@@ -1,3 +1,11 @@
+# Contents : #
+  * [Overview](./atomic_swaps.md/#Overview)
+  * [Configuration](./atomic_swaps.md/#Configuration )
+  * [Workflow / Guide](./atomic_swaps.md/#Atomic-swap-workflow)
+  * [Cancellation](./atomic_swaps.md/#Cancellation)
+  * [Discontinuing Auto-Swap](./atomic_swaps.md/#Discontinuing-Auto-Swap)
+  * [Secondary Currency List](./atomic_swaps.md/#Secondary-Currency-List)
+  
 # Overview #
 
 As of mwc-wallet 3.2.2, atomic swaps are supported by the mwc-wallet. This feature will allow users to exchange MWC coins for 
@@ -13,7 +21,7 @@ We strongly recommend the use of automatic mode for the standard swaps.
 
 The configuration includes some parameters in the mwc-wallet.toml.  Every secondary supported currency will require 
 it's own node to monitor the blockchain and process transactions with a secondary currency. Default values point to the 
-community node, you can install your ouwn to get more security. 
+community node, you can install your own to get more security. 
 
 ```
 # ElectrumX BTC Node URI needed for atomic swap that include with BTC.
@@ -48,7 +56,7 @@ Command 'swap_start' completed
 ```
 This command successfully created trade 975ab0c2-27f5-45bd-99f2-2c3b01ce0fa5
 
-* Buyer should have listener up and running.
+* Make sure the Buyer has the listener up and running.
 
 ```
 $ mwc-wallet cli
@@ -61,9 +69,9 @@ mwc-wallet> listen -m mwcmqs
 mwcmqs listener started for [xmgHFXM1ryJ1ug7kGPsjmDj8Gd7XC18cfhQ8n8uyjxL3JzAq9r73] tid=[tr3MClzoqB1ecFnH0kHBH]
 ```
 
-* Seller starting atomic swap trade in atomatic mode with a `swap --autoswap` command.  Please specify enough transaction fee 
-for redeem transaction, so it will not stuck in the memory pool. Please keep in mind, **if your redeem transaction stuck in the 
-memory pool, the Buyer will be able to get all the coins**.
+* As a Seller, start atomic swap trades in automatic mode with the `swap --autoswap` command.  <br>
+Please specify a big enough transaction fee for the redeem transaction, to ensure it will not get stuck in the memory pool. <br>
+Keep in mind, **if your redeem transaction is stuck in the memory pool, the Buyer will be able to get all the coins**.
 
 ```
 $ mwc-wallet cli
@@ -110,13 +118,14 @@ Swap Trade 975ab0c2-27f5-45bd-99f2-2c3b01ce0fa5: Offer message was sent
 Swap Trade 975ab0c2-27f5-45bd-99f2-2c3b01ce0fa5: Waiting for Accept Offer message
 ```
 
-* Buyer is waiting for the message that swap offer has been received. The offer Swap Id will be printed.
+* Once the Buyer received the offer, the offer Swap Id will be printed out.
 ```
 You get an offer to swap BTC to MWC. SwapID is 975ab0c2-27f5-45bd-99f2-2c3b01ce0fa5
 ```
 
-* Buyer reviews the trade details. If something wrong, just cancel the trade and notify Seller about the problem. 
-The seller will need to cancel it's own stap tarde and create a new trade with fixed parameters. 
+* The Buyer should carefully reviews the trade details. <br>
+If something is wrong, just cancel the trade and notify the Seller about the problem. <br>
+The Seller will need to cancel it's own swap tarde and create a new trade with fixed parameters. 
 
 ```
 mwc-wallet> swap --check -i 975ab0c2-27f5-45bd-99f2-2c3b01ce0fa5
@@ -151,8 +160,9 @@ mwc-wallet> swap --check -i 975ab0c2-27f5-45bd-99f2-2c3b01ce0fa5
 Command 'swap' completed
 ```
 
-* Buyer starting atomic swap trade in atomatic mode with a `swap --autoswap` command. Please specify enough transaction fee 
-for refund transaction, so it will not stuck in the memory pool.
+* If the Buyer agrees with the Swap offer, he can start the atomic swap trade in atomatic mode with a `swap --autoswap` command. 
+Please specify a big enough transaction fee for the redeem transaction to ensure it will not get stuck in the memory pool. <br>
+Keep in mind, **if your redeem transaction is stuck in the memory pool, the Seller will be able to get all the coins**.
 
 ```
 mwc-wallet> swap --autoswap --method mwcmqs --dest xmgHFXM1ryJ1ug7kGPsjmDj8Gd7XC18cfhQ8n8uyjxL3JzAq9r73 --buyer_refund_address mjdcskZm4Kimq7yzUGLtzwiEwMdBdTa3No --secondary_fee 30 -i 975ab0c2-27f5-45bd-99f2-2c3b01ce0fa5
@@ -189,9 +199,10 @@ Swap Trade 975ab0c2-27f5-45bd-99f2-2c3b01ce0fa5: Response to offer message was s
 Swap Trade 975ab0c2-27f5-45bd-99f2-2c3b01ce0fa5: Seller locking funds, waiting for 1 MWC lock confirmations, has 0
 ```
 
-* The seller should get a message that the swap has been accepted and automactic mode will process the next steps. At this moment 
-the seller needs to keep the wallet running until the trade has finished. There is no need to be around, the swap for the seller will continue 
-in automatic mode. If the buyer didn't act in a reasonable and timely manner, the swap trade will be cancelled and refunded automatically.
+* The Seller should get a message that the swap has been accepted and automactic mode will process the next steps. <br>
+Both parties need to keep the wallets running until the Atomic Swap has finished. 
+There is no need for the Seller to be around anymore tho, the swap for the Seller will continue in automatic mode.
+If the Buyer didn't act in a reasonable and timely manner, the swap trade will be cancelled and refunded automatically.
 
 ```
 Processed Offer Accept message
@@ -199,18 +210,19 @@ Swap Trade 975ab0c2-27f5-45bd-99f2-2c3b01ce0fa5: MWC lock slate is posted
 Swap Trade 975ab0c2-27f5-45bd-99f2-2c3b01ce0fa5: MWC Lock transaction, waiting for 500 MWC lock confirmations, has 0
 ```
 
-* The buyer will need to wait until they need to deposit Secondary (for example BTC) coins to a multisig lock account. 
-A few minutes after starting the trade, the buyer should see a message `Please deposit exactly XXXXXX BTC at <address>`
+* As a Buyer the next step will be to deposit the Secondary (for example BTC) coins to a multisig lock account. <br>
+A few minutes after the swap was accepted, the Buyer should see a message `Please deposit exactly XXXXXX BTC at <address>`
  
 ```
 Swap Trade 975ab0c2-27f5-45bd-99f2-2c3b01ce0fa5: Please deposit exactly 0.087 BTC at 2N4YMbGBzP39WjhJMEFtrMhCxLz8iifcepW
 ``` 
  
-* Buyer should post the funds to that address. Please specify enough transaction fees. Transation must be mined before 
-expiration time. 
+* Once the message was received, the Buyer should post **the exact amount** of funds required to that address. <br>
+Please specify enough transaction fees as the Transation must be mined before expiration time or the swap will be canceled.
 
-* At this moment Buyer needs to keep the wallet running until the trade will be finished. There is no need to be around, the swap will
- continue in automatic mode. If the seller didn't act in a reasonable and timely manner, the swap trade will be cancelled and refunded automatically.
+* At this moment the Buyer needs to keep the wallet running until the swap is finished. <br>
+There is no need for the Buyer to be around anymore tho, the swap will continue in automatic mode. <br>
+If the Seller didn't act in a reasonable and timely manner, the swap trade will be cancelled and refunded automatically.
 
 
 # Cancellation #
@@ -218,7 +230,7 @@ expiration time.
 The swap trade can be cancelled at the starting stage, until the buyer has posted a redeem transaction. Depending on the stage of this transaction,
 waiting for refund might be required.
 
-In this example buyer didn't lock any funds yet, so his trade is cancelled immediately. 
+In this example the Buyer didn't lock any funds yet, so his trade is cancelled immediately. 
 ```
 mwc-wallet> swap --adjust cancel  -i 975ab0c2-27f5-45bd-99f2-2c3b01ce0fa5
 Swap trade 975ab0c2-27f5-45bd-99f2-2c3b01ce0fa5 was successfully adjusted. New state: Buyer swap was cancelled, nothing was locked, no need to refund
@@ -226,7 +238,7 @@ Command 'swap' completed
 mwc-wallet> Swap Trade 975ab0c2-27f5-45bd-99f2-2c3b01ce0fa5: Swap trade is finished
 ```
 
-The seller already locked MWC, so he will need to wait about 20 hours and 55 minutes to get the fund.
+The Seller already locked MWC, so he will need to wait about 20 hours and 55 minutes to redeem the funds after canceling the swap.
 ```
 mwc-wallet> swap --adjust cancel -i 975ab0c2-27f5-45bd-99f2-2c3b01ce0fa5
 Swap trade 975ab0c2-27f5-45bd-99f2-2c3b01ce0fa5 was successfully adjusted. New state: Waiting when refund Slate can be posted
@@ -271,3 +283,6 @@ Yes
 Stopping.....
 Command 'swap' completed
 ```
+
+# Secondary Currency List #
+ * BCH - Bitcoin Cash
