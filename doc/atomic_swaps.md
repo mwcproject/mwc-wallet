@@ -285,4 +285,4 @@ Command 'swap' completed
 ```
 
 # Secondary Currency List #
- * BCH - Bitcoin Cash
+ * BCH - BitcoinCashABC
