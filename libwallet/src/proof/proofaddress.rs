@@ -13,22 +13,38 @@
 // limitations under the License.
 
 use super::base58::Base58;
-use crate::address;
 use crate::error::Error;
 use crate::grin_util::secp::key::PublicKey;
+use crate::grin_util::secp::key::SecretKey;
 use crate::proof::crypto;
+use crate::proof::hasher;
 use ed25519_dalek::PublicKey as DalekPublicKey;
 use grin_core::global;
-use grin_wallet_util::grin_keychain::{Identifier, Keychain};
+use grin_wallet_util::grin_keychain::Keychain;
 use grin_wallet_util::OnionV3Address;
 use serde::{Deserialize, Deserializer, Serializer};
 use std::convert::TryFrom;
 use std::fmt::{self, Display};
+use std::sync::atomic::{AtomicU32, Ordering};
 
 /// Address prefixes for mainnet
 pub const PROOFABLE_ADDRESS_VERSION_MAINNET: [u8; 2] = [1, 69];
 /// Address prefixes for floonet
 pub const PROOFABLE_ADDRESS_VERSION_TESTNET: [u8; 2] = [1, 121];
+
+lazy_static! {
+	/// Wallet address derive index
+	static ref ADDRESS_INDEX: AtomicU32 = AtomicU32::new(0);
+}
+
+/// Set address derivative index
+pub fn set_address_index(addr_idx: u32) {
+	ADDRESS_INDEX.store(addr_idx, Ordering::Relaxed);
+}
+/// Get address derivative index
+pub fn get_address_index() -> u32 {
+	ADDRESS_INDEX.load(Ordering::Relaxed)
+}
 
 /// Address that can have a proof. Such address need to be able to convertable to
 /// the public key
@@ -130,32 +146,74 @@ pub fn address_to_pubkey(addr: String) -> String {
 	return addr_to_return;
 }
 
+/// Format of the requested address.
+pub enum ProofAddressType {
+	/// MQS address format
+	MQS,
+	/// Tor v3 (Onion) address format
+	Onion,
+}
+
 /// provable address public key
 pub fn payment_proof_address<K>(
 	keychain: &K,
-	parent_key_id: &Identifier,
-	index: u32,
+	addr_type: ProofAddressType,
 ) -> Result<ProvableAddress, Error>
 where
 	K: Keychain,
 {
-	let sender_address_secret_key =
-		address::address_from_derivation_path(keychain, &parent_key_id, index)?;
-	let sender_address_pub_key = crypto::public_key_from_secret_key(&sender_address_secret_key)?;
-	Ok(ProvableAddress::from_pub_key(&sender_address_pub_key))
+	payment_proof_address_from_index(keychain, get_address_index(), addr_type)
 }
 
-///
-pub fn payment_proof_address_pubkey<K>(
+/// provable address public key
+pub fn payment_proof_address_from_index<K>(
 	keychain: &K,
-	parent_key_id: &Identifier,
 	index: u32,
-) -> Result<PublicKey, Error>
+	addr_type: ProofAddressType,
+) -> Result<ProvableAddress, Error>
 where
 	K: Keychain,
 {
-	let sender_address_secret_key =
-		address::address_from_derivation_path(keychain, &parent_key_id, index)?;
+	let secret_key = payment_proof_address_secret_from_index(keychain, index)?;
+
+	match addr_type {
+		ProofAddressType::MQS => {
+			let sender_address_pub_key = crypto::public_key_from_secret_key(&secret_key)?;
+			Ok(ProvableAddress::from_pub_key(&sender_address_pub_key))
+		}
+		ProofAddressType::Onion => {
+			let onion_address = OnionV3Address::from_private(&secret_key.0)?;
+			let dalek_pubkey = onion_address.to_ov3_str();
+			Ok(ProvableAddress::from_str(&dalek_pubkey)?)
+		}
+	}
+}
+
+/// Derive a secret key given a derivation path and index
+pub fn payment_proof_address_secret<K>(keychain: &K) -> Result<SecretKey, Error>
+where
+	K: Keychain,
+{
+	payment_proof_address_secret_from_index(keychain, get_address_index())
+}
+
+/// Derive a secret key given a derivation path and index
+pub fn payment_proof_address_secret_from_index<K>(
+	keychain: &K,
+	index: u32,
+) -> Result<SecretKey, Error>
+where
+	K: Keychain,
+{
+	hasher::derive_address_key(keychain, index).map_err(|e| e.into())
+}
+
+///
+pub fn payment_proof_address_pubkey<K>(keychain: &K) -> Result<PublicKey, Error>
+where
+	K: Keychain,
+{
+	let sender_address_secret_key = payment_proof_address_secret(keychain)?;
 	crypto::public_key_from_secret_key(&sender_address_secret_key)
 }
 

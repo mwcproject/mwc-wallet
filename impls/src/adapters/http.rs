@@ -140,7 +140,7 @@ impl HttpDataSender {
 		trace!("Response: {}", res);
 		if res["error"] != json!(null) {
 			let report = format!(
-				"Posting transaction slate: Error: {}, Message: {}",
+				"Checking version: Error: {}, Message: {}",
 				res["error"]["code"], res["error"]["message"]
 			);
 			error!("{}", report);
@@ -185,6 +185,91 @@ impl HttpDataSender {
 		}
 
 		let report = "Unable to negotiate slate format with other wallet.".to_string();
+		error!("{}", report);
+		Err(ErrorKind::ClientCallback(report).into())
+	}
+
+	/// Check proof address of the listening wallet
+	pub fn check_receiver_proof_address(
+		&self,
+		url: &str,
+		timeout: Option<u128>,
+	) -> Result<String, Error> {
+		let res_str: String;
+		let start_time = std::time::Instant::now();
+		trace!("starting now check proof address of listening wallet");
+
+		loop {
+			let req = json!({
+				"jsonrpc": "2.0",
+				"method": "get_proof_address",
+				"id": 1,
+				"params": []
+			});
+
+			let res = self.post(url, self.apisecret.clone(), req);
+
+			let diff_time = start_time.elapsed().as_millis();
+			trace!("elapsed time check proof address = {}", diff_time);
+			// we try until it's taken more than 30 seconds.
+			if res.is_err() && diff_time <= timeout.unwrap_or(30_000) {
+				let res_err_str = format!("{:?}", res);
+				trace!(
+					"Got error (receiver_proof_address), but continuing: {}, time elapsed = {}ms",
+					res_err_str,
+					diff_time
+				);
+				// the api seems to have "GeneralFailures"
+				// on some platforms. retry is fast and can be
+				// done again.
+				// keep trying for 30 seconds.
+				continue;
+			} else if !res.is_err() {
+				res_str = res.unwrap();
+				break;
+			}
+
+			res.map_err(|e| {
+				let mut report = format!(
+					"Performing receiver proof address check (is recipient listening?): {}",
+					e
+				);
+				let err_string = format!("{}", e);
+				if err_string.contains("404") {
+					// Report that the other version of the wallet is out of date
+					report = "Other wallet is incompatible and requires an upgrade. \
+				          	Please urge the other wallet owner to upgrade and try the transaction again."
+						.to_string();
+				}
+				error!("{}", report);
+				ErrorKind::ClientCallback(report)
+			})?;
+		}
+
+		let res: Value = serde_json::from_str(&res_str).map_err(|e| {
+			ErrorKind::GenericError(format!("Unable to parse respond {}, {}", res_str, e))
+		})?;
+		trace!("Response: {}", res);
+		if res["error"] != json!(null) {
+			let report = format!(
+				"Checking receiver wallet proof address: Error: {}, Message: {}",
+				res["error"]["code"], res["error"]["message"]
+			);
+			error!("{}", report);
+			return Err(ErrorKind::ClientCallback(report).into());
+		}
+
+		let resp_value = res["result"]["Ok"].clone();
+		trace!("resp_value: {}", resp_value.clone());
+		let mut receiver_proof_address: String = resp_value.to_string();
+
+		if receiver_proof_address.contains("\"") {
+			receiver_proof_address = receiver_proof_address.replace("\"", "");
+		}
+		if receiver_proof_address.len() == 56 {
+			return Ok(receiver_proof_address);
+		}
+		let report = "Unable to check proof address with other wallet.".to_string();
 		error!("{}", report);
 		Err(ErrorKind::ClientCallback(report).into())
 	}
@@ -313,6 +398,9 @@ impl SlateSender for HttpDataSender {
 			}
 		};
 
+		// //get the proof address of the other wallet
+		// let receiver_proof_address = self.check_receiver_proof_address(&url_str, None)?;
+
 		let res_str: String;
 		let start_time = std::time::Instant::now();
 		loop {
@@ -371,21 +459,44 @@ impl SlateSender for HttpDataSender {
 			error!("{}", report);
 			return Err(ErrorKind::ClientCallback(report).into());
 		}
+		if res["result"]["Err"] != json!(null) {
+			let report = format!("Posting transaction slate: Error: {}", res["result"]["Err"]);
+			error!("{}", report);
+			return Err(ErrorKind::ClientCallback(report).into());
+		}
+
+		let slate_value = res["result"]["Ok"].clone();
+		trace!("slate_value: {}", slate_value);
+		if slate_value.is_null() {
+			let report = format!("Unable to parse receiver wallet response {}", res_str);
+			error!("{}", report);
+			return Err(ErrorKind::ClientCallback(report).into());
+		}
 
 		if res["result"]["Ok"]["version_info"]["version"] == json!(3)
 			&& res["result"]["Ok"]["ttl_cutoff_height"] == json!(null)
 		{
 			res["result"]["Ok"]["ttl_cutoff_height"] = json!(u64::MAX);
 		}
-		let slate_value = res["result"]["Ok"].clone();
-		trace!("slate_value: {}", slate_value);
 		let slate =
 			Slate::deserialize_upgrade(&serde_json::to_string(&slate_value).map_err(|e| {
 				ErrorKind::GenericError(format!("Unable to build slate from values, {}", e))
 			})?)
 			.map_err(|e| {
-				ErrorKind::GenericError(format!("Unable to build slate from json, {}", e))
+				ErrorKind::GenericError(format!("Unable to build slate from response {}, {}", res_str, e))
 			})?;
+
+		// //compare the listening wallet proof address retrieved earlier to the returned slate. If they don't match, return error
+		// if let Some(ref p) = slate.payment_proof {
+		// 	let receiver_a = p.clone().receiver_address;
+		// 	if receiver_a.public_key != receiver_proof_address {
+		// 		return Err(ErrorKind::ProofAddressMismatch(
+		// 			receiver_a.public_key,
+		// 			receiver_proof_address,
+		// 		)
+		// 		.into());
+		// 	}
+		// }
 
 		Ok(slate)
 	}

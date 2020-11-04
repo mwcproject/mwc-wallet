@@ -88,7 +88,7 @@ fn ttl_cutoff_test_impl(test_dir: &'static str) -> Result<(), wallet::Error> {
 			ttl_blocks: Some(2),
 			..Default::default()
 		};
-		let slate_i = sender_api.init_send_tx(m, args, None, 1)?;
+		let slate_i = sender_api.init_send_tx(m, args, 1)?;
 
 		slate = client1.send_tx_slate_direct("wallet2", &slate_i)?;
 		sender_api.tx_lock_outputs(m, &slate, None, 0)?;
@@ -138,7 +138,7 @@ fn ttl_cutoff_test_impl(test_dir: &'static str) -> Result<(), wallet::Error> {
 			ttl_blocks: Some(2),
 			..Default::default()
 		};
-		let slate_i = sender_api.init_send_tx(m, args, None, 1)?;
+		let slate_i = sender_api.init_send_tx(m, args, 1)?;
 		sender_api.tx_lock_outputs(m, &slate_i, None, 0)?;
 		slate = slate_i;
 

@@ -82,6 +82,7 @@ pub use api_impl::types::{
 };
 pub use internal::scan::scan;
 pub use proof::tx_proof::TxProof;
+pub use proof::tx_proof::{proof_ok, verify_tx_proof_wrapper};
 pub use slate_versions::ser as dalek_ser;
 pub use types::{
 	AcctPathMapping, BlockIdentifier, CbData, Context, HeaderInfo, NodeClient, NodeVersionInfo,

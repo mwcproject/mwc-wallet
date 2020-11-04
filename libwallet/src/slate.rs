@@ -525,7 +525,7 @@ impl Slate {
 			.collect();
 		match PublicKey::from_combination(secp, pub_nonces) {
 			Ok(k) => Ok(k),
-			Err(e) => Err(ErrorKind::Secp(e).into()),
+			Err(e) => Err(Error::from(e)),
 		}
 	}
 
@@ -538,7 +538,7 @@ impl Slate {
 			.collect();
 		match PublicKey::from_combination(secp, pub_blinds) {
 			Ok(k) => Ok(k),
-			Err(e) => Err(ErrorKind::Secp(e).into()),
+			Err(e) => Err(Error::from(e)),
 		}
 	}
 

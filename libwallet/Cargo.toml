@@ -46,18 +46,18 @@ grin_wallet_util = { path = "../util", version = "3.2.2" }
 grin_wallet_config = { path = "../config", version = "3.2.2" }
 
 # Release
-#grin_api = { git = "https://github.com/mwcproject/mwc-node", tag = "3.2.2" }
-#grin_p2p = { git = "https://github.com/mwcproject/mwc-node", tag = "3.2.2" }
-#grin_core= { git = "https://github.com/mwcproject/mwc-node", tag = "3.2.2" }
-#grin_keychain = { git = "https://github.com/mwcproject/mwc-node", tag = "3.2.2" }
-#grin_util = { git = "https://github.com/mwcproject/mwc-node", tag = "3.2.2" }
+grin_api = { git = "https://github.com/mwcproject/mwc-node", tag = "prerebase_to_v5" }
+grin_p2p = { git = "https://github.com/mwcproject/mwc-node", tag = "prerebase_to_v5" }
+grin_core= { git = "https://github.com/mwcproject/mwc-node", tag = "prerebase_to_v5" }
+grin_keychain = { git = "https://github.com/mwcproject/mwc-node", tag = "prerebase_to_v5" }
+grin_util = { git = "https://github.com/mwcproject/mwc-node", tag = "prerebase_to_v5" }
 
 # For bleeding edge
-grin_api = { git = "https://github.com/mwcproject/mwc-node", branch = "master" }
-grin_p2p = { git = "https://github.com/mwcproject/mwc-node", branch = "master" }
-grin_core= { git = "https://github.com/mwcproject/mwc-node", branch = "master" }
-grin_keychain = { git = "https://github.com/mwcproject/mwc-node", branch = "master" }
-grin_util = { git = "https://github.com/mwcproject/mwc-node", branch = "master"  }
+#grin_api = { git = "https://github.com/mwcproject/mwc-node", branch = "master" }
+#grin_p2p = { git = "https://github.com/mwcproject/mwc-node", branch = "master" }
+#grin_core= { git = "https://github.com/mwcproject/mwc-node", branch = "master" }
+#grin_keychain = { git = "https://github.com/mwcproject/mwc-node", branch = "master" }
+#grin_util = { git = "https://github.com/mwcproject/mwc-node", branch = "master"  }
 
 
 # For local testing

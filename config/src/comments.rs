@@ -113,16 +113,6 @@ fn comments() -> HashMap<String, String> {
 		.to_string(),
 	);
 	retval.insert(
-		"keybase_notify_ttl".to_string(),
-		"
-#The exploding lifetime for keybase notification on coins received.
-#Unit: Minute. Default value 1440 minutes for one day.
-#Refer to https://keybase.io/blog/keybase-exploding-messages for detail.
-#To disable this notification, set it as 0.
-"
-		.to_string(),
-	);
-	retval.insert(
 		"grinbox_address_index".to_string(),
 		"
 # Address derive index. Every new index will give you a new address that will be used for
@@ -132,9 +122,15 @@ fn comments() -> HashMap<String, String> {
 	);
 
 	retval.insert(
-		"electrum_node_addr".to_string(),
+		"[wallet.swap_electrumx_addr]".to_string(),
 		"
-# ElectrumX BTC Node URI needed for atomic swap that include with BTC.
+# Electrum X servers that are used for Atomic Swap operations. Each Secondary Currency need
+# its own dedicated Electrum X instance. We highly advise to use your own instance, instead of
+# using those community servers.
+# For every secondary currency expected 4 instances:
+# mainnet primary, mainnet secondary, testnet primary, testnet secondary,
+# Key: <coin>_[main|test]_[1|2]
+# value: URI
 "
 		.to_string(),
 	);

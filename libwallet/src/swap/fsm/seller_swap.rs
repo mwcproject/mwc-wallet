@@ -562,9 +562,16 @@ impl<K: Keychain> State for SellerWaitingForLockConfirmations<K> {
 
 				if tx_conf.secondary_lock_amount > swap.secondary_amount {
 					// Posted too much, bayer probably will cancel the deal, let's be in sync
-					swap.add_journal_message(
-						JOURNAL_CANCELLED_BYER_LOCK_TOO_MUCH_FUNDS.to_string(),
-					);
+					swap.add_journal_message(format!(
+						"{}. Expected {} {}, but get {} {}",
+						JOURNAL_CANCELLED_BYER_LOCK_TOO_MUCH_FUNDS,
+						swap.secondary_currency
+							.amount_to_hr_string(swap.secondary_amount, true),
+						swap.secondary_currency,
+						swap.secondary_currency
+							.amount_to_hr_string(tx_conf.secondary_lock_amount, true),
+						swap.secondary_currency
+					));
 					return Ok(StateProcessRespond::new(
 						StateId::SellerWaitingForRefundHeight,
 					));

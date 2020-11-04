@@ -41,7 +41,6 @@ use grin_wallet_util::grin_keychain as keychain;
 use linefeed::terminal::Signal;
 use linefeed::{Interface, ReadResult};
 use rpassword;
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -556,6 +555,17 @@ pub fn parse_send_args(args: &ArgMatches) -> Result<command::SendArgs, ParseErro
 	)?;
 	let exclude_change_outputs = args.is_present("exclude_change_outputs");
 
+	let outputs = match args.is_present("outputs") {
+		true => Some(
+			args.value_of("outputs")
+				.unwrap()
+				.split(",")
+				.map(|s| s.to_string())
+				.collect::<Vec<String>>(),
+		),
+		false => None,
+	};
+
 	if minimum_confirmations_change_outputs_is_present && !exclude_change_outputs {
 		Err(ArgumentError("minimum_confirmations_change_outputs may only be specified if exclude_change_outputs is set".to_string()))
 	} else {
@@ -577,6 +587,7 @@ pub fn parse_send_args(args: &ArgMatches) -> Result<command::SendArgs, ParseErro
 			exclude_change_outputs: exclude_change_outputs,
 			minimum_confirmations_change_outputs: minimum_confirmations_change_outputs,
 			address: address,
+			outputs,
 		})
 	}
 }
@@ -974,6 +985,9 @@ pub fn parse_swap_start_args(args: &ArgMatches) -> Result<command::SwapStartArgs
 	let method = parse_required(args, "method")?;
 	let destination = parse_required(args, "dest")?;
 
+	let electrum_node_uri1 = args.value_of("electrum_uri1").map(|s| String::from(s));
+	let electrum_node_uri2 = args.value_of("electrum_uri2").map(|s| String::from(s));
+
 	Ok(command::SwapStartArgs {
 		mwc_amount,
 		secondary_currency: secondary_currency.to_string(),
@@ -987,6 +1001,8 @@ pub fn parse_swap_start_args(args: &ArgMatches) -> Result<command::SwapStartArgs
 		redeem_time_sec: redeem_time * 60,
 		buyer_communication_method: method.to_string(),
 		buyer_communication_address: destination.to_string(),
+		electrum_node_uri1,
+		electrum_node_uri2,
 	})
 }
 
@@ -994,7 +1010,7 @@ pub fn parse_swap_args(args: &ArgMatches) -> Result<command::SwapArgs, ParseErro
 	let swap_id = args.value_of("swap_id").map(|s| String::from(s));
 	let adjust = args.value_of("adjust").map(|s| String::from(s));
 	let method = args.value_of("method").map(|s| String::from(s));
-	let destination = args.value_of("dest").map(|s| String::from(s));
+	let mut destination = args.value_of("dest").map(|s| String::from(s));
 	let apisecret = args.value_of("apisecret").map(|s| String::from(s));
 	let secondary_fee = match args.value_of("secondary_fee") {
 		Some(s) => Some(parse_f32(s, "secondary_fee")?),
@@ -1021,6 +1037,12 @@ pub fn parse_swap_args(args: &ArgMatches) -> Result<command::SwapArgs, ParseErro
 		command::SwapSubcommand::Process
 	} else if args.is_present("dump") {
 		command::SwapSubcommand::Dump
+	} else if args.is_present("trade_export") {
+		destination = args.value_of("trade_export").map(|s| String::from(s));
+		command::SwapSubcommand::TradeExport
+	} else if args.is_present("trade_import") {
+		destination = args.value_of("trade_import").map(|s| String::from(s));
+		command::SwapSubcommand::TradeImport
 	} else if adjust.is_some() {
 		command::SwapSubcommand::Adjust
 	} else if args.is_present("autoswap") {
@@ -1032,6 +1054,9 @@ pub fn parse_swap_args(args: &ArgMatches) -> Result<command::SwapArgs, ParseErro
 			"Please define some action to do"
 		)));
 	};
+
+	let electrum_node_uri1 = args.value_of("electrum_uri1").map(|s| String::from(s));
+	let electrum_node_uri2 = args.value_of("electrum_uri2").map(|s| String::from(s));
 
 	Ok(command::SwapArgs {
 		subcommand,
@@ -1046,18 +1071,9 @@ pub fn parse_swap_args(args: &ArgMatches) -> Result<command::SwapArgs, ParseErro
 		start_listener,
 		secondary_address,
 		json_format: false,
+		electrum_node_uri1,
+		electrum_node_uri2,
 	})
-}
-
-pub fn get_supported_secondary_currency_node_addrs(
-	wallet_config: &WalletConfig,
-) -> HashMap<String, String> {
-	grin_wallet_libwallet::swap::defaults::get_swap_support_servers(
-		&wallet_config.electrumx_mainnet_bch_node_addr,
-		&wallet_config.electrumx_testnet_bch_node_addr,
-		&wallet_config.electrumx_mainnet_btc_node_addr,
-		&wallet_config.electrumx_testnet_btc_node_addr,
-	)
 }
 
 pub fn wallet_command<C, F>(
@@ -1185,12 +1201,9 @@ where
 
 			let wallet_inst = lc.wallet_inst()?;
 
-			let secondary_currency_node_addrs =
-				get_supported_secondary_currency_node_addrs(&wallet_config);
-
 			grin_wallet_libwallet::swap::trades::init_swap_trade_backend(
 				wallet_inst.get_data_file_dir(),
-				secondary_currency_node_addrs,
+				&wallet_config.swap_electrumx_addr,
 			);
 
 			if let Some(account) = wallet_args.value_of("account") {
@@ -1427,7 +1440,6 @@ where
 			command::swap(
 				owner_api.wallet_inst.clone(),
 				km,
-				wallet_config.grinbox_address_index(),
 				wallet_config.api_listen_addr(),
 				Some(mqs_config.clone()),
 				Some(tor_config.clone()),

@@ -20,28 +20,20 @@ failure = "0.1"
 failure_derive = "0.1"
 
 # For Release
-#grin_core = { git = "https://github.com/mwcproject/mwc-node", tag = "3.2.2" }
-#grin_keychain = { git = "https://github.com/mwcproject/mwc-node", tag = "3.2.2" }
-#grin_chain = { git = "https://github.com/mwcproject/mwc-node", tag = "3.2.2" }
-#grin_util = { git = "https://github.com/mwcproject/mwc-node", tag = "3.2.2" }
-#grin_api = { git = "https://github.com/mwcproject/mwc-node", tag = "3.2.2" }
-#grin_store = { git = "https://github.com/mwcproject/mwc-node", tag = "3.2.2" }
-
-# For beta release
-# grin_core = { git = "https://github.com/mwcproject/mwc-node", tag = "2.4.0" }
-# grin_keychain = { git = "https://github.com/mwcproject/mwc-node", tag = "2.4.0" }
-# grin_chain = { git = "https://github.com/mwcproject/mwc-node", tag = "2.4.0" }
-# grin_util = { git = "https://github.com/mwcproject/mwc-node", tag = "2.4.0" }
-# grin_api = { git = "https://github.com/mwcproject/mwc-node", tag = "2.4.0" }
-# grin_store = { git = "https://github.com/mwcproject/mwc-node", tag = "2.4.0" }
+grin_core = { git = "https://github.com/mwcproject/mwc-node", tag = "prerebase_to_v5" }
+grin_keychain = { git = "https://github.com/mwcproject/mwc-node", tag = "prerebase_to_v5" }
+grin_chain = { git = "https://github.com/mwcproject/mwc-node", tag = "prerebase_to_v5" }
+grin_util = { git = "https://github.com/mwcproject/mwc-node", tag = "prerebase_to_v5" }
+grin_api = { git = "https://github.com/mwcproject/mwc-node", tag = "prerebase_to_v5" }
+grin_store = { git = "https://github.com/mwcproject/mwc-node", tag = "prerebase_to_v5" }
 
 # For bleeding edge
-grin_core = { git = "https://github.com/mwcproject/mwc-node", branch = "master" }
-grin_keychain = { git = "https://github.com/mwcproject/mwc-node", branch = "master" }
-grin_chain = { git = "https://github.com/mwcproject/mwc-node", branch = "master" }
-grin_util = { git = "https://github.com/mwcproject/mwc-node", branch = "master" }
-grin_api = { git = "https://github.com/mwcproject/mwc-node", branch = "master" }
-grin_store = { git = "https://github.com/mwcproject/mwc-node", branch = "master" }
+#grin_core = { git = "https://github.com/mwcproject/mwc-node", branch = "master", tag = "prerebase_to_v5" }
+#grin_keychain = { git = "https://github.com/mwcproject/mwc-node", branch = "master", tag = "prerebase_to_v5" }
+#grin_chain = { git = "https://github.com/mwcproject/mwc-node", branch = "master", tag = "prerebase_to_v5" }
+#grin_util = { git = "https://github.com/mwcproject/mwc-node", branch = "master", tag = "prerebase_to_v5" }
+#grin_api = { git = "https://github.com/mwcproject/mwc-node", branch = "master", tag = "prerebase_to_v5" }
+#grin_store = { git = "https://github.com/mwcproject/mwc-node", branch = "master", tag = "prerebase_to_v5" }
 
 # For local testing
 #grin_core = { path = "../../mwc-node/core"}

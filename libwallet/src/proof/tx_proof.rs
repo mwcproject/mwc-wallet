@@ -187,9 +187,22 @@ impl TxProof {
 			));
 		}
 
-		let decrypted_message = encrypted_message.decrypt_with_key(&self.key).map_err(|e| {
+		let mut decrypted_message = encrypted_message.decrypt_with_key(&self.key).map_err(|e| {
 			ErrorKind::TxProofGenericError(format!("Unable to decrypt message, {}", e))
 		})?;
+		//the decrypted_message cloud have been appended with the _<torkey>tor
+		let mut tor_key = "tor".to_string();
+		if decrypted_message.ends_with("tor") {
+			let leng = decrypted_message.len();
+			if leng <= 59 {
+				return Err(ErrorKind::TxProofGenericError(format!(
+					"Unable to build Slate form proof message"
+				)));
+			}
+			tor_key = decrypted_message.clone()[leng - 59..].to_string();
+			tor_key.truncate(56);
+			decrypted_message.truncate(leng - 59); //remove the "tor" and tor_key from the elnd
+		}
 
 		let slate = Slate::deserialize_upgrade(&decrypted_message).map_err(|e| {
 			ErrorKind::TxProofGenericError(format!(
@@ -199,6 +212,12 @@ impl TxProof {
 		})?;
 		//for mwc713 display purpose. the destination needs to be onion address
 		if let Some(onion_addr) = self.tor_sender_address.clone() {
+			if tor_key != "tor" && tor_key != onion_addr {
+				return Err(ErrorKind::TxProofVerifySender(
+					tor_key.to_string(),
+					onion_addr,
+				));
+			}
 			let tor_sender = ProvableAddress::from_str(&onion_addr).map_err(|e| {
 				ErrorKind::TxProofGenericError(format!(
 					"Unable to create sender onion address, {}",
@@ -300,13 +319,18 @@ impl TxProof {
 					let version = slate.lowest_version();
 					let slate = VersionedSlate::into_version(slate.clone(), version);
 
+					let mut slate_json_with_tor = serde_json::to_string(&slate).map_err(|e| {
+						ErrorKind::TxProofGenericError(format!(
+							"Unable to build public key for address {}, {}",
+							address, e
+						))
+					})?;
+					if let Some(tor_des) = tor_destination.clone() {
+						slate_json_with_tor = slate_json_with_tor + &tor_des + "tor";
+					}
+
 					let encrypted_message = EncryptedMessage::new(
-						serde_json::to_string(&slate).map_err(|e| {
-							ErrorKind::TxProofGenericError(format!(
-								"Unable to build public key for address {}, {}",
-								address, e
-							))
-						})?,
+						slate_json_with_tor,
 						expected_destination, //this is the sender address
 						&expected_destination.public_key().map_err(|e| {
 							ErrorKind::TxProofGenericError(format!(

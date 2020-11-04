@@ -17,7 +17,6 @@ use crate::util::secp::key::SecretKey;
 use crate::util::Mutex;
 use clap::App;
 //use colored::Colorize;
-use crate::cmd::wallet_args::get_supported_secondary_currency_node_addrs;
 use grin_wallet_api::Owner;
 use grin_wallet_config::{MQSConfig, TorConfig, WalletConfig};
 use grin_wallet_controller::command::GlobalArgs;
@@ -184,11 +183,9 @@ where
 
 								let wallet_inst = lc.wallet_inst()?;
 
-								let secondary_currency_node_addrs =
-									get_supported_secondary_currency_node_addrs(wallet_config);
 								grin_wallet_libwallet::swap::trades::init_swap_trade_backend(
 									wallet_inst.get_data_file_dir(),
-									secondary_currency_node_addrs,
+									&wallet_config.swap_electrumx_addr,
 								);
 
 								if let Some(account) = args.value_of("account") {

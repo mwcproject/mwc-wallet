@@ -19,10 +19,12 @@ use crate::grin_keychain::Keychain;
 use crate::grin_util::secp::key::SecretKey;
 use crate::grin_util::Mutex;
 use crate::internal::{tx, updater};
+use crate::proof::proofaddress;
+use crate::proof::proofaddress::ProofAddressType;
 use crate::proof::proofaddress::ProvableAddress;
 use crate::slate_versions::SlateVersion;
 use crate::{
-	address, BlockFees, CbData, Error, ErrorKind, NodeClient, Slate, TxLogEntryType, VersionInfo,
+	BlockFees, CbData, Error, ErrorKind, NodeClient, Slate, TxLogEntryType, VersionInfo,
 	WalletBackend, WalletInst, WalletLCProvider,
 };
 use grin_core::core::amount_to_hr_string;
@@ -42,6 +44,27 @@ lazy_static! {
 /// get current receive account name
 pub fn get_receive_account() -> Option<String> {
 	RECV_ACCOUNT.read().unwrap().clone()
+}
+
+/// get tor proof address
+pub fn get_proof_address<'a, T: ?Sized, C, K>(
+	w: &mut T,
+	keychain_mask: Option<&SecretKey>,
+) -> Result<String, Error>
+where
+	T: WalletBackend<'a, C, K>,
+	C: NodeClient + 'a,
+	K: Keychain + 'a,
+{
+	let keychain = w.keychain(keychain_mask)?;
+	let provable_address = proofaddress::payment_proof_address(&keychain, ProofAddressType::Onion)
+		.map_err(|e| {
+			ErrorKind::PaymentProofAddress(format!(
+				"Error occurred in getting payment proof address, {}",
+				e
+			))
+		})?;
+	Ok(provable_address.public_key)
 }
 
 ///
@@ -90,7 +113,6 @@ pub fn receive_tx<'a, T: ?Sized, C, K>(
 	message: Option<String>,
 	use_test_rng: bool,
 	refresh_from_node: bool,
-	address_index: u32,
 ) -> Result<Slate, Error>
 where
 	T: WalletBackend<'a, C, K>,
@@ -100,6 +122,8 @@ where
 	let display_from = "http listener";
 	let slate_message = &slate.participant_data[0].message;
 	let mut address_for_logging = address.clone();
+
+	check_ttl(w, &slate, refresh_from_node)?;
 
 	if address.is_none() {
 		// that means it's not mqs so need to print it
@@ -208,8 +232,7 @@ where
 			.eq(&p.receiver_address.public_key)
 		{
 			debug!("file proof, replace the receiver address with its address");
-			let sec_key =
-				address::address_from_derivation_path(&keychain, &parent_key_id, address_index)?;
+			let sec_key = proofaddress::payment_proof_address_secret(&keychain)?;
 			let onion_address = OnionV3Address::from_private(&sec_key.0)?;
 			let dalek_pubkey = onion_address.to_ov3_str();
 			p.receiver_address = ProvableAddress::from_str(&dalek_pubkey)?;
@@ -219,7 +242,7 @@ where
 			&excess,
 			p.sender_address.clone(),
 			p.receiver_address.clone(),
-			address::address_from_derivation_path(&keychain, &parent_key_id, address_index)?,
+			proofaddress::payment_proof_address_secret(&keychain)?,
 		)?;
 
 		p.receiver_signature = Some(sig);

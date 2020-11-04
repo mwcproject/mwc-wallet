@@ -39,9 +39,6 @@ pub mod swap;
 /// Swap trade sessions catalog
 pub mod trades;
 
-/// Default values for Swap related data
-pub mod defaults;
-
 /// Serialization adapters
 pub mod ser;
 
@@ -427,7 +424,7 @@ mod tests {
 		let secondary_redeem_address = btc_address(&kc_sell);
 		let height = 100_000;
 
-		let mut api_sell = BtcSwapApi::new(
+		let mut api_sell = BtcSwapApi::new_test(
 			Arc::new(TestNodeClient::new(height)),
 			Arc::new(Mutex::new(TestBtcNodeClient::new(1))),
 		);
@@ -446,6 +443,8 @@ mod tests {
 				3600,
 				"file".to_string(),
 				"/tmp/del.me".to_string(),
+				None,
+				None,
 			)
 			.unwrap();
 		let mut fsm_sell = api_sell.get_fsm(&kc_sell, &swap);
@@ -503,7 +502,7 @@ mod tests {
 
 		// Seller: create swap offer
 		let mut api_sell =
-			BtcSwapApi::new(Arc::new(nc.clone()), Arc::new(Mutex::new(btc_nc.clone())));
+			BtcSwapApi::new_test(Arc::new(nc.clone()), Arc::new(Mutex::new(btc_nc.clone())));
 		let mut swap_sell = api_sell
 			.create_swap_offer(
 				&kc_sell,
@@ -519,6 +518,8 @@ mod tests {
 				3600,
 				"file".to_string(),
 				"/tmp/del.me".to_string(),
+				None,
+				None,
 			)
 			.unwrap();
 
@@ -589,7 +590,8 @@ mod tests {
 		let ctx_buy = context_buy(&kc_buy);
 
 		// Buyer: accept swap offer
-		let api_buy = BtcSwapApi::new(Arc::new(nc.clone()), Arc::new(Mutex::new(btc_nc.clone())));
+		let api_buy =
+			BtcSwapApi::new_test(Arc::new(nc.clone()), Arc::new(Mutex::new(btc_nc.clone())));
 
 		let (id, offer, secondary_update) = message_1.unwrap_offer().unwrap();
 		let mut swap_buy =
@@ -1325,14 +1327,14 @@ mod tests {
 			self.swap_stack.push((
 				self.swap.clone(),
 				self.api.node_client.get_state(),
-				self.api.btc_node_client.lock().get_state(),
+				self.api.btc_node_client1.lock().get_state(),
 			));
 		}
 		pub fn pops(&mut self) {
 			let (swap, nc_state, bnc_state) = self.swap_stack.pop().unwrap();
 			self.swap = swap;
 			self.api.node_client.set_state(&nc_state);
-			self.api.btc_node_client.lock().set_state(&bnc_state);
+			self.api.btc_node_client1.lock().set_state(&bnc_state);
 		}
 	}
 
@@ -1540,7 +1542,7 @@ mod tests {
 		let btc_amount = btc_amount_1 + btc_amount_2;
 
 		let mut api_sell =
-			BtcSwapApi::new(Arc::new(nc.clone()), Arc::new(Mutex::new(btc_nc.clone())));
+			BtcSwapApi::new_test(Arc::new(nc.clone()), Arc::new(Mutex::new(btc_nc.clone())));
 		let kc_sell = keychain(1);
 		let ctx_sell = context_sell(&kc_sell);
 
@@ -1561,6 +1563,8 @@ mod tests {
 					REDEEM_TIME as u64,
 					"file".to_string(),
 					"/tmp/del.me".to_string(),
+					None,
+					None,
 				)
 				.unwrap();
 			let fsm_sell = api_sell.get_fsm(&kc_sell, &swap_sell);
@@ -1673,7 +1677,8 @@ mod tests {
 		// Creating buyer
 		let kc_buy = keychain(2);
 		let ctx_buy = context_buy(&kc_buy);
-		let api_buy = BtcSwapApi::new(Arc::new(nc.clone()), Arc::new(Mutex::new(btc_nc.clone())));
+		let api_buy =
+			BtcSwapApi::new_test(Arc::new(nc.clone()), Arc::new(Mutex::new(btc_nc.clone())));
 
 		////////////////////////////////////////////////////////////////////
 		// Testing how Buyer can validate the data
@@ -4741,7 +4746,7 @@ mod tests {
 		}
 
 		// Bith party waiting for confirmations
-		nc.mine_blocks(MWC_CONFIRMATION / 2 - 14);
+		nc.mine_blocks(MWC_CONFIRMATION / 2);
 		btc_nc.mine_blocks(BTC_CONFIRMATION / 2);
 		test_responds(
 			&mut buyer,

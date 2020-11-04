@@ -58,6 +58,8 @@ impl SellApi {
 		redeem_time_sec: u64,
 		communication_method: String,
 		buyer_destination_address: String,
+		electrum_node_uri1: Option<String>,
+		electrum_node_uri2: Option<String>,
 	) -> Result<Swap, ErrorKind> {
 		#[cfg(test)]
 		let test_mode = is_test_mode();
@@ -124,6 +126,8 @@ impl SellApi {
 			posted_refund: None,
 			journal: Vec::new(),
 			secondary_fee,
+			electrum_node_uri1,
+			electrum_node_uri2,
 		};
 
 		swap.add_journal_message("Swap offer is created".to_string());

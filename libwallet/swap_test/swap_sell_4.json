@@ -434,5 +434,7 @@
       "message": "Send response to Redeem message"
     }
   ],
-  "secondary_fee": 1.4
+  "secondary_fee": 1.4,
+  "electrum_node_uri1": null,
+  "electrum_node_uri2": null
 }

@@ -61,6 +61,11 @@ pub fn get_mwcmqs_brocker() -> Option<(MWCMQPublisher, MWCMQSubscriber)> {
 	MWCMQS_BROKER.read().clone()
 }
 
+/// Reset Broker (listener is stopped)
+pub fn reset_mwcmqs_brocker() {
+	MWCMQS_BROKER.write().take();
+}
+
 pub struct MwcMqsChannel {
 	des_address: String,
 }
@@ -299,6 +304,7 @@ impl Subscriber for MWCMQSubscriber {
 
 			let response_status = response.is_ok();
 			self.broker.stop();
+			reset_mwcmqs_brocker();
 			response_status
 		} else {
 			error!("Unable to stop mwcmqs threads");

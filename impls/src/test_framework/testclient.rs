@@ -230,7 +230,6 @@ where
 				None,
 				false,
 				false,
-				0,
 			) {
 				Err(e) => {
 					return Ok(WalletProxyMessage {
@@ -558,6 +557,7 @@ impl NodeClient for LocalWalletClient {
 		Ok(HeaderInfo {
 			height: r_height,
 			hash: r_hash,
+			confirmed_time: "".to_string(),
 			version: r_version,
 			nonce: r_nonce,
 			total_difficulty: r_total_difficulty,

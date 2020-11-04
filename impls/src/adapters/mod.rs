@@ -14,16 +14,11 @@
 
 mod file;
 pub mod http;
-mod keybase;
 mod mwcmq;
 mod types;
 
 pub use self::file::PathToSlate;
 pub use self::http::HttpDataSender;
-pub use self::keybase::{
-	get_keybase_brocker, init_keybase_access_data, KeybaseChannel, KeybasePublisher,
-	KeybaseSubscriber, TOPIC_SLATE_NEW,
-};
 
 use crate::config::{TorConfig, WalletConfig};
 use crate::error::{Error, ErrorKind};
@@ -35,8 +30,8 @@ pub use mwcmq::{
 	get_mwcmqs_brocker, init_mwcmqs_access_data, MWCMQPublisher, MWCMQSubscriber, MwcMqsChannel,
 };
 pub use types::{
-	Address, AddressType, CloseReason, HttpsAddress, KeybaseAddress, MWCMQSAddress, Publisher,
-	Subscriber, SubscriptionHandler,
+	Address, AddressType, CloseReason, HttpsAddress, MWCMQSAddress, Publisher, Subscriber,
+	SubscriptionHandler,
 };
 
 /// Sends transactions to a corresponding SlateReceiver
@@ -91,15 +86,14 @@ pub fn create_sender(
 		))
 	};
 
-	let method = if method=="http" {
+	let method = if method == "http" {
 		// Url might be onion. In this case we can update method to tor
 		if validate_tor_address(dest).is_ok() {
 			"tor"
 		} else {
 			method
 		}
-	}
-	else {
+	} else {
 		method
 	};
 
@@ -127,7 +121,6 @@ pub fn create_sender(
 				)
 			}
 		},
-		"keybase" => Box::new(KeybaseChannel::new(dest.to_string())),
 		"mwcmqs" => Box::new(MwcMqsChannel::new(dest.to_string())),
 		_ => {
 			return Err(handle_unsupported_types(method));

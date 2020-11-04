@@ -20,6 +20,7 @@ use crate::util::secp;
 use failure::{Backtrace, Context, Fail};
 use grin_wallet_util::OnionV3AddressError;
 use std::env;
+use std::error::Error as StdError;
 use std::fmt::{self, Display};
 
 /// Error definition
@@ -53,7 +54,7 @@ pub enum ErrorKind {
 
 	/// Secp Error
 	#[fail(display = "Secp error, {}", _0)]
-	Secp(secp::Error),
+	Secp(String),
 
 	/// Error when formatting json
 	#[fail(display = "Serde JSON error, {}", _0)]
@@ -115,15 +116,9 @@ pub enum ErrorKind {
 	#[fail(display = "MQS error: {}", _0)]
 	MqsGenericError(String),
 
-	/// Keybase generic error
-	#[fail(display = "Keybase error: {}", _0)]
-	KeybaseGenericError(String),
-
-	#[fail(display = "keybase not found! consider installing keybase locally first.")]
-	KeybaseNotFound,
-
-	#[fail(display = "Unable to send keybase message, {}", _0)]
-	KeybaseMessageSendError(String),
+	/// Address generic error
+	#[fail(display = "Address error: {}", _0)]
+	AddressGenericError(String),
 
 	/// Get MQS invalid response
 	#[fail(display = "{} Sender returned invalid response.", _0)]
@@ -136,9 +131,6 @@ pub enum ErrorKind {
 	#[fail(display = "unkown address!, {}", _0)]
 	UnknownAddressType(String),
 
-	#[fail(display = "could not parse `{}` to a keybase address!", 0)]
-	KeybaseAddressParsingError(String),
-
 	#[fail(display = "could not parse `{}` to a https address!", 0)]
 	HttpsAddressParsingError(String),
 
@@ -150,6 +142,9 @@ pub enum ErrorKind {
 
 	#[fail(display = "Error in getting swap nodes info, {}", _0)]
 	SwapNodesObtainError(String),
+
+	#[fail(display = "proof address mismatch {}, {}!", _0, _1)]
+	ProofAddressMismatch(String, String),
 }
 
 impl Fail for Error {
@@ -219,13 +214,19 @@ impl From<keychain::Error> for Error {
 	}
 }
 
+// we have to use e.description  because of the bug at rust-secp256k1-zkp
+#[allow(deprecated)]
+
 impl From<secp::Error> for Error {
 	fn from(error: secp::Error) -> Error {
 		Error {
-			inner: Context::new(ErrorKind::Secp(error)),
+			// secp::Error to_string is broken, in past biilds.
+			inner: Context::new(ErrorKind::Secp(format!("{}", error.description()))),
 		}
 	}
 }
+
+#[warn(deprecated)]
 
 impl From<libwallet::Error> for Error {
 	fn from(error: libwallet::Error) -> Error {

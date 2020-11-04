@@ -189,6 +189,24 @@ impl Currency {
 			Currency::Btc | Currency::Bch => "satoshi per byte".to_string(),
 		}
 	}
+
+	/// Transaction at the first block. That transaction confirmation number must match the height of the chain
+	pub fn get_block1_tx_hash(&self, testnet: bool) -> String {
+		// Bch is clone of BTC, so even the same transaction does exist. For other alts that will not be true
+		if testnet {
+			match self {
+				Currency::Btc | Currency::Bch => {
+					"f0315ffc38709d70ad5647e22048358dd3745f3ce3874223c80a7c92fab0c8ba".to_string()
+				}
+			}
+		} else {
+			match self {
+				Currency::Btc | Currency::Bch => {
+					"0e3e2357e806b6cdb1f70b54c3a3a17b6714ee1f0e68bebb44a74b1efd512098".to_string()
+				}
+			}
+		}
+	}
 }
 
 impl fmt::Display for Currency {

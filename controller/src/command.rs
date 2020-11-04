@@ -33,6 +33,7 @@ use grin_wallet_libwallet::api_impl::owner_swap;
 use grin_wallet_libwallet::proof::proofaddress::ProvableAddress;
 use grin_wallet_libwallet::proof::tx_proof::TxProof;
 use grin_wallet_libwallet::swap::message;
+use grin_wallet_libwallet::swap::trades;
 use grin_wallet_libwallet::swap::types::Action;
 use grin_wallet_libwallet::{Slate, TxLogEntry, WalletInst};
 use serde_json as json;
@@ -165,7 +166,6 @@ where
 						&config.api_listen_addr(),
 						g_args.tls_conf.clone(),
 						tor_config.use_tor_listener,
-						config.grinbox_address_index(),
 					);
 					if let Err(e) = res {
 						error!("Error starting http listener: {}", e);
@@ -181,23 +181,10 @@ where
 				}
 			}
 		}
-		"keybase" => {
-			let wallet_inst = owner_api.wallet_inst.clone();
-			let _ = controller::init_start_keybase_listener(
-				config.clone(),
-				wallet_inst,
-				keychain_mask,
-				!cli_mode,
-			)
-			.map_err(|e| {
-				error!("Unable to start keybase listener, {}", e);
-				Error::from(ErrorKind::ListenerError)
-			})?;
-		}
+
 		"mwcmqs" => {
 			let wallet_inst = owner_api.wallet_inst.clone();
 			let _ = controller::init_start_mwcmqs_listener(
-				config.clone(),
 				wallet_inst,
 				mqs_config.clone(),
 				keychain_mask,
@@ -237,7 +224,6 @@ where
 	// Starting MQS first
 	if config.owner_api_include_mqs_listener.unwrap_or(false) {
 		let _ = controller::init_start_mwcmqs_listener(
-			config.clone(),
 			owner_api.wallet_inst.clone(),
 			mqs_config.clone(),
 			km.clone(),
@@ -246,15 +232,6 @@ where
 		)?;
 	}
 
-	// Starting Keybase
-	if config.owner_api_include_keybase_listener.unwrap_or(false) {
-		let _ = controller::init_start_keybase_listener(
-			config.clone(),
-			owner_api.wallet_inst.clone(),
-			km.clone(),
-			false,
-		)?;
-	}
 
 	// Now Owner API
 	controller::owner_listener(
@@ -264,7 +241,6 @@ where
 		g_args.api_secret.clone(),
 		g_args.tls_conf.clone(),
 		config.owner_api_include_foreign.clone(),
-		config.grinbox_address_index().clone(),
 		Some(tor_config.clone()),
 	)
 	.map_err(|e| ErrorKind::LibWallet(format!("Unable to start Listener, {}", e)))?;
@@ -335,12 +311,13 @@ pub struct SendArgs {
 	pub ttl_blocks: Option<u64>,
 	pub exclude_change_outputs: bool,
 	pub minimum_confirmations_change_outputs: u64,
-	pub address: Option<String>, //this is only for file proof.
+	pub address: Option<String>,      //this is only for file proof.
+	pub outputs: Option<Vec<String>>, // Outputs to use. If None, all outputs can be used
 }
 
 pub fn send<L, C, K>(
 	owner_api: &mut Owner<L, C, K>,
-	config: &WalletConfig,
+	_config: &WalletConfig,
 	keychain_mask: Option<&SecretKey>,
 	tor_config: Option<TorConfig>,
 	mqs_config: Option<MQSConfig>,
@@ -368,9 +345,10 @@ where
 					exclude_change_outputs: Some(args.exclude_change_outputs),
 					minimum_confirmations_change_outputs: args.minimum_confirmations_change_outputs,
 					address: args.address.clone(),
+					outputs: args.outputs.clone(),
 					..Default::default()
 				};
-				let slate = api.init_send_tx(m, init_args, None, 1)?;
+				let slate = api.init_send_tx(m, init_args, 1)?;
 				strategies.push((strategy, slate.amount, slate.fee));
 			}
 			display::estimate(args.amount, strategies, dark_scheme);
@@ -390,9 +368,10 @@ where
 				send_args: None,
 				exclude_change_outputs: Some(args.exclude_change_outputs),
 				minimum_confirmations_change_outputs: args.minimum_confirmations_change_outputs,
+				outputs: args.outputs.clone(),
 				..Default::default()
 			};
-			let result = api.init_send_tx(m, init_args, None, 1);
+			let result = api.init_send_tx(m, init_args, 1);
 			let mut slate = match result {
 				Ok(s) => {
 					info!(
@@ -415,46 +394,33 @@ where
 
 			//if it is mwcmqs, start listner first.
 			match args.method.as_str() {
-				"keybase" => {
-					let km = match keychain_mask.as_ref() {
-						None => None,
-						Some(&m) => Some(m.to_owned()),
-					};
-					//start the listener
-					let _ = controller::init_start_keybase_listener(
-						config.clone(),
-						wallet_inst.clone(),
-						Arc::new(Mutex::new(km)),
-						false,
-					)?;
-					thread::sleep(Duration::from_millis(2000));
-				}
 				"mwcmqs" => {
-					//check to see if mqs_config is there, if not, return error
-					let mqs_config_unwrapped;
-					match mqs_config {
-						Some(s) => {
-							mqs_config_unwrapped = s;
+					if grin_wallet_impls::adapters::get_mwcmqs_brocker().is_none() {
+						//check to see if mqs_config is there, if not, return error
+						let mqs_config_unwrapped;
+						match mqs_config {
+							Some(s) => {
+								mqs_config_unwrapped = s;
+							}
+							None => {
+								return Err(ErrorKind::MQSConfig(format!("NO MQS config!")).into());
+							}
 						}
-						None => {
-							return Err(ErrorKind::MQSConfig(format!("NO MQS config!")).into());
-						}
-					}
 
-					let km = match keychain_mask.as_ref() {
-						None => None,
-						Some(&m) => Some(m.to_owned()),
-					};
-					//start the listener finalize tx
-					let _ = controller::init_start_mwcmqs_listener(
-						config.clone(),
-						wallet_inst.clone(),
-						mqs_config_unwrapped,
-						Arc::new(Mutex::new(km)),
-						false,
-						//None,
-					)?;
-					thread::sleep(Duration::from_millis(2000));
+						let km = match keychain_mask.as_ref() {
+							None => None,
+							Some(&m) => Some(m.to_owned()),
+						};
+						//start the listener finalize tx
+						let _ = controller::init_start_mwcmqs_listener(
+							wallet_inst.clone(),
+							mqs_config_unwrapped,
+							Arc::new(Mutex::new(km)),
+							false,
+							//None,
+						)?;
+						thread::sleep(Duration::from_millis(2000));
+					}
 				}
 				_ => {}
 			}
@@ -720,7 +686,7 @@ where
 					estimate_only: Some(true),
 					..Default::default()
 				};
-				let slate = api.init_send_tx(m, init_args, None, 1)?;
+				let slate = api.init_send_tx(m, init_args, 1)?;
 				strategies.push((strategy, slate.amount, slate.fee));
 			}
 			display::estimate(slate.amount, strategies, dark_scheme);
@@ -1127,7 +1093,7 @@ where
 {
 	controller::owner_single_use(None, keychain_mask, Some(owner_api), |api, m| {
 		// Just address at derivation index 0 for now
-		let pub_key = api.get_public_proof_address(m, 0)?;
+		let pub_key = api.get_public_proof_address(m)?;
 		let addr = ProvableAddress::from_pub_key(&pub_key);
 
 		println!();
@@ -1302,6 +1268,10 @@ pub struct SwapStartArgs {
 	pub buyer_communication_method: String,
 	/// Buyer destination address
 	pub buyer_communication_address: String,
+	/// ElectrumX URI1
+	pub electrum_node_uri1: Option<String>,
+	/// ElectrumX failover URI2
+	pub electrum_node_uri2: Option<String>,
 }
 
 pub fn swap_start<L, C, K>(
@@ -1352,6 +1322,8 @@ where
 				redeem_time_sec: args.redeem_time_sec,
 				buyer_communication_method: args.buyer_communication_method,
 				buyer_communication_address: args.buyer_communication_address,
+				electrum_node_uri1: args.electrum_node_uri1,
+				electrum_node_uri2: args.electrum_node_uri2,
 			},
 		);
 		match result {
@@ -1409,6 +1381,8 @@ pub enum SwapSubcommand {
 	Autoswap,
 	Adjust,
 	Dump,
+	TradeExport,
+	TradeImport,
 	StopAllAutoSwap,
 }
 
@@ -1438,6 +1412,10 @@ pub struct SwapArgs {
 	pub secondary_address: Option<String>,
 	/// Print output in Json format. Note, it is not for all cases.
 	pub json_format: bool,
+	/// ElectrumX URI1
+	pub electrum_node_uri1: Option<String>,
+	/// ElectrumX failover URI2
+	pub electrum_node_uri2: Option<String>,
 }
 
 // For Json we can't use int 64, we have to convert all of them to Strings
@@ -1462,7 +1440,6 @@ pub struct SwapJournalRecordString {
 pub fn swap<L, C, K>(
 	wallet_inst: Arc<Mutex<Box<dyn WalletInst<'static, L, C, K>>>>,
 	keychain_mask: Option<&SecretKey>,
-	address_index: u32,
 	api_listen_addr: String,
 	mqs_config: Option<MQSConfig>,
 	tor_config: Option<TorConfig>,
@@ -1491,14 +1468,18 @@ where
 					if args.json_format {
 						let mut res = Vec::new();
 
-						for (info, swap_id, state, action, expiration, start_time) in list {
+						for swap_info in list {
 							let item = json::json!({
-								"info" : info,
-								"swap_id": swap_id,
-								"state" : state.to_string(),
-								"action" : action.unwrap_or(Action::None).to_string(),
-								"expiration" : expiration.unwrap_or(0).to_string(),
-								"start_time" : start_time.to_string(),
+								"is_seller" : swap_info.is_seller,
+								"secondary_address" : swap_info.secondary_address,
+								"mwc_amount" : swap_info.mwc_amount,
+								"secondary_amount" : swap_info.secondary_amount,
+								"secondary_currency" : swap_info.secondary_currency,
+								"swap_id": swap_info.swap_id,
+								"state" : swap_info.state.to_string(),
+								"action" : swap_info.action.unwrap_or(Action::None).to_string(),
+								"expiration" : swap_info.expiration.unwrap_or(0).to_string(),
+								"start_time" : swap_info.trade_start_time.to_string(),
 							});
 							res.push(item);
 						}
@@ -1509,7 +1490,7 @@ where
 						} else {
 							display::swap_trades(
 								list.iter()
-									.map(|v| (v.1.clone(), v.2.to_string()))
+									.map(|v| (v.swap_id.clone(), v.state.to_string()))
 									.collect(),
 							);
 						}
@@ -1596,6 +1577,8 @@ where
 				args.destination.clone(),
 				secondary_address,
 				args.secondary_fee,
+				args.electrum_node_uri1,
+				args.electrum_node_uri2,
 			);
 			match result {
 				Ok((state, _action)) => {
@@ -1625,12 +1608,16 @@ where
 						wallet_inst.clone(),
 						keychain_mask,
 						&swap_id,
+						args.electrum_node_uri1.clone(),
+						args.electrum_node_uri2.clone(),
 					)?;
 					let (_status, action, time_limit, roadmap, journal_records) =
 						owner_swap::update_swap_status_action(
 							wallet_inst.clone(),
 							keychain_mask,
 							&swap_id,
+							args.electrum_node_uri1,
+							args.electrum_node_uri2,
 						)?;
 
 					let mwc_lock_time = if conf_status.mwc_tip < swap.refund_slate.lock_height {
@@ -1736,7 +1723,6 @@ where
 							let _ = controller::start_mwcmqs_listener(
 								wallet_inst2,
 								mqs_config.expect("No MQS config found!").clone(),
-								address_index,
 								false,
 								Arc::new(Mutex::new(km)),
 								true,
@@ -1779,7 +1765,6 @@ where
 										&api_listen_addr,
 										tls_conf,
 										tor_config.use_tor_listener,
-										address_index,
 									);
 									if let Err(e) = res {
 										error!("Error starting http listener: {}", e);
@@ -1861,6 +1846,8 @@ where
 				args.buyer_refund_address,
 				args.secondary_fee,
 				args.secondary_address,
+				args.electrum_node_uri1,
+				args.electrum_node_uri2,
 			);
 
 			match result {
@@ -1875,6 +1862,10 @@ where
 			}
 		}
 		SwapSubcommand::Autoswap => {
+			// Note !!!
+			// For auto swap --json_format is a trigger for a one shot action.
+			let one_shot = args.json_format;
+
 			let swap_id = args.swap_id.ok_or(ErrorKind::ArgumentError(
 				"Not found expected 'swap_id' argument".to_string(),
 			))?;
@@ -1889,7 +1880,9 @@ where
 			let wallet_inst2 = wallet_inst.clone();
 			let km2 = km.clone();
 
-			SWAP_THREADS_RUN.swap(false, Ordering::Relaxed);
+			if !one_shot {
+				SWAP_THREADS_RUN.swap(false, Ordering::Relaxed);
+			}
 
 			if args.start_listener {
 				match swap.communication_method.as_str() {
@@ -1902,7 +1895,6 @@ where
 						let _ = controller::start_mwcmqs_listener(
 							wallet_inst,
 							mqs_config.expect("No MQS config found!").clone(),
-							address_index,
 							false,
 							Arc::new(Mutex::new(km)),
 							true,
@@ -1931,7 +1923,6 @@ where
 									&api_listen_addr,
 									tls_conf,
 									tor_config.use_tor_listener,
-									address_index,
 								);
 								if let Err(e) = res {
 									error!("Error starting http listener: {}", e);
@@ -2033,13 +2024,20 @@ where
 
 			// Calling mostly for params and environment validation. Also it is a nice chance to print the status of the deal that will be started
 			let (mut prev_state, mut prev_action, mut prev_journal_len) = {
-				let conf_status =
-					owner_swap::get_swap_tx_tstatus(wallet_inst2.clone(), keychain_mask, &swap_id)?;
+				let conf_status = owner_swap::get_swap_tx_tstatus(
+					wallet_inst2.clone(),
+					keychain_mask,
+					&swap_id,
+					args.electrum_node_uri1.clone(),
+					args.electrum_node_uri2.clone(),
+				)?;
 				let (state, action, time_limit, roadmap, journal_records) =
 					owner_swap::update_swap_status_action(
 						wallet_inst2.clone(),
 						keychain_mask,
 						&swap_id,
+						args.electrum_node_uri1,
+						args.electrum_node_uri2,
 					)?;
 
 				// Autoswap has to be sure that ALL parameters are defined. There are multiple steps and potentioly all of them can be used.
@@ -2057,27 +2055,36 @@ where
 								})?
 						}
 						None => {
-							return Err(ErrorKind::GenericError(
-								"Please define buyer_refund_address for automated swap".to_string(),
-							)
-							.into())
+							if swap.get_secondary_address().is_empty() {
+								return Err(ErrorKind::GenericError(
+									"Please define buyer_refund_address for automated swap"
+										.to_string(),
+								)
+								.into());
+							}
 						}
 					}
 				}
 
-				display::swap_trade(
-					&swap,
-					&action,
-					&time_limit,
-					&conf_status,
-					&roadmap,
-					&journal_records,
-					true,
-				)?;
+				if !args.json_format {
+					display::swap_trade(
+						&swap,
+						&action,
+						&time_limit,
+						&conf_status,
+						&roadmap,
+						&journal_records,
+						true,
+					)?;
+				}
 				(state, action, journal_records.len())
 			};
 
-			println!("Swap started in auto mode.... Status will be displayed as swap progresses.");
+			if !one_shot {
+				println!(
+					"Swap started in auto mode.... Status will be displayed as swap progresses."
+				);
+			}
 
 			// NOTE - we can't process errors with '?' here. We can't exit, we must try forever or until we get a final state
 			let swap_id2 = swap_id.clone();
@@ -2091,6 +2098,7 @@ where
 				"".to_string()
 			};
 			let stop_thread_clone = SWAP_THREADS_RUN.clone();
+			let json_format_clone = args.json_format.clone();
 
 			debug!("Starting autoswap thread for swap id {}", swap_id);
 			let api_thread = thread::Builder::new()
@@ -2102,30 +2110,25 @@ where
 							mut curr_state,
 							mut curr_action,
 							_time_limit,
-							_roadmap,
+							roadmap,
 							mut journal_records,
 						) = match owner_swap::update_swap_status_action(
 							wallet_inst2.clone(),
 							km2.as_ref(),
-							&swap_id,
+							&swap_id2,
+							None,None, // URIs are already updated
 						) {
 							Ok(res) => res,
 							Err(e) => {
-								error!("Error during Swap {}: {}", swap_id, e);
+								error!("Error during Swap {}: {}", swap_id2, e);
 								thread::sleep(Duration::from_millis(10000));
 								continue;
 							}
 						};
 
-						// In case of final state - we are exiting.
-						if curr_state.is_final_state() {
-							println!("{}Swap trade is finished", swap_report_prefix);
-							break;
-						}
-
 						// If actin require execution - it must be executed
 						let mut was_executed = false;
-						if curr_action.can_execute() {
+						if !curr_state.is_final_state() && curr_action.can_execute() {
 							match owner_swap::swap_process(
 								wallet_inst2.clone(),
 								km2.as_ref(),
@@ -2135,6 +2138,7 @@ where
 								refund_address.clone(),
 								fee_satoshi.clone(),
 								secondary_address.clone(),
+								None, None, // URIs was already updated before. No need to update the same.
 							) {
 								Ok(res) => {
 									curr_state = res.next_state_id;
@@ -2143,49 +2147,88 @@ where
 									}
 									journal_records = res.journal;
 								}
-								Err(e) => error!("Error during Swap {}: {}", swap_id, e),
+								Err(e) => error!("Error during Swap {}: {}", swap_id2, e),
 							}
 							// We can execute in the row. Internal guarantees that we will never do retry to the same action unless it is an error
 							// The sleep here for possible error
 							was_executed = true;
 							debug!(
 								"Action {} for swap id {} was excecuted",
-								curr_action, swap_id
+								curr_action, swap_id2
 							);
 						}
 
-						if prev_journal_len < journal_records.len() {
-							for i in prev_journal_len..journal_records.len() {
-								println!(
-									"{}{}",
-									swap_report_prefix, journal_records[i].message
-								);
+						if !json_format_clone {
+							if prev_journal_len < journal_records.len() {
+								for i in prev_journal_len..journal_records.len() {
+									println!(
+										"{}{}",
+										swap_report_prefix, journal_records[i].message
+									);
+								}
+								prev_journal_len = journal_records.len();
 							}
-							prev_journal_len = journal_records.len();
+
+							let curr_action_str = if curr_action.is_none() {
+								"".to_string()
+							} else {
+								curr_action.to_string()
+							};
+
+							if curr_state != prev_state {
+								if curr_action_str.len() > 0 {
+									println!("{}{}", swap_report_prefix, curr_action_str);
+								} else {
+									println!(
+										"{}{}. {}",
+										swap_report_prefix, curr_state, curr_action_str
+									);
+								}
+								prev_state = curr_state.clone();
+								prev_action = curr_action.clone();
+							} else if curr_action.to_string() != prev_action.to_string() {
+								if curr_action_str.len() > 0 {
+									println!("{}{}", swap_report_prefix, curr_action);
+								}
+								prev_action = curr_action.clone();
+							}
 						}
 
-						let curr_action_str = if curr_action.is_none() {
-							"".to_string()
-						} else {
-							curr_action.to_string()
-						};
+						// In case of Json printing, executing one step and exiting.
+						if json_format_clone {
+							let road_map_to_print: Vec<StateEtaInfoString> = roadmap
+								.iter()
+								.map(|r| StateEtaInfoString {
+									active: r.active,
+									name: r.name.clone(),
+									end_time: r.end_time.map(|r| r.to_string()),
+								})
+								.collect();
 
-						if curr_state != prev_state {
-							if curr_action_str.len() > 0 {
-								println!("{}{}", swap_report_prefix, curr_action_str);
-							} else {
-								println!(
-									"{}{}. {}",
-									swap_report_prefix, curr_state, curr_action_str
-								);
-							}
-							prev_state = curr_state;
-							prev_action = curr_action;
-						} else if curr_action.to_string() != prev_action.to_string() {
-							if curr_action_str.len() > 0 {
-								println!("{}{}", swap_report_prefix, curr_action);
-							}
-							prev_action = curr_action;
+							let journal_records_to_print: Vec<SwapJournalRecordString> = journal_records
+								.iter()
+								.map(|j| SwapJournalRecordString {
+									time: j.time.to_string(),
+									message: j.message.to_string(),
+								})
+								.collect();
+
+							let item = json::json!({
+									"swap_id" : swap_id2.clone(),
+									"autowsap_done" : curr_state.is_final_state(),
+									"currentAction": curr_action.to_string(),
+									"currentState" : curr_state.to_string(),
+									"roadmap" : road_map_to_print,
+									"journal_records" : journal_records_to_print,
+								});
+							println!("JSON: {}", item.to_string());
+							break;
+						}
+
+						// In case of final state - we are exiting.
+						if curr_state.is_final_state() {
+							println!("{}Swap trade is finished", swap_report_prefix);
+							break;
 						}
 
 						let seconds_to_sleep = if was_executed {
@@ -2211,11 +2254,15 @@ where
 				});
 
 			if let Ok(t) = api_thread {
-				if !cli_mode {
+				if !cli_mode || one_shot {
 					let r = t.join();
 					if let Err(_) = r {
-						error!("Error doing auto swap.");
-						return Err(ErrorKind::LibWallet(format!("Error doing auto swap")).into());
+						error!("Error during running autoswap thread for {}", swap_id);
+						return Err(ErrorKind::LibWallet(format!(
+							"Error during running autoswap thread for {}",
+							swap_id
+						))
+						.into());
 					}
 				}
 			}
@@ -2261,6 +2308,37 @@ where
 					.into())
 				}
 			}
+		}
+		SwapSubcommand::TradeExport => {
+			let swap_id = args.swap_id.ok_or(ErrorKind::ArgumentError(
+				"Not found expected 'swap_id' argument".to_string(),
+			))?;
+
+			let file_name = args.destination.ok_or(ErrorKind::ArgumentError(
+				"Not found expected file name for the exported data".to_string(),
+			))?;
+
+			trades::export_trade(swap_id.as_str(), file_name.as_str())
+				.map_err(|e| ErrorKind::LibWallet(format!("Unable to export trade data, {}", e)))?;
+
+			println!("Swap trade is exported to {}", file_name);
+			Ok(())
+		}
+		SwapSubcommand::TradeImport => {
+			let trade_file_name = args.destination.ok_or(ErrorKind::ArgumentError(
+				"Not found expected file name for the exported data".to_string(),
+			))?;
+
+			let swap_id = owner_swap::swap_import_trade(
+				wallet_inst,
+				keychain_mask,
+				trade_file_name.as_str(),
+			)?;
+			println!(
+				"Swap trade {} is restored from the file {}",
+				swap_id, trade_file_name
+			);
+			Ok(())
 		}
 	}
 }

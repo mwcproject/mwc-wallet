@@ -35,6 +35,7 @@ use crate::{ECDHPubkey, Owner, PubAddress, Token};
 use easy_jsonrpc_mw;
 use grin_wallet_libwallet::proof::proofaddress::ProvableAddress;
 use rand::thread_rng;
+use std::error::Error;
 use std::time::Duration;
 
 /// Public definition used to generate Owner jsonrpc api.
@@ -1618,8 +1619,7 @@ pub trait OwnerRpcS {
 				"no_commit_cache": null,
 				"tls_certificate_file": null,
 				"tls_certificate_key": null,
-				"dark_background_color_scheme": null,
-				"keybase_notify_ttl": null
+				"dark_background_color_scheme": null
 			},
 			"logging_config": {
 				"log_to_stdout": false,
@@ -1961,8 +1961,7 @@ pub trait OwnerRpcS {
 		"jsonrpc": "2.0",
 		"method": "get_public_proof_address",
 		"params": {
-			"token": "d202964900000000d302964900000000d402964900000000d502964900000000",
-			"derivation_index": 0
+			"token": "d202964900000000d302964900000000d402964900000000d502964900000000"
 		},
 		"id": 1
 	}
@@ -1985,11 +1984,7 @@ pub trait OwnerRpcS {
 	```
 	*/
 
-	fn get_public_proof_address(
-		&self,
-		token: Token,
-		derivation_index: u32,
-	) -> Result<ProvableAddress, ErrorKind>;
+	fn get_public_proof_address(&self, token: Token) -> Result<ProvableAddress, ErrorKind>;
 
 	/**
 	Networked version of [Owner::proof_address_from_onion_v3](struct.Owner.html#method.proof_address_from_onion_v3).
@@ -2243,7 +2238,7 @@ where
 	}
 
 	fn init_send_tx(&self, token: Token, args: InitTxArgs) -> Result<VersionedSlate, ErrorKind> {
-		let slate = Owner::init_send_tx(self, (&token.keychain_mask).as_ref(), args, None, 1)
+		let slate = Owner::init_send_tx(self, (&token.keychain_mask).as_ref(), args, 1)
 			.map_err(|e| e.kind())?;
 		let version = slate.lowest_version();
 		Ok(VersionedSlate::into_version(slate, version))
@@ -2399,6 +2394,9 @@ where
 		Owner::node_height(self, (&token.keychain_mask).as_ref()).map_err(|e| e.kind())
 	}
 
+	// we have to use e.description  because of the bug at rust-secp256k1-zkp
+	#[allow(deprecated)]
+
 	fn init_secure_api(&self, ecdh_pubkey: ECDHPubkey) -> Result<ECDHPubkey, ErrorKind> {
 		let secp_inst = static_secp_instance();
 		let secp = secp_inst.lock();
@@ -2407,21 +2405,25 @@ where
 		let mut shared_pubkey = ecdh_pubkey.ecdh_pubkey;
 		shared_pubkey
 			.mul_assign(&secp, &sec_key)
-			.map_err(ErrorKind::Secp)?;
+			.map_err(|e| ErrorKind::Secp(format!("{}", e.description())))?;
 
 		let x_coord = shared_pubkey.serialize_vec(&secp, true);
-		let shared_key = SecretKey::from_slice(&secp, &x_coord[1..]).map_err(ErrorKind::Secp)?;
+		let shared_key = SecretKey::from_slice(&secp, &x_coord[1..])
+			.map_err(|e| ErrorKind::Secp(format!("{}", e.description())))?;
 		{
 			let mut s = self.shared_key.lock();
 			*s = Some(shared_key);
 		}
 
-		let pub_key = PublicKey::from_secret_key(&secp, &sec_key).map_err(ErrorKind::Secp)?;
+		let pub_key = PublicKey::from_secret_key(&secp, &sec_key)
+			.map_err(|e| ErrorKind::Secp(format!("{}", e.description())))?;
 
 		Ok(ECDHPubkey {
 			ecdh_pubkey: pub_key,
 		})
 	}
+
+	#[warn(deprecated)]
 
 	fn get_top_level_directory(&self) -> Result<String, ErrorKind> {
 		Owner::get_top_level_directory(self).map_err(|e| e.kind())
@@ -2533,17 +2535,9 @@ where
 		Owner::get_updater_messages(self, count as usize).map_err(|e| e.kind())
 	}
 
-	fn get_public_proof_address(
-		&self,
-		token: Token,
-		derivation_index: u32,
-	) -> Result<ProvableAddress, ErrorKind> {
-		let address = Owner::get_public_proof_address(
-			self,
-			(&token.keychain_mask).as_ref(),
-			derivation_index,
-		)
-		.map_err(|e| e.kind())?;
+	fn get_public_proof_address(&self, token: Token) -> Result<ProvableAddress, ErrorKind> {
+		let address = Owner::get_public_proof_address(self, (&token.keychain_mask).as_ref())
+			.map_err(|e| e.kind())?;
 		let public_proof_address = ProvableAddress::from_pub_key(&address);
 		println!("public_proof address {}", public_proof_address.public_key);
 		Ok(public_proof_address)

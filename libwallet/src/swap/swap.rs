@@ -136,6 +136,10 @@ pub struct Swap {
 	/// Secondary fee as it comes from the parameters or default value.
 	/// Fee units might be changed from Currency to Currency
 	pub secondary_fee: f32,
+	/// ElectrumX URI1
+	pub electrum_node_uri1: Option<String>,
+	/// ElectrumX failover URI2
+	pub electrum_node_uri2: Option<String>,
 }
 
 impl Swap {

@@ -119,7 +119,7 @@ fn file_exchange_test_impl(test_dir: &'static str) -> Result<(), wallet::Error> 
 			message: Some(message.to_owned()),
 			..Default::default()
 		};
-		let mut slate = api.init_send_tx(m, args, None, 1)?;
+		let mut slate = api.init_send_tx(m, args, 1)?;
 		// output tx file
 		PathToSlate((&send_file).into()).put_tx(&mut slate)?;
 		api.tx_lock_outputs(m, &slate, None, 0)?;

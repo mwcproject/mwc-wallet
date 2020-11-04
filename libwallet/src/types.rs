@@ -1036,8 +1036,19 @@ impl TxLogEntry {
 	}
 
 	/// Update confirmation TS with now
-	pub fn update_confirmation_ts(&mut self) {
-		self.confirmation_ts = Some(Utc::now());
+	pub fn update_confirmation_ts(&mut self, time: String) {
+		//
+		if time.is_empty() {
+			self.confirmation_ts = Some(Utc::now());
+		} else {
+			//sample time string: 2020-10-07T23:57:00+00:00
+			let time_converted = DateTime::parse_from_rfc3339(&time);
+			let time_stamp = time_converted.unwrap().timestamp();
+			let confirmed_t =
+				DateTime::<Utc>::from_utc(NaiveDateTime::from_timestamp(time_stamp, 0), Utc);
+			self.confirmation_ts = Some(confirmed_t);
+		}
+		//query the node to get the confirmation time
 	}
 
 	/// Return zero height - mean unknown. Needed for backward compatibility
@@ -1217,6 +1228,8 @@ pub struct HeaderInfo {
 	pub height: u64,
 	/// Header Hash
 	pub hash: String,
+	/// Header timestamp
+	pub confirmed_time: String,
 	/// Header version
 	pub version: i32,
 	/// Header nonce

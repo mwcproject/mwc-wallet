@@ -130,13 +130,15 @@ pub struct InitTxArgs {
 	/// transaction to a destination and optionally finalize the result
 	#[serde(default)]
 	pub send_args: Option<InitTxSendArgs>,
+	/// Selected outputs. If none, will use all outputs
+	pub outputs: Option<Vec<String>>, // outputs to include into the transaction
 }
 
 /// Send TX API Args, for convenience functionality that inits the transaction and sends
 /// in one go
 #[derive(Clone, Serialize, Deserialize)]
 pub struct InitTxSendArgs {
-	/// The transaction method. Can currently be 'http' or 'keybase'.
+	/// The transaction method. Can currently be 'http' .
 	pub method: String,
 	/// The destination, contents will depend on the particular method
 	pub dest: String,
@@ -172,6 +174,7 @@ impl Default for InitTxArgs {
 			exclude_change_outputs: Some(false),
 			minimum_confirmations_change_outputs: 1,
 			send_args: None,
+			outputs: None,
 		}
 	}
 }
@@ -345,4 +348,8 @@ pub struct SwapStartArgs {
 	pub buyer_communication_method: String,
 	/// Buyer destination address
 	pub buyer_communication_address: String,
+	/// ElectrumX URI1
+	pub electrum_node_uri1: Option<String>,
+	/// ElectrumX failover URI2
+	pub electrum_node_uri2: Option<String>,
 }

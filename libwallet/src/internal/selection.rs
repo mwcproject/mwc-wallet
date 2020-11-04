@@ -47,8 +47,8 @@ pub fn build_send_tx<'a, T: ?Sized, C, K>(
 	selection_strategy_is_use_all: bool,
 	parent_key_id: Identifier,
 	use_test_nonce: bool,
-	outputs: &Option<Vec<&str>>, // outputs to include into the transaction
-	routputs: usize,             // Number of resulting outputs. Normally it is 1
+	outputs: &Option<Vec<String>>, // outputs to include into the transaction
+	routputs: usize,               // Number of resulting outputs. Normally it is 1
 	exclude_change_outputs: bool,
 	change_output_minimum_confirmations: u64,
 ) -> Result<Context, Error>
@@ -187,10 +187,11 @@ where
 					.into());
 				}
 			};
-			let sender_a = proofaddress::payment_proof_address(
+			// MQS type because public key is requred
+			let sender_a = proofaddress::payment_proof_address_from_index(
 				&keychain,
-				&parent_key_id,
 				sender_address_path,
+				proofaddress::ProofAddressType::MQS,
 			)?;
 			t.payment_proof = Some(StoredProofInfo {
 				receiver_address: p.receiver_address.clone(),
@@ -398,8 +399,8 @@ pub fn select_send_tx<'a, T: ?Sized, C, K, B>(
 	change_outputs: usize,
 	selection_strategy_is_use_all: bool,
 	parent_key_id: &Identifier,
-	outputs: &Option<Vec<&str>>, // outputs to include into the transaction
-	routputs: usize,             // Number of resulting outputs. Normally it is 1
+	outputs: &Option<Vec<String>>, // outputs to include into the transaction
+	routputs: usize,               // Number of resulting outputs. Normally it is 1
 	exclude_change_outputs: bool,
 	change_output_minimum_confirmations: u64,
 ) -> Result<
@@ -449,8 +450,8 @@ pub fn select_coins_and_fee<'a, T: ?Sized, C, K>(
 	change_outputs: usize,
 	selection_strategy_is_use_all: bool,
 	parent_key_id: &Identifier,
-	outputs: &Option<Vec<&str>>, // outputs to include into the transaction
-	routputs: usize,             // Number of resulting outputs. Normally it is 1
+	outputs: &Option<Vec<String>>, // outputs to include into the transaction
+	routputs: usize,               // Number of resulting outputs. Normally it is 1
 	exclude_change_outputs: bool,
 	change_output_minimum_confirmations: u64,
 ) -> Result<
@@ -638,7 +639,7 @@ pub fn select_coins<'a, T: ?Sized, C, K>(
 	max_outputs: usize,
 	select_all: bool,
 	parent_key_id: &Identifier,
-	outputs: &Option<Vec<&str>>, // outputs to include into the transaction
+	outputs: &Option<Vec<String>>, // outputs to include into the transaction
 	exclude_change_outputs: bool,
 	change_output_minimum_confirmations: u64,
 ) -> (usize, Vec<OutputData>)
@@ -688,7 +689,7 @@ where
 				.into_iter()
 				.filter(|out| {
 					if out.commit.is_some() {
-						let commit_str = &*out.commit.clone().unwrap();
+						let commit_str = out.commit.clone().unwrap();
 						outputs.contains(&commit_str)
 					} else {
 						false

@@ -18,26 +18,11 @@
 use crate::grin_util::from_hex;
 use crate::grin_util::secp::key::SecretKey;
 use crate::{Error, ErrorKind};
-use grin_wallet_util::grin_keychain::{Identifier, Keychain};
 
 use data_encoding::BASE32;
 use ed25519_dalek::PublicKey as DalekPublicKey;
 use ed25519_dalek::SecretKey as DalekSecretKey;
 use sha3::{Digest, Sha3_256};
-
-use crate::proof::hasher;
-
-/// Derive a secret key given a derivation path and index
-pub fn address_from_derivation_path<K>(
-	keychain: &K,
-	_parent_key_id: &Identifier,
-	index: u32,
-) -> Result<SecretKey, Error>
-where
-	K: Keychain,
-{
-	hasher::derive_address_key(keychain, index).map_err(|e| e.into())
-}
 
 /// Output ed25519 keypair given an rust_secp256k1 SecretKey
 pub fn ed25519_keypair(sec_key: &SecretKey) -> Result<(DalekSecretKey, DalekPublicKey), Error> {

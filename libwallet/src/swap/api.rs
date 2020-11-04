@@ -67,6 +67,8 @@ pub trait SwapApi<K: Keychain>: Sync + Send {
 		redeem_time_sec: u64,
 		communication_method: String,
 		buyer_destination_address: String,
+		electrum_node_uri1: Option<String>,
+		electrum_node_uri2: Option<String>,
 	) -> Result<Swap, ErrorKind>;
 
 	/// get state machine fro this trade.
@@ -134,54 +136,24 @@ pub trait SwapApi<K: Keychain>: Sync + Send {
 pub fn create_instance<'a, C, K>(
 	currency: &Currency,
 	node_client: C,
+	electrum_node_uri1: String,
+	electrum_node_uri2: String,
 ) -> Result<Box<dyn SwapApi<K> + 'a>, ErrorKind>
 where
 	C: NodeClient + 'a,
 	K: Keychain + 'a,
 {
-	let mut electrum_node_uri = "".to_string();
-	let electrumx_uri_hashmap = crate::swap::trades::get_electrumx_uri();
-	if electrumx_uri_hashmap.is_none() {
-		return Err(ErrorKind::UndefinedElectrumXURI);
-	}
-
-	match currency {
-		Currency::Btc => {
-			if let Some(electrum_node_addrs) = electrumx_uri_hashmap {
-				if global::is_mainnet() {
-					electrum_node_uri = electrum_node_addrs
-						.get("electrumx_mainnet_btc_node_addr")
-						.expect("BCH Electrumx mainnet node uri is missing")
-						.clone()
-				} else {
-					electrum_node_uri = electrum_node_addrs
-						.get("electrumx_testnet_btc_node_addr")
-						.expect("BCH Electrumx testnet node uri is missing")
-						.clone()
-				}
-			}
-		}
-		Currency::Bch => {
-			if let Some(electrum_node_addrs) = electrumx_uri_hashmap {
-				if global::is_mainnet() {
-					electrum_node_uri = electrum_node_addrs
-						.get("electrumx_mainnet_bch_node_addr")
-						.expect("BCH Electrumx mainnet node uri is missing")
-						.clone()
-				} else {
-					electrum_node_uri = electrum_node_addrs
-						.get("electrumx_testnet_bch_node_addr")
-						.expect("BCH Electrumx testnet node uri is missing")
-						.clone()
-				}
-			}
-		}
-	}
-
-	let secondary_currency_node_client =
-		ElectrumNodeClient::new(electrum_node_uri, !global::is_mainnet());
+	let secondary_currency_node_client1 = ElectrumNodeClient::new(
+		electrum_node_uri1,
+		currency.get_block1_tx_hash(!global::is_mainnet()),
+	);
+	let secondary_currency_node_client2 = ElectrumNodeClient::new(
+		electrum_node_uri2,
+		currency.get_block1_tx_hash(!global::is_mainnet()),
+	);
 	Ok(Box::new(BtcSwapApi::new(
 		Arc::new(node_client),
-		Arc::new(Mutex::new(secondary_currency_node_client)),
+		Arc::new(Mutex::new(secondary_currency_node_client1)),
+		Arc::new(Mutex::new(secondary_currency_node_client2)),
 	)))
 }

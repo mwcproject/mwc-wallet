@@ -136,7 +136,7 @@ impl fmt::Display for StateId {
 			StateId::SellerWaitingForRefundConfirmations => {
 				"Waiting for Refund transaction confirmations"
 			}
-			StateId::SellerCancelledRefunded => "Seller swap cancelled, refund was processed",
+			StateId::SellerCancelledRefunded => "Seller swap was cancelled, refund was processed",
 			StateId::SellerCancelled => {
 				"Seller swap was cancelled, nothing was locked, no need to refund"
 			}

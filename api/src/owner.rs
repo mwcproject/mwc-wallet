@@ -668,7 +668,6 @@ where
 	/// let result = api_owner.init_send_tx(
 	/// 	None,
 	/// 	args,
-	/// 	None,
 	/// 	1,
 	/// );
 	///
@@ -684,8 +683,7 @@ where
 		&self,
 		keychain_mask: Option<&SecretKey>,
 		args: InitTxArgs,
-		outputs: Option<Vec<&str>>, // outputs to include into the transaction
-		routputs: usize,            // Number of resulting outputs. Normally it is 1
+		routputs: usize, // Number of resulting outputs. Normally it is 1
 	) -> Result<Slate, Error> {
 		let address = args.address.clone();
 
@@ -715,14 +713,7 @@ where
 		let mut slate = {
 			let mut w_lock = self.wallet_inst.lock();
 			let w = w_lock.lc_provider()?.wallet_inst()?;
-			owner::init_send_tx(
-				&mut **w,
-				keychain_mask,
-				args,
-				self.doctest_mode,
-				outputs,
-				routputs,
-			)?
+			owner::init_send_tx(&mut **w, keychain_mask, args, self.doctest_mode, routputs)?
 		};
 
 		match send_args {
@@ -730,7 +721,7 @@ where
 				let original_slate = slate.clone();
 
 				match sa.method.as_ref() {
-					"http" | "keybase" | "mwcmqs" => {
+					"http" | "mwcmqs" => {
 						let tor_config_lock = self.tor_config.lock();
 						let comm_adapter = create_sender(
 							&sa.method,
@@ -968,7 +959,6 @@ where
 	/// let result = api_owner.init_send_tx(
 	/// 	None,
 	/// 	args,
-	/// 	None,
 	/// 	1,
 	/// );
 	///
@@ -1037,7 +1027,6 @@ where
 	/// let result = api_owner.init_send_tx(
 	/// 	None,
 	/// 	args,
-	/// 	None,
 	/// 	1,
 	/// );
 	///
@@ -1101,7 +1090,6 @@ where
 	/// let result = api_owner.init_send_tx(
 	/// 	None,
 	/// 	args,
-	/// 	None,
 	/// 	1,
 	/// );
 	///
@@ -1175,7 +1163,6 @@ where
 	/// let result = api_owner.init_send_tx(
 	/// 	None,
 	/// 	args,
-	/// 	None,
 	/// 	1,
 	/// );
 	///
@@ -1300,7 +1287,6 @@ where
 	/// let result = api_owner.init_send_tx(
 	/// 	None,
 	/// 	args,
-	/// 	None,
 	/// 	1,
 	/// );
 	///
@@ -2135,7 +2121,7 @@ where
 	/// // Set up as above
 	/// # let api_owner = Owner::new(wallet.clone(), None, None);
 	///
-	/// let res = api_owner.get_public_proof_address(None, 0);
+	/// let res = api_owner.get_public_proof_address(None);
 	///
 	/// if let Ok(_) = res {
 	///   // ...
@@ -2146,9 +2132,8 @@ where
 	pub fn get_public_proof_address(
 		&self,
 		keychain_mask: Option<&SecretKey>,
-		derivation_index: u32,
 	) -> Result<PublicKey, Error> {
-		owner::get_public_proof_address(self.wallet_inst.clone(), keychain_mask, derivation_index)
+		owner::get_public_proof_address(self.wallet_inst.clone(), keychain_mask)
 	}
 
 	/// Helper function to convert an Onion v3 address to a payment proof address (essentially
@@ -2353,7 +2338,7 @@ where
 		&self,
 		keychain_mask: Option<&SecretKey>,
 		do_check: bool,
-	) -> Result<Vec<(String, String, StateId, Option<Action>, Option<i64>, i64)>, Error> {
+	) -> Result<Vec<owner_swap::SwapListInfo>, Error> {
 		owner_swap::swap_list(self.wallet_inst.clone(), keychain_mask, do_check)
 	}
 
@@ -2385,6 +2370,8 @@ where
 		destination: Option<String>,
 		secondary_address: Option<String>, // secondary address to adjust
 		secondary_fee: Option<f32>,
+		electrum_node_uri1: Option<String>,
+		electrum_node_uri2: Option<String>,
 	) -> Result<(StateId, Action), Error> {
 		owner_swap::swap_adjust(
 			self.wallet_inst.clone(),
@@ -2395,6 +2382,8 @@ where
 			destination,
 			secondary_address,
 			secondary_fee,
+			electrum_node_uri1,
+			electrum_node_uri2,
 		)
 	}
 
@@ -2414,6 +2403,8 @@ where
 		&self,
 		keychain_mask: Option<&SecretKey>,
 		swap_id: String,
+		electrum_node_uri1: Option<String>,
+		electrum_node_uri2: Option<String>,
 	) -> Result<
 		(
 			StateId,
@@ -2424,7 +2415,13 @@ where
 		),
 		Error,
 	> {
-		owner_swap::update_swap_status_action(self.wallet_inst.clone(), keychain_mask, &swap_id)
+		owner_swap::update_swap_status_action(
+			self.wallet_inst.clone(),
+			keychain_mask,
+			&swap_id,
+			electrum_node_uri1,
+			electrum_node_uri2,
+		)
 	}
 
 	/// Get a status of the transactions that involved into the swap.
@@ -2432,8 +2429,16 @@ where
 		&self,
 		keychain_mask: Option<&SecretKey>,
 		swap_id: String,
+		electrum_node_uri1: Option<String>,
+		electrum_node_uri2: Option<String>,
 	) -> Result<SwapTransactionsConfirmations, Error> {
-		owner_swap::get_swap_tx_tstatus(self.wallet_inst.clone(), keychain_mask, &swap_id)
+		owner_swap::get_swap_tx_tstatus(
+			self.wallet_inst.clone(),
+			keychain_mask,
+			&swap_id,
+			electrum_node_uri1,
+			electrum_node_uri2,
+		)
 	}
 
 	pub fn swap_process<F>(
@@ -2445,6 +2450,8 @@ where
 		buyer_refund_address: Option<String>,
 		secondary_fee: Option<f32>,
 		secondary_address: Option<String>,
+		electrum_node_uri1: Option<String>,
+		electrum_node_uri2: Option<String>,
 	) -> Result<StateProcessRespond, Error>
 	where
 		F: FnOnce(Message, String, String) -> Result<(bool, String), crate::libwallet::Error>
@@ -2459,6 +2466,8 @@ where
 			buyer_refund_address,
 			secondary_fee,
 			secondary_address,
+			electrum_node_uri1,
+			electrum_node_uri2,
 		)
 	}
 

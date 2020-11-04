@@ -263,6 +263,7 @@ where
 	K: Keychain + 'a,
 {
 	let current_height = wallet.last_confirmed_height()?;
+	println!("updater: the current_height is {}", current_height);
 	let outputs = wallet
 		.iter()
 		.filter(|out| out.root_key_id == *parent_key_id);

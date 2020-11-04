@@ -24,7 +24,7 @@ use sha2::{Digest, Sha256};
 /// Build a public key for the given private key
 pub fn public_key_from_secret_key(secret_key: &SecretKey) -> Result<PublicKey, Error> {
 	let secp = Secp256k1::new();
-	PublicKey::from_secret_key(&secp, secret_key).map_err(|e| ErrorKind::Secp(e).into())
+	PublicKey::from_secret_key(&secp, secret_key).map_err(|e| Error::from(e))
 }
 
 /// Verify signature, usual way
@@ -38,7 +38,7 @@ pub fn verify_signature(
 	let message = Message::from_slice(hasher.result().as_slice())?;
 	let secp = Secp256k1::new();
 	secp.verify(&message, signature, public_key)
-		.map_err(|e| ErrorKind::Secp(e))?;
+		.map_err(|e| Error::from(e))?;
 	Ok(())
 }
 
@@ -48,8 +48,7 @@ pub fn sign_challenge(challenge: &str, secret_key: &SecretKey) -> Result<Signatu
 	hasher.input(challenge.as_bytes());
 	let message = Message::from_slice(hasher.result().as_slice())?;
 	let secp = Secp256k1::new();
-	secp.sign(&message, secret_key)
-		.map_err(|e| ErrorKind::Secp(e).into())
+	secp.sign(&message, secret_key).map_err(|e| Error::from(e))
 }
 
 /// convert to a signature from string

@@ -91,7 +91,7 @@ fn self_send_test_impl(test_dir: &'static str) -> Result<(), wallet::Error> {
 			selection_strategy_is_use_all: true,
 			..Default::default()
 		};
-		let mut slate = api.init_send_tx(m, args, None, 1)?;
+		let mut slate = api.init_send_tx(m, args, 1)?;
 		api.tx_lock_outputs(m, &slate, None, 0)?;
 		// Send directly to self
 		wallet::controller::foreign_single_use(wallet1.clone(), mask1_i.clone(), |api| {

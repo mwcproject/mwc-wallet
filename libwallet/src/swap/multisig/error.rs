@@ -14,6 +14,7 @@
 
 use failure::Fail;
 use grin_util::secp;
+use std::error::Error as StdError;
 
 /// Multisig error
 #[derive(Clone, Eq, PartialEq, Debug, Fail)]
@@ -50,11 +51,15 @@ pub enum ErrorKind {
 	Round2Missing,
 	/// Secp error
 	#[fail(display = "Multisig Secp: {}", _0)]
-	Secp(secp::Error),
+	Secp(String),
 }
+
+// we have to use e.description  because of the bug at rust-secp256k1-zkp
+#[allow(deprecated)]
 
 impl From<secp::Error> for ErrorKind {
 	fn from(error: secp::Error) -> ErrorKind {
-		ErrorKind::Secp(error)
+		// secp::Error to_string is broken, in past biilds.
+		ErrorKind::Secp(format!("{}", error.description()))
 	}
 }

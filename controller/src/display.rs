@@ -804,7 +804,7 @@ pub fn swap_trade(
 	println!("");
 	println!("-------- Trade Journal --------");
 	for j in journal_records {
-		println!("    {:20}{}", timestamp_to_local_time(j.time), j.message);
+		println!("    {:20} {}", timestamp_to_local_time(j.time), j.message);
 	}
 
 	if show_requied_action {

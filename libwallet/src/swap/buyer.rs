@@ -257,6 +257,8 @@ impl BuyApi {
 			posted_refund: None,
 			journal: Vec::new(),
 			secondary_fee,
+			electrum_node_uri1: None, // User need to review the offer first. Then to electrumX uri can be updated
+			electrum_node_uri2: None,
 		};
 		swap.add_journal_message("Get a Swap offer".to_string());
 

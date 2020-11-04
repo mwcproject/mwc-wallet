@@ -256,7 +256,7 @@ fn get_block_by_height(
 	height: u64,
 ) -> Result<api::BlockPrintable, Error> {
 	let url = format!(
-		"http://{}:{}/v1/blocks/{}",
+		"http://{}:{}/v1/blocks/{}?no_merkle_proof",
 		base_addr, api_server_port, height
 	);
 	api::client::get::<api::BlockPrintable>(url.as_str(), None).map_err(|e| Error::API(url, e))
@@ -268,7 +268,7 @@ fn get_block_by_height_compact(
 	height: u64,
 ) -> Result<api::CompactBlockPrintable, Error> {
 	let url = format!(
-		"http://{}:{}/v1/blocks/{}?compact",
+		"http://{}:{}/v1/blocks/{}?no_merkle_proof&compact",
 		base_addr, api_server_port, height
 	);
 	api::client::get::<api::CompactBlockPrintable>(url.as_str(), None).map_err(|e| Error::API(url, e))
@@ -280,7 +280,7 @@ fn get_block_by_hash(
 	block_hash: &String,
 ) -> Result<api::BlockPrintable, Error> {
 	let url = format!(
-		"http://{}:{}/v1/blocks/{}",
+		"http://{}:{}/v1/blocks/{}?no_merkle_proof",
 		base_addr, api_server_port, block_hash
 	);
 	api::client::get::<api::BlockPrintable>(url.as_str(), None).map_err(|e| Error::API(url, e))
@@ -292,7 +292,7 @@ fn get_block_by_hash_compact(
 	block_hash: &String,
 ) -> Result<api::CompactBlockPrintable, Error> {
 	let url = format!(
-		"http://{}:{}/v1/blocks/{}?compact",
+		"http://{}:{}/v1/blocks/{}?no_merkle_proof&compact",
 		base_addr, api_server_port, block_hash
 	);
 	api::client::get::<api::CompactBlockPrintable>(url.as_str(), None).map_err(|e| Error::API(url, e))

@@ -67,6 +67,36 @@ pub trait ForeignRpc {
 	fn check_version(&self) -> Result<VersionInfo, ErrorKind>;
 
 	/**
+	Networked version of [Foreign::check_version](struct.Foreign.html#method.check_version).
+
+	# Json rpc example
+
+	```
+	# grin_wallet_api::doctest_helper_json_rpc_foreign_assert_response!(
+	# r#"
+	{
+		"jsonrpc": "2.0",
+		"method": "get_proof_address",
+		"id": 1,
+		"params": []
+	}
+	# "#
+	# ,
+	# r#"
+	{
+		"id": 1,
+		"jsonrpc": "2.0",
+		"result": {
+			"Ok": "fffqrotuelaodwjblwmifg36xjedjw4azbwvfexmxmmzsb6xvzbkhuqd"
+		}
+	}
+	# "#
+	# ,false, 0, false, false);
+	```
+	*/
+	fn get_proof_address(&self) -> Result<String, ErrorKind>;
+
+	/**
 	Networked Legacy (non-secure token) version of [Foreign::build_coinbase](struct.Foreign.html#method.build_coinbase).
 
 	# Json rpc example
@@ -538,6 +568,10 @@ where
 		Foreign::check_version(self).map_err(|e| e.kind())
 	}
 
+	fn get_proof_address(&self) -> Result<String, ErrorKind> {
+		Foreign::get_proof_address(self).map_err(|e| e.kind())
+	}
+
 	fn build_coinbase(&self, block_fees: &BlockFees) -> Result<VersionedCoinbase, ErrorKind> {
 		let cb: CbData = Foreign::build_coinbase(self, block_fees).map_err(|e| e.kind())?;
 		Ok(VersionedCoinbase::into_version(cb, SlateVersion::V2))
@@ -789,8 +823,8 @@ pub fn run_doctest_foreign(
 			selection_strategy_is_use_all: true,
 			..Default::default()
 		};
-		let slate = api_impl::owner::init_send_tx(&mut **w, (&mask1).as_ref(), args, true, None, 1)
-			.unwrap();
+		let slate =
+			api_impl::owner::init_send_tx(&mut **w, (&mask1).as_ref(), args, true, 1).unwrap();
 		println!("INIT SLATE");
 		// Spit out slate for input to finalize_tx
 		println!("{}", serde_json::to_string_pretty(&slate).unwrap());

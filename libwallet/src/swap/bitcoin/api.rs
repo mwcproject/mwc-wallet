@@ -45,8 +45,10 @@ where
 {
 	/// Client for MWC node
 	pub node_client: Arc<C>,
-	/// Client for BTC electrumx node
-	pub btc_node_client: Arc<Mutex<B>>,
+	/// Primary Client for BTC electrumx node
+	pub btc_node_client1: Arc<Mutex<B>>,
+	/// Secondary Client for BTC electrumx node
+	pub btc_node_client2: Arc<Mutex<B>>,
 
 	phantom: PhantomData<&'a C>,
 }
@@ -57,10 +59,25 @@ where
 	B: BtcNodeClient + 'a,
 {
 	/// Create BTC Swap API instance
-	pub fn new(node_client: Arc<C>, btc_node_client: Arc<Mutex<B>>) -> Self {
+	pub fn new(
+		node_client: Arc<C>,
+		btc_node_client1: Arc<Mutex<B>>,
+		btc_node_client2: Arc<Mutex<B>>,
+	) -> Self {
 		Self {
 			node_client,
-			btc_node_client,
+			btc_node_client1,
+			btc_node_client2,
+			phantom: PhantomData,
+		}
+	}
+
+	/// For tests doesn't make sense to use any failover
+	pub fn new_test(node_client: Arc<C>, btc_node_client: Arc<Mutex<B>>) -> Self {
+		Self {
+			node_client,
+			btc_node_client1: btc_node_client.clone(),
+			btc_node_client2: btc_node_client,
 			phantom: PhantomData,
 		}
 	}
@@ -69,7 +86,8 @@ where
 	pub fn clone(&self) -> Self {
 		Self {
 			node_client: self.node_client.clone(),
-			btc_node_client: self.btc_node_client.clone(),
+			btc_node_client1: self.btc_node_client1.clone(),
+			btc_node_client2: self.btc_node_client2.clone(),
 			phantom: PhantomData,
 		}
 	}
@@ -100,8 +118,14 @@ where
 	) -> Result<(u64, u64, u64, Vec<Output>), ErrorKind> {
 		let btc_data = swap.secondary_data.unwrap_btc()?;
 		let address = btc_data.address(input_script, swap.network)?;
-		let outputs = self.btc_node_client.lock().unspent(&address)?;
-		let height = self.btc_node_client.lock().height()?;
+		let outputs = match self.btc_node_client1.lock().unspent(&address) {
+			Ok(r) => r,
+			Err(_) => self.btc_node_client2.lock().unspent(&address)?,
+		};
+		let height = match self.btc_node_client1.lock().height() {
+			Ok(r) => r,
+			Err(_) => self.btc_node_client2.lock().height()?,
+		};
 		let mut pending_amount = 0;
 		let mut confirmed_amount = 0;
 		let mut least_confirmations = None;
@@ -225,7 +249,9 @@ where
 		)?;
 
 		let tx = refund_tx.tx.clone();
-		self.btc_node_client.lock().post_tx(tx)?;
+		if let Err(_) = self.btc_node_client1.lock().post_tx(tx.clone()) {
+			self.btc_node_client2.lock().post_tx(tx)?;
+		}
 		btc_data.refund_tx = Some(refund_tx.txid);
 		btc_data.tx_fee = Some(swap.secondary_fee);
 		Ok(())
@@ -285,13 +311,19 @@ where
 	) -> Result<Option<u64>, ErrorKind> {
 		let result: Option<u64> = match tx_hash {
 			None => None,
-			Some(tx_hash) => match self.btc_node_client.lock().transaction(&tx_hash)? {
-				None => None,
-				Some((height, _tx)) => match height {
-					None => Some(0),
-					Some(h) => Some(btc_tip.saturating_sub(h) + 1),
-				},
-			},
+			Some(tx_hash) => {
+				let tx_resp = match self.btc_node_client1.lock().transaction(&tx_hash) {
+					Ok(r) => r,
+					Err(_) => self.btc_node_client2.lock().transaction(&tx_hash)?,
+				};
+				match tx_resp {
+					None => None,
+					Some((height, _tx)) => match height {
+						None => Some(0),
+						Some(h) => Some(btc_tip.saturating_sub(h) + 1),
+					},
+				}
+			}
 		};
 		Ok(result)
 	}
@@ -380,6 +412,8 @@ where
 		redeem_time_sec: u64,
 		communication_method: String,
 		buyer_destination_address: String,
+		electrum_node_uri1: Option<String>,
+		electrum_node_uri2: Option<String>,
 	) -> Result<Swap, ErrorKind> {
 		// Checking if address is valid
 		let _redeem_address = Address::from_str(&secondary_redeem_address).map_err(|e| {
@@ -409,6 +443,8 @@ where
 			redeem_time_sec,
 			communication_method,
 			buyer_destination_address,
+			electrum_node_uri1,
+			electrum_node_uri2,
 		)?;
 
 		let btc_data = BtcData::new(keychain, context.unwrap_seller()?.unwrap_btc()?)?;
@@ -455,7 +491,9 @@ where
 
 		let btc_tx = self.seller_build_redeem_tx(keychain, swap, context, &input_script)?;
 
-		self.btc_node_client.lock().post_tx(btc_tx.tx)?;
+		if let Err(_) = self.btc_node_client1.lock().post_tx(btc_tx.tx.clone()) {
+			self.btc_node_client2.lock().post_tx(btc_tx.tx)?;
+		}
 
 		let btc_data = swap.secondary_data.unwrap_btc_mut()?;
 		btc_data.redeem_tx = Some(btc_tx.txid);
@@ -480,7 +518,10 @@ where
 		let mwc_refund_conf =
 			self.get_slate_confirmation_number(&mwc_tip, &swap.refund_slate, !is_seller)?;
 
-		let btc_tip = self.btc_node_client.lock().height()?;
+		let btc_tip = match self.btc_node_client1.lock().height() {
+			Ok(r) => r,
+			Err(_) => self.btc_node_client2.lock().height()?,
+		};
 		let btc_data = swap.secondary_data.unwrap_btc()?;
 		let secondary_redeem_conf =
 			self.get_btc_confirmation_number(&btc_tip, btc_data.redeem_tx.clone())?;
@@ -494,7 +535,10 @@ where
 
 		if let Ok(input_script) = self.script(swap) {
 			if let Ok(address) = btc_data.address(&input_script, swap.network) {
-				let outputs = self.btc_node_client.lock().unspent(&address)?;
+				let outputs = match self.btc_node_client1.lock().unspent(&address) {
+					Ok(r) => r,
+					Err(_) => self.btc_node_client2.lock().unspent(&address)?,
+				};
 				for output in outputs {
 					secondary_lock_amount += output.value;
 					if output.height == 0 {

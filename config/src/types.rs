@@ -21,6 +21,7 @@ use std::path::PathBuf;
 use crate::config::GRIN_WALLET_DIR;
 use crate::core::global::ChainTypes;
 use crate::util::logger::LoggingConfig;
+use std::collections::BTreeMap;
 
 /// Command-line wallet configuration
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -45,8 +46,6 @@ pub struct WalletConfig {
 	pub owner_api_include_foreign: Option<bool>,
 	/// Whether to include the mwcmqs listener
 	pub owner_api_include_mqs_listener: Option<bool>,
-	/// Whether to include the keybase listener
-	pub owner_api_include_keybase_listener: Option<bool>,
 	///Index used to derive address
 	pub grinbox_address_index: Option<u32>,
 	/// The directory in which wallet files are stored
@@ -61,18 +60,12 @@ pub struct WalletConfig {
 	/// Whether to use the black background color scheme for command line
 	/// if enabled, wallet command output color will be suitable for black background terminal
 	pub dark_background_color_scheme: Option<bool>,
-	/// The exploding lifetime (minutes) for keybase notification on coins received
-	pub keybase_notify_ttl: Option<u16>,
 	/// Wallet data directory. Default none is 'wallet_data'
 	pub wallet_data_dir: Option<String>,
-	/// Electrum node for BCH mainnet address
-	pub electrumx_mainnet_bch_node_addr: Option<String>,
-	/// Electrum node for BCH testnet address
-	pub electrumx_testnet_bch_node_addr: Option<String>,
-	/// Electrum node for BTC mainnet address
-	pub electrumx_mainnet_btc_node_addr: Option<String>,
-	/// Electrum node for BTC testnet address
-	pub electrumx_testnet_btc_node_addr: Option<String>,
+	/// Electrum nodes for secondary coins
+	/// Key: <coin>_[main|test]_[1|2]
+	/// Value: url
+	pub swap_electrumx_addr: Option<BTreeMap<String, String>>,
 }
 
 impl Default for WalletConfig {
@@ -87,19 +80,29 @@ impl Default for WalletConfig {
 			check_node_api_http_addr: "http://127.0.0.1:3413".to_string(),
 			owner_api_include_foreign: Some(false),
 			owner_api_include_mqs_listener: Some(false),
-			owner_api_include_keybase_listener: Some(false),
 			data_file_dir: ".".to_string(),
 			grinbox_address_index: None,
 			no_commit_cache: Some(false),
 			tls_certificate_file: None,
 			tls_certificate_key: None,
 			dark_background_color_scheme: Some(true),
-			keybase_notify_ttl: Some(1440),
 			wallet_data_dir: None,
-			electrumx_mainnet_bch_node_addr: None, // Some("52.23.248.83:8000".to_string()),   make them none because it is not Default Value. They will be overwritten by config. So this code add confusion and doesn't solve default values problem
-			electrumx_testnet_bch_node_addr: None, // Some("52.23.248.83:8000".to_string()),
-			electrumx_mainnet_btc_node_addr: None, // Some("52.23.248.83:8000".to_string()),
-			electrumx_testnet_btc_node_addr: None, // Some("52.23.248.83:8000".to_string()),
+			swap_electrumx_addr: Some(
+				[
+					("btc_main_1", "btc.main1.swap.mwc.mw:8000"),
+					("btc_main_2", "btc.main2.swap.mwc.mw:8000"),
+					("btc_test_1", "btc.test1.swap.mwc.mw:8000"),
+					("btc_test_2", "btc.test2.swap.mwc.mw:8000"),
+					("bch_main_1", "bch.main1.swap.mwc.mw:8000"),
+					("bch_main_2", "bch.main2.swap.mwc.mw:8000"),
+					("bch_test_1", "bch.test1.swap.mwc.mw:8000"),
+					("bch_test_2", "bch.test1.swap.mwc.mw:8000"),
+				]
+				.iter()
+				.cloned()
+				.map(|i| (i.0.to_string(), i.1.to_string()))
+				.collect::<BTreeMap<String, String>>(),
+			),
 		}
 	}
 }
@@ -131,10 +134,6 @@ impl WalletConfig {
 		self.wallet_data_dir
 			.clone()
 			.unwrap_or(GRIN_WALLET_DIR.to_string())
-	}
-
-	pub fn grinbox_address_index(&self) -> u32 {
-		self.grinbox_address_index.unwrap_or(0)
 	}
 }
 

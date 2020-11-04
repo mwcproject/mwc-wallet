@@ -68,7 +68,6 @@ subcommands:
             long: method
             possible_values:
               - http
-              - keybase
               - mwcmqs
             default_value: http
             takes_value: true
@@ -139,7 +138,6 @@ subcommands:
               - http
               - file
               - self
-              - keybase
               - mwcmqs
             default_value: http
             takes_value: true
@@ -159,7 +157,6 @@ subcommands:
             long: request_payment_proof
         - proof:
             help: Request a payment proof from the recipient. If sending to a Tor address, the address will be filled automatically.
-            short: pf
             long: proof
         - proof_address:
             help: Recipient proof address. If not using Tor, must be provided seprarately by the recipient
@@ -184,6 +181,11 @@ subcommands:
             help: If present, the number of blocks from the current after which wallets should refuse to process transactions further
             short: b
             long: ttl_blocks
+            takes_value: true
+        - outputs:
+            help: a comma separated list of custom outputs to include in transaction
+            short: p
+            long: outputs
             takes_value: true
   - receive:
       about: Processes a transaction file to accept a transfer from a sender
@@ -544,6 +546,14 @@ subcommands:
             short: d
             long: dest
             takes_value: true
+        - electrum_uri1:
+            help: primary private ElectrumX node URI. If not defined, community node will be used
+            long: electrum_uri1
+            takes_value: true
+        - electrum_uri2:
+            help: secondary private ElectrumX node URI. If not defined, community node will be used
+            long: electrum_uri2
+            takes_value: true
   - swap:
       about: Trade MWC with another currency via atomic swap
       args:
@@ -577,6 +587,14 @@ subcommands:
             short: u
             long: dump
             takes_value: false
+        - trade_export:
+            help: Export the trade data into the file for the backup
+            long: trade_export
+            takes_value: true
+        - trade_import:
+            help: Import (restore) the trade data from the backup file
+            long: trade_import
+            takes_value: true
         - adjust:
             help: Modify the swap trade workflow. You can use this to cancel a swap. For all other values, please only proceed if you know what you are doing!
             short: j
@@ -587,6 +605,7 @@ subcommands:
               - destination
               - secondary_address
               - secondary_fee
+              - electrumx_uri
               - SellerOfferCreated
               - SellerSendingOffer
               - SellerWaitingForAcceptanceMessage
@@ -668,5 +687,13 @@ subcommands:
             help: Only needed if in CLI mode doing auto swap and the method is Tor or mwcmqs. Please specify false if listener was started in previous auto swap in the same CLI session.
             long: start_listener
             takes_value: false
+        - electrum_uri1:
+            help: primary private ElectrumX node URI. If never setup, community node will be used
+            long: electrum_uri1
+            takes_value: true
+        - electrum_uri2:
+            help: secondary private ElectrumX node URI. If never setup, community node will be used
+            long: electrum_uri2
+            takes_value: true
 
 

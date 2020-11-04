@@ -48,9 +48,8 @@ pub mod tor;
 pub use crate::adapters::{
 	create_sender,
 	get_mwcmqs_brocker, init_mwcmqs_access_data,
-	get_keybase_brocker, init_keybase_access_data, TOPIC_SLATE_NEW,
 	Address, AddressType, CloseReason,
-	HttpDataSender, HttpsAddress, KeybaseAddress, KeybasePublisher, KeybaseSubscriber,
+	HttpDataSender, HttpsAddress,
 	MWCMQPublisher, MWCMQSAddress, MWCMQSubscriber, MwcMqsChannel, PathToSlate, Publisher,
 	SlateGetter, SlatePutter, SlateReceiver, SlateSender, Subscriber, SubscriptionHandler,
 	SwapMessageSender,

@@ -146,7 +146,8 @@ impl HTTPNodeClient {
 						return self.send_json_request(method, params, counter-1);
 					}
 					error!("{:?}", inner);
-					let report = format!("Unable to parse response for {}: {}", method, e);
+					// error message is likely what user want to see...
+					let report = format!("{}", e);
 					error!("{}", report);
 					Err(libwallet::ErrorKind::ClientCallback(report).into())
 				}
@@ -411,6 +412,7 @@ impl NodeClient for HTTPNodeClient {
 		Some(retval)
 	}
 
+
 	/// Posts a transaction to a grin node
 	fn post_tx(&self, tx: &Transaction, fluff: bool) -> Result<(), libwallet::Error> {
 		let params = json!([tx, fluff]);
@@ -447,6 +449,7 @@ impl NodeClient for HTTPNodeClient {
 		let hdr = HeaderInfo {
 			height: r.height,
 			hash: r.hash,
+			confirmed_time: r.timestamp,
 			version: r.version as i32,
 			nonce: r.nonce,
 			total_difficulty: r.total_difficulty,

@@ -79,13 +79,10 @@ where
 	w.set_parent_key_id_by_name(label)
 }
 
-/// Retrieve the payment proof address for the current parent key at
-/// the given index
-/// set active account
+/// Retrieve the payment proof address for the wallet
 pub fn get_public_proof_address<'a, L, C, K>(
 	wallet_inst: Arc<Mutex<Box<dyn WalletInst<'a, L, C, K>>>>,
 	keychain_mask: Option<&SecretKey>,
-	index: u32,
 ) -> Result<PublicKey, Error>
 where
 	L: WalletLCProvider<'a, C, K>,
@@ -93,9 +90,8 @@ where
 	K: Keychain + 'a,
 {
 	wallet_lock!(wallet_inst, w);
-	let parent_key_id = w.parent_key_id();
 	let k = w.keychain(keychain_mask)?;
-	let pub_key = proofaddress::payment_proof_address_pubkey(&k, &parent_key_id, index)?;
+	let pub_key = proofaddress::payment_proof_address_pubkey(&k)?;
 	Ok(pub_key)
 }
 
@@ -372,8 +368,7 @@ pub fn init_send_tx<'a, T: ?Sized, C, K>(
 	keychain_mask: Option<&SecretKey>,
 	args: InitTxArgs,
 	use_test_rng: bool,
-	outputs: Option<Vec<&str>>, // outputs to include into the transaction
-	routputs: usize,            // Number of resulting outputs. Normally it is 1
+	routputs: usize, // Number of resulting outputs. Normally it is 1
 ) -> Result<Slate, Error>
 where
 	T: WalletBackend<'a, C, K>,
@@ -412,7 +407,7 @@ where
 			args.num_change_outputs as usize,
 			args.selection_strategy_is_use_all,
 			&parent_key_id,
-			&outputs,
+			&args.outputs,
 			routputs,
 			args.exclude_change_outputs.unwrap_or(false),
 			args.minimum_confirmations_change_outputs,
@@ -435,7 +430,7 @@ where
 		message,
 		true,
 		use_test_rng,
-		outputs,
+		&args.outputs,
 		routputs,
 		args.exclude_change_outputs.unwrap_or(false),
 		args.minimum_confirmations_change_outputs,
@@ -444,9 +439,9 @@ where
 	// Payment Proof, add addresses to slate and save address
 	// TODO: Note we only use single derivation path for now,
 	// probably want to allow sender to specify which one
-	let deriv_path = 0u32;
+	// sender_a has to in MQS format because we need Normal public key to sign, dalek will not work
 	let k = w.keychain(keychain_mask)?;
-	let sender_a = proofaddress::payment_proof_address(&k, &parent_key_id, deriv_path)?;
+	let sender_a = proofaddress::payment_proof_address(&k, proofaddress::ProofAddressType::MQS)?;
 
 	if let Some(a) = args.address {
 		if a.eq("file_proof") {
@@ -458,7 +453,7 @@ where
 				receiver_signature: None,
 			});
 
-			context.payment_proof_derivation_index = Some(deriv_path);
+			context.payment_proof_derivation_index = Some(proofaddress::get_address_index());
 		}
 	}
 
@@ -469,7 +464,7 @@ where
 			receiver_signature: None,
 		});
 
-		context.payment_proof_derivation_index = Some(deriv_path);
+		context.payment_proof_derivation_index = Some(proofaddress::get_address_index());
 	} else {
 		debug!("There is no payment proof recipient address");
 	}
@@ -635,7 +630,7 @@ where
 		message,
 		false,
 		use_test_rng,
-		None,
+		&None,
 		1,
 		args.exclude_change_outputs.unwrap_or(false),
 		args.minimum_confirmations_change_outputs,
@@ -690,9 +685,8 @@ where
 	let mut sl = slate.clone();
 	check_ttl(w, &sl, refresh_from_node)?;
 	let context = w.get_private_context(keychain_mask, sl.id.as_bytes(), 0)?;
-	let parent_key_id = w.parent_key_id();
 	tx::complete_tx(&mut *w, keychain_mask, &mut sl, 0, &context)?;
-	tx::verify_slate_payment_proof(&mut *w, keychain_mask, &parent_key_id, &context, &sl)?;
+	tx::verify_slate_payment_proof(&mut *w, keychain_mask, &context, &sl)?;
 	tx::update_stored_tx(&mut *w, keychain_mask, &context, &sl, false)?;
 	tx::update_message(&mut *w, keychain_mask, &sl)?;
 	{
@@ -1030,8 +1024,8 @@ where
 	if tip_height == 0 || tip_height < blocks.first().map(|b| b.height).unwrap_or(0) {
 		if let Some(ref s) = status_send_channel {
 			let _ = s.send(StatusMessage::Warning(
-					String::from("Wallet Update is skipped, please wait for sync on node to complete or fork to resolve.")
-				));
+				String::from("Wallet Update is skipped, please wait for sync on node to complete or fork to resolve.")
+			));
 		}
 		return Ok((0, String::new(), ScannedBlockInfo::empty(), false));
 	}
@@ -1203,13 +1197,9 @@ where
 	let sender_pubkey = proof.sender_address.clone().public_key;
 	let msg = tx::payment_proof_message(proof.amount, &proof.excess, sender_pubkey)?;
 
-	let (client, parent_key_id, keychain) = {
+	let (client, keychain) = {
 		wallet_lock!(wallet_inst, w);
-		(
-			w.w2n_client().clone(),
-			w.parent_key_id(),
-			w.keychain(keychain_mask)?,
-		)
+		(w.w2n_client().clone(), w.keychain(keychain_mask)?)
 	};
 
 	// Check kernel exists
@@ -1250,8 +1240,7 @@ where
 	)
 	.map_err(|e| ErrorKind::TxProofVerifySignature(format!("{}", e)))?;
 
-	let my_address_pubkey =
-		proofaddress::payment_proof_address_pubkey(&keychain, &parent_key_id, 0)?;
+	let my_address_pubkey = proofaddress::payment_proof_address_pubkey(&keychain)?;
 	let sender_mine = my_address_pubkey == sender_pubkey;
 	let recipient_mine = my_address_pubkey == recipient_pubkey;
 

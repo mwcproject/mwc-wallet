@@ -77,7 +77,7 @@ fn payment_proofs_test_impl(test_dir: &'static str) -> Result<(), wallet::Error>
 
 	let mut address = None;
 	wallet::controller::owner_single_use(Some(wallet2.clone()), mask2, None, |api, m| {
-		address = Some(api.get_public_proof_address(m, 0)?);
+		address = Some(api.get_public_proof_address(m)?);
 		Ok(())
 	})?;
 
@@ -97,7 +97,7 @@ fn payment_proofs_test_impl(test_dir: &'static str) -> Result<(), wallet::Error>
 			payment_proof_recipient_address: Some(address.clone()),
 			..Default::default()
 		};
-		let slate_i = sender_api.init_send_tx(m, args, None, 1)?;
+		let slate_i = sender_api.init_send_tx(m, args, 1)?;
 
 		assert_eq!(
 			slate_i

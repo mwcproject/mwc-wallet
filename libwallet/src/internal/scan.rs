@@ -238,6 +238,7 @@ where
 {
 	wallet_lock!(wallet_inst, w);
 
+	let node_client = w.w2n_client().clone();
 	let commit = w.calc_commit_for_cache(keychain_mask, output.value, &output.key_id)?;
 	let mut batch = w.batch(keychain_mask)?;
 
@@ -266,7 +267,9 @@ where
 			t.amount_credited = output.value;
 			t.num_outputs = 1;
 			t.output_commits = vec![output.commit.clone()];
-			t.update_confirmation_ts();
+			if let Ok(hdr_info) = node_client.get_header_info(t.output_height) {
+				t.update_confirmation_ts(hdr_info.confirmed_time);
+			}
 			batch.save_tx_log_entry(t, &parent_key_id)?;
 			log_id
 		}
@@ -980,11 +983,22 @@ where
 	// Processing slate based transactions. Just need to update 'confirmed flag' and height
 	// We don't want to cancel the transactions. Let's user do that.
 	// We can uncancel transactions if it is confirmed
-	validate_transactions(&mut transactions, &outputs, status_send_channel);
+	let _result = validate_transactions(
+		wallet_inst.clone(),
+		keychain_mask,
+		&mut transactions,
+		&outputs,
+		status_send_channel,
+	);
 
 	// Checking for output to transaction mapping. We don't want to see active outputs without trsansaction or with cancelled transactions
 	// we might unCancel transaction if output was found but all mapped transactions are cancelled (user just a cheater)
-	validate_outputs_ownership(&mut outputs, &mut transactions, status_send_channel);
+	validate_outputs_ownership(
+		wallet_inst.clone(),
+		&mut outputs,
+		&mut transactions,
+		status_send_channel,
+	);
 
 	// Delete any unconfirmed outputs (requested by user), unlock any locked outputs and delete (cancel) associated transactions
 	if del_unconfirmed {
@@ -1238,11 +1252,19 @@ where
 // Processing slate based transactions. Just need to update 'confirmed flag' and height
 // We don't want to cancel the transactions. Let's user do that.
 // We can uncancel transactions if it is confirmed
-fn validate_transactions(
+fn validate_transactions<'a, L, C, K>(
+	wallet_inst: Arc<Mutex<Box<dyn WalletInst<'a, L, C, K>>>>,
+	_keychain_mask: Option<&SecretKey>,
 	transactions: &mut HashMap<String, WalletTxInfo>,
 	outputs: &HashMap<String, WalletOutputInfo>,
 	status_send_channel: &Option<Sender<StatusMessage>>,
-) {
+) -> Result<(), Error>
+where
+	L: WalletLCProvider<'a, C, K>,
+	C: NodeClient + 'a,
+	K: Keychain + 'a,
+{
+	wallet_lock!(wallet_inst, w);
 	for tx_info in transactions.values_mut() {
 		// Checking the kernel - the source of truth for transactions
 		if tx_info.kernel_validation.is_some() {
@@ -1262,7 +1284,14 @@ fn validate_transactions(
 
 				if !tx_info.tx_log.confirmed {
 					tx_info.tx_log.confirmed = true;
-					tx_info.tx_log.update_confirmation_ts();
+
+					if let Ok(hdr_info) =
+						w.w2n_client().get_header_info(tx_info.tx_log.output_height)
+					{
+						tx_info
+							.tx_log
+							.update_confirmation_ts(hdr_info.confirmed_time);
+					}
 					tx_info.updated = true;
 
 					if let Some(ref s) = status_send_channel {
@@ -1288,7 +1317,7 @@ fn validate_transactions(
 			}
 		}
 
-		update_non_kernel_transaction(tx_info, outputs);
+		let _update_result = update_non_kernel_transaction(wallet_inst.clone(), tx_info, outputs);
 
 		// Update confirmation flag fr the cancelled.
 		if tx_info.tx_log.is_cancelled() {
@@ -1298,15 +1327,22 @@ fn validate_transactions(
 			}
 		}
 	}
+
+	Ok(())
 }
 
 // Checking for output to transaction mapping. We don't want to see active outputs without trsansaction or with cancelled transactions
 // we might unCancel transaction if output was found but all mapped transactions are cancelled (user just a cheater)
-fn validate_outputs_ownership(
+fn validate_outputs_ownership<'a, L, C, K>(
+	wallet_inst: Arc<Mutex<Box<dyn WalletInst<'a, L, C, K>>>>,
 	outputs: &mut HashMap<String, WalletOutputInfo>,
 	transactions: &mut HashMap<String, WalletTxInfo>,
 	status_send_channel: &Option<Sender<StatusMessage>>,
-) {
+) where
+	L: WalletLCProvider<'a, C, K>,
+	C: NodeClient + 'a,
+	K: Keychain + 'a,
+{
 	for w_out in outputs.values_mut() {
 		// For every output checking to how many transaction it belong as Input and Output
 
@@ -1396,7 +1432,8 @@ fn validate_outputs_ownership(
 					w_out.updated = true;
 				}
 				if out_active == 0 && out_cancelled_uuid.len() > 0 {
-					recover_first_cancelled(
+					let _result = recover_first_cancelled(
+						wallet_inst.clone(),
 						status_send_channel,
 						&w_out.tx_input_uuid,
 						transactions,
@@ -1406,14 +1443,16 @@ fn validate_outputs_ownership(
 			OutputStatus::Spent => {
 				// output have to have some valid transation. User cancel all of them?
 				if out_active == 0 && out_cancelled_uuid.len() > 0 {
-					recover_first_cancelled(
+					let _result = recover_first_cancelled(
+						wallet_inst.clone(),
 						status_send_channel,
 						&w_out.tx_output_uuid,
 						transactions,
 					);
 				}
 				if in_active == 0 && in_cancelled_uuid.len() > 0 {
-					recover_first_cancelled(
+					let _result = recover_first_cancelled(
+						wallet_inst.clone(),
 						status_send_channel,
 						&w_out.tx_input_uuid,
 						transactions,
@@ -1443,7 +1482,8 @@ fn validate_outputs_ownership(
 					w_out.updated = true;
 				}
 				if out_active == 0 && out_cancelled_uuid.len() > 0 {
-					recover_first_cancelled(
+					let _result = recover_first_cancelled(
+						wallet_inst.clone(),
 						status_send_channel,
 						&w_out.tx_output_uuid,
 						transactions,
@@ -1578,6 +1618,7 @@ where
 	K: Keychain + 'a,
 {
 	wallet_lock!(wallet_inst, w);
+	let node_client = w.w2n_client().clone();
 	let mut batch = w.batch(keychain_mask)?;
 
 	// Slate based Transacitons
@@ -1634,7 +1675,9 @@ where
 				log_id,
 			);
 			t.confirmed = true;
-			t.update_confirmation_ts();
+			if let Ok(hdr_info) = node_client.get_header_info(t.output_height) {
+				t.update_confirmation_ts(hdr_info.confirmed_time);
+			}
 			t.output_height = w_out.output.height;
 			t.amount_credited = w_out.output.value;
 			t.amount_debited = 0;
@@ -1666,10 +1709,16 @@ where
 	Ok(())
 }
 
-fn update_non_kernel_transaction(
+fn update_non_kernel_transaction<'a, L, C, K>(
+	wallet_inst: Arc<Mutex<Box<dyn WalletInst<'a, L, C, K>>>>,
 	tx_info: &mut WalletTxInfo,
 	outputs: &HashMap<String, WalletOutputInfo>,
-) {
+) -> Result<(), Error>
+where
+	L: WalletLCProvider<'a, C, K>,
+	C: NodeClient + 'a,
+	K: Keychain + 'a,
+{
 	// Handle legacy broken data case. Transaction might not have any kernel. Let's out outputs to upadte the state
 	if tx_info.tx_log.kernel_excess.is_none() {
 		// Rule is very simple. If outputs are exist, we will map them and update transaction status by that
@@ -1694,7 +1743,17 @@ fn update_non_kernel_transaction(
 			}
 			if !tx_info.tx_log.confirmed {
 				tx_info.tx_log.confirmed = true;
-				tx_info.tx_log.update_confirmation_ts();
+				{
+					wallet_lock!(wallet_inst, w);
+					if let Ok(hdr_info) =
+						w.w2n_client().get_header_info(tx_info.tx_log.output_height)
+					{
+						tx_info
+							.tx_log
+							.update_confirmation_ts(hdr_info.confirmed_time);
+					}
+				}
+
 				tx_info.updated = true;
 			}
 		} else if outputs_state.contains(&OutputStatus::Unconfirmed) {
@@ -1704,6 +1763,7 @@ fn update_non_kernel_transaction(
 			}
 		}
 	}
+	Ok(())
 }
 
 // restore labels, account paths and child derivation indices
@@ -1784,11 +1844,18 @@ fn report_transaction_collision(
 // By some reasons output exist but all related transactions are cancelled. Let's activate one of them
 // Note! There is no analisys what transaction to activate. As a result that can trigger the transaction collision.
 // We don't want to implement complicated algorithm to handle that. User suppose to be sane and not cancell transactions without reason.
-fn recover_first_cancelled(
+fn recover_first_cancelled<'a, L, C, K>(
+	wallet_inst: Arc<Mutex<Box<dyn WalletInst<'a, L, C, K>>>>,
 	status_send_channel: &Option<Sender<StatusMessage>>,
 	tx_uuid: &HashSet<String>,
 	transactions: &mut HashMap<String, WalletTxInfo>,
-) {
+) -> Result<(), Error>
+where
+	L: WalletLCProvider<'a, C, K>,
+	C: NodeClient + 'a,
+	K: Keychain + 'a,
+{
+	wallet_lock!(wallet_inst, w);
 	// let's revert first non cancelled
 	for uuid in tx_uuid {
 		if let Some(wtx) = transactions.get_mut(uuid) {
@@ -1802,7 +1869,9 @@ fn recover_first_cancelled(
 					),
 				};
 				wtx.tx_log.confirmed = true;
-				wtx.tx_log.update_confirmation_ts();
+				if let Ok(hdr_info) = w.w2n_client().get_header_info(wtx.tx_log.output_height) {
+					wtx.tx_log.update_confirmation_ts(hdr_info.confirmed_time);
+				}
 				wtx.updated = true;
 				if let Some(ref s) = status_send_channel {
 					let _ = s.send(StatusMessage::Warning(format!(
@@ -1817,4 +1886,5 @@ fn recover_first_cancelled(
 			}
 		}
 	}
+	Ok(())
 }

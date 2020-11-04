@@ -23,6 +23,7 @@ use crate::swap::error::ErrorKind as SwapErrorKind;
 use crate::util;
 use failure::{Backtrace, Context, Fail};
 use std::env;
+use std::error::Error as StdError;
 use std::fmt::{self, Display};
 use std::io;
 
@@ -80,7 +81,7 @@ pub enum ErrorKind {
 
 	/// Secp Error
 	#[fail(display = "Secp error, {}", _0)]
-	Secp(secp::Error),
+	Secp(String),
 
 	/// Onion V3 Address Error
 	#[fail(display = "Onion V3 Address Error")]
@@ -309,6 +310,13 @@ pub enum ErrorKind {
 	)]
 	TxProofVerifyDestination(String, String),
 
+	/// Expected sender address doesn't match expected value
+	#[fail(
+		display = "Tx Proof unable to verify sender address. Expected {}, found {}",
+		_0, _1
+	)]
+	TxProofVerifySender(String, String),
+
 	/// Not found Tx Proof file
 	#[fail(display = "transaction doesn't have a proof, file {} not found", _0)]
 	TransactionHasNoProof(String),
@@ -419,13 +427,19 @@ impl From<crate::grin_core::ser::Error> for Error {
 	}
 }
 
+// we have to use e.description  because of the bug at rust-secp256k1-zkp
+#[allow(deprecated)]
+
 impl From<secp::Error> for Error {
 	fn from(error: secp::Error) -> Error {
 		Error {
-			inner: Context::new(ErrorKind::Secp(error)),
+			// secp::Error to_string is broken, in past biilds.
+			inner: Context::new(ErrorKind::Secp(format!("{}", error.description()))),
 		}
 	}
 }
+
+#[warn(deprecated)]
 
 impl From<committed::Error> for Error {
 	fn from(error: committed::Error) -> Error {

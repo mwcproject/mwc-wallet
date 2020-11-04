@@ -12,8 +12,7 @@ use std::fmt::{self, Debug, Display};
 const DEFAULT_MWCMQS_DOMAIN: &str = "mqs.mwc.mw";
 pub const DEFAULT_MWCMQS_PORT: u16 = 443;
 
-const ADDRESS_REGEX: &str = r"^((?P<address_type>keybase|mwcmq|mwcmqs|https|http)://).+$";
-const KEYBASE_ADDRESS_REGEX: &str = r"^(keybase://)?(?P<username>[0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz_]{1,16})(:(?P<topic>[a-zA-Z0-9_-]+))?$";
+const ADDRESS_REGEX: &str = r"^((?P<address_type>mwcmq|mwcmqs|https|http)://).+$";
 
 pub enum CloseReason {
 	Normal,
@@ -71,51 +70,7 @@ pub trait Address: Debug + Display {
 #[derive(Debug, PartialEq)]
 pub enum AddressType {
 	MWCMQS,
-	Keybase,
 	Https,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct KeybaseAddress {
-	pub username: String,
-	pub topic: Option<String>,
-}
-
-impl Address for KeybaseAddress {
-	fn from_str(s: &str) -> Result<Self, Error> {
-		let re = Regex::new(KEYBASE_ADDRESS_REGEX).unwrap();
-		let captures = re.captures(s);
-		if captures.is_none() {
-			Err(ErrorKind::KeybaseAddressParsingError(s.to_string()))?;
-		}
-
-		let captures = captures.unwrap();
-		let username = captures.name("username").unwrap().as_str().to_string();
-		let topic = captures.name("topic").map(|m| m.as_str().to_string());
-		Ok(Self { username, topic })
-	}
-
-	fn address_type(&self) -> AddressType {
-		AddressType::Keybase
-	}
-
-	fn get_stripped(&self) -> String {
-		format!("{}", self.username)
-	}
-
-	fn get_full_name(&self) -> String {
-		"keybase://".to_string() + &self.get_stripped()
-	}
-}
-
-impl Display for KeybaseAddress {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "keybase://{}", self.username)?;
-		if let Some(ref topic) = self.topic {
-			write!(f, ":{}", topic)?;
-		}
-		Ok(())
-	}
 }
 
 #[derive(Clone, Debug)]
@@ -237,7 +192,7 @@ impl Display for HttpsAddress {
 impl dyn Address {
 	pub fn parse(address: &str) -> Result<Box<dyn Address>, Error> {
 		let re = Regex::new(ADDRESS_REGEX).map_err(|e| {
-			ErrorKind::KeybaseGenericError(format!("Unable to construct address parser, {}", e))
+			ErrorKind::AddressGenericError(format!("Unable to construct address parser, {}", e))
 		})?;
 		let captures = re.captures(address);
 		if captures.is_none() {
@@ -247,7 +202,6 @@ impl dyn Address {
 		let captures = captures.unwrap();
 		let address_type = captures.name("address_type").unwrap().as_str().to_string();
 		let address: Box<dyn Address> = match address_type.as_ref() {
-			"keybase" => Box::new(KeybaseAddress::from_str(address)?),
 			"mwcmqs" => Box::new(MWCMQSAddress::from_str(address)?),
 			"https" => Box::new(HttpsAddress::from_str(address)?),
 			"http" => Box::new(HttpsAddress::from_str(address)?),

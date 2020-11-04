@@ -259,8 +259,8 @@ pub struct ElectrumTransaction {
 pub struct ElectrumNodeClient {
 	/// BTC address
 	pub address: String,
-	/// true if it is a test network
-	pub testnet: bool,
+	/// transaction at block 1. The number of confirmations must be equal to the height
+	pub check_tx_hash: String,
 	/// ElectrumX client
 	client: Option<(ElectrumRpcClient, Instant)>,
 }
@@ -268,10 +268,10 @@ pub struct ElectrumNodeClient {
 impl ElectrumNodeClient {
 	/// Create a new instance.
 	/// address - it is URI for electrumX host    host:port
-	pub fn new(address: String, testnet: bool) -> Self {
+	pub fn new(address: String, check_tx_hash: String) -> Self {
 		Self {
 			address,
-			testnet,
+			check_tx_hash,
 			client: None,
 		}
 	}
@@ -312,15 +312,16 @@ impl BtcNodeClient for ElectrumNodeClient {
 		// and validate them. Since we assume the server can be trusted,
 		// instead we simply ask for the number of confirmations on the
 		// coinbase output at height 1
-		let tx_hash = if self.testnet {
+		/*		let tx_hash = if self.testnet {
 			"f0315ffc38709d70ad5647e22048358dd3745f3ce3874223c80a7c92fab0c8ba"
 		} else {
 			"0e3e2357e806b6cdb1f70b54c3a3a17b6714ee1f0e68bebb44a74b1efd512098"
 		}
-		.to_owned();
+		.to_owned();*/
+		let hash = self.check_tx_hash.clone();
 		let client = self.client()?;
 		let tx = client
-			.transaction(tx_hash)?
+			.transaction(hash)?
 			.ok_or(ErrorKind::ElectrumNodeClient(
 				"Unable to determine height".into(),
 			))?;

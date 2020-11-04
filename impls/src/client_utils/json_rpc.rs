@@ -62,8 +62,15 @@ impl Response {
 		}
 
 		let result = match self.result.clone() {
-			Some(r) => serde_json::from_value(r["Ok"].clone()).map_err(|e| Error::Json(format!("{}",e)) ),
-			None => serde_json::from_value(serde_json::Value::Null).map_err(|e| Error::Json(format!("{}",e)) ),
+			Some(r) => {
+				if !r["Err"].is_null() {
+					// we get error. Let's respond as error
+					return Err(Error::GenericError(r["Err"].to_string()));
+				}
+				serde_json::from_value(r["Ok"].clone()).map_err(|e| Error::Json(format!("{}", e)))
+			}
+			None => serde_json::from_value(serde_json::Value::Null)
+				.map_err(|e| Error::Json(format!("{}", e))),
 		}?;
 		Ok(result)
 	}
