@@ -44,9 +44,9 @@ The Atomic swap is started by the Seller (the person who want to sell MWC coins 
 the swap trade parameters and Buyer destination address. The seller can use the `swap_start` command to create a swap trade.
 Please note, this command will not start the atomic swap trade.
 
-This example creates an atomic swap trade where 5.6 MWC traded to 0.087 BCH. MWC transactions will require 500 confirmations, and
-BCH transactions will require 6 confirmations. The time interval required for the message exchange and redeem are 1 hour (60 minutes).
-The BCH redeem address is n4GUrta1qhA1Zgy4DUkmDgxULtJKjDhEc6. The seller will lock the funds first.
+This example creates an atomic swap trade where 5.6 MWC traded to 0.087 BTC. MWC transactions will require 500 confirmations, and
+BTC transactions will require 6 confirmations. The time interval required for the message exchange and redeem are 1 hour (60 minutes).
+The BTC redeem address is n4GUrta1qhA1Zgy4DUkmDgxULtJKjDhEc6. The seller will lock the funds first.
 
 ```
 $ mwc-wallet cli
@@ -56,7 +56,7 @@ mwc-wallet> open
 Password:
 Command 'open' completed
 
-mwc-wallet> swap_start --mwc_amount 5.6 --secondary_currency BCH --secondary_amount 0.087  --mwc_confirmations 500 --secondary_confirmations 6 --message_exchange_time 60 --redeem_time 60 --secondary_address n4GUrta1qhA1Zgy4DUkmDgxULtJKjDhEc6 --who_lock_first seller
+mwc-wallet> swap_start --mwc_amount 5.6 --secondary_currency BTC --secondary_amount 0.087  --mwc_confirmations 500 --secondary_confirmations 6 --message_exchange_time 60 --redeem_time 60 --secondary_address n4GUrta1qhA1Zgy4DUkmDgxULtJKjDhEc6 --who_lock_first seller
 20200804 12:19:27.863 WARN grin_wallet_controller::command - Seller Swap trade is created: 975ab0c2-27f5-45bd-99f2-2c3b01ce0fa5
 Command 'swap_start' completed
 ```
@@ -91,12 +91,12 @@ mwcmqs listener started for [xmgHFXM1ryJ1ug7kGPsjmDj8Gd7XC18cfhQ8n8uyjxL3JzAq9r7
 mwc-wallet> swap --autoswap --method mwcmqs --dest xmggm9xA2ryzDARaRKNEdbw9rmSHxyLTMCqNua8iSPjCQAvsyx6s --secondary_fee 30 -i 975ab0c2-27f5-45bd-99f2-2c3b01ce0fa5
 
     Swap ID: 975ab0c2-27f5-45bd-99f2-2c3b01ce0fa5
-    Selling 5.6 MWC for 0.087 BCH. BCH redeem address: n4GUrta1qhA1Zgy4DUkmDgxULtJKjDhEc6
-    Requied lock confirmations: 500 for MWC and 6 for BCH
+    Selling 5.6 MWC for 0.087 BTC. BTC redeem address: n4GUrta1qhA1Zgy4DUkmDgxULtJKjDhEc6
+    Requied lock confirmations: 500 for MWC and 6 for BTC
     Time limits: 60 minutes for messages exchange and 60 minutes for redeem/refund
     Locking order: Seller lock MWC first
     MWC funds locked until block 508701, expected to be mined in 21 hours and 11 minutes
-    BCH funds locked for 33 hours and 25 minutes
+    BTC funds locked for 33 hours and 25 minutes
 
 -------- Execution plan --------
     Offer Created at August  4 12:19:27
@@ -126,7 +126,7 @@ Swap Trade 975ab0c2-27f5-45bd-99f2-2c3b01ce0fa5: Waiting for Accept Offer messag
 
 * Once the Buyer received the offer, the offer Swap Id will be printed out.
 ```
-You get an offer to swap BCH to MWC. SwapID is 975ab0c2-27f5-45bd-99f2-2c3b01ce0fa5
+You get an offer to swap BTC to MWC. SwapID is 975ab0c2-27f5-45bd-99f2-2c3b01ce0fa5
 ```
 
 * The Buyer should carefully reviews the trade details. <br>
@@ -137,19 +137,19 @@ The Seller will need to cancel it's own swap tarde and create a new trade with f
 mwc-wallet> swap --check -i 975ab0c2-27f5-45bd-99f2-2c3b01ce0fa5
 
     Swap ID: 975ab0c2-27f5-45bd-99f2-2c3b01ce0fa5
-    Buying 5.6 MWC for 0.087 BCH
-    Requied lock confirmations: 500 for MWC and 6 for BCH
+    Buying 5.6 MWC for 0.087 BTC
+    Requied lock confirmations: 500 for MWC and 6 for BTC
     Time limits: 60 minutes for messages exchange and 60 minutes for redeem/refund
     Locking order: Seller lock MWC first
     MWC funds locked until block 508701, expected to be mined in 21 hours and 9 minutes
-    BCH funds locked for 33 hours and 23 minutes
+    BTC funds locked for 33 hours and 23 minutes
 
 -------- Execution plan --------
     Get an Offer at August  4 12:19:27
 --> Send Accept Offer Message                 required by August  4 13:19:27
         Sending Accept Offer message, expired in 47 minutes
     Wait for seller to start locking MWC      required by August  4 13:46:57
-    Post BCH to lock account                  required by August  4 13:46:57
+    Post BTC to lock account                  required by August  4 13:46:57
     Wait for Locking funds confirmations      required by August  4 23:29:27
     Send Init Redeem Message                  required by August  4 23:29:27
     Wait For Redeem response message          required by August  4 23:29:27
@@ -174,19 +174,19 @@ Keep in mind, **if your redeem transaction is stuck in the memory pool, the Sell
 mwc-wallet> swap --autoswap --method mwcmqs --dest xmgHFXM1ryJ1ug7kGPsjmDj8Gd7XC18cfhQ8n8uyjxL3JzAq9r73 --buyer_refund_address mjdcskZm4Kimq7yzUGLtzwiEwMdBdTa3No --secondary_fee 30 -i 975ab0c2-27f5-45bd-99f2-2c3b01ce0fa5
 
     Swap ID: 975ab0c2-27f5-45bd-99f2-2c3b01ce0fa5
-    Buying 5.6 MWC for 0.087 BCH
-    Requied lock confirmations: 500 for MWC and 6 for BCH
+    Buying 5.6 MWC for 0.087 BTC
+    Requied lock confirmations: 500 for MWC and 6 for BTC
     Time limits: 60 minutes for messages exchange and 60 minutes for redeem/refund
     Locking order: Seller lock MWC first
     MWC funds locked until block 508701, expected to be mined in 21 hours and 7 minutes
-    BCH funds locked for 33 hours and 20 minutes
+    BTC funds locked for 33 hours and 20 minutes
 
 -------- Execution plan --------
     Get an Offer at August  4 12:19:27
 --> Send Accept Offer Message                 required by August  4 13:19:27
         Sending Accept Offer message, expired in 44 minutes
     Wait for seller to start locking MWC      required by August  4 13:46:57
-    Post BCH to lock account                  required by August  4 13:46:57
+    Post BTC to lock account                  required by August  4 13:46:57
     Wait for Locking funds confirmations      required by August  4 23:29:27
     Send Init Redeem Message                  required by August  4 23:29:27
     Wait For Redeem response message          required by August  4 23:29:27
@@ -216,11 +216,11 @@ Swap Trade 975ab0c2-27f5-45bd-99f2-2c3b01ce0fa5: MWC lock slate is posted
 Swap Trade 975ab0c2-27f5-45bd-99f2-2c3b01ce0fa5: MWC Lock transaction, waiting for 500 MWC lock confirmations, has 0
 ```
 
-* As a Buyer the next step will be to deposit the Secondary (for example BCH) coins to a multisig lock account. <br>
-A few minutes after the swap was accepted, the Buyer should see a message `Please deposit exactly XXXXXX BCH at <address>`
+* As a Buyer the next step will be to deposit the Secondary (for example BTC) coins to a multisig lock account. <br>
+A few minutes after the swap was accepted, the Buyer should see a message `Please deposit exactly XXXXXX BTC at <address>`
  
 ```
-Swap Trade 975ab0c2-27f5-45bd-99f2-2c3b01ce0fa5: Please deposit exactly 0.087 BCH at 2N4YMbGBzP39WjhJMEFtrMhCxLz8iifcepW
+Swap Trade 975ab0c2-27f5-45bd-99f2-2c3b01ce0fa5: Please deposit exactly 0.087 BTC at 2N4YMbGBzP39WjhJMEFtrMhCxLz8iifcepW
 ``` 
  
 * Once the message was received, the Buyer should post **the exact amount** of funds required to that address. <br>
@@ -254,12 +254,12 @@ mwc-wallet> swap --check  -i 975ab0c2-27f5-45bd-99f2-2c3b01ce0fa5
 Password:
 
     Swap ID: 975ab0c2-27f5-45bd-99f2-2c3b01ce0fa5
-    Selling 5.6 MWC for 0.087 BCH. BCH redeem address: n4GUrta1qhA1Zgy4DUkmDgxULtJKjDhEc6
-    Requied lock confirmations: 500 for MWC and 6 for BCH
+    Selling 5.6 MWC for 0.087 BTC. BTC redeem address: n4GUrta1qhA1Zgy4DUkmDgxULtJKjDhEc6
+    Requied lock confirmations: 500 for MWC and 6 for BTC
     Time limits: 60 minutes for messages exchange and 60 minutes for redeem/refund
     Locking order: Seller lock MWC first
     MWC funds locked until block 508701, expected to be mined in 20 hours and 55 minutes
-    BCH funds locked for 33 hours and 6 minutes
+    BTC funds locked for 33 hours and 6 minutes
 
 -------- Execution plan --------
 --> Wait for MWC refund to unlock             required by August  5 09:43:53
@@ -291,4 +291,5 @@ Command 'swap' completed
 ```
 
 # Secondary Currency List #
+ * BTC - BitcoinCore
  * BCH - BitcoinCashABC
