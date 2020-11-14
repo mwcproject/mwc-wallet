@@ -124,7 +124,7 @@ Swap Trade 975ab0c2-27f5-45bd-99f2-2c3b01ce0fa5: Offer message was sent
 Swap Trade 975ab0c2-27f5-45bd-99f2-2c3b01ce0fa5: Waiting for Accept Offer message
 ```
 
-* Once the Buyer received the offer, the offer Swap Id will be printed out.
+* Buyer awaits the message indicating a swap offer was received.
 ```
 You get an offer to swap BTC to MWC. SwapID is 975ab0c2-27f5-45bd-99f2-2c3b01ce0fa5
 ```
