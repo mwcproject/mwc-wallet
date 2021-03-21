@@ -532,7 +532,7 @@ impl BtcData {
 			.map_err(|e| ErrorKind::Generic(format!("Unable to encode redeem tx, {}", e)))?;
 
 		// By some reasons length is floating, probably encoding can do some optimization . Let'e keep an eye on it, we don't want to calcucate fee badly.
-		debug_assert!(actual_size <= tx_size + 1);
+		debug_assert!(actual_size <= tx_size + 4);
 		debug_assert!(actual_size >= tx_size - 5);
 
 		Ok((
