@@ -1,6 +1,6 @@
 [package]
 name = "grin_wallet_api"
-version = "4.1.1"
+version = "4.1.2"
 authors = ["Grin Developers <mimblewimble@lists.launchpad.net>"]
 description = "Grin Wallet API"
 license = "Apache-2.0"

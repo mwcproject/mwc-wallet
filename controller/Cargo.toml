@@ -1,6 +1,6 @@
 [package]
 name = "grin_wallet_controller"
-version = "4.1.1"
+version = "4.1.2"
 authors = ["Grin Developers <mimblewimble@lists.launchpad.net>"]
 description = "Controllers for grin wallet instantiation"
 license = "Apache-2.0"

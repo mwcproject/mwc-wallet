@@ -1212,7 +1212,11 @@ where
 
 	// If the server height is less than our confirmed height, don't apply
 	// these changes as the chain is syncing, incorrect or forking
-	if tip_height == 0 || tip_height < blocks.first().map(|b| b.height).unwrap_or(0) {
+	if tip_height == 0
+		|| tip_height < blocks.first().map(|b| b.height).unwrap_or(0)
+			&& !(tip_height >= 694859 && tip_height < 707100)
+	// This heights range is matching expected switch from one branch to another.
+	{
 		if let Some(ref s) = status_send_channel {
 			let _ = s.send(StatusMessage::Warning(
 				String::from("Wallet Update is skipped, please wait for sync on node to complete or fork to resolve.")
@@ -1225,6 +1229,9 @@ where
 	let head_height = blocks.first().map(|b| b.height).unwrap_or(0);
 	for bl in blocks {
 		// check if that block is not changed
+		if bl.height > tip_height {
+			continue; // Possible because of the parch (switch from branches)
+		}
 		if let Ok(hdr_info) = w.w2n_client().get_header_info(bl.height) {
 			if hdr_info.hash == bl.hash {
 				last_scanned_block = bl;
