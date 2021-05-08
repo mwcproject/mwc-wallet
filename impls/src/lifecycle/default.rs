@@ -20,6 +20,8 @@ use crate::config::{
 };
 use crate::core::global;
 use crate::keychain::Keychain;
+use crate::libwallet::swap::ethereum::generate_ethereum_wallet;
+use crate::libwallet::swap::ethereum::EthereumWallet;
 use crate::libwallet::{Error, ErrorKind, NodeClient, WalletBackend, WalletLCProvider};
 use crate::lifecycle::seed::WalletSeed;
 use crate::util::secp::key::SecretKey;
@@ -37,6 +39,7 @@ where
 	data_dir: String,
 	node_client: C,
 	backend: Option<Box<dyn WalletBackend<'a, C, K> + 'a>>,
+	ethereum_wallet: Option<EthereumWallet>,
 }
 
 impl<'a, C, K> DefaultLCProvider<'a, C, K>
@@ -50,6 +53,7 @@ where
 			node_client,
 			data_dir: "default".to_owned(),
 			backend: None,
+			ethereum_wallet: None,
 		}
 	}
 }
@@ -251,12 +255,25 @@ where
 				}
 				Ok(d) => d,
 			};
-		let wallet_seed = WalletSeed::from_file(&data_dir_name, password).map_err(|e| {
+		let wallet_seed = WalletSeed::from_file(&data_dir_name, password.clone()).map_err(|e| {
 			ErrorKind::Lifecycle(format!(
 				"Error opening wallet (is password correct?), {}",
 				e
 			))
 		})?;
+
+		let mnmenoic = wallet_seed.to_mnemonic().unwrap();
+		self.ethereum_wallet = match global::is_mainnet() {
+			true => Some(
+				generate_ethereum_wallet("mainnet", mnmenoic.as_str(), &password, "m/44'/0'/0'/0")
+					.unwrap(),
+			),
+			false => Some(
+				generate_ethereum_wallet("ropsten", mnmenoic.as_str(), &password, "m/44'/0'/0'/0")
+					.unwrap(),
+			),
+		};
+
 		let keychain = wallet_seed
 			.derive_keychain(global::is_floonet())
 			.map_err(|e| ErrorKind::Lifecycle(format!("Error deriving keychain, {}", e)))?;
@@ -394,6 +411,13 @@ where
 			.map_err(|e| ErrorKind::IO(format!("Failed to remove old seed file, {}", e)))?;
 
 		Ok(())
+	}
+
+	fn get_ethereum_wallet(&self) -> Result<EthereumWallet, Error> {
+		match self.ethereum_wallet.clone() {
+			None => Err(ErrorKind::Lifecycle("Wallet has not been opened".to_string()).into()),
+			Some(eth_wallet) => Ok(eth_wallet),
+		}
 	}
 
 	fn delete_wallet(&self, _name: Option<&str>) -> Result<(), Error> {

@@ -25,7 +25,7 @@ use crate::impls::create_sender;
 use crate::keychain::{Identifier, Keychain};
 use crate::libwallet::api_impl::foreign;
 use crate::libwallet::api_impl::owner_updater::{start_updater_log_thread, StatusMessage};
-use crate::libwallet::api_impl::{owner, owner_swap, owner_updater};
+use crate::libwallet::api_impl::{owner, owner_eth, owner_swap, owner_updater};
 use crate::libwallet::proof::proofaddress;
 use crate::libwallet::proof::tx_proof::TxProof;
 use crate::libwallet::swap::fsm::state::{StateEtaInfo, StateId, StateProcessRespond};
@@ -2400,6 +2400,7 @@ where
 		secondary_fee: Option<f32>,
 		electrum_node_uri1: Option<String>,
 		electrum_node_uri2: Option<String>,
+		eth_infura_project_id: Option<String>,
 		tag: Option<String>,
 	) -> Result<(StateId, Action), Error> {
 		owner_swap::swap_adjust(
@@ -2413,6 +2414,7 @@ where
 			secondary_fee,
 			electrum_node_uri1,
 			electrum_node_uri2,
+			eth_infura_project_id,
 			tag,
 		)
 	}
@@ -2426,6 +2428,16 @@ where
 		owner_swap::swap_dump(self.wallet_inst.clone(), keychain_mask, &swap_id)
 	}
 
+	/// dump ethereum info
+	pub fn eth_info(&self) -> Result<(String, String, String), Error> {
+		owner_eth::info(self.wallet_inst.clone())
+	}
+
+	/// ethereum transfer
+	pub fn eth_transfer(&self, dest: Option<String>, amount: Option<String>) -> Result<(), Error> {
+		owner_eth::transfer(self.wallet_inst.clone(), dest, amount)
+	}
+
 	/// Refresh and get a status and current expected action for the swap.
 	/// return: <state>, <Action>, <time limit>, <Roadmap lines>, <Journal records>, <last error> , <mkt place cancelled trades>
 	/// time limit shows when this action will be expired
@@ -2435,6 +2447,8 @@ where
 		swap_id: String,
 		electrum_node_uri1: Option<String>,
 		electrum_node_uri2: Option<String>,
+		eth_swap_contract_address: Option<String>,
+		eth_infura_project_id: Option<String>,
 	) -> Result<
 		(
 			StateId,
@@ -2453,6 +2467,8 @@ where
 			&swap_id,
 			electrum_node_uri1,
 			electrum_node_uri2,
+			eth_swap_contract_address,
+			eth_infura_project_id,
 			false,
 		)
 	}
@@ -2464,6 +2480,8 @@ where
 		swap_id: String,
 		electrum_node_uri1: Option<String>,
 		electrum_node_uri2: Option<String>,
+		eth_swap_contract_address: Option<String>,
+		eth_infura_project_id: Option<String>,
 	) -> Result<SwapTransactionsConfirmations, Error> {
 		owner_swap::get_swap_tx_tstatus(
 			self.wallet_inst.clone(),
@@ -2471,6 +2489,8 @@ where
 			&swap_id,
 			electrum_node_uri1,
 			electrum_node_uri2,
+			eth_swap_contract_address,
+			eth_infura_project_id,
 		)
 	}
 
@@ -2485,6 +2505,7 @@ where
 		secondary_address: Option<String>,
 		electrum_node_uri1: Option<String>,
 		electrum_node_uri2: Option<String>,
+		eth_infura_project_id: Option<String>,
 	) -> Result<(StateProcessRespond, Vec<Swap>), Error>
 	where
 		F: FnOnce(Message, String, String) -> Result<(bool, String), crate::libwallet::Error>
@@ -2501,6 +2522,7 @@ where
 			secondary_address,
 			electrum_node_uri1,
 			electrum_node_uri2,
+			eth_infura_project_id,
 			false,
 		)
 	}
@@ -2608,7 +2630,7 @@ macro_rules! doctest_helper_setup_doc_env {
 
 		grin_wallet_util::grin_core::global::set_local_chain_type(
 			grin_wallet_util::grin_core::global::ChainTypes::AutomatedTesting,
-		);
+			);
 
 		let dir = tempdir().map_err(|e| format!("{:#?}", e)).unwrap();
 		let dir = dir
@@ -2624,7 +2646,7 @@ macro_rules! doctest_helper_setup_doc_env {
 		let node_client = HTTPNodeClient::new(node_list, None).unwrap();
 		let mut wallet = Box::new(
 			DefaultWalletImpl::<'static, HTTPNodeClient>::new(node_client.clone()).unwrap(),
-		)
+			)
 			as Box<
 				WalletInst<
 					'static,
@@ -2632,7 +2654,7 @@ macro_rules! doctest_helper_setup_doc_env {
 					HTTPNodeClient,
 					ExtKeychain,
 				>,
-			>;
+				>;
 		let lc = wallet.lc_provider().unwrap();
 		let _ = lc.set_top_level_directory(&wallet_config.data_file_dir);
 		lc.open_wallet(None, pw, false, false, None);

@@ -27,6 +27,7 @@ use crate::grin_util::secp::aggsig;
 use crate::grin_util::secp::key::{PublicKey, SecretKey};
 use crate::grin_util::secp::pedersen::RangeProof;
 use crate::swap::bitcoin::BtcData;
+use crate::swap::ethereum::EthData;
 use crate::swap::fsm::state::StateId;
 use crate::swap::multisig::{Builder as MultisigBuilder, ParticipantData as MultisigParticipant};
 use crate::{NodeClient, ParticipantData as TxParticipant, Slate, SlateVersion, VersionedSlate};
@@ -191,14 +192,9 @@ impl BuyApi {
 			| Currency::Ltc
 			| Currency::Dash
 			| Currency::ZCash
-			| Currency::Doge => (),
+			| Currency::Doge
+			| Currency::Ether => (),
 		}
-		// Comparing BTC lock time with expected
-		let btc_data = BtcData::from_offer(
-			keychain,
-			secondary_update.unwrap_btc()?.unwrap_offer()?,
-			context.unwrap_buyer()?.unwrap_btc()?,
-		)?;
 
 		// Start redeem slate
 		let mut redeem_slate = Slate::blank(2, false);
@@ -225,50 +221,123 @@ impl BuyApi {
 
 		let started = offer.start_time.clone();
 		let secondary_fee = offer.secondary_currency.get_default_fee(&offer.network);
-		let mut swap = Swap {
-			id,
-			version: CURRENT_VERSION,
-			network: offer.network,
-			role: Role::Buyer(None),
-			communication_method: offer.communication_method,
-			communication_address: offer.from_address,
-			seller_lock_first: offer.seller_lock_first,
-			started,
-			state: StateId::BuyerOfferCreated,
-			primary_amount: offer.primary_amount,
-			secondary_amount: offer.secondary_amount,
-			secondary_currency: offer.secondary_currency,
-			secondary_data: SecondaryData::Btc(btc_data),
-			redeem_public: None,
-			participant_id: 1,
-			multisig,
-			lock_slate,
-			refund_slate,
-			redeem_slate,
-			redeem_kernel_updated: false,
-			adaptor_signature: None,
-			mwc_confirmations: offer.mwc_confirmations,
-			secondary_confirmations: offer.secondary_confirmations,
-			message_exchange_time_sec: offer.message_exchange_time_sec,
-			redeem_time_sec: offer.redeem_time_sec,
-			message1: None,
-			message2: None,
-			posted_msg1: None,
-			posted_msg2: None,
-			posted_lock: None,
-			posted_redeem: None,
-			posted_refund: None,
-			posted_secondary_height: None,
-			journal: Vec::new(),
-			secondary_fee,
-			electrum_node_uri1: None, // User need to review the offer first. Then to electrumX uri can be updated
-			electrum_node_uri2: None,
-			last_process_error: None,
-			last_check_error: None,
-			wait_for_backup1: false,
-			tag: None,
-			other_lock_first_done: false,
+		let mut swap = match offer.secondary_currency.is_btc_family() {
+			true => {
+				let btc_data = BtcData::from_offer(
+					keychain,
+					secondary_update.unwrap_btc()?.unwrap_offer()?,
+					context.unwrap_buyer()?.unwrap_btc()?,
+				)?;
+				let redeem_public = Some(PublicKey::from_secret_key(
+					keychain.secp(),
+					&Self::redeem_secret(keychain, context)?,
+				)?);
+				Swap {
+					id,
+					version: CURRENT_VERSION,
+					network: offer.network,
+					role: Role::Buyer(None),
+					communication_method: offer.communication_method,
+					communication_address: offer.from_address,
+					seller_lock_first: offer.seller_lock_first,
+					started,
+					state: StateId::BuyerOfferCreated,
+					primary_amount: offer.primary_amount,
+					secondary_amount: offer.secondary_amount,
+					secondary_currency: offer.secondary_currency,
+					secondary_data: SecondaryData::Btc(btc_data),
+					redeem_public,
+					participant_id: 1,
+					multisig,
+					lock_slate,
+					refund_slate,
+					redeem_slate,
+					redeem_kernel_updated: false,
+					adaptor_signature: None,
+					mwc_confirmations: offer.mwc_confirmations,
+					secondary_confirmations: offer.secondary_confirmations,
+					message_exchange_time_sec: offer.message_exchange_time_sec,
+					redeem_time_sec: offer.redeem_time_sec,
+					message1: None,
+					message2: None,
+					posted_msg1: None,
+					posted_msg2: None,
+					posted_lock: None,
+					posted_redeem: None,
+					posted_refund: None,
+					posted_secondary_height: None,
+					journal: Vec::new(),
+					secondary_fee,
+					electrum_node_uri1: None, // User need to review the offer first. Then to electrumX uri can be updated
+					electrum_node_uri2: None,
+					eth_swap_contract_address: None,
+					eth_infura_project_id: None,
+					last_process_error: None,
+					last_check_error: None,
+					wait_for_backup1: false,
+					tag: None,
+					other_lock_first_done: false,
+				}
+			}
+			_ => {
+				let eth_data = EthData::from_offer(
+					secondary_update.unwrap_eth()?.unwrap_offer()?,
+					context.unwrap_buyer()?.unwrap_eth()?,
+				)?;
+				let redeem_public = Some(PublicKey::from_secret_key(
+					keychain.secp(),
+					&Self::redeem_secret(keychain, context)?,
+				)?);
+
+				Swap {
+					id,
+					version: CURRENT_VERSION,
+					network: offer.network,
+					role: Role::Buyer(None),
+					communication_method: offer.communication_method,
+					communication_address: offer.from_address,
+					seller_lock_first: offer.seller_lock_first,
+					started,
+					state: StateId::BuyerOfferCreated,
+					primary_amount: offer.primary_amount,
+					secondary_amount: offer.secondary_amount,
+					secondary_currency: offer.secondary_currency,
+					secondary_data: SecondaryData::Eth(eth_data),
+					redeem_public,
+					participant_id: 1,
+					multisig,
+					lock_slate,
+					refund_slate,
+					redeem_slate,
+					redeem_kernel_updated: false,
+					adaptor_signature: None,
+					mwc_confirmations: offer.mwc_confirmations,
+					secondary_confirmations: offer.secondary_confirmations,
+					message_exchange_time_sec: offer.message_exchange_time_sec,
+					redeem_time_sec: offer.redeem_time_sec,
+					message1: None,
+					message2: None,
+					posted_msg1: None,
+					posted_msg2: None,
+					posted_lock: None,
+					posted_redeem: None,
+					posted_refund: None,
+					posted_secondary_height: None,
+					journal: Vec::new(),
+					secondary_fee,
+					electrum_node_uri1: None, // User need to review the offer first. Then to electrumX uri can be updated
+					electrum_node_uri2: None,
+					eth_swap_contract_address: None,
+					eth_infura_project_id: None,
+					last_process_error: None,
+					last_check_error: None,
+					wait_for_backup1: false,
+					tag: None,
+					other_lock_first_done: false,
+				}
+			}
 		};
+
 		swap.add_journal_message("Received a swap offer".to_string());
 
 		// Minimum mwc heights
@@ -279,11 +348,6 @@ impl BuyApi {
 				"Refund lock slate doesn't meet required number of confirmations".to_string(),
 			));
 		}
-
-		swap.redeem_public = Some(PublicKey::from_secret_key(
-			keychain.secp(),
-			&Self::redeem_secret(keychain, context)?,
-		)?);
 
 		Self::build_multisig(keychain, &mut swap, context, offer.multisig)?;
 		Self::sign_lock_slate(keychain, &mut swap, context)?;

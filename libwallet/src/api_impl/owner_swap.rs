@@ -14,8 +14,8 @@
 
 //! Generic implementation of owner API atomic swap functions
 
-use crate::grin_util::secp::key::SecretKey;
 use crate::grin_util::Mutex;
+use crate::{grin_util::secp::key::SecretKey, swap::ethereum::EthereumWallet};
 
 use crate::grin_core::core;
 use crate::grin_core::core::Committed;
@@ -106,6 +106,12 @@ where
 		.map(|o| (o.output.commit.clone().unwrap(), o.output.value))
 		.collect();
 
+	let ethereum_wallet = wallet_inst
+		.clone()
+		.lock()
+		.lc_provider()?
+		.get_ethereum_wallet()?;
+
 	wallet_lock!(wallet_inst, w);
 	let node_client = w.w2n_client().clone();
 	let keychain = w.keychain(keychain_mask)?;
@@ -157,15 +163,35 @@ where
 	let secondary_currency = Currency::try_from(params.secondary_currency.as_str())?;
 	let secondary_amount = secondary_currency.amount_from_hr_string(&params.secondary_amount)?;
 
-	let (uri1, uri2) = trades::get_electrumx_uri(
-		&secondary_currency,
-		&params.electrum_node_uri1,
-		&params.electrum_node_uri2,
-	)?;
-	let mut swap_api =
-		crate::swap::api::create_instance(&secondary_currency, node_client, uri1, uri2)?;
+	let mut swap_api = match secondary_currency.is_btc_family() {
+		true => {
+			let (uri1, uri2) = trades::get_electrumx_uri(
+				&secondary_currency,
+				&params.electrum_node_uri1,
+				&params.electrum_node_uri2,
+			)?;
+			crate::swap::api::create_btc_instance(&secondary_currency, node_client, uri1, uri2)?
+		}
+		_ => {
+			let eth_swap_contract_address = trades::get_eth_swap_contract_address(
+				&secondary_currency,
+				&params.eth_swap_contract_address,
+			)?;
+			let eth_infura_project_id = trades::get_eth_infura_projectid(
+				&secondary_currency,
+				&params.eth_infura_project_id,
+			)?;
+			crate::swap::api::create_eth_instance(
+				&secondary_currency,
+				node_client,
+				ethereum_wallet.clone(),
+				eth_swap_contract_address,
+				eth_infura_project_id,
+			)?
+		}
+	};
 
-	// Checking ElectrumX nodes...
+	// Checking ElectrumX/Infura nodes...
 	swap_api.test_client_connections()?;
 
 	let parent_key_id = w.parent_key_id(); // account is current one
@@ -192,6 +218,7 @@ where
 
 	let context = create_context(
 		&mut **w,
+		Some(&ethereum_wallet),
 		keychain_mask,
 		&mut swap_api,
 		&keychain,
@@ -222,6 +249,8 @@ where
 		params.buyer_communication_address.clone(),
 		params.electrum_node_uri1.clone(),
 		params.electrum_node_uri2.clone(),
+		params.eth_swap_contract_address.clone(),
+		params.eth_infura_project_id.clone(),
 		params.dry_run,
 		params.tag.clone(),
 	)?;
@@ -298,6 +327,11 @@ where
 	C: NodeClient + 'a,
 	K: Keychain + 'a,
 {
+	let ethereum_wallet = wallet_inst
+		.clone()
+		.lock()
+		.lc_provider()?
+		.get_ethereum_wallet()?;
 	// Need to lock first to check if the wallet is open
 	wallet_lock!(wallet_inst, w);
 
@@ -325,6 +359,7 @@ where
 				&context,
 				node_client.clone(),
 				&keychain,
+				ethereum_wallet.clone(),
 			) {
 				Ok((state, action, expiration, _state_eta, other_was_locked)) => {
 					swap.last_check_error = None;
@@ -437,6 +472,7 @@ pub fn swap_adjust<'a, L, C, K>(
 	secondary_fee: Option<f32>,
 	electrum_node_uri1: Option<String>,
 	electrum_node_uri2: Option<String>,
+	eth_infura_project_id: Option<String>,
 	tag: Option<String>,
 ) -> Result<(StateId, Action), Error>
 where
@@ -444,6 +480,12 @@ where
 	C: NodeClient + 'a,
 	K: Keychain + 'a,
 {
+	let ethereum_wallet = wallet_inst
+		.clone()
+		.lock()
+		.lc_provider()?
+		.get_ethereum_wallet()?;
+
 	wallet_lock!(wallet_inst, w);
 	let keychain = w.keychain(keychain_mask)?;
 	let skey = get_swap_storage_key(&keychain)?;
@@ -455,32 +497,65 @@ where
 
 	match adjust_cmd {
 		"electrumx_uri" => {
-			// Let's test electrumX instances first.
-			let mut electrum1 = electrum_node_uri1.clone();
-			let mut electrum2 = electrum_node_uri2.clone();
+			match swap.secondary_currency.is_btc_family() {
+				true => {
+					// Let's test electrumX instances first.
+					let mut electrum1 = electrum_node_uri1.clone();
+					let mut electrum2 = electrum_node_uri2.clone();
 
-			if electrum1.is_some() || electrum2.is_some() {
-				if electrum1.is_none() {
-					electrum1 = electrum2.clone();
-				}
-				if electrum2.is_none() {
-					electrum2 = electrum1.clone();
-				}
+					if electrum1.is_some() || electrum2.is_some() {
+						if electrum1.is_none() {
+							electrum1 = electrum2.clone();
+						}
+						if electrum2.is_none() {
+							electrum2 = electrum1.clone();
+						}
 
-				let swap_api: Box<dyn SwapApi<K>> = crate::swap::api::create_instance(
-					&swap.secondary_currency,
-					node_client.clone(),
-					electrum1.unwrap(),
-					electrum2.unwrap(),
-				)?;
-				swap_api.test_client_connections()?;
+						let swap_api: Box<dyn SwapApi<K>> = crate::swap::api::create_btc_instance(
+							&swap.secondary_currency,
+							node_client.clone(),
+							electrum1.unwrap(),
+							electrum2.unwrap(),
+						)?;
+						swap_api.test_client_connections()?;
+					}
+
+					swap.electrum_node_uri1 = electrum_node_uri1;
+					swap.electrum_node_uri2 = electrum_node_uri2;
+					trades::store_swap_trade(&context, &swap, &skey, &*swap_lock)?;
+					return Ok((swap.state.clone(), Action::None));
+				}
+				_ => {
+					return Err(ErrorKind::Generic("Non BTC family coins".to_string()).into());
+				}
 			}
-
-			swap.electrum_node_uri1 = electrum_node_uri1;
-			swap.electrum_node_uri2 = electrum_node_uri2;
-			trades::store_swap_trade(&context, &swap, &skey, &*swap_lock)?;
-			return Ok((swap.state.clone(), Action::None));
 		}
+		"eth_infura_project_id" => match swap.secondary_currency.is_btc_family() {
+			true => {
+				return Err(ErrorKind::Generic("Not Ethereum family coins".to_string()).into());
+			}
+			_ => {
+				let eth_swap_contract_address = trades::get_eth_swap_contract_address(
+					&swap.secondary_currency,
+					&swap.eth_swap_contract_address,
+				)?;
+
+				if eth_infura_project_id.is_some() {
+					let swap_api: Box<dyn SwapApi<K>> = crate::swap::api::create_eth_instance(
+						&swap.secondary_currency,
+						node_client.clone(),
+						ethereum_wallet,
+						eth_swap_contract_address,
+						eth_infura_project_id.clone().unwrap(),
+					)?;
+					swap_api.test_client_connections()?;
+				}
+
+				swap.eth_infura_project_id = eth_infura_project_id;
+				trades::store_swap_trade(&context, &swap, &skey, &*swap_lock)?;
+				return Ok((swap.state.clone(), Action::None));
+			}
+		},
 		"destination" => {
 			if method.is_none() || destination.is_none() {
 				return Err(ErrorKind::Generic(
@@ -552,17 +627,40 @@ where
 		_ => (), // Nothing to do. Will continue with api construction
 	}
 
-	let (uri1, uri2) = trades::get_electrumx_uri(
-		&swap.secondary_currency,
-		&swap.electrum_node_uri1,
-		&swap.electrum_node_uri2,
-	)?;
-	let swap_api = crate::swap::api::create_instance(
-		&swap.secondary_currency,
-		node_client.clone(),
-		uri1,
-		uri2,
-	)?;
+	let swap_api = match swap.secondary_currency.is_btc_family() {
+		true => {
+			let (uri1, uri2) = trades::get_electrumx_uri(
+				&swap.secondary_currency,
+				&swap.electrum_node_uri1,
+				&swap.electrum_node_uri2,
+			)?;
+
+			crate::swap::api::create_btc_instance(
+				&swap.secondary_currency,
+				node_client.clone(),
+				uri1,
+				uri2,
+			)?
+		}
+		_ => {
+			let eth_swap_contract_address = trades::get_eth_swap_contract_address(
+				&swap.secondary_currency,
+				&swap.eth_swap_contract_address,
+			)?;
+			let eth_infura_project_id = trades::get_eth_infura_projectid(
+				&swap.secondary_currency,
+				&swap.eth_infura_project_id,
+			)?;
+			crate::swap::api::create_eth_instance(
+				&swap.secondary_currency,
+				node_client.clone(),
+				ethereum_wallet,
+				eth_swap_contract_address,
+				eth_infura_project_id,
+			)?
+		}
+	};
+
 	let mut fsm = swap_api.get_fsm(&keychain, &swap);
 
 	match adjust_cmd {
@@ -636,6 +734,12 @@ where
 	C: NodeClient + 'a,
 	K: Keychain + 'a,
 {
+	let ethereum_wallet = wallet_inst
+		.clone()
+		.lock()
+		.lc_provider()?
+		.get_ethereum_wallet()?;
+
 	wallet_lock!(wallet_inst, w);
 	let keychain = w.keychain(keychain_mask)?;
 	let skey = get_swap_storage_key(&keychain)?;
@@ -659,32 +763,76 @@ where
 	let _l = swap_lock.lock();
 	let (context, mut swap) = trades::get_swap_trade(&swap_id, &skey, &*swap_lock)?;
 
-	let (uri1, uri2) = trades::get_electrumx_uri(
-		&swap.secondary_currency,
-		&swap.electrum_node_uri1,
-		&swap.electrum_node_uri2,
-	)?;
-	let swap_api = crate::swap::api::create_instance(
-		&swap.secondary_currency,
-		node_client.clone(),
-		uri1,
-		uri2,
-	)?;
+	let swap_api = match swap.secondary_currency.is_btc_family() {
+		true => {
+			let (uri1, uri2) = trades::get_electrumx_uri(
+				&swap.secondary_currency,
+				&swap.electrum_node_uri1,
+				&swap.electrum_node_uri2,
+			)?;
+			crate::swap::api::create_btc_instance(
+				&swap.secondary_currency,
+				node_client.clone(),
+				uri1,
+				uri2,
+			)?
+		}
+		_ => {
+			let eth_swap_contract_address = trades::get_eth_swap_contract_address(
+				&swap.secondary_currency,
+				&swap.eth_swap_contract_address,
+			)?;
+			let eth_infura_project_id = trades::get_eth_infura_projectid(
+				&swap.secondary_currency,
+				&swap.eth_infura_project_id,
+			)?;
+			crate::swap::api::create_eth_instance(
+				&swap.secondary_currency,
+				node_client.clone(),
+				ethereum_wallet.clone(),
+				eth_swap_contract_address,
+				eth_infura_project_id,
+			)?
+		}
+	};
 
-	// let's calcutate the scrip hashes if needed and can
-	if swap.is_seller() && swap.secondary_data.unwrap_btc()?.redeem_tx.is_none() {
-		// try to calculate the hash if possible
-		let _ = swap_api.publish_secondary_transaction(&keychain, &mut swap, &context, false);
-	}
-	if !swap.is_seller() && swap.secondary_data.unwrap_btc()?.refund_tx.is_none() {
-		let refund_address = swap.unwrap_buyer()?;
-		let _ = swap_api.post_secondary_refund_tx(
-			&keychain,
-			&context,
-			&mut swap,
-			refund_address,
-			false,
-		);
+	match swap.secondary_currency.is_btc_family() {
+		true => {
+			// let's calcutate the scrip hashes if needed and can
+			if swap.is_seller() && swap.secondary_data.unwrap_btc()?.redeem_tx.is_none() {
+				// try to calculate the hash if possible
+				let _ =
+					swap_api.publish_secondary_transaction(&keychain, &mut swap, &context, false);
+			}
+			if !swap.is_seller() && swap.secondary_data.unwrap_btc()?.refund_tx.is_none() {
+				let refund_address = swap.unwrap_buyer()?;
+				let _ = swap_api.post_secondary_refund_tx(
+					&keychain,
+					&context,
+					&mut swap,
+					refund_address,
+					false,
+				);
+			}
+		}
+		_ => {
+			// let's calcutate the scrip hashes if needed and can
+			if swap.is_seller() && swap.secondary_data.unwrap_eth()?.redeem_tx.is_none() {
+				// try to calculate the hash if possible
+				let _ =
+					swap_api.publish_secondary_transaction(&keychain, &mut swap, &context, false);
+			}
+			if !swap.is_seller() && swap.secondary_data.unwrap_eth()?.refund_tx.is_none() {
+				let refund_address = swap.unwrap_buyer()?;
+				let _ = swap_api.post_secondary_refund_tx(
+					&keychain,
+					&context,
+					&mut swap,
+					refund_address,
+					false,
+				);
+			}
+		}
 	}
 
 	let tx_conf = swap_api.request_tx_confirmations(&keychain, &swap)?;
@@ -733,18 +881,45 @@ fn update_swap_status_action_impl<'a, C, K>(
 	context: &Context,
 	node_client: C,
 	keychain: &K,
+	ethereum_wallet: EthereumWallet,
 ) -> Result<(StateId, Action, Option<i64>, Vec<StateEtaInfo>, bool), Error>
 where
 	C: NodeClient + 'a,
 	K: Keychain + 'a,
 {
-	let (uri1, uri2) = trades::get_electrumx_uri(
-		&swap.secondary_currency,
-		&swap.electrum_node_uri1,
-		&swap.electrum_node_uri2,
-	)?;
-	let swap_api =
-		crate::swap::api::create_instance(&swap.secondary_currency, node_client, uri1, uri2)?;
+	let swap_api = match swap.secondary_currency.is_btc_family() {
+		true => {
+			let (uri1, uri2) = trades::get_electrumx_uri(
+				&swap.secondary_currency,
+				&swap.electrum_node_uri1,
+				&swap.electrum_node_uri2,
+			)?;
+			crate::swap::api::create_btc_instance(
+				&swap.secondary_currency,
+				node_client,
+				uri1,
+				uri2,
+			)?
+		}
+		_ => {
+			let eth_swap_contract_address = trades::get_eth_swap_contract_address(
+				&swap.secondary_currency,
+				&swap.eth_swap_contract_address,
+			)?;
+			let eth_infura_project_id = trades::get_eth_infura_projectid(
+				&swap.secondary_currency,
+				&swap.eth_infura_project_id,
+			)?;
+			crate::swap::api::create_eth_instance(
+				&swap.secondary_currency,
+				node_client,
+				ethereum_wallet,
+				eth_swap_contract_address,
+				eth_infura_project_id,
+			)?
+		}
+	};
+
 	let mut fsm = swap_api.get_fsm(keychain, swap);
 	let tx_conf = swap_api.request_tx_confirmations(keychain, swap)?;
 	let start_locked = swap.other_lock_first_done;
@@ -824,6 +999,8 @@ pub fn update_swap_status_action<'a, L, C, K>(
 	swap_id: &str,
 	electrum_node_uri1: Option<String>,
 	electrum_node_uri2: Option<String>,
+	eth_swap_contract_address: Option<String>,
+	eth_infura_project_id: Option<String>,
 	wait_for_backup1: bool,
 ) -> Result<
 	(
@@ -842,6 +1019,12 @@ where
 	C: NodeClient + 'a,
 	K: Keychain + 'a,
 {
+	let ethereum_wallet = wallet_inst
+		.clone()
+		.lock()
+		.lc_provider()?
+		.get_ethereum_wallet()?;
+
 	wallet_lock!(wallet_inst, w);
 	let node_client = w.w2n_client().clone();
 	let keychain = w.keychain(keychain_mask)?;
@@ -859,9 +1042,23 @@ where
 		swap.electrum_node_uri2 = electrum_node_uri2;
 	}
 
+	// Updating ethereum contract address and project id if they are defined. We can't reset them. For reset use Adjust
+	if eth_swap_contract_address.is_some() {
+		swap.eth_swap_contract_address = eth_swap_contract_address;
+	}
+	if eth_infura_project_id.is_some() {
+		swap.eth_infura_project_id = eth_infura_project_id;
+	}
+
 	swap.wait_for_backup1 = wait_for_backup1;
 
-	match update_swap_status_action_impl(&mut swap, &context, node_client, &keychain) {
+	match update_swap_status_action_impl(
+		&mut swap,
+		&context,
+		node_client,
+		&keychain,
+		ethereum_wallet,
+	) {
 		Ok((next_state_id, action, time_limit, eta, cancel_mkt_place_trades)) => {
 			swap.last_check_error = None;
 			trades::store_swap_trade(&context, &swap, &skey, &*swap_lock)?;
@@ -898,12 +1095,20 @@ pub fn get_swap_tx_tstatus<'a, L, C, K>(
 	swap_id: &str,
 	electrum_node_uri1: Option<String>,
 	electrum_node_uri2: Option<String>,
+	eth_swap_contract_address: Option<String>,
+	eth_infura_project_id: Option<String>,
 ) -> Result<SwapTransactionsConfirmations, Error>
 where
 	L: WalletLCProvider<'a, C, K>,
 	C: NodeClient + 'a,
 	K: Keychain + 'a,
 {
+	let ethereum_wallet = wallet_inst
+		.clone()
+		.lock()
+		.lc_provider()?
+		.get_ethereum_wallet()?;
+
 	wallet_lock!(wallet_inst, w);
 	let node_client = w.w2n_client().clone();
 	let keychain = w.keychain(keychain_mask)?;
@@ -913,21 +1118,54 @@ where
 
 	let (_context, mut swap) = trades::get_swap_trade(swap_id, &skey, &*swap_lock)?;
 
-	// Note, electrum_node_uri updates will not be saved. Needed for the check with failed ElectrumX node
-	if electrum_node_uri1.is_some() {
-		swap.electrum_node_uri1 = electrum_node_uri1;
-	}
-	if electrum_node_uri2.is_some() {
-		swap.electrum_node_uri2 = electrum_node_uri2;
-	}
+	let swap_api = match swap.secondary_currency.is_btc_family() {
+		true => {
+			// Note, electrum_node_uri updates will not be saved. Needed for the check with failed ElectrumX node
+			if electrum_node_uri1.is_some() {
+				swap.electrum_node_uri1 = electrum_node_uri1;
+			}
+			if electrum_node_uri2.is_some() {
+				swap.electrum_node_uri2 = electrum_node_uri2;
+			}
+			let (uri1, uri2) = trades::get_electrumx_uri(
+				&swap.secondary_currency,
+				&swap.electrum_node_uri1,
+				&swap.electrum_node_uri2,
+			)?;
+			crate::swap::api::create_btc_instance(
+				&swap.secondary_currency,
+				node_client,
+				uri1,
+				uri2,
+			)?
+		}
+		_ => {
+			// eth_infura_project_id is not saved in trade
+			if eth_swap_contract_address.is_some() {
+				swap.eth_swap_contract_address = eth_swap_contract_address;
+			}
+			if eth_infura_project_id.is_some() {
+				swap.eth_infura_project_id = eth_infura_project_id;
+			}
 
-	let (uri1, uri2) = trades::get_electrumx_uri(
-		&swap.secondary_currency,
-		&swap.electrum_node_uri1,
-		&swap.electrum_node_uri2,
-	)?;
-	let swap_api =
-		crate::swap::api::create_instance(&swap.secondary_currency, node_client, uri1, uri2)?;
+			let eth_swap_contract_address = trades::get_eth_swap_contract_address(
+				&swap.secondary_currency,
+				&swap.eth_swap_contract_address,
+			)?;
+			let eth_infura_project_id = trades::get_eth_infura_projectid(
+				&swap.secondary_currency,
+				&swap.eth_infura_project_id,
+			)?;
+			crate::swap::api::create_eth_instance(
+				&swap.secondary_currency,
+				node_client,
+				ethereum_wallet,
+				eth_swap_contract_address,
+				eth_infura_project_id,
+			)?
+		}
+	};
+
 	let res = swap_api.request_tx_confirmations(&keychain, &mut swap)?;
 
 	Ok(res)
@@ -954,6 +1192,12 @@ where
 	K: Keychain + 'a,
 	F: FnOnce(Message, String, String) -> Result<(bool, String), Error> + 'a,
 {
+	let ethereum_wallet = wallet_inst
+		.clone()
+		.lock()
+		.lc_provider()?
+		.get_ethereum_wallet()?;
+
 	if let Some(secondary_fee) = secondary_fee {
 		swap.secondary_fee = secondary_fee;
 	}
@@ -972,17 +1216,38 @@ where
 		}
 	}
 
-	let (uri1, uri2) = trades::get_electrumx_uri(
-		&swap.secondary_currency,
-		&swap.electrum_node_uri1,
-		&swap.electrum_node_uri2,
-	)?;
-	let swap_api = crate::swap::api::create_instance(
-		&swap.secondary_currency,
-		node_client.clone(),
-		uri1,
-		uri2,
-	)?;
+	let swap_api = match swap.secondary_currency.is_btc_family() {
+		true => {
+			let (uri1, uri2) = trades::get_electrumx_uri(
+				&swap.secondary_currency,
+				&swap.electrum_node_uri1,
+				&swap.electrum_node_uri2,
+			)?;
+			crate::swap::api::create_btc_instance(
+				&swap.secondary_currency,
+				node_client,
+				uri1,
+				uri2,
+			)?
+		}
+		_ => {
+			let eth_swap_contract_address = trades::get_eth_swap_contract_address(
+				&swap.secondary_currency,
+				&swap.eth_swap_contract_address,
+			)?;
+			let eth_infura_project_id = trades::get_eth_infura_projectid(
+				&swap.secondary_currency,
+				&swap.eth_infura_project_id,
+			)?;
+			crate::swap::api::create_eth_instance(
+				&swap.secondary_currency,
+				node_client,
+				ethereum_wallet,
+				eth_swap_contract_address,
+				eth_infura_project_id,
+			)?
+		}
+	};
 
 	let tx_conf = swap_api.request_tx_confirmations(&keychain, swap)?;
 	let mut fsm = swap_api.get_fsm(&keychain, swap);
@@ -1052,6 +1317,9 @@ where
 				&contents,
 				Some(swap_lock.clone()),
 			)?;
+		}
+		Action::BuyerDepositToContractAccount => {
+			process_respond = fsm.process(Input::Execute, swap, &context, &tx_conf)?;
 		}
 		Action::SellerPublishMwcLockTx => {
 			wallet_lock!(wallet_inst, w);
@@ -1173,6 +1441,7 @@ pub fn swap_process<'a, L, C, K, F>(
 	secondary_address: Option<String>,
 	electrum_node_uri1: Option<String>,
 	electrum_node_uri2: Option<String>,
+	eth_infura_project_id: Option<String>,
 	wait_for_backup1: bool,
 ) -> Result<(StateProcessRespond, Vec<Swap>), Error>
 where
@@ -1200,6 +1469,11 @@ where
 	}
 	if electrum_node_uri2.is_some() {
 		swap.electrum_node_uri2 = electrum_node_uri2;
+	}
+
+	// upddate ethereum infura project id
+	if eth_infura_project_id.is_some() {
+		swap.eth_infura_project_id = eth_infura_project_id;
 	}
 
 	swap.wait_for_backup1 = wait_for_backup1;
@@ -1407,7 +1681,7 @@ where
 					&swap.electrum_node_uri1,
 					&swap.electrum_node_uri2,
 				)?;
-				let swap_api = crate::swap::api::create_instance(
+				let swap_api = crate::swap::api::create_btc_instance(
 					&swap.secondary_currency,
 					node_client.clone(),
 					uri1,
@@ -1463,6 +1737,12 @@ where
 
 	debug!("Get swap message {:?}", message);
 
+	let ethereum_wallet = wallet_inst
+		.clone()
+		.lock()
+		.lc_provider()?
+		.get_ethereum_wallet()?;
+
 	wallet_lock!(wallet_inst, w);
 	let node_client = w.w2n_client().clone();
 	let keychain = w.keychain(keychain_mask)?;
@@ -1491,18 +1771,38 @@ where
 				return Err( ErrorKind::Generic(format!("trade with SwapID {} already exist. Probably you already processed this message", swap_id)).into());
 			}
 
-			let (uri1, uri2) =
-				trades::get_electrumx_uri(&offer_update.secondary_currency, &None, &None)?;
-			let mut swap_api = crate::swap::api::create_instance(
-				&offer_update.secondary_currency,
-				node_client.clone(),
-				uri1,
-				uri2,
-			)?;
+			let mut swap_api = match offer_update.secondary_currency.is_btc_family() {
+				true => {
+					let (uri1, uri2) =
+						trades::get_electrumx_uri(&offer_update.secondary_currency, &None, &None)?;
+					crate::swap::api::create_btc_instance(
+						&offer_update.secondary_currency,
+						node_client.clone(),
+						uri1,
+						uri2,
+					)?
+				}
+				_ => {
+					let eth_swap_contract_address = trades::get_eth_swap_contract_address(
+						&offer_update.secondary_currency,
+						&None,
+					)?;
+					let eth_infura_project_id =
+						trades::get_eth_infura_projectid(&offer_update.secondary_currency, &None)?;
+					crate::swap::api::create_eth_instance(
+						&offer_update.secondary_currency,
+						node_client.clone(),
+						ethereum_wallet.clone(),
+						eth_swap_contract_address,
+						eth_infura_project_id,
+					)?
+				}
+			};
 
 			// Creating Buyer context
 			let context = create_context(
 				&mut **w,
+				Some(&ethereum_wallet.clone()),
 				keychain_mask,
 				&mut swap_api,
 				&keychain,
@@ -1519,7 +1819,7 @@ where
 				id,
 				offer,
 				secondary_update,
-				&node_client,
+				&node_client.clone(),
 			)?;
 
 			trades::store_swap_trade(&context, &swap, &skey, &*lock)?;
@@ -1559,18 +1859,35 @@ where
 		}
 		_ => {
 			let (context, mut swap) = trades::get_swap_trade(swap_id.as_str(), &skey, &*lock)?;
+			let swap_api = match swap.secondary_currency.is_btc_family() {
+				true => {
+					let (uri1, uri2) = trades::get_electrumx_uri(
+						&swap.secondary_currency,
+						&swap.electrum_node_uri1,
+						&swap.electrum_node_uri2,
+					)?;
+					crate::swap::api::create_btc_instance(
+						&swap.secondary_currency,
+						node_client.clone(),
+						uri1,
+						uri2,
+					)?
+				}
+				_ => {
+					let eth_swap_contract_address =
+						trades::get_eth_swap_contract_address(&swap.secondary_currency, &None)?;
+					let eth_infura_project_id =
+						trades::get_eth_infura_projectid(&swap.secondary_currency, &None)?;
+					crate::swap::api::create_eth_instance(
+						&swap.secondary_currency,
+						node_client.clone(),
+						ethereum_wallet.clone(),
+						eth_swap_contract_address,
+						eth_infura_project_id,
+					)?
+				}
+			};
 
-			let (uri1, uri2) = trades::get_electrumx_uri(
-				&swap.secondary_currency,
-				&swap.electrum_node_uri1,
-				&swap.electrum_node_uri2,
-			)?;
-			let swap_api = crate::swap::api::create_instance(
-				&swap.secondary_currency,
-				node_client,
-				uri1,
-				uri2,
-			)?;
 			let tx_conf = swap_api.request_tx_confirmations(&keychain, &swap)?;
 			let mut fsm = swap_api.get_fsm(&keychain, &swap);
 			let msg_gr = match &&message.inner {
@@ -1595,6 +1912,7 @@ where
 // Local Helper method to create a context
 fn create_context<'a, T: ?Sized, C, K>(
 	wallet: &mut T,
+	ethereum_wallet: Option<&EthereumWallet>,
 	keychain_mask: Option<&SecretKey>,
 	swap_api: &mut Box<dyn SwapApi<K> + 'a>,
 	keychain: &K,
@@ -1635,6 +1953,7 @@ where
 
 	let context = (**swap_api).create_context(
 		keychain,
+		ethereum_wallet,
 		secondary_currency,
 		is_seller,
 		inputs,

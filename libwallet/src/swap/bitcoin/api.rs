@@ -22,6 +22,7 @@ use crate::grin_util::secp::Message;
 use crate::grin_util::Mutex;
 use crate::swap::bitcoin::types::BtcTtansaction;
 use crate::swap::bitcoin::Output;
+use crate::swap::ethereum::*;
 use crate::swap::fsm::machine::StateMachine;
 use crate::swap::fsm::{buyer_swap, seller_swap};
 use crate::swap::message::SecondaryUpdate;
@@ -365,20 +366,16 @@ where
 		secondary_currency: Currency,
 		_is_seller: bool,
 	) -> Result<usize, ErrorKind> {
-		match secondary_currency {
-			Currency::Btc
-			| Currency::Bch
-			| Currency::Ltc
-			| Currency::Dash
-			| Currency::ZCash
-			| Currency::Doge => Ok(4),
-			//_ => return Err(ErrorKind::UnexpectedCoinType),
+		match secondary_currency.is_btc_family() {
+			true => Ok(4),
+			_ => return Err(ErrorKind::UnexpectedCoinType),
 		}
 	}
 
 	fn create_context(
 		&mut self,
 		keychain: &K,
+		_ethereum_wallet: Option<&EthereumWallet>,
 		secondary_currency: Currency,
 		is_seller: bool,
 		inputs: Option<Vec<(Identifier, Option<u64>, u64)>>,
@@ -386,14 +383,9 @@ where
 		keys: Vec<Identifier>,
 		parent_key_id: Identifier,
 	) -> Result<Context, ErrorKind> {
-		match secondary_currency {
-			Currency::Btc
-			| Currency::Bch
-			| Currency::Ltc
-			| Currency::Dash
-			| Currency::ZCash
-			| Currency::Doge => (),
-			//_ => return Err(ErrorKind::UnexpectedCoinType),
+		match secondary_currency.is_btc_family() {
+			true => (),
+			_ => return Err(ErrorKind::UnexpectedCoinType),
 		}
 
 		let secp = keychain.secp();
@@ -451,6 +443,8 @@ where
 		buyer_destination_address: String,
 		electrum_node_uri1: Option<String>,
 		electrum_node_uri2: Option<String>,
+		eth_swap_contract_address: Option<String>,
+		eth_infura_project_id: Option<String>,
 		dry_run: bool,
 		tag: Option<String>,
 	) -> Result<Swap, ErrorKind> {
@@ -465,14 +459,9 @@ where
 				))
 			})?;
 
-		match secondary_currency {
-			Currency::Btc
-			| Currency::Bch
-			| Currency::Ltc
-			| Currency::Dash
-			| Currency::ZCash
-			| Currency::Doge => (),
-			//_ => return Err(ErrorKind::UnexpectedCoinType),
+		match secondary_currency.is_btc_family() {
+			true => (),
+			_ => return Err(ErrorKind::UnexpectedCoinType),
 		}
 
 		let height = self.node_client.get_chain_tip()?.0;
@@ -493,6 +482,8 @@ where
 			buyer_destination_address,
 			electrum_node_uri1,
 			electrum_node_uri2,
+			eth_swap_contract_address,
+			eth_infura_project_id,
 			dry_run,
 			tag,
 		)?;
@@ -779,6 +770,11 @@ where
 			post_tx,
 		)?;
 		Ok(())
+	}
+
+	/// deposit secondary currecny to lock account.
+	fn post_secondary_lock_tx(&self, _swap: &mut Swap) -> Result<(), ErrorKind> {
+		unimplemented!()
 	}
 
 	/// Validate clients. We want to be sure that the clients able to acceess the servers

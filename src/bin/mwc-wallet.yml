@@ -565,6 +565,7 @@ subcommands:
               - zcash
               - dash
               - doge
+              - ether
             default_value: bch
         - secondary_amount:
             help: Secondary currency amount excluding fees
@@ -577,7 +578,7 @@ subcommands:
             long: secondary_address
             takes_value: true
         - secondary_fee:
-            help: Tx fee for secondary currency (satoshi per byte)
+            help: Tx fee for secondary currency (satoshi per byte for btc family, gwei for ethereum)
             long: secondary_fee
             takes_value: true
         - who_lock_first:
@@ -630,6 +631,14 @@ subcommands:
         - electrum_uri2:
             help: secondary private ElectrumX node URI. If not defined, community node will be used
             long: electrum_uri2
+            takes_value: true
+        - eth_swap_contract_address:
+            help: ethereum swap contract address
+            long: eth_swap_contract_address
+            takes_value: true
+        - eth_infura_project_id:
+            help: ethereum infura project id
+            long: eth_infura_project_id
             takes_value: true
         - dry_run:
             help: verify parameters, do not create a new swap trade
@@ -692,6 +701,7 @@ subcommands:
               - secondary_address
               - secondary_fee
               - electrumx_uri
+              - eth_infura_project_id
               - SellerOfferCreated
               - SellerSendingOffer
               - SellerWaitingForAcceptanceMessage
@@ -781,9 +791,34 @@ subcommands:
             help: secondary private ElectrumX node URI. If never setup, community node will be used
             long: electrum_uri2
             takes_value: true
+        - eth_infura_project_id:
+            help: ethereum infura project id
+            long: eth_infura_project_id
+            takes_value: true
         - tag:
             help: Adjusted tag for the swap trade. Tags are used for managing swap marketplace trades
             long: tag
+            takes_value: true
+  - eth:
+      about: basic eth account management for eth swap
+      args:
+        - info:
+            help: show eth wallet info
+            short: i
+            long: info
+            takes_value: false
+        - send:
+            help: send out eth coins
+            long: send
+            takes_value: false
+        - dest:
+            help: destination eth wallet account
+            short: d
+            long: dest
+            takes_value: true
+        - amount:
+            help: amounts send out
+            long: amount
             takes_value: true
   - integrity:
       about: Manage integrity fees and funds.

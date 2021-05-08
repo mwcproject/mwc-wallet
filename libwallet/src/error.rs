@@ -351,6 +351,10 @@ pub enum ErrorKind {
 	/// Slatepack Encoding Error
 	#[fail(display = "Slatepack encode error, {}", _0)]
 	SlatepackEncodeError(String),
+
+	/// Ethereum Wallet Error
+	#[fail(display = "Ethereum wallet error, {}", _0)]
+	EthereumWalletError(String),
 }
 
 impl Display for Error {

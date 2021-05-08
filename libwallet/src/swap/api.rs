@@ -20,6 +20,7 @@ use crate::grin_core::global;
 use crate::grin_keychain::Identifier;
 use crate::grin_util::Mutex;
 use crate::swap::bitcoin::{BtcSwapApi, ElectrumNodeClient};
+use crate::swap::ethereum::{EthSwapApi, EthereumWallet, InfuraNodeClient};
 use crate::swap::fsm::machine::StateMachine;
 use crate::swap::message::SecondaryUpdate;
 use crate::swap::types::SwapTransactionsConfirmations;
@@ -43,6 +44,7 @@ pub trait SwapApi<K: Keychain>: Sync + Send {
 	fn create_context(
 		&mut self,
 		keychain: &K,
+		ethereum_wallet: Option<&EthereumWallet>,
 		secondary_currency: Currency,
 		is_seller: bool,
 		inputs: Option<Vec<(Identifier, Option<u64>, u64)>>, // inputs with amounts that sellect is agree to use.
@@ -70,6 +72,8 @@ pub trait SwapApi<K: Keychain>: Sync + Send {
 		buyer_destination_address: String,
 		electrum_node_uri1: Option<String>,
 		electrum_node_uri2: Option<String>,
+		eth_swap_contract_address: Option<String>,
+		eth_infura_project_id: Option<String>,
 		dry_run: bool,
 		tag: Option<String>,
 	) -> Result<Swap, ErrorKind>;
@@ -135,6 +139,9 @@ pub trait SwapApi<K: Keychain>: Sync + Send {
 		post_tx: bool,
 	) -> Result<(), ErrorKind>;
 
+	/// deposit secondary currecny to lock account.
+	fn post_secondary_lock_tx(&self, swap: &mut Swap) -> Result<(), ErrorKind>;
+
 	/// Validate clients. We want to be sure that the clients able to acceess the servers
 	fn test_client_connections(&self) -> Result<(), ErrorKind>;
 }
@@ -142,7 +149,7 @@ pub trait SwapApi<K: Keychain>: Sync + Send {
 /// Create an appropriate instance for the Currency
 /// electrumx_uri - mandatory for BTC
 /// Note: Result lifetime is equal of arguments lifetime!
-pub fn create_instance<'a, C, K>(
+pub fn create_btc_instance<'a, C, K>(
 	currency: &Currency,
 	node_client: C,
 	electrum_node_uri1: String,
@@ -152,18 +159,72 @@ where
 	C: NodeClient + 'a,
 	K: Keychain + 'a,
 {
-	let secondary_currency_node_client1 = ElectrumNodeClient::new(
-		electrum_node_uri1,
-		currency.get_block1_tx_hash(!global::is_mainnet()),
-	);
-	let secondary_currency_node_client2 = ElectrumNodeClient::new(
-		electrum_node_uri2,
-		currency.get_block1_tx_hash(!global::is_mainnet()),
-	);
-	Ok(Box::new(BtcSwapApi::new(
-		currency.clone(),
-		Arc::new(node_client),
-		Arc::new(Mutex::new(secondary_currency_node_client1)),
-		Arc::new(Mutex::new(secondary_currency_node_client2)),
-	)))
+	//todo change to check btc family
+	match currency {
+		Currency::Btc
+		| Currency::Bch
+		| Currency::Ltc
+		| Currency::Dash
+		| Currency::ZCash
+		| Currency::Doge => {
+			let secondary_currency_node_client1 = ElectrumNodeClient::new(
+				electrum_node_uri1,
+				currency.get_block1_tx_hash(!global::is_mainnet()),
+			);
+			let secondary_currency_node_client2 = ElectrumNodeClient::new(
+				electrum_node_uri2,
+				currency.get_block1_tx_hash(!global::is_mainnet()),
+			);
+			Ok(Box::new(BtcSwapApi::new(
+				currency.clone(),
+				Arc::new(node_client),
+				Arc::new(Mutex::new(secondary_currency_node_client1)),
+				Arc::new(Mutex::new(secondary_currency_node_client2)),
+			)))
+		}
+		_ => Err(ErrorKind::InvalidCurrency(
+			"unknow btc family coins".to_string(),
+		)),
+	}
+}
+
+/// Create an appropriate instance for the Currency
+/// ethereum - mandatory for ETH
+/// Note: Result lifetime is equal of arguments lifetime!
+pub fn create_eth_instance<'a, C, K>(
+	currency: &Currency,
+	node_client: C,
+	ethereum_wallet: EthereumWallet,
+	eth_swap_contract_addr: String,
+	eth_infura_project_id: String,
+) -> Result<Box<dyn SwapApi<K> + 'a>, ErrorKind>
+where
+	C: NodeClient + 'a,
+	K: Keychain + 'a,
+{
+	match currency {
+		Currency::Ether => {
+			let chain = if global::is_mainnet() {
+				"mainnet".to_string()
+			} else {
+				"ropsten".to_string()
+			};
+			let secondary_currency_node_client = InfuraNodeClient::new(
+				eth_infura_project_id,
+				chain,
+				ethereum_wallet,
+				eth_swap_contract_addr,
+			)
+			.unwrap();
+
+			Ok(Box::new(EthSwapApi::new(
+				currency.clone(),
+				Arc::new(node_client),
+				Arc::new(Mutex::new(secondary_currency_node_client)),
+			)))
+		}
+		_ => Err(ErrorKind::InvalidCurrency(
+			"unknow ethereum family coins".to_string(),
+		)),
+	}
 }

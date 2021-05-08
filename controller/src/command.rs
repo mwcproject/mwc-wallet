@@ -1725,10 +1725,30 @@ pub struct SwapArgs {
 	pub electrum_node_uri1: Option<String>,
 	/// ElectrumX failover URI2
 	pub electrum_node_uri2: Option<String>,
+	/// Ethereum Swap Contract Address
+	pub eth_swap_contract_address: Option<String>,
+	/// Ethereum Infura Project Id
+	pub eth_infura_project_id: Option<String>,
 	/// Need to wait for the first backup.
 	pub wait_for_backup1: bool,
 	/// Assign tag to this trade
 	pub tag: Option<String>,
+}
+
+/// Eth operation
+#[derive(PartialEq)]
+pub enum EthSubcommand {
+	Info,
+	Send,
+}
+/// Arguments for the eth command
+pub struct EthArgs {
+	/// eth subcommand
+	pub subcommand: EthSubcommand,
+	/// dest address
+	pub dest: Option<String>,
+	/// amount
+	pub amount: Option<String>,
 }
 
 // Integrity operation
@@ -1999,6 +2019,7 @@ where
 					args.secondary_fee,
 					args.electrum_node_uri1.clone(),
 					args.electrum_node_uri2.clone(),
+					args.eth_infura_project_id.clone(),
 					args.tag.clone(),
 				);
 				match result {
@@ -2035,6 +2056,8 @@ where
 						&swap_id,
 						args.electrum_node_uri1.clone(),
 						args.electrum_node_uri2.clone(),
+						args.eth_swap_contract_address.clone(),
+						args.eth_infura_project_id.clone(),
 					) {
 						Ok(status) => status,
 						Err(e) => {
@@ -2076,6 +2099,8 @@ where
 									"journal_records" : journal_records_to_print,
 									"electrumNodeUri1" : swap.electrum_node_uri1.clone().unwrap_or("".to_string()),
 									"electrumNodeUri2" : swap.electrum_node_uri2.clone().unwrap_or("".to_string()),
+									"eth_swap_contract_address": swap.eth_swap_contract_address.clone().unwrap_or("".to_string()),
+									"eth_infura_project_id": swap.eth_infura_project_id.clone().unwrap_or("".to_string()),
 								});
 								println!("JSON: {}", item.to_string());
 								return Ok(());
@@ -2099,6 +2124,8 @@ where
 						&swap_id,
 						args.electrum_node_uri1,
 						args.electrum_node_uri2,
+						args.eth_swap_contract_address,
+						args.eth_infura_project_id,
 						args.wait_for_backup1,
 					)?;
 
@@ -2162,6 +2189,9 @@ where
 
 							"electrumNodeUri1" : swap.electrum_node_uri1.clone().unwrap_or("".to_string()),
 							"electrumNodeUri2" : swap.electrum_node_uri2.clone().unwrap_or("".to_string()),
+
+							"eth_swap_contract_address": swap.eth_swap_contract_address.clone().unwrap_or("".to_string()),
+							"eth_infura_project_id": swap.eth_infura_project_id.clone().unwrap_or("".to_string()),
 						});
 
 						println!("JSON: {}", item.to_string());
@@ -2341,6 +2371,7 @@ where
 				args.secondary_address,
 				args.electrum_node_uri1,
 				args.electrum_node_uri2,
+				args.eth_infura_project_id,
 				args.wait_for_backup1,
 			);
 
@@ -2538,6 +2569,8 @@ where
 					&swap_id,
 					args.electrum_node_uri1.clone(),
 					args.electrum_node_uri2.clone(),
+					args.eth_swap_contract_address.clone(),
+					args.eth_infura_project_id.clone(),
 				)?;
 				let (
 					state,
@@ -2553,6 +2586,8 @@ where
 					&swap_id,
 					args.electrum_node_uri1,
 					args.electrum_node_uri2,
+					args.eth_swap_contract_address,
+					args.eth_infura_project_id,
 					args.wait_for_backup1,
 				)?;
 
@@ -2578,7 +2613,9 @@ where
 								})?
 						}
 						None => {
-							if swap.get_secondary_address().is_empty() {
+							if swap.get_secondary_address().is_empty()
+								&& swap.secondary_currency.is_btc_family()
+							{
 								return Err(ErrorKind::GenericError(
 									"Please define buyer_refund_address for automated swap"
 										.to_string(),
@@ -2645,6 +2682,7 @@ where
 							km2.as_ref(),
 							&swap_id2,
 							None,None, // URIs are already updated
+							None, None,
 							wait_for_backup1,
 						) {
 							Ok(res) => res,
@@ -2675,6 +2713,7 @@ where
 								fee_satoshi.clone(),
 								secondary_address.clone(),
 								None, None, // URIs was already updated before. No need to update the same.
+								None,
 								wait_for_backup1,
 							) {
 								Ok( (res, cancelled_swaps)) => {
@@ -2884,6 +2923,52 @@ where
 				"Swap trade {} is restored from the file {}",
 				swap_id, trade_file_name
 			);
+			Ok(())
+		}
+	}
+}
+
+pub fn eth<L, C, K>(
+	owner_api: &mut Owner<L, C, K>,
+	keychain_mask: Option<&SecretKey>,
+	args: EthArgs,
+) -> Result<(), Error>
+where
+	L: WalletLCProvider<'static, C, K> + 'static,
+	C: NodeClient + 'static,
+	K: keychain::Keychain + 'static,
+{
+	match args.subcommand {
+		EthSubcommand::Info => {
+			controller::owner_single_use(None, keychain_mask, Some(owner_api), |api, _m| {
+				let result = api.eth_info();
+				match result {
+					Ok((address, height, balance)) => {
+						display::eth_info(address, height, balance);
+						Ok(())
+					}
+					Err(e) => Err(ErrorKind::LibWallet(format!(
+						"Ethereum Chain Operation failed! {}",
+						e
+					))
+					.into()),
+				}
+			})?;
+			Ok(())
+		}
+		EthSubcommand::Send => {
+			controller::owner_single_use(None, keychain_mask, Some(owner_api), |api, _m| {
+				let dest = args.dest;
+				let amount = args.amount;
+
+				if dest.is_none() || amount.is_none() {
+					println!("Please sepecify destination address and amounts");
+					return Ok(());
+				}
+				api.eth_transfer(dest.clone(), amount.clone())?;
+				println!("Transfer {} to {} done!!!", amount.unwrap(), dest.unwrap());
+				Ok(())
+			})?;
 			Ok(())
 		}
 	}

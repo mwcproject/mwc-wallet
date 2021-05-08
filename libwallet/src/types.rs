@@ -15,6 +15,7 @@
 //! Types and traits that should be provided by a wallet
 //! implementation
 
+use super::swap::ethereum::EthereumWallet;
 use crate::config::{MQSConfig, TorConfig, WalletConfig};
 use crate::error::{Error, ErrorKind};
 use crate::grin_api::{Libp2pMessages, Libp2pPeers};
@@ -138,6 +139,9 @@ where
 		new: ZeroingString,
 		wallet_data_dir: Option<&str>,
 	) -> Result<(), Error>;
+
+	/// get ethereum wallet instant
+	fn get_ethereum_wallet(&self) -> Result<EthereumWallet, Error>;
 
 	/// deletes wallet
 	fn delete_wallet(&self, name: Option<&str>) -> Result<(), Error>;

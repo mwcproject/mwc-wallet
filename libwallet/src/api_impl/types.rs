@@ -366,7 +366,7 @@ pub struct SwapStartArgs {
 	pub outputs: Option<Vec<String>>, // Outputs to select for this swap. Must be unlocked but can belong to other trades.
 	/// Secondary currency
 	pub secondary_currency: String,
-	/// BTC to recieve
+	/// Secondary to recieve
 	pub secondary_amount: String,
 	/// Secondary currency redeem address
 	pub secondary_redeem_address: String,
@@ -392,6 +392,10 @@ pub struct SwapStartArgs {
 	pub electrum_node_uri1: Option<String>,
 	/// ElectrumX failover URI2
 	pub electrum_node_uri2: Option<String>,
+	/// Ethereum Swap Contract Address
+	pub eth_swap_contract_address: Option<String>,
+	/// Ethereum Infura Project Id
+	pub eth_infura_project_id: Option<String>,
 	/// Dry run flag. Use true if you want to validate config
 	pub dry_run: bool,
 	/// Tag for this offer. Needed for swap marketplace related offers management

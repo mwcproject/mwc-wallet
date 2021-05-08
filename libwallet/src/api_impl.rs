@@ -23,6 +23,7 @@
 
 pub mod foreign;
 pub mod owner;
+pub mod owner_eth;
 pub mod owner_libp2p;
 pub mod owner_swap;
 pub mod owner_updater;
