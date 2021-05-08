@@ -583,184 +583,184 @@ mod tests {
 			}};
 	}
 
-	#[test]
-	fn test_infura() {
-		let nc = get_infura_client!(
-			PROJECT_ID,
-			CHAIN,
-			MNMENOIC,
-			PASSWORD,
-			WALLET_PATH,
-			CONTRACT_ADDR
-		);
-		let balance = nc.balance(Currency::Ether).unwrap();
-		println!("balance: {}", balance.0);
+	// #[test]
+	// fn test_infura() {
+	// 	let nc = get_infura_client!(
+	// 		PROJECT_ID,
+	// 		CHAIN,
+	// 		MNMENOIC,
+	// 		PASSWORD,
+	// 		WALLET_PATH,
+	// 		CONTRACT_ADDR
+	// 	);
+	// 	let balance = nc.balance(Currency::Ether).unwrap();
+	// 	println!("balance: {}", balance.0);
 
-		let height = nc.height().unwrap();
-		println!("height: {}", height);
-	}
+	// 	let height = nc.height().unwrap();
+	// 	println!("height: {}", height);
+	// }
 
-	#[test]
-	fn test_transfer_funds() {
-		let c = get_infura_client!(
-			PROJECT_ID,
-			CHAIN,
-			MNMENOIC,
-			PASSWORD,
-			WALLET_PATH,
-			CONTRACT_ADDR
-		);
-		let res = c.transfer(
-			to_eth_address("Aa7937998d2f417EaC0524ad6E15c9C5e40efBA9".to_string()).unwrap(),
-			1_000_000_000_000_000_000_u64,
-		);
-		println!("transfer result: {:?}", res);
-	}
+	// #[test]
+	// fn test_transfer_funds() {
+	// 	let c = get_infura_client!(
+	// 		PROJECT_ID,
+	// 		CHAIN,
+	// 		MNMENOIC,
+	// 		PASSWORD,
+	// 		WALLET_PATH,
+	// 		CONTRACT_ADDR
+	// 	);
+	// 	let res = c.transfer(
+	// 		to_eth_address("Aa7937998d2f417EaC0524ad6E15c9C5e40efBA9".to_string()).unwrap(),
+	// 		1_000_000_000_000_000_000_u64,
+	// 	);
+	// 	println!("transfer result: {:?}", res);
+	// }
 
-	#[test]
-	fn test_retrieve_trans_receipt() {
-		let c = get_infura_client!(
-			PROJECT_ID,
-			CHAIN,
-			MNMENOIC,
-			PASSWORD,
-			WALLET_PATH,
-			CONTRACT_ADDR
-		);
-		let res = c.retrieve_receipt(
-			to_eth_tx_hash(
-				"0x193342ec1fc85fb075d8c09006b954c5dc8b015606c72e57e8759f43b7191ea6".to_string(),
-			)
-			.unwrap(),
-		);
-		println!("test_retrieve_trans_receipt result: {:?}", res.unwrap());
-	}
+	// #[test]
+	// fn test_retrieve_trans_receipt() {
+	// 	let c = get_infura_client!(
+	// 		PROJECT_ID,
+	// 		CHAIN,
+	// 		MNMENOIC,
+	// 		PASSWORD,
+	// 		WALLET_PATH,
+	// 		CONTRACT_ADDR
+	// 	);
+	// 	let res = c.retrieve_receipt(
+	// 		to_eth_tx_hash(
+	// 			"0x193342ec1fc85fb075d8c09006b954c5dc8b015606c72e57e8759f43b7191ea6".to_string(),
+	// 		)
+	// 		.unwrap(),
+	// 	);
+	// 	println!("test_retrieve_trans_receipt result: {:?}", res.unwrap());
+	// }
 
-	#[test]
-	fn test_initiate_swap() {
-		let nc = get_infura_client!(
-			PROJECT_ID,
-			CHAIN,
-			MNMENOIC,
-			PASSWORD,
-			WALLET_PATH,
-			CONTRACT_ADDR
-		);
-		let wallet_rand = EthereumWallet::new(&mut thread_rng()).unwrap();
-		let address_from_secret = to_eth_address(wallet_rand.address.clone().unwrap()).unwrap();
-		let res = nc.initiate(
-			2700,
-			address_from_secret,
-			to_eth_address("Aa7937998d2f417EaC0524ad6E15c9C5e40efBA8".to_string()).unwrap(),
-			2000,
-		);
-		println!("initiate_swap result: {:?}", res);
-	}
+	// #[test]
+	// fn test_initiate_swap() {
+	// 	let nc = get_infura_client!(
+	// 		PROJECT_ID,
+	// 		CHAIN,
+	// 		MNMENOIC,
+	// 		PASSWORD,
+	// 		WALLET_PATH,
+	// 		CONTRACT_ADDR
+	// 	);
+	// 	let wallet_rand = EthereumWallet::new(&mut thread_rng()).unwrap();
+	// 	let address_from_secret = to_eth_address(wallet_rand.address.clone().unwrap()).unwrap();
+	// 	let res = nc.initiate(
+	// 		2700,
+	// 		address_from_secret,
+	// 		to_eth_address("Aa7937998d2f417EaC0524ad6E15c9C5e40efBA8".to_string()).unwrap(),
+	// 		2000,
+	// 	);
+	// 	println!("initiate_swap result: {:?}", res);
+	// }
 
-	// wallet: EthereumWallet { path: None, password: None, mnemonic: None, extended_private_key: None, extended_public_key: None, private_key: Some("4651f24db5971c714d854df5ea5a68f2fccce96a24b8c41c619f4c9d49cd96e2"), public_key: Some("6673c66071c3fed37fc29b22bc55b723dc183f746c5170f432de35326cb7e2e07d9aa0096943d901d753af0a0f314712eae7c759a1ae3b3e0dea3054d3ae65ba"), address: Some("0x3b6C3dF492a9cf58ca3f52CAA68bA9D09391E692"), transaction_id: None, network: None, transaction_hex: None }
-	#[test]
-	fn test_get_swap_details() {
-		let c = get_infura_client!(
-			PROJECT_ID,
-			CHAIN,
-			MNMENOIC,
-			PASSWORD,
-			WALLET_PATH,
-			CONTRACT_ADDR
-		);
+	// // wallet: EthereumWallet { path: None, password: None, mnemonic: None, extended_private_key: None, extended_public_key: None, private_key: Some("4651f24db5971c714d854df5ea5a68f2fccce96a24b8c41c619f4c9d49cd96e2"), public_key: Some("6673c66071c3fed37fc29b22bc55b723dc183f746c5170f432de35326cb7e2e07d9aa0096943d901d753af0a0f314712eae7c759a1ae3b3e0dea3054d3ae65ba"), address: Some("0x3b6C3dF492a9cf58ca3f52CAA68bA9D09391E692"), transaction_id: None, network: None, transaction_hex: None }
+	// #[test]
+	// fn test_get_swap_details() {
+	// 	let c = get_infura_client!(
+	// 		PROJECT_ID,
+	// 		CHAIN,
+	// 		MNMENOIC,
+	// 		PASSWORD,
+	// 		WALLET_PATH,
+	// 		CONTRACT_ADDR
+	// 	);
 
-		let address_from_secret =
-			to_eth_address("3b6C3dF492a9cf58ca3f52CAA68bA9D09391E692".to_string()).unwrap();
-		let res = c.get_swap_details(address_from_secret);
-		println!("test_get_swap_details result: {:?}", res.unwrap());
-	}
+	// 	let address_from_secret =
+	// 		to_eth_address("3b6C3dF492a9cf58ca3f52CAA68bA9D09391E692".to_string()).unwrap();
+	// 	let res = c.get_swap_details(address_from_secret);
+	// 	println!("test_get_swap_details result: {:?}", res.unwrap());
+	// }
 
-	// // wallet: EthereumWallet { path: None, password: None, mnemonic: None, extended_private_key: None, extended_public_key: None, private_key: Some("64b0699526f9ed457cafb6cd27dbffe7ea8196a602b23354e0303521d0c1e265"), public_key: Some("cff6fc214ee02f9fb2def6908b605e84e2e2aaa5b0b484426d3997cb123dbba037c1b9d86fb76477c5c0df9750f7ba222adc80549e164affe68c6d2b75008942"), address: Some("0xDed1df8d3ea680C314bF9D7B9D0577c8F2eE980C"), transaction_id: None, network: None, transaction_hex: None }
-	#[test]
-	fn test_redeem() {
-		set_test_mode(true);
-		let c = get_infura_client!(
-			PROJECT_ID,
-			CHAIN,
-			MNMENOIC,
-			PASSWORD,
-			WALLET_PATH,
-			CONTRACT_ADDR
-		);
+	// // // wallet: EthereumWallet { path: None, password: None, mnemonic: None, extended_private_key: None, extended_public_key: None, private_key: Some("64b0699526f9ed457cafb6cd27dbffe7ea8196a602b23354e0303521d0c1e265"), public_key: Some("cff6fc214ee02f9fb2def6908b605e84e2e2aaa5b0b484426d3997cb123dbba037c1b9d86fb76477c5c0df9750f7ba222adc80549e164affe68c6d2b75008942"), address: Some("0xDed1df8d3ea680C314bF9D7B9D0577c8F2eE980C"), transaction_id: None, network: None, transaction_hex: None }
+	// #[test]
+	// fn test_redeem() {
+	// 	set_test_mode(true);
+	// 	let c = get_infura_client!(
+	// 		PROJECT_ID,
+	// 		CHAIN,
+	// 		MNMENOIC,
+	// 		PASSWORD,
+	// 		WALLET_PATH,
+	// 		CONTRACT_ADDR
+	// 	);
 
-		//generate rand address for swap index
-		let wallet_rand = EthereumWallet::new(&mut thread_rng()).unwrap();
-		let address_from_secret = to_eth_address(wallet_rand.address.clone().unwrap()).unwrap();
+	// 	//generate rand address for swap index
+	// 	let wallet_rand = EthereumWallet::new(&mut thread_rng()).unwrap();
+	// 	let address_from_secret = to_eth_address(wallet_rand.address.clone().unwrap()).unwrap();
 
-		//generate participant wallet
-		let redeem_wallet =
-			generate_ethereum_wallet(CHAIN, REDEEM_MNMENOIC, PASSWORD, WALLET_PATH).unwrap();
-		REDEEM_WALLET
-			.write()
-			.unwrap()
-			.replace(redeem_wallet.clone());
+	// 	//generate participant wallet
+	// 	let redeem_wallet =
+	// 		generate_ethereum_wallet(CHAIN, REDEEM_MNMENOIC, PASSWORD, WALLET_PATH).unwrap();
+	// 	REDEEM_WALLET
+	// 		.write()
+	// 		.unwrap()
+	// 		.replace(redeem_wallet.clone());
 
-		//initiate swap offer
-		let res = c.initiate(
-			720,
-			address_from_secret,
-			to_eth_address(redeem_wallet.address.clone().unwrap()).unwrap(),
-			1000,
-		);
-		println!("initiate_swap result: {}", res.unwrap());
+	// 	//initiate swap offer
+	// 	let res = c.initiate(
+	// 		720,
+	// 		address_from_secret,
+	// 		to_eth_address(redeem_wallet.address.clone().unwrap()).unwrap(),
+	// 		1000,
+	// 	);
+	// 	println!("initiate_swap result: {}", res.unwrap());
 
-		// delay 100s , then refund
-		let ten_secs = time::Duration::from_secs(100);
-		thread::sleep(ten_secs);
+	// 	// delay 100s , then refund
+	// 	let ten_secs = time::Duration::from_secs(100);
+	// 	thread::sleep(ten_secs);
 
-		// redeem now
-		//call redeem function
-		let key = secp256k1::SecretKey::from_slice(
-			&from_hex(wallet_rand.private_key.clone().unwrap().as_str()).unwrap(),
-		)
-		.unwrap();
-		let res = c.redeem(address_from_secret, key);
-		println!("test_redeem result: {:?}", res.unwrap());
-	}
+	// 	// redeem now
+	// 	//call redeem function
+	// 	let key = secp256k1::SecretKey::from_slice(
+	// 		&from_hex(wallet_rand.private_key.clone().unwrap().as_str()).unwrap(),
+	// 	)
+	// 	.unwrap();
+	// 	let res = c.redeem(address_from_secret, key);
+	// 	println!("test_redeem result: {:?}", res.unwrap());
+	// }
 
-	#[test]
-	fn test_refund() {
-		let c = get_infura_client!(
-			PROJECT_ID,
-			CHAIN,
-			MNMENOIC,
-			PASSWORD,
-			WALLET_PATH,
-			CONTRACT_ADDR
-		);
+	// #[test]
+	// fn test_refund() {
+	// 	let c = get_infura_client!(
+	// 		PROJECT_ID,
+	// 		CHAIN,
+	// 		MNMENOIC,
+	// 		PASSWORD,
+	// 		WALLET_PATH,
+	// 		CONTRACT_ADDR
+	// 	);
 
-		//generate rand address for swap index
-		let wallet_rand = EthereumWallet::new(&mut thread_rng()).unwrap();
-		let address_from_secret = to_eth_address(wallet_rand.address.clone().unwrap()).unwrap();
+	// 	//generate rand address for swap index
+	// 	let wallet_rand = EthereumWallet::new(&mut thread_rng()).unwrap();
+	// 	let address_from_secret = to_eth_address(wallet_rand.address.clone().unwrap()).unwrap();
 
-		//generate participant walletc
-		let redeem_wallet =
-			generate_ethereum_wallet(CHAIN, REDEEM_MNMENOIC, PASSWORD, WALLET_PATH).unwrap();
-		REDEEM_WALLET
-			.write()
-			.unwrap()
-			.replace(redeem_wallet.clone());
+	// 	//generate participant walletc
+	// 	let redeem_wallet =
+	// 		generate_ethereum_wallet(CHAIN, REDEEM_MNMENOIC, PASSWORD, WALLET_PATH).unwrap();
+	// 	REDEEM_WALLET
+	// 		.write()
+	// 		.unwrap()
+	// 		.replace(redeem_wallet.clone());
 
-		//initiate swap offer
-		let res = c.initiate(
-			5,
-			address_from_secret,
-			to_eth_address("a25F8893278191875d863adE80BE6A38eDF9542d".to_string()).unwrap(),
-			1000,
-		);
-		println!("initiate_swap result: {}", res.unwrap());
+	// 	//initiate swap offer
+	// 	let res = c.initiate(
+	// 		5,
+	// 		address_from_secret,
+	// 		to_eth_address("a25F8893278191875d863adE80BE6A38eDF9542d".to_string()).unwrap(),
+	// 		1000,
+	// 	);
+	// 	println!("initiate_swap result: {}", res.unwrap());
 
-		// delay 100s , then refund
-		let ten_secs = time::Duration::from_secs(100);
-		thread::sleep(ten_secs);
+	// 	// delay 100s , then refund
+	// 	let ten_secs = time::Duration::from_secs(100);
+	// 	thread::sleep(ten_secs);
 
-		// refund now
-		let res = c.refund(address_from_secret);
-		println!("test_refund result: {:?}", res.unwrap());
-	}
+	// 	// refund now
+	// 	let res = c.refund(address_from_secret);
+	// 	println!("test_refund result: {:?}", res.unwrap());
+	// }
 }

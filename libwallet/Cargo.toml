@@ -61,7 +61,7 @@ tokio = { version = "0.2.1", features = ["full"] }
 futures-timer = "3.0.2"
 crossbeam-utils = "0.7"
 #web3 = { git = "https://github.com/terryhash/rust-web3.git", branch = "master" }
-web3 = "0.15.0"
+web3 = { version = "0.15.0", default-features = false, features = ["ws-tls-async-std", "signing"] }
 secp256k1 = { version = "0.20.1", features = ["rand"]}
 ether-converter = "0.1.3"
 wagyu-ethereum = { git = "https://github.com/terryhash/wagyu-ethereum.git", branch = "master" }

@@ -234,9 +234,9 @@ version = "0.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9e9e7a929bd34c68a82d58a4de7f86fffdaf97fb2af850162a7bb19dd7269b33"
 dependencies = [
+ "async-std",
  "native-tls",
  "thiserror",
- "tokio 0.2.25",
  "url 2.2.1",
 ]
 
@@ -2766,24 +2766,6 @@ dependencies = [
  "tower-service",
  "tracing",
  "want 0.3.0",
-]
-
-[[package]]
-name = "hyper-proxy"
-version = "0.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f93ec5be69758dfc06b9b29efa9d6e9306e387c85eb362c603912eead2ad98c7"
-dependencies = [
- "bytes 0.5.6",
- "futures 0.3.14",
- "http 0.2.4",
- "hyper 0.13.10",
- "hyper-tls 0.4.3",
- "native-tls",
- "tokio 0.2.25",
- "tokio-tls",
- "tower-service",
- "typed-headers",
 ]
 
 [[package]]
@@ -6171,21 +6153,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "tokio-util"
-version = "0.6.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "940a12c99365c31ea8dd9ba04ec1be183ffe4920102bb7122c2f515437601e8e"
-dependencies = [
- "bytes 1.0.1",
- "futures-core",
- "futures-io",
- "futures-sink",
- "log",
- "pin-project-lite 0.2.6",
- "tokio 1.5.0",
-]
-
-[[package]]
 name = "toml"
 version = "0.4.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6269,19 +6236,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "283d3b89e1368717881a9d51dad843cc435380d8109c9e47d38780a324698d8b"
 dependencies = [
  "cfg-if 0.1.10",
-]
-
-[[package]]
-name = "typed-headers"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3179a61e9eccceead5f1574fd173cf2e162ac42638b9bf214c6ad0baf7efa24a"
-dependencies = [
- "base64 0.11.0",
- "bytes 0.5.6",
- "chrono",
- "http 0.2.4",
- "mime",
 ]
 
 [[package]]
@@ -6689,16 +6643,13 @@ checksum = "4080a844bbb41437f0d432138f0a7543780a40b43345b76dc0338c59bdfd1336"
 dependencies = [
  "arrayvec 0.5.2",
  "async-native-tls",
- "base64 0.13.0",
+ "async-std",
  "derive_more",
  "ethabi",
  "ethereum-types 0.10.0",
  "futures 0.3.14",
  "futures-timer",
  "hex 0.4.3",
- "hyper 0.13.10",
- "hyper-proxy",
- "hyper-tls 0.4.3",
  "jsonrpc-core 16.0.0",
  "log",
  "native-tls",
@@ -6710,9 +6661,6 @@ dependencies = [
  "serde_json",
  "soketto",
  "tiny-keccak 2.0.2",
- "tokio 0.2.25",
- "tokio-util 0.6.6",
- "typed-headers",
  "url 2.2.1",
 ]
 
