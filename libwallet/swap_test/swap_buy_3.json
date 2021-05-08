@@ -393,6 +393,8 @@
   "secondary_fee": 1.4,
   "electrum_node_uri1": null,
   "electrum_node_uri2": null,
+  "eth_swap_contract_address": null,
+  "eth_infura_project_id": null,
   "tag": null,
   "other_lock_first_done": false
 }

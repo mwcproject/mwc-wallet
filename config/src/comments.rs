@@ -121,6 +121,20 @@ fn comments() -> HashMap<String, String> {
 		.to_string(),
 	);
 	retval.insert(
+		"eth_swap_contract_address".to_string(),
+		"
+#ethereum atomic swap contract address
+"
+		.to_string(),
+	);
+	retval.insert(
+		"eth_infura_project_id".to_string(),
+		"
+#ethereum infura chain project id
+"
+		.to_string(),
+	);
+	retval.insert(
 		"grinbox_address_index".to_string(),
 		"
 # Address derive index. Every new index will give you a new address that will be used for

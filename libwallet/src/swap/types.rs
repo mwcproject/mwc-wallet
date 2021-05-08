@@ -1161,13 +1161,13 @@ pub fn check_txs_confirmed(currency: Currency, lock: u64, lock_conf: u64) -> boo
 		| Currency::ZCash
 		| Currency::Doge => {
 			if lock < lock_conf {
-				true
-			} else {
 				false
+			} else {
+				true
 			}
 		}
 		Currency::Ether => {
-			if lock == 1 {
+			if lock >= 1 {
 				true
 			} else {
 				false

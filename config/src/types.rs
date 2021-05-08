@@ -68,14 +68,14 @@ pub struct WalletConfig {
 	/// Base fee for all transactions. Please note, that fee can't be lower then Base fee
 	/// at the miner nodes. Otherwise your transaction will never be mined.
 	pub base_fee: Option<u64>,
-	/// Electrum nodes for secondary coins
-	/// Key: <coin>_[main|test]_[1|2]
-	/// Value: url
-	pub swap_electrumx_addr: Option<BTreeMap<String, String>>,
 	/// Ethereum Swap Contract Address
 	pub eth_swap_contract_address: Option<String>,
 	/// Ethereum Infura Project Id
 	pub eth_infura_project_id: Option<String>,
+	/// Electrum nodes for secondary coins
+	/// Key: <coin>_[main|test]_[1|2]
+	/// Value: url
+	pub swap_electrumx_addr: Option<BTreeMap<String, String>>,
 }
 
 impl Default for WalletConfig {
@@ -99,6 +99,8 @@ impl Default for WalletConfig {
 			dark_background_color_scheme: Some(true),
 			wallet_data_dir: None,
 			base_fee: None,
+			eth_swap_contract_address: Some("A21b2c034dF046a3DB790dd20b0C5C0040a74c67".to_string()),
+			eth_infura_project_id: Some("7f1274674be54d2881bf3c0168bf9855".to_string()),
 			swap_electrumx_addr: Some(
 				[
 					("btc_main_1", "btc.main1.swap.mwc.mw:18337"),
@@ -131,8 +133,6 @@ impl Default for WalletConfig {
 				.map(|i| (i.0.to_string(), i.1.to_string()))
 				.collect::<BTreeMap<String, String>>(),
 			),
-			eth_swap_contract_address: Some("A21b2c034dF046a3DB790dd20b0C5C0040a74c67".to_string()),
-			eth_infura_project_id: Some("7f1274674be54d2881bf3c0168bf9855".to_string()),
 		}
 	}
 }

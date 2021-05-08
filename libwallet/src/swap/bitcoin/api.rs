@@ -774,7 +774,7 @@ where
 
 	/// deposit secondary currecny to lock account.
 	fn post_secondary_lock_tx(&self, _swap: &mut Swap) -> Result<(), ErrorKind> {
-		unimplemented!()
+		Ok(())
 	}
 
 	/// Validate clients. We want to be sure that the clients able to acceess the servers

@@ -262,16 +262,29 @@ where
 			))
 		})?;
 
-		let mnmenoic = wallet_seed.to_mnemonic().unwrap();
-		self.ethereum_wallet = match global::is_mainnet() {
-			true => Some(
-				generate_ethereum_wallet("mainnet", mnmenoic.as_str(), &password, "m/44'/0'/0'/0")
+		//generate ethereum wallet account
+		self.ethereum_wallet = match wallet_seed.to_mnemonic() {
+			Ok(mnmenoic) => match global::is_mainnet() {
+				true => Some(
+					generate_ethereum_wallet(
+						"mainnet",
+						mnmenoic.as_str(),
+						&password,
+						"m/44'/0'/0'/0",
+					)
 					.unwrap(),
-			),
-			false => Some(
-				generate_ethereum_wallet("ropsten", mnmenoic.as_str(), &password, "m/44'/0'/0'/0")
+				),
+				false => Some(
+					generate_ethereum_wallet(
+						"ropsten",
+						mnmenoic.as_str(),
+						&password,
+						"m/44'/0'/0'/0",
+					)
 					.unwrap(),
-			),
+				),
+			},
+			_ => None,
 		};
 
 		let keychain = wallet_seed

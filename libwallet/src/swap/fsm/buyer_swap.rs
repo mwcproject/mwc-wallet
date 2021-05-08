@@ -481,6 +481,14 @@ where
 				))
 			}
 			Input::Execute => {
+				// for btc family, buyer should deposit secondary currency manually.
+				if swap.secondary_currency.is_btc_family() {
+					return Err(ErrorKind::InvalidSwapStateInput(format!(
+						"BuyerPostingSecondaryToMultisigAccount get {:?}",
+						input
+					)));
+				}
+
 				self.swap_api.post_secondary_lock_tx(swap)?;
 
 				Ok(StateProcessRespond::new(
