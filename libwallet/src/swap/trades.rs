@@ -40,6 +40,8 @@ pub const SWAP_DEAL_MKT_DELETED_DIR: &'static str = "deleted_mkt";
 lazy_static! {
 	static ref TRADE_DEALS_PATH: RwLock<Option<PathBuf>> = RwLock::new(None);
 	static ref ELECTRUM_X_URI: RwLock<Option<BTreeMap<String, String>>> = RwLock::new( Some(BTreeMap::new()));
+	static ref ETH_SWAP_CONTRACT_ADDR: RwLock<Option<String>> = RwLock::new(None);
+	static ref ETH_INFURA_PROJECTID: RwLock<Option<String>> = RwLock::new(None);
 	// Locks for the swap reads. Note, all instances are in the memory, we don't expect too many of them
 	static ref SWAP_LOCKS: RwLock<HashMap< String, Arc<Mutex<()>>>> = RwLock::new(HashMap::new());
 }
@@ -48,6 +50,8 @@ lazy_static! {
 pub fn init_swap_trade_backend(
 	data_file_dir: &str,
 	electrumx_config_uri: &Option<BTreeMap<String, String>>,
+	eth_swap_contract_addr: &Option<String>,
+	eth_infura_projectid: &Option<String>,
 ) {
 	let stored_swap_deal_path = Path::new(data_file_dir).join(SWAP_DEAL_SAVE_DIR);
 	fs::create_dir_all(&stored_swap_deal_path)
@@ -64,6 +68,18 @@ pub fn init_swap_trade_backend(
 		ELECTRUM_X_URI
 			.write()
 			.replace(electrumx_config_uri.clone().unwrap());
+	}
+
+	if eth_swap_contract_addr.is_some() {
+		ETH_SWAP_CONTRACT_ADDR
+			.write()
+			.replace(eth_swap_contract_addr.clone().unwrap());
+	}
+
+	if eth_infura_projectid.is_some() {
+		ETH_INFURA_PROJECTID
+			.write()
+			.replace(eth_infura_projectid.clone().unwrap());
 	}
 }
 
@@ -99,6 +115,38 @@ pub fn get_electrumx_uri(
 	};
 
 	Ok((uri1, uri2))
+}
+
+/// Get etherum contract addr.
+pub fn get_eth_swap_contract_address(
+	_currency: &Currency,
+	eth_swap_contract_addr: &Option<String>,
+) -> Result<String, ErrorKind> {
+	let swap_contract_addresss = ETH_SWAP_CONTRACT_ADDR.read().clone();
+
+	match eth_swap_contract_addr.clone() {
+		Some(s) => Ok(s),
+		None => match swap_contract_addresss {
+			Some(s) => Ok(s),
+			None => swap_contract_addresss.ok_or(ErrorKind::UndefinedEthSwapContractAddress),
+		},
+	}
+}
+
+/// Get etherum infura project id.
+pub fn get_eth_infura_projectid(
+	_currency: &Currency,
+	eth_infura_projectid: &Option<String>,
+) -> Result<String, ErrorKind> {
+	let infura_project_id = ETH_INFURA_PROJECTID.read().clone();
+
+	match eth_infura_projectid.clone() {
+		Some(s) => Ok(s),
+		None => match infura_project_id {
+			Some(s) => Ok(s),
+			None => infura_project_id.ok_or(ErrorKind::UndefinedEthSwapContractAddress),
+		},
+	}
 }
 
 /// List available swap trades.

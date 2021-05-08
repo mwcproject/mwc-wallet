@@ -125,6 +125,33 @@ pub enum ErrorKind {
 	/// BCH tweks related error
 	#[fail(display = "BCH error, {}", _0)]
 	BchError(String),
+
+	/// Infura Node client error
+	#[fail(
+		display = "Eth Swap Contract Address is not defined. Please specify it at wallet config or with swap arguments"
+	)]
+	UndefinedEthSwapContractAddress,
+	/// Infura Node error
+	#[fail(display = "Infura Node error, {}", _0)]
+	InfuraNodeClient(String),
+	/// Invalid Swap Trade Index
+	#[fail(display = "Ethereum Swap Trade Index error")]
+	InvalidEthSwapTradeIndex,
+	/// Invalid Eth Address
+	#[fail(display = "Ethereum Address error")]
+	InvalidEthAddress,
+	/// Eth balance is not enough
+	#[fail(display = "Eth Wallet Balance is not enough")]
+	EthBalanceNotEnough,
+	/// Invalid Tx Hash
+	#[fail(display = "Invalid Eth Transaction Hash")]
+	InvalidTxHash,
+	/// Contract error
+	#[fail(display = "Call Swap Contract error")]
+	EthContractCallError,
+	/// Retrieve TransactionRecipt error
+	#[fail(display = "Retrieve Eth TransactionReceipt error")]
+	EthRetrieveTransReciptError,
 }
 
 impl ErrorKind {

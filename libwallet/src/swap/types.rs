@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use super::bitcoin::{BtcBuyerContext, BtcData, BtcSellerContext};
+use super::ethereum::{EthBuyerContext, EthData, EthSellerContext, EthereumAddress};
 use super::ser::*;
 use super::ErrorKind;
 use crate::grin_core::global::ChainTypes;
@@ -21,9 +22,9 @@ use crate::grin_keychain::Identifier;
 use crate::grin_util::secp::key::SecretKey;
 use crate::swap::message::Message;
 use bitcoin::Address;
-use std::convert::TryFrom;
 use std::convert::TryInto;
 use std::fmt;
+use std::{convert::TryFrom, str::FromStr};
 
 /// MWC Network where SWAP happens.
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
@@ -93,10 +94,12 @@ pub enum Currency {
 	ZCash,
 	/// Dogecoin
 	Doge,
+	/// Ether
+	Ether,
 }
 
 impl Currency {
-	/// Satoshi to 1 conversion
+	/// Satoshi to 1 conversion; Gwei to 1 ether conversion for ETH
 	pub fn exponent(&self) -> usize {
 		match self {
 			Currency::Btc
@@ -105,6 +108,7 @@ impl Currency {
 			| Currency::Dash
 			| Currency::ZCash
 			| Currency::Doge => 8,
+			Currency::Ether => 18,
 		}
 	}
 
@@ -116,6 +120,7 @@ impl Currency {
 			Currency::Dash => 60 * 2 + 39, // 2.65 Minutes
 			Currency::ZCash => 75,
 			Currency::Doge => 60,
+			Currency::Ether => 15,
 		}
 	}
 
@@ -296,6 +301,14 @@ impl Currency {
 					}
 				}
 			}
+			Currency::Ether => {
+				EthereumAddress::from_str(address.as_str()).map_err(|e| {
+					ErrorKind::Generic(format!(
+						"Unable to parse Ethereum address {}, {}",
+						address, e
+					))
+				})?;
+			}
 		}
 		Ok(())
 	}
@@ -364,6 +377,10 @@ impl Currency {
 				})?;
 				addr.to_btc().to_string()
 			}
+			Currency::Ether => {
+				//todo
+				"".to_string()
+			}
 		};
 
 		let addr = Address::new_btc().from_str(&addr_str).map_err(|e| {
@@ -417,6 +434,13 @@ impl Currency {
 					Network::Mainnet => 3.0 as f32,
 				}
 			}
+			Currency::Ether => {
+				// Default values
+				match network {
+					Network::Floonet => 0.00000011 as f32, //ether
+					Network::Mainnet => 0.00000011 as f32,
+				}
+			}
 		}
 	}
 
@@ -431,6 +455,7 @@ impl Currency {
 			Currency::Dash => ("duff per byte".to_string(), 1, true),
 			Currency::ZCash => ("ZEC".to_string(), 100_000_000, false),
 			Currency::Doge => ("doge".to_string(), 100_000_000, false),
+			Currency::Ether => ("gwei".to_string(), 1, true),
 		}
 	}
 
@@ -454,6 +479,9 @@ impl Currency {
 				Currency::Doge => {
 					"6b591fe460c9cfb75d4406c3787c913022be1caa8641415932ee8c5228ff2e3b".to_string()
 				}
+				Currency::Ether => {
+					"f37e9f691fffb635de0999491d906ee85ba40cd36dae9f6e5911a8277d7c5f75".to_string()
+				}
 			}
 		} else {
 			match self {
@@ -472,7 +500,23 @@ impl Currency {
 				Currency::Doge => {
 					"5f7e779f7600f54e528686e91d5891f3ae226ee907f461692519e549105f521c".to_string()
 				}
+				Currency::Ether => {
+					"f37e9f691fffb635de0999491d906ee85ba40cd36dae9f6e5911a8277d7c5f75".to_string()
+				}
 			}
+		}
+	}
+
+	/// check is btc family
+	pub fn is_btc_family(&self) -> bool {
+		match self {
+			Currency::Btc
+			| Currency::Bch
+			| Currency::Ltc
+			| Currency::Dash
+			| Currency::ZCash
+			| Currency::Doge => true,
+			_ => false,
 		}
 	}
 }
@@ -486,6 +530,7 @@ impl fmt::Display for Currency {
 			Currency::Dash => "Dash",
 			Currency::ZCash => "ZCash",
 			Currency::Doge => "Doge",
+			Currency::Ether => "Ether",
 		};
 		write!(f, "{}", disp)
 	}
@@ -502,6 +547,7 @@ impl TryFrom<&str> for Currency {
 			"dash" => Ok(Currency::Dash),
 			"zec" | "zcash" => Ok(Currency::ZCash),
 			"doge" => Ok(Currency::Doge),
+			"ether" => Ok(Currency::Ether),
 			_ => Err(ErrorKind::InvalidCurrency(value.to_string())),
 		}
 	}
@@ -536,6 +582,8 @@ pub enum SecondaryData {
 	Empty,
 	/// Bitcoin data
 	Btc(BtcData),
+	/// Ether data
+	Eth(EthData),
 }
 
 impl SecondaryData {
@@ -550,6 +598,20 @@ impl SecondaryData {
 	pub fn unwrap_btc_mut(&mut self) -> Result<&mut BtcData, ErrorKind> {
 		match self {
 			SecondaryData::Btc(d) => Ok(d),
+			_ => Err(ErrorKind::UnexpectedCoinType),
+		}
+	}
+	/// To ETH data
+	pub fn unwrap_eth(&self) -> Result<&EthData, ErrorKind> {
+		match self {
+			SecondaryData::Eth(d) => Ok(d),
+			_ => Err(ErrorKind::UnexpectedCoinType),
+		}
+	}
+	/// To ETH data
+	pub fn unwrap_eth_mut(&mut self) -> Result<&mut EthData, ErrorKind> {
+		match self {
+			SecondaryData::Eth(d) => Ok(d),
 			_ => Err(ErrorKind::UnexpectedCoinType),
 		}
 	}
@@ -637,7 +699,7 @@ pub struct SellerContext {
 	pub change_amount: u64,
 	/// MWC refund output  (Derivative ID)
 	pub refund_output: Identifier,
-	/// Secondary currency (BTC) related context
+	/// Secondary currency (BTC/ETH) related context
 	pub secondary_context: SecondarySellerContext,
 }
 
@@ -646,12 +708,20 @@ impl SellerContext {
 	pub fn unwrap_btc(&self) -> Result<&BtcSellerContext, ErrorKind> {
 		match &self.secondary_context {
 			SecondarySellerContext::Btc(c) => Ok(c),
-			//_ => Err(ErrorKind::UnexpectedCoinType),
+			_ => Err(ErrorKind::UnexpectedCoinType),
+		}
+	}
+
+	/// Retreive ETH data
+	pub fn unwrap_eth(&self) -> Result<&EthSellerContext, ErrorKind> {
+		match &self.secondary_context {
+			SecondarySellerContext::Eth(c) => Ok(c),
+			_ => Err(ErrorKind::UnexpectedCoinType),
 		}
 	}
 }
 
-/// Context for the Bayer party
+/// Context for the Buyer party
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct BuyerContext {
 	/// Buyer recieve account
@@ -660,7 +730,7 @@ pub struct BuyerContext {
 	pub output: Identifier,
 	/// Secret that unlocks the funds on both chains (Derivative ID)
 	pub redeem: Identifier,
-	/// Secondary currency (BTC) related context
+	/// Secondary currency (BTC/ETH) related context
 	pub secondary_context: SecondaryBuyerContext,
 }
 
@@ -669,7 +739,15 @@ impl BuyerContext {
 	pub fn unwrap_btc(&self) -> Result<&BtcBuyerContext, ErrorKind> {
 		match &self.secondary_context {
 			SecondaryBuyerContext::Btc(c) => Ok(c),
-			//_ => Err(ErrorKind::UnexpectedCoinType),
+			_ => Err(ErrorKind::UnexpectedCoinType),
+		}
+	}
+
+	/// To ETH context
+	pub fn unwrap_eth(&self) -> Result<&EthBuyerContext, ErrorKind> {
+		match &self.secondary_context {
+			SecondaryBuyerContext::Eth(c) => Ok(c),
+			_ => Err(ErrorKind::UnexpectedCoinType),
 		}
 	}
 }
@@ -679,6 +757,8 @@ impl BuyerContext {
 pub enum SecondarySellerContext {
 	/// BTC context
 	Btc(BtcSellerContext),
+	/// ETH context
+	Eth(EthSellerContext),
 }
 
 /// Buyer secondary currency context
@@ -686,6 +766,8 @@ pub enum SecondarySellerContext {
 pub enum SecondaryBuyerContext {
 	/// BTC context
 	Btc(BtcBuyerContext),
+	/// ETH context
+	Eth(EthBuyerContext),
 }
 
 /// Action or step of the swap process
@@ -728,6 +810,8 @@ pub enum Action {
 		/// Address to deposit. Here is vector because some coins might have legacy and new addresses that mean the same
 		address: Vec<String>,
 	},
+	/// Deposit secondary currency
+	BuyerDepositToContractAccount,
 	/// Wait for sufficient confirmations. Lock transaction on MWC network
 	WaitForMwcConfirmations {
 		/// What exactly are we waiting for.
@@ -824,6 +908,7 @@ impl Action {
 		match &self {
 			Action::SellerSendOfferMessage(_)
 			| Action::BuyerSendAcceptOfferMessage(_)
+			| Action::BuyerDepositToContractAccount
 			| Action::BuyerSendInitRedeemMessage(_)
 			| Action::SellerSendRedeemMessage(_)
 			| Action::SellerPublishMwcLockTx
@@ -863,6 +948,7 @@ impl Action {
 				amount: _,
 				address: _,
 			} => "DepositSecondary",
+			Action::BuyerDepositToContractAccount => "BuyerDepositToContractAccount",
 			Action::WaitForMwcConfirmations {
 				name: _,
 				required: _,
@@ -944,6 +1030,7 @@ impl fmt::Display for Action {
 					address.join(" or ")
 				)
 			},
+			Action::BuyerDepositToContractAccount => "Buyer Depositing Secondary Currency to Contract Account".to_string(),
 			Action::WaitForMwcConfirmations {
 				name,
 				required,
@@ -1053,14 +1140,40 @@ pub struct SwapTransactionsConfirmations {
 	pub mwc_refund_conf: Option<u64>,
 	/// BTC node tip
 	pub secondary_tip: u64,
-	/// BTC lock (multisug account) number of confirmations
+	/// In ETH: 1 means confirmed, 0 means not confirmed
+	/// BTC/ETH lock (multisug account) number of confirmations
 	pub secondary_lock_conf: Option<u64>,
 	/// How much is locked. This process is manual, so Buyer might make a mistake
 	pub secondary_lock_amount: u64,
-	/// BTC redeem number of confirmations
+	/// BTC/ETH redeem number of confirmations
 	pub secondary_redeem_conf: Option<u64>,
-	/// BTC  refund transaciton number of confirmations
+	/// BTC/ETH  refund transaciton number of confirmations
 	pub secondary_refund_conf: Option<u64>,
+}
+
+/// check transactin confirmed
+pub fn check_txs_confirmed(currency: Currency, lock: u64, lock_conf: u64) -> bool {
+	match currency {
+		Currency::Btc
+		| Currency::Bch
+		| Currency::Ltc
+		| Currency::Dash
+		| Currency::ZCash
+		| Currency::Doge => {
+			if lock < lock_conf {
+				true
+			} else {
+				false
+			}
+		}
+		Currency::Ether => {
+			if lock == 1 {
+				true
+			} else {
+				false
+			}
+		}
+	}
 }
 
 #[cfg(test)]

@@ -243,6 +243,7 @@ impl BtcData {
 				let address = Address::new_doge().p2sh(script, btc_network(network));
 				Ok(vec![address.to_string()])
 			}
+			_ => return Err(ErrorKind::UnexpectedCoinType),
 		}
 	}
 
@@ -351,6 +352,7 @@ impl BtcData {
 
 				(cosign_ser, redeem_ser)
 			}
+			Currency::Ether => panic!("Ether  not supported"),
 		};
 
 		let script_sig = Builder::new()
@@ -529,6 +531,7 @@ impl BtcData {
 					None,
 				));
 			}
+			Currency::Ether => panic!("Ether not supported"),
 		};
 
 		let mut cursor = Cursor::new(Vec::with_capacity(tx_size));
@@ -568,6 +571,7 @@ impl BtcData {
 				sign_ser.push(0x01); // SIGHASH_ALL
 				sign_ser
 			}
+			Currency::Ether => panic!("Ether not supported"),
 		};
 
 		let script_sig = Builder::new()

@@ -61,6 +61,8 @@ impl SellApi {
 		buyer_destination_address: String,
 		electrum_node_uri1: Option<String>,
 		electrum_node_uri2: Option<String>,
+		eth_swap_contract_address: Option<String>,
+		eth_infura_project_id: Option<String>,
 		dry_run: bool,
 		tag: Option<String>,
 	) -> Result<Swap, ErrorKind> {
@@ -132,6 +134,8 @@ impl SellApi {
 			secondary_fee,
 			electrum_node_uri1,
 			electrum_node_uri2,
+			eth_swap_contract_address,
+			eth_infura_project_id,
 			last_process_error: None,
 			last_check_error: None,
 			wait_for_backup1: false,
@@ -216,7 +220,9 @@ impl SellApi {
 			0
 		};
 
-		secondary_currency.validate_address(&secondary_redeem_address)?;
+		if secondary_currency.is_btc_family() {
+			secondary_currency.validate_address(&secondary_redeem_address)?;
+		}
 		swap.role = Role::Seller(secondary_redeem_address, change);
 
 		if !dry_run {

@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use super::bitcoin::BtcUpdate;
+use super::ethereum::EthUpdate;
 use super::multisig::ParticipantData as MultisigParticipant;
 use super::ser::*;
 use super::types::{Currency, Network};
@@ -33,7 +34,7 @@ pub struct Message {
 	pub id: Uuid,
 	/// Swap core data
 	pub inner: Update,
-	/// Secondary currency (BTC) related data
+	/// Secondary currency (BTC/ETH) related data
 	inner_secondary: SecondaryUpdate,
 }
 
@@ -155,8 +156,8 @@ pub struct OfferUpdate {
 	/// from destination address
 	pub from_address: String,
 	/// Flag that specify the Locking fund order (Will wait for the fact that transaction is publishing, not for all confirmations).
-	///    true: Seller lock MWC first, then Buyer BTC.
-	///    false: Buyer lock BTC first, then Seller does lock.
+	///    true: Seller lock MWC first, then Buyer BTC/ETH.
+	///    false: Buyer lock BTC/ETH first, then Seller does lock.
 	pub seller_lock_first: bool,
 	/// Number of MWC to offer
 	#[serde(with = "secp_ser::string_or_u64")]
@@ -164,7 +165,7 @@ pub struct OfferUpdate {
 	/// Number of BTC to get
 	#[serde(with = "secp_ser::string_or_u64")]
 	pub secondary_amount: u64,
-	/// BTC
+	/// BTC/ETH
 	pub secondary_currency: Currency,
 	/// Seller part of multisig
 	pub multisig: MultisigParticipant,
@@ -176,7 +177,7 @@ pub struct OfferUpdate {
 	pub redeem_participant: TxParticipant,
 	/// Required confirmations for MWC Locking
 	pub mwc_confirmations: u64,
-	/// Required confirmations for BTC Locking
+	/// Required confirmations for BTC/ETH Locking
 	pub secondary_confirmations: u64,
 	/// Time interval for message exchange session.
 	pub message_exchange_time_sec: u64,
@@ -222,6 +223,8 @@ pub enum SecondaryUpdate {
 	Empty,
 	/// BTC upadte
 	BTC(BtcUpdate),
+	/// ETH update
+	ETH(EthUpdate),
 }
 
 impl SecondaryUpdate {
@@ -229,6 +232,14 @@ impl SecondaryUpdate {
 	pub fn unwrap_btc(self) -> Result<BtcUpdate, ErrorKind> {
 		match self {
 			SecondaryUpdate::BTC(d) => Ok(d),
+			_ => Err(ErrorKind::UnexpectedCoinType),
+		}
+	}
+
+	/// Helper to extract EthUpdate with type validation
+	pub fn unwrap_eth(self) -> Result<EthUpdate, ErrorKind> {
+		match self {
+			SecondaryUpdate::ETH(d) => Ok(d),
 			_ => Err(ErrorKind::UnexpectedCoinType),
 		}
 	}

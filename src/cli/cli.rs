@@ -186,6 +186,8 @@ where
 								grin_wallet_libwallet::swap::trades::init_swap_trade_backend(
 									wallet_inst.get_data_file_dir(),
 									&wallet_config.swap_electrumx_addr,
+									&wallet_config.eth_swap_contract_address,
+									&wallet_config.eth_infura_project_id,
 								);
 
 								if let Some(account) = args.value_of("account") {

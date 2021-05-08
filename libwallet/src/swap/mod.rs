@@ -18,6 +18,9 @@ pub mod api;
 /// Library that support bitcoin operations
 pub mod bitcoin;
 
+/// Library that support ethereum operations
+pub mod ethereum;
+
 /// Swap crate errors
 pub mod error;
 
@@ -60,14 +63,20 @@ pub use crate::grin_keychain::Keychain;
 use serial_test::serial;
 #[cfg(test)]
 use std::sync::atomic::{AtomicBool, Ordering};
+#[cfg(test)]
+use std::sync::{Arc, Mutex};
 
 const CURRENT_VERSION: u8 = 1;
+
+#[cfg(test)]
+use self::ethereum::*;
 
 #[cfg(test)]
 lazy_static! {
 	/// Flag to set test mode
 	static ref TEST_MODE: AtomicBool = AtomicBool::new(false);
 	static ref ACTIVATE_TEST_RESPONSE: AtomicBool = AtomicBool::new(true);
+	static ref ETH_RANDOM_WALLET: Arc<Mutex<Option<EthereumWallet>>> = Arc::new(Mutex::new(None));
 }
 
 #[cfg(test)]
@@ -115,6 +124,7 @@ mod tests {
 	use std::sync::Arc;
 
 	use super::bitcoin::*;
+	use super::ethereum::*;
 	use super::message::Message;
 	use super::types::*;
 	use super::*;
@@ -126,6 +136,7 @@ mod tests {
 	use crate::swap::fsm::state;
 	use crate::swap::fsm::state::{Input, StateId, StateProcessRespond};
 	use crate::swap::message::{SecondaryUpdate, Update};
+	extern crate web3;
 
 	const GRIN_UNIT: u64 = 1_000_000_000;
 
@@ -196,6 +207,60 @@ mod tests {
 			BtcNetwork::Testnet,
 		);
 		format!("{}", address)
+	}
+
+	fn context_eth_sell(kc: &ExtKeychain) -> Context {
+		let eth_sell_wallet = EthereumWallet::from_mnemonic::<Ropsten, English>(
+			ETH_MNEMONIC,
+			Some(ETH_PARTICIPANT_PASSWORD),
+			ETH_ACCOUNT_PATH,
+		)
+		.unwrap();
+		let redeem_address = to_eth_address(eth_sell_wallet.address.clone().unwrap());
+		Context {
+			multisig_key: key_id(0, 0),
+			multisig_nonce: key(kc, 1, 0),
+			lock_nonce: key(kc, 1, 1),
+			refund_nonce: key(kc, 1, 2),
+			redeem_nonce: key(kc, 1, 3),
+			role_context: RoleContext::Seller(SellerContext {
+				parent_key_id: key_id(0, 0),
+				inputs: vec![
+					(key_id(0, 1), None, 60 * GRIN_UNIT),
+					(key_id(0, 2), None, 60 * GRIN_UNIT),
+				],
+				change_output: key_id(0, 3),
+				change_amount: 20 * GRIN_UNIT, // selling 100 coins, so 20 will be left
+				refund_output: key_id(0, 4),
+				secondary_context: SecondarySellerContext::Eth(EthSellerContext {
+					redeem_address: Some(redeem_address.unwrap()),
+				}),
+			}),
+		}
+	}
+
+	fn context_eth_buy(kc: &ExtKeychain) -> Context {
+		let sec_key = key(kc, 0, 2);
+		let eth_rand_wallet =
+			EthereumWallet::from_private_key(to_hex(&sec_key.0).as_str()).unwrap();
+		let address_from_secret = to_eth_address(eth_rand_wallet.address.clone().unwrap());
+		*ETH_RANDOM_WALLET.lock().unwrap() = Some(eth_rand_wallet.clone());
+
+		Context {
+			multisig_key: key_id(0, 0),
+			multisig_nonce: key(kc, 1, 0),
+			lock_nonce: key(kc, 1, 1),
+			refund_nonce: key(kc, 1, 2),
+			redeem_nonce: key(kc, 1, 3),
+			role_context: RoleContext::Buyer(BuyerContext {
+				parent_key_id: key_id(0, 0),
+				output: key_id(0, 1),
+				redeem: key_id(0, 2),
+				secondary_context: SecondaryBuyerContext::Eth(EthBuyerContext {
+					address_from_secret: Some(address_from_secret.unwrap()),
+				}),
+			}),
+		}
 	}
 
 	#[derive(Debug, Clone)]
@@ -445,7 +510,7 @@ mod tests {
 
 	#[test]
 	#[serial]
-	fn test_refund_tx_lock() {
+	fn test_btc_refund_tx_lock() {
 		set_test_mode(true);
 		global::set_local_chain_type(global::ChainTypes::Floonet);
 		swap::set_testing_cur_time(1567632152);
@@ -474,6 +539,8 @@ mod tests {
 				3600,
 				"file".to_string(),
 				"/tmp/del.me".to_string(),
+				None,
+				None,
 				None,
 				None,
 				false,
@@ -553,6 +620,8 @@ mod tests {
 				3600,
 				"file".to_string(),
 				"/tmp/del.me".to_string(),
+				None,
+				None,
 				None,
 				None,
 				false,
@@ -1620,6 +1689,8 @@ mod tests {
 					REDEEM_TIME as u64,
 					"file".to_string(),
 					"/tmp/del.me".to_string(),
+					None,
+					None,
 					None,
 					None,
 					false,
@@ -5488,6 +5559,8 @@ mod tests {
 				"/tmp/del.me".to_string(),
 				None,
 				None,
+				None,
+				None,
 				false,
 				None,
 			)
@@ -5584,5 +5657,924 @@ mod tests {
 		swap_api
 			.publish_secondary_transaction(&kc_sell, &mut swap_sell, &ctx_sell, true)
 			.unwrap();
+	}
+
+	const ETH_MNEMONIC: &str = "square social wall upgrade owner flat razor across enable idea mirror autumn rescue pottery total seat confirm dizzy fabric couple reveal relief lucky session";
+	const ETH_INITIATOR_PASSWORD: &str = "initiator";
+	const ETH_PARTICIPANT_PASSWORD: &str = "participant";
+	const ETH_ACCOUNT_PATH: &str = "m/44'/60'/0'/0";
+
+	// Test ethereum wallet generate process
+	#[test]
+	fn test_eth_genwallet() {
+		// initiator: for sender, 0xAB90ddDF7bdff0e4FCAB3c9bF608393a6C7e2390
+		// participant: for receiver, 0x0a6d6D1f7D798cd1Ce033a3a9222b524B9d4bf0B
+		let wallet = EthereumWallet::from_mnemonic::<Ropsten, English>(
+			ETH_MNEMONIC,
+			Some(ETH_PARTICIPANT_PASSWORD),
+			ETH_ACCOUNT_PATH,
+		)
+		.unwrap();
+
+		println!("test_eth_genwallet --- {}", wallet);
+	}
+
+	#[test]
+	#[serial]
+	fn test_eth_refund_tx_lock() {
+		set_test_mode(true);
+		global::set_local_chain_type(global::ChainTypes::Floonet);
+		swap::set_testing_cur_time(1617589405);
+
+		let kc_sell = keychain(1);
+		let ctx_sell = context_eth_sell(&kc_sell);
+		let eth_buy_wallet = EthereumWallet::from_mnemonic::<Ropsten, English>(
+			ETH_MNEMONIC,
+			Some(ETH_INITIATOR_PASSWORD),
+			ETH_ACCOUNT_PATH,
+		)
+		.unwrap();
+		let secondary_redeem_address = eth_buy_wallet.address.clone().unwrap().drain(2..).collect();
+		let height = 100_000;
+
+		let mut api_sell = EthSwapApi::new_test(
+			Arc::new(TestNodeClient::new(height)),
+			Arc::new(Mutex::new(TestEthNodeClient::new(1))),
+		);
+		let mut swap = api_sell
+			.create_swap_offer(
+				&kc_sell,
+				&ctx_sell,
+				100 * GRIN_UNIT,
+				3_000_000,
+				Currency::Ether,
+				secondary_redeem_address,
+				true, // mwc should be publisher first
+				30,
+				3,
+				3600,
+				3600,
+				"file".to_string(),
+				"/tmp/del.me".to_string(),
+				None,
+				None,
+				None,
+				None,
+				false,
+				None,
+			)
+			.unwrap();
+		let mut fsm_sell = api_sell.get_fsm(&kc_sell, &swap);
+		let tx_state = api_sell
+			.request_tx_confirmations(&kc_sell, &mut swap)
+			.unwrap();
+
+		let message = match fsm_sell
+			.process(Input::Check, &mut swap, &ctx_sell, &tx_state)
+			.unwrap()
+			.action
+			.unwrap()
+		{
+			Action::SellerSendOfferMessage(message) => message,
+			_ => panic!("Unexpected action"),
+		};
+
+		// Simulate short refund lock time by passing height+4h
+		let kc_buy = keychain(2);
+		let ctx_buy = context_eth_buy(&kc_buy);
+		let nc = TestNodeClient::new(height + 12 * 60);
+
+		let (id, offer, secondary_update) = message.unwrap_offer().unwrap();
+		let res = BuyApi::accept_swap_offer(&kc_buy, &ctx_buy, id, offer, secondary_update, &nc);
+
+		assert_eq!(
+			res.err().unwrap(),
+			ErrorKind::InvalidMessageData(
+				"Lock Slate inputs are not found at the chain".to_string()
+			)
+		); // Swap cannot be accepted
+	}
+
+	#[test]
+	fn test_eth_wallet() {
+		let kc = keychain(1);
+		let sec_key = key(&kc, 0, 0);
+		let eth_pri_wallet = EthereumWallet::from_private_key(to_hex(&sec_key.0).as_str()).unwrap();
+		println!("eth_pri_wallet  ---- {:?}", eth_pri_wallet);
+
+		let pub_key = PublicKey::from_secret_key(kc.secp(), &sec_key).unwrap();
+		println!("pub_key  ---- {:?}", pub_key);
+
+		let pub_key_array = pub_key.0 .0;
+		let first_part: Vec<u8> = pub_key_array[..pub_key_array.len() / 2]
+			.to_owned()
+			.iter()
+			.rev()
+			.cloned()
+			.collect();
+		let second_part: Vec<u8> = pub_key_array[pub_key_array.len() / 2..]
+			.to_owned()
+			.iter()
+			.rev()
+			.cloned()
+			.collect();
+		let pub_key_vec: Vec<u8> = first_part
+			.into_iter()
+			.chain(second_part.into_iter())
+			.collect();
+
+		let eth_pub_wallet =
+			EthereumWallet::from_public_key(to_hex(&pub_key_vec).as_str()).unwrap();
+		println!("eth_pub_wallet  ---- {:?}", eth_pub_wallet);
+	}
+
+	// Because of gonden output new line symbol we skipping Windows.
+	#[cfg(not(target_os = "windows"))]
+	#[test]
+	#[serial]
+	fn test_eth_swap() {
+		set_test_mode(true);
+		swap::set_testing_cur_time(1618044775);
+		global::set_local_chain_type(ChainTypes::Floonet);
+		let write_json = true;
+
+		let kc_sell = keychain(1);
+		let ctx_sell = context_eth_sell(&kc_sell);
+		let eth_sell_wallet = EthereumWallet::from_mnemonic::<Ropsten, English>(
+			ETH_MNEMONIC,
+			Some(ETH_PARTICIPANT_PASSWORD),
+			ETH_ACCOUNT_PATH,
+		)
+		.unwrap();
+
+		let nc = TestNodeClient::new(300_000);
+		let eth_nc = TestEthNodeClient::new(500_000);
+
+		let amount = 100 * GRIN_UNIT;
+		let eth_amount = 3_000_000;
+
+		// Seller: create swap offer
+		let mut api_sell =
+			EthSwapApi::new_test(Arc::new(nc.clone()), Arc::new(Mutex::new(eth_nc.clone())));
+		let mut swap_sell = api_sell
+			.create_swap_offer(
+				&kc_sell,
+				&ctx_sell,
+				amount,
+				eth_amount,
+				Currency::Ether,
+				eth_sell_wallet.address.clone().unwrap(),
+				true, // lock MWC first
+				30,
+				6,
+				3600,
+				3600,
+				"file".to_string(),
+				"/tmp/del.me".to_string(),
+				None,
+				None,
+				None,
+				None,
+				false,
+				None,
+			)
+			.unwrap();
+
+		let mut fsm_sell = api_sell.get_fsm(&kc_sell, &swap_sell);
+		let tx_conf = &api_sell
+			.request_tx_confirmations(&kc_sell, &swap_sell)
+			.unwrap();
+		let sell_resp = fsm_sell
+			.process(Input::Check, &mut swap_sell, &ctx_sell, tx_conf)
+			.unwrap();
+
+		assert_eq!(swap_sell.state, StateId::SellerSendingOffer);
+		let message_1: Message = match sell_resp.action.unwrap() {
+			Action::SellerSendOfferMessage(message) => message,
+			_ => panic!("Unexpected action"),
+		};
+		let tx_conf = api_sell
+			.request_tx_confirmations(&kc_sell, &swap_sell)
+			.unwrap();
+		let sell_resp = fsm_sell
+			.process(Input::Execute, &mut swap_sell, &ctx_sell, &tx_conf)
+			.unwrap();
+		assert_eq!(
+			sell_resp.action.unwrap().get_id_str(),
+			"SellerWaitForOfferMessage"
+		);
+		assert_eq!(swap_sell.state, StateId::SellerWaitingForAcceptanceMessage);
+
+		if write_json {
+			write(
+				"/home/terry/Work/mwc/mwc-wallet/libwallet/swap_test/eth/swap_sell_1.json",
+				serde_json::to_string_pretty(&swap_sell).unwrap(),
+			)
+			.unwrap();
+
+			write(
+				"/home/terry/Work/mwc/mwc-wallet/libwallet/swap_test/eth/message_1.json",
+				serde_json::to_string_pretty(&message_1).unwrap(),
+			)
+			.unwrap();
+			write(
+				"/home/terry/Work/mwc/mwc-wallet/libwallet/swap_test/eth/context_sell.json",
+				serde_json::to_string_pretty(&ctx_sell).unwrap(),
+			)
+			.unwrap();
+		} else {
+			assert_eq!(
+				read_to_string(
+					"/home/terry/Work/mwc/mwc-wallet/libwallet/swap_test/eth/swap_sell_1.json"
+				)
+				.unwrap(),
+				serde_json::to_string_pretty(&swap_sell).unwrap()
+			);
+			assert_eq!(
+				read_to_string(
+					"/home/terry/Work/mwc/mwc-wallet/libwallet/swap_test/eth/message_1.json"
+				)
+				.unwrap(),
+				serde_json::to_string_pretty(&message_1).unwrap()
+			);
+			assert_eq!(
+				read_to_string(
+					"/home/terry/Work/mwc/mwc-wallet/libwallet/swap_test/eth/context_sell.json"
+				)
+				.unwrap(),
+				serde_json::to_string_pretty(&ctx_sell).unwrap()
+			);
+		}
+
+		// Add inputs to utxo set
+		nc.mine_blocks(2);
+		for input in swap_sell.lock_slate.tx.inputs_committed() {
+			nc.push_output(input);
+		}
+
+		let kc_buy = keychain(2);
+		let ctx_buy = context_eth_buy(&kc_buy);
+
+		// Buyer: accept swap offer
+		let api_buy =
+			EthSwapApi::new_test(Arc::new(nc.clone()), Arc::new(Mutex::new(eth_nc.clone())));
+
+		let (id, offer, secondary_update) = message_1.unwrap_offer().unwrap();
+		let mut swap_buy =
+			BuyApi::accept_swap_offer(&kc_buy, &ctx_buy, id, offer, secondary_update, &nc).unwrap();
+
+		let mut fsm_buy = api_buy.get_fsm(&kc_buy, &swap_buy);
+		let tx_conf = api_buy
+			.request_tx_confirmations(&kc_buy, &swap_buy)
+			.unwrap();
+		let buy_resp = fsm_buy
+			.process(Input::Check, &mut swap_buy, &ctx_buy, &tx_conf)
+			.unwrap();
+
+		assert_eq!(swap_buy.state, StateId::BuyerSendingAcceptOfferMessage);
+		let message_2 = match buy_resp.action.unwrap() {
+			Action::BuyerSendAcceptOfferMessage(message) => message,
+			_ => panic!("Unexpected action"),
+		};
+		let tx_conf = api_buy
+			.request_tx_confirmations(&kc_buy, &swap_buy)
+			.unwrap();
+		let buy_resp = fsm_buy
+			.process(Input::Execute, &mut swap_buy, &ctx_buy, &tx_conf)
+			.unwrap();
+		assert_eq!(swap_buy.state, StateId::BuyerWaitingForSellerToLock);
+
+		// Expected to wait for the Seller to deposit MWC and wait for 1 block
+		match buy_resp.action.unwrap() {
+			Action::WaitForMwcConfirmations {
+				name: _,
+				required,
+				actual,
+			} => {
+				assert_eq!(required, 1);
+				assert_eq!(actual, 0);
+			}
+			_ => panic!("Invalid action"),
+		}
+
+		// !!!!!!!!!!!!!!!!!!!!!!
+		// Here we are changing lock order because we want to keep tests original. Waiting case is covered, can go normally
+		swap_buy.seller_lock_first = false;
+		swap_sell.seller_lock_first = true;
+		let tx_conf = api_buy
+			.request_tx_confirmations(&kc_buy, &swap_buy)
+			.unwrap();
+		let buy_resp = fsm_buy
+			.process(Input::Check, &mut swap_buy, &ctx_buy, &tx_conf)
+			.unwrap();
+
+		assert_eq!(
+			swap_buy.state,
+			StateId::BuyerPostingSecondaryToMultisigAccount
+		);
+
+		// Buyer: should deposit eth
+		let address = match buy_resp.action.unwrap() {
+			Action::DepositSecondary {
+				currency: _,
+				amount,
+				address,
+			} => {
+				assert_eq!(amount, eth_amount);
+				address
+			}
+			_ => panic!("Invalid action"),
+		};
+		let address_from_secret = to_eth_address(address[0].clone()).unwrap();
+		let refund_time = eth_nc.height().unwrap() + 100;
+		let participant = swap_buy
+			.secondary_data
+			.unwrap_eth()
+			.unwrap()
+			.redeem_address
+			.unwrap();
+		let value = swap_buy.secondary_amount;
+		let tx_id = eth_nc
+			.initiate(refund_time, address_from_secret, participant, value)
+			.unwrap();
+		let eth_data = swap_buy.secondary_data.unwrap_eth_mut().unwrap();
+		eth_data.lock_tx = Some(tx_id);
+
+		let tx_conf = api_buy
+			.request_tx_confirmations(&kc_buy, &swap_buy)
+			.unwrap();
+		let buy_resp = fsm_buy
+			.process(Input::Check, &mut swap_buy, &ctx_buy, &tx_conf)
+			.unwrap();
+		assert_eq!(swap_buy.state, StateId::BuyerWaitingForLockConfirmations);
+
+		match buy_resp.action.unwrap() {
+			Action::WaitForLockConfirmations {
+				mwc_required: _,
+				mwc_actual: _,
+				currency: _,
+				address: _,
+				sec_expected_to_be_posted: _,
+				sec_required: _,
+				sec_actual: actual,
+			} => assert_eq!(actual, Some(1)),
+			_ => panic!("Invalid action"),
+		};
+
+		// Buyer: wait for MWC confirmations
+		let tx_conf = api_buy
+			.request_tx_confirmations(&kc_buy, &swap_buy)
+			.unwrap();
+		let buy_resp = fsm_buy
+			.process(Input::Check, &mut swap_buy, &ctx_buy, &tx_conf)
+			.unwrap();
+		assert_eq!(swap_buy.state, StateId::BuyerWaitingForLockConfirmations);
+		match buy_resp.action.unwrap() {
+			Action::WaitForLockConfirmations {
+				mwc_required: _,
+				mwc_actual: actual,
+				currency: _,
+				address: _,
+				sec_expected_to_be_posted: _,
+				sec_required: _,
+				sec_actual: _,
+			} => assert_eq!(actual, 0),
+			_ => panic!("Invalid action"),
+		};
+
+		// Check if buyer has correct confirmed outputs
+		{
+			let eth_buy_data = swap_buy.secondary_data.unwrap_eth().unwrap();
+			let (_refund_time, _initiator, _participant, value) = api_buy
+				.eth_swap_details(eth_buy_data.address_from_secret.clone())
+				.unwrap();
+			assert_eq!(value, eth_amount);
+		}
+
+		if write_json {
+			write(
+				"/home/terry/Work/mwc/mwc-wallet/libwallet/swap_test/eth/swap_buy_1.json",
+				serde_json::to_string_pretty(&swap_buy).unwrap(),
+			)
+			.unwrap();
+			write(
+				"/home/terry/Work/mwc/mwc-wallet/libwallet/swap_test/eth/message_2.json",
+				serde_json::to_string_pretty(&message_2).unwrap(),
+			)
+			.unwrap();
+			write(
+				"/home/terry/Work/mwc/mwc-wallet/libwallet/swap_test/eth/context_buy.json",
+				serde_json::to_string_pretty(&ctx_buy).unwrap(),
+			)
+			.unwrap();
+		} else {
+			assert_eq!(
+				read_to_string(
+					"/home/terry/Work/mwc/mwc-wallet/libwallet/swap_test/eth/swap_buy_1.json"
+				)
+				.unwrap(),
+				serde_json::to_string_pretty(&swap_buy).unwrap()
+			);
+			assert_eq!(
+				read_to_string(
+					"/home/terry/Work/mwc/mwc-wallet/libwallet/swap_test/eth/message_2.json"
+				)
+				.unwrap(),
+				serde_json::to_string_pretty(&message_2).unwrap()
+			);
+			assert_eq!(
+				read_to_string(
+					"/home/terry/Work/mwc/mwc-wallet/libwallet/swap_test/eth/context_buy.json"
+				)
+				.unwrap(),
+				serde_json::to_string_pretty(&ctx_buy).unwrap()
+			);
+		}
+
+		// Seller: receive accepted offer
+		assert_eq!(swap_sell.state, StateId::SellerWaitingForAcceptanceMessage);
+		let tx_conf = api_sell
+			.request_tx_confirmations(&kc_sell, &swap_sell)
+			.unwrap();
+		let sell_resp = fsm_sell
+			.process(
+				Input::IncomeMessage(message_2),
+				&mut swap_sell,
+				&ctx_sell,
+				&tx_conf,
+			)
+			.unwrap();
+		assert_eq!(
+			sell_resp.action.unwrap().get_id_str(),
+			"SellerPublishMwcLockTx"
+		);
+		assert_eq!(swap_sell.state, StateId::SellerPostingLockMwcSlate);
+
+		let tx_conf = api_sell
+			.request_tx_confirmations(&kc_sell, &swap_sell)
+			.unwrap();
+		let sell_resp = fsm_sell
+			.process(Input::Execute, &mut swap_sell, &ctx_sell, &tx_conf)
+			.unwrap();
+		assert_eq!(swap_sell.state, StateId::SellerWaitingForLockConfirmations);
+		match sell_resp.action.unwrap() {
+			Action::WaitForLockConfirmations {
+				mwc_required: required,
+				mwc_actual: actual,
+				currency: _,
+				address: _,
+				sec_expected_to_be_posted: _,
+				sec_required: _,
+				sec_actual: _,
+			} => {
+				assert_eq!(required, 30);
+				assert_eq!(actual, 0)
+			}
+			_ => panic!("Invalid action"),
+		}
+
+		if write_json {
+			write(
+				"/home/terry/Work/mwc/mwc-wallet/libwallet/swap_test/eth/swap_sell_2.json",
+				serde_json::to_string_pretty(&swap_sell).unwrap(),
+			)
+			.unwrap();
+		} else {
+			assert_eq!(
+				read_to_string(
+					"/home/terry/Work/mwc/mwc-wallet/libwallet/swap_test/eth/swap_sell_2.json"
+				)
+				.unwrap(),
+				serde_json::to_string_pretty(&swap_sell).unwrap()
+			);
+		}
+
+		// Seller: wait for Grin confirmations
+		nc.mine_blocks(10);
+		let tx_conf = api_sell
+			.request_tx_confirmations(&kc_sell, &swap_sell)
+			.unwrap();
+		let sell_resp = fsm_sell
+			.process(Input::Check, &mut swap_sell, &ctx_sell, &tx_conf)
+			.unwrap();
+		assert_eq!(swap_sell.state, StateId::SellerWaitingForLockConfirmations);
+		match sell_resp.action.unwrap() {
+			Action::WaitForLockConfirmations {
+				mwc_required: required,
+				mwc_actual: actual,
+				currency: _,
+				address: _,
+				sec_expected_to_be_posted: _,
+				sec_required: _,
+				sec_actual: _,
+			} => {
+				assert_eq!(required, 30);
+				assert_eq!(actual, 10)
+			}
+			_ => panic!("Invalid action"),
+		}
+		let tx_conf = api_buy
+			.request_tx_confirmations(&kc_buy, &swap_buy)
+			.unwrap();
+		let buy_resp = fsm_buy
+			.process(Input::Check, &mut swap_buy, &ctx_buy, &tx_conf)
+			.unwrap();
+		assert_eq!(swap_buy.state, StateId::BuyerWaitingForLockConfirmations);
+		match buy_resp.action.unwrap() {
+			Action::WaitForLockConfirmations {
+				mwc_required: required,
+				mwc_actual: actual,
+				currency: _,
+				address: _,
+				sec_expected_to_be_posted: _,
+				sec_required: _,
+				sec_actual: _,
+			} => {
+				assert_eq!(required, 30);
+				assert_eq!(actual, 10)
+			}
+			_ => panic!("Invalid action"),
+		}
+
+		// // Undo a BTC block to test seller
+		// {
+		// 	let mut state = btc_nc.state.lock();
+		// 	state.height -= 1;
+		// }
+
+		// Seller: wait BTC confirmations
+		nc.mine_blocks(20);
+		// let tx_conf = api_sell
+		// 	.request_tx_confirmations(&kc_sell, &swap_sell)
+		// 	.unwrap();
+		// let sell_resp = fsm_sell
+		// 	.process(Input::Check, &mut swap_sell, &ctx_sell, &tx_conf)
+		// 	.unwrap();
+		// assert_eq!(swap_sell.state, StateId::SellerWaitingForLockConfirmations);
+		// match sell_resp.action.unwrap() {
+		// 	Action::WaitForLockConfirmations {
+		// 		mwc_required: _,
+		// 		mwc_actual: _,
+		// 		currency: _,
+		// 		address: _,
+		// 		sec_expected_to_be_posted: _,
+		// 		sec_required: required,
+		// 		sec_actual: actual,
+		// 	} => {
+		// 		assert_eq!(required, 6);
+		// 		assert_eq!(actual, Some(1))
+		// 	}
+		// 	_ => panic!("Invalid action"),
+		// }
+		// btc_nc.mine_block();
+
+		// if write_json {
+		// 	write(
+		// 		"/home/terry/Work/mwc/mwc-wallet/libwallet/swap_test/eth/swap_sell_3.json",
+		// 		serde_json::to_string_pretty(&swap_sell).unwrap(),
+		// 	)
+		// 	.unwrap();
+		// } else {
+		// 	assert_eq!(
+		// 		read_to_string("/home/terry/Work/mwc/mwc-wallet/libwallet/swap_test/eth/swap_sell_3.json").unwrap(),
+		// 		serde_json::to_string_pretty(&swap_sell).unwrap()
+		// 	);
+		// }
+
+		// Checking if both seller & Buyer are moved to the redeem message exchange step
+		let tx_conf = api_sell
+			.request_tx_confirmations(&kc_sell, &swap_sell)
+			.unwrap();
+		let sell_resp = fsm_sell
+			.process(Input::Check, &mut swap_sell, &ctx_sell, &tx_conf)
+			.unwrap();
+		let tx_conf = api_buy
+			.request_tx_confirmations(&kc_buy, &swap_buy)
+			.unwrap();
+		let buy_resp = fsm_buy
+			.process(Input::Check, &mut swap_buy, &ctx_buy, &tx_conf)
+			.unwrap();
+
+		assert_eq!(swap_sell.state, StateId::SellerWaitingForInitRedeemMessage);
+		assert_eq!(swap_buy.state, StateId::BuyerSendingInitRedeemMessage);
+		assert_eq!(
+			sell_resp.action.unwrap().get_id_str(),
+			"SellerWaitingForInitRedeemMessage"
+		);
+		let message_3 = match buy_resp.action.unwrap() {
+			Action::BuyerSendInitRedeemMessage(message) => message,
+			_ => panic!("Unexpected action"),
+		};
+		let tx_conf = api_buy
+			.request_tx_confirmations(&kc_buy, &swap_buy)
+			.unwrap();
+		fsm_buy
+			.process(Input::Execute, &mut swap_buy, &ctx_buy, &tx_conf)
+			.unwrap();
+		assert_eq!(swap_buy.state, StateId::BuyerWaitingForRespondRedeemMessage);
+
+		if write_json {
+			write(
+				"/home/terry/Work/mwc/mwc-wallet/libwallet/swap_test/eth/swap_buy_2.json",
+				serde_json::to_string_pretty(&swap_buy).unwrap(),
+			)
+			.unwrap();
+			write(
+				"/home/terry/Work/mwc/mwc-wallet/libwallet/swap_test/eth/message_3.json",
+				serde_json::to_string_pretty(&message_3).unwrap(),
+			)
+			.unwrap();
+		} else {
+			assert_eq!(
+				read_to_string(
+					"/home/terry/Work/mwc/mwc-wallet/libwallet/swap_test/eth/swap_buy_2.json"
+				)
+				.unwrap(),
+				serde_json::to_string_pretty(&swap_buy).unwrap()
+			);
+			assert_eq!(
+				read_to_string(
+					"/home/terry/Work/mwc/mwc-wallet/libwallet/swap_test/eth/message_3.json"
+				)
+				.unwrap(),
+				serde_json::to_string_pretty(&message_3).unwrap()
+			);
+		}
+
+		// Seller: sign redeem
+		let tx_conf = api_sell
+			.request_tx_confirmations(&kc_sell, &swap_sell)
+			.unwrap();
+		let sell_resp = fsm_sell
+			.process(Input::Check, &mut swap_sell, &ctx_sell, &tx_conf)
+			.unwrap();
+		assert_eq!(swap_sell.state, StateId::SellerWaitingForInitRedeemMessage);
+		assert_eq!(
+			sell_resp.action.unwrap().get_id_str(),
+			"SellerWaitingForInitRedeemMessage"
+		);
+
+		let tx_conf = api_sell
+			.request_tx_confirmations(&kc_sell, &swap_sell)
+			.unwrap();
+		let sell_resp = fsm_sell
+			.process(
+				Input::IncomeMessage(message_3),
+				&mut swap_sell,
+				&ctx_sell,
+				&tx_conf,
+			)
+			.unwrap();
+		assert_eq!(swap_sell.state, StateId::SellerSendingInitRedeemMessage);
+		let message_4 = match sell_resp.action.unwrap() {
+			Action::SellerSendRedeemMessage(message) => message,
+			_ => panic!("Unexpected action"),
+		};
+
+		let tx_conf = api_sell
+			.request_tx_confirmations(&kc_sell, &swap_sell)
+			.unwrap();
+		let sell_resp = fsm_sell
+			.process(Input::Execute, &mut swap_sell, &ctx_sell, &tx_conf)
+			.unwrap();
+		// Seller: wait for buyer's on-chain redeem tx
+		assert_eq!(swap_sell.state, StateId::SellerWaitingForBuyerToRedeemMwc);
+		assert_eq!(
+			sell_resp.action.unwrap().get_id_str(),
+			"SellerWaitForBuyerRedeemPublish"
+		);
+
+		if write_json {
+			write(
+				"/home/terry/Work/mwc/mwc-wallet/libwallet/swap_test/eth/swap_sell_4.json",
+				serde_json::to_string_pretty(&swap_sell).unwrap(),
+			)
+			.unwrap();
+			write(
+				"/home/terry/Work/mwc/mwc-wallet/libwallet/swap_test/eth/message_4.json",
+				serde_json::to_string_pretty(&message_4).unwrap(),
+			)
+			.unwrap();
+		} else {
+			assert_eq!(
+				read_to_string(
+					"/home/terry/Work/mwc/mwc-wallet/libwallet/swap_test/eth/swap_sell_4.json"
+				)
+				.unwrap(),
+				serde_json::to_string_pretty(&swap_sell).unwrap()
+			);
+			assert_eq!(
+				read_to_string(
+					"/home/terry/Work/mwc/mwc-wallet/libwallet/swap_test/eth/message_4.json"
+				)
+				.unwrap(),
+				serde_json::to_string_pretty(&message_4).unwrap()
+			);
+		}
+
+		// Buyer: redeem
+		let tx_conf = api_buy
+			.request_tx_confirmations(&kc_buy, &swap_buy)
+			.unwrap();
+		let buy_resp = fsm_buy
+			.process(Input::Check, &mut swap_buy, &ctx_buy, &tx_conf)
+			.unwrap();
+		assert_eq!(swap_buy.state, StateId::BuyerWaitingForRespondRedeemMessage);
+		assert_eq!(
+			buy_resp.action.unwrap().get_id_str(),
+			"BuyerWaitingForRedeemMessage"
+		);
+
+		let tx_conf = api_buy
+			.request_tx_confirmations(&kc_buy, &swap_buy)
+			.unwrap();
+		let buy_resp = fsm_buy
+			.process(
+				Input::IncomeMessage(message_4),
+				&mut swap_buy,
+				&ctx_buy,
+				&tx_conf,
+			)
+			.unwrap();
+		assert_eq!(swap_buy.state, StateId::BuyerRedeemMwc);
+		assert_eq!(
+			buy_resp.action.unwrap().get_id_str(),
+			"BuyerPublishMwcRedeemTx"
+		);
+
+		let tx_conf = &api_buy
+			.request_tx_confirmations(&kc_buy, &swap_buy)
+			.unwrap();
+		let buy_resp = fsm_buy
+			.process(Input::Execute, &mut swap_buy, &ctx_buy, &tx_conf)
+			.unwrap();
+		assert_eq!(swap_buy.state, StateId::BuyerWaitForRedeemMwcConfirmations);
+		assert_eq!(
+			buy_resp.action.unwrap().get_id_str(),
+			"WaitForMwcConfirmations"
+		);
+
+		// Buyer: almost done, just need to wait for confirmations
+		nc.mine_block();
+
+		let tx_conf = api_buy
+			.request_tx_confirmations(&kc_buy, &swap_buy)
+			.unwrap();
+		let buy_resp = fsm_buy
+			.process(Input::Check, &mut swap_buy, &ctx_buy, &tx_conf)
+			.unwrap();
+		assert_eq!(swap_buy.state, StateId::BuyerWaitForRedeemMwcConfirmations);
+		match buy_resp.action.unwrap() {
+			Action::WaitForMwcConfirmations {
+				name: _,
+				required,
+				actual,
+			} => {
+				assert_eq!(actual, 1);
+				assert_eq!(required, 30);
+			}
+			_ => panic!("Invalid action"),
+		}
+
+		// At this point, buyer would add Grin to their outputs
+		// Now seller can redeem ETH
+		if write_json {
+			write(
+				"/home/terry/Work/mwc/mwc-wallet/libwallet/swap_test/eth/swap_buy_3.json",
+				serde_json::to_string_pretty(&swap_buy).unwrap(),
+			)
+			.unwrap();
+		} else {
+			assert_eq!(
+				read_to_string(
+					"/home/terry/Work/mwc/mwc-wallet/libwallet/swap_test/eth/swap_buy_3.json"
+				)
+				.unwrap(),
+				serde_json::to_string_pretty(&swap_buy).unwrap()
+			);
+		}
+
+		// Seller: publish ETH tx
+		let tx_conf = api_sell
+			.request_tx_confirmations(&kc_sell, &swap_sell)
+			.unwrap();
+		let sell_resp = fsm_sell
+			.process(Input::Check, &mut swap_sell, &ctx_sell, &tx_conf)
+			.unwrap();
+		assert_eq!(swap_sell.state, StateId::SellerRedeemSecondaryCurrency);
+		assert_eq!(
+			sell_resp.action.unwrap().get_id_str(),
+			"SellerPublishTxSecondaryRedeem"
+		);
+
+		if write_json {
+			write(
+				"/home/terry/Work/mwc/mwc-wallet/libwallet/swap_test/eth/swap_sell_5.json",
+				serde_json::to_string_pretty(&swap_sell).unwrap(),
+			)
+			.unwrap();
+		} else {
+			assert_eq!(
+				read_to_string(
+					"/home/terry/Work/mwc/mwc-wallet/libwallet/swap_test/eth/swap_sell_5.json"
+				)
+				.unwrap(),
+				serde_json::to_string_pretty(&swap_sell).unwrap()
+			);
+		}
+
+		// Seller: publishing and wait for ETH confirmations
+		let tx_conf = api_sell
+			.request_tx_confirmations(&kc_sell, &swap_sell)
+			.unwrap();
+		let sell_resp = fsm_sell
+			.process(Input::Execute, &mut swap_sell, &ctx_sell, &tx_conf)
+			.unwrap();
+		assert_eq!(
+			swap_sell.state,
+			StateId::SellerWaitingForRedeemConfirmations
+		);
+		match sell_resp.action.unwrap() {
+			Action::WaitForSecondaryConfirmations {
+				name: _,
+				expected_to_be_posted: _,
+				currency: _,
+				address: _,
+				required,
+				actual,
+			} => {
+				assert_eq!(required, 6);
+				assert_eq!(actual, 0)
+			}
+			_ => panic!("Invalid action"),
+		}
+
+		// btc_nc.mine_block();
+		// still waiting
+		// let tx_conf = api_sell
+		// 	.request_tx_confirmations(&kc_sell, &swap_sell)
+		// 	.unwrap();
+		// let sell_resp = fsm_sell
+		// 	.process(Input::Check, &mut swap_sell, &ctx_sell, &tx_conf)
+		// 	.unwrap();
+		// assert_eq!(
+		// 	swap_sell.state,
+		// 	StateId::SellerWaitingForRedeemConfirmations
+		// );
+		// match sell_resp.action.unwrap() {
+		// 	Action::WaitForSecondaryConfirmations {
+		// 		name: _,
+		// 		expected_to_be_posted: _,
+		// 		currency: _,
+		// 		address: _,
+		// 		required,
+		// 		actual,
+		// 	} => {
+		// 		assert_eq!(required, 6);
+		// 		assert_eq!(actual, 1)
+		// 	}
+		// 	_ => panic!("Invalid action"),
+		// }
+
+		// // Let's mine more blocks, so both Buyer and Seller will come to complete state
+		nc.mine_blocks(30);
+		// btc_nc.mine_blocks(6);
+
+		let tx_conf = api_sell
+			.request_tx_confirmations(&kc_sell, &swap_sell)
+			.unwrap();
+		let sell_resp = fsm_sell
+			.process(Input::Check, &mut swap_sell, &ctx_sell, &tx_conf)
+			.unwrap();
+		let tx_conf = &api_buy
+			.request_tx_confirmations(&kc_buy, &swap_buy)
+			.unwrap();
+		let buy_resp = fsm_buy
+			.process(Input::Check, &mut swap_buy, &ctx_buy, &tx_conf)
+			.unwrap();
+
+		// Seller & Buyer: complete!
+		assert_eq!(swap_sell.state, StateId::SellerSwapComplete);
+		assert_eq!(swap_buy.state, StateId::BuyerSwapComplete);
+		assert!(sell_resp.action.is_none());
+		assert!(buy_resp.action.is_none());
+
+		if write_json {
+			write(
+				"/home/terry/Work/mwc/mwc-wallet/libwallet/swap_test/eth/swap_sell_6.json",
+				serde_json::to_string_pretty(&swap_sell).unwrap(),
+			)
+			.unwrap();
+		} else {
+			assert_eq!(
+				read_to_string(
+					"/home/terry/Work/mwc/mwc-wallet/libwallet/swap_test/eth/swap_sell_6.json"
+				)
+				.unwrap(),
+				serde_json::to_string_pretty(&swap_sell).unwrap()
+			);
+		}
+
+		assert!(write_json, "json files written");
 	}
 }
