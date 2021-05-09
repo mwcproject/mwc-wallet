@@ -1735,7 +1735,7 @@ where
 		}
 		("eth", Some(args)) => {
 			let a = arg_parse!(parse_eth_args(&args));
-			command::eth(owner_api, km, a)
+			command::eth(owner_api.wallet_inst.clone(), a)
 		}
 		(cmd, _) => {
 			return Err(ErrorKind::ArgumentError(format!(

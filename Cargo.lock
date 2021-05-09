@@ -2072,7 +2072,6 @@ dependencies = [
 [[package]]
 name = "grin_api"
 version = "4.4.0"
-source = "git+https://github.com/mwcproject/mwc-node?tag=4.4.0#60a84b72f8b89ad26a318ea68df154f6dca30318"
 dependencies = [
  "bytes 0.5.6",
  "chrono",
@@ -2107,7 +2106,6 @@ dependencies = [
 [[package]]
 name = "grin_chain"
 version = "4.4.0"
-source = "git+https://github.com/mwcproject/mwc-node?tag=4.4.0#60a84b72f8b89ad26a318ea68df154f6dca30318"
 dependencies = [
  "bit-vec",
  "bitflags 1.2.1",
@@ -2131,7 +2129,6 @@ dependencies = [
 [[package]]
 name = "grin_core"
 version = "4.4.0"
-source = "git+https://github.com/mwcproject/mwc-node?tag=4.4.0#60a84b72f8b89ad26a318ea68df154f6dca30318"
 dependencies = [
  "blake2-rfc",
  "byteorder",
@@ -2157,7 +2154,6 @@ dependencies = [
 [[package]]
 name = "grin_keychain"
 version = "4.4.0"
-source = "git+https://github.com/mwcproject/mwc-node?tag=4.4.0#60a84b72f8b89ad26a318ea68df154f6dca30318"
 dependencies = [
  "blake2-rfc",
  "byteorder",
@@ -2181,7 +2177,6 @@ dependencies = [
 [[package]]
 name = "grin_p2p"
 version = "4.4.0"
-source = "git+https://github.com/mwcproject/mwc-node?tag=4.4.0#60a84b72f8b89ad26a318ea68df154f6dca30318"
 dependencies = [
  "async-std",
  "bitflags 1.2.1",
@@ -2215,7 +2210,6 @@ dependencies = [
 [[package]]
 name = "grin_pool"
 version = "4.4.0"
-source = "git+https://github.com/mwcproject/mwc-node?tag=4.4.0#60a84b72f8b89ad26a318ea68df154f6dca30318"
 dependencies = [
  "blake2-rfc",
  "chrono",
@@ -2249,7 +2243,6 @@ dependencies = [
 [[package]]
 name = "grin_servers"
 version = "4.4.0"
-source = "git+https://github.com/mwcproject/mwc-node?tag=4.4.0#60a84b72f8b89ad26a318ea68df154f6dca30318"
 dependencies = [
  "chrono",
  "dirs 1.0.5",
@@ -2287,7 +2280,6 @@ dependencies = [
 [[package]]
 name = "grin_store"
 version = "4.4.0"
-source = "git+https://github.com/mwcproject/mwc-node?tag=4.4.0#60a84b72f8b89ad26a318ea68df154f6dca30318"
 dependencies = [
  "byteorder",
  "croaring-mw",
@@ -2307,7 +2299,6 @@ dependencies = [
 [[package]]
 name = "grin_util"
 version = "4.4.0"
-source = "git+https://github.com/mwcproject/mwc-node?tag=4.4.0#60a84b72f8b89ad26a318ea68df154f6dca30318"
 dependencies = [
  "backtrace",
  "base64 0.12.3",

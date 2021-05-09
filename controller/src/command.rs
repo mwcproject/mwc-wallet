@@ -34,7 +34,7 @@ use grin_wallet_impls::adapters::{
 use grin_wallet_impls::tor;
 use grin_wallet_impls::{libp2p_messaging, HttpDataSender};
 use grin_wallet_impls::{Address, MWCMQSAddress, Publisher};
-use grin_wallet_libwallet::api_impl::{owner, owner_libp2p, owner_swap};
+use grin_wallet_libwallet::api_impl::{owner, owner_eth, owner_libp2p, owner_swap};
 use grin_wallet_libwallet::internal::selection;
 use grin_wallet_libwallet::proof::proofaddress::{self, ProvableAddress};
 use grin_wallet_libwallet::proof::tx_proof::TxProof;
@@ -2929,8 +2929,7 @@ where
 }
 
 pub fn eth<L, C, K>(
-	owner_api: &mut Owner<L, C, K>,
-	keychain_mask: Option<&SecretKey>,
+	wallet_inst: Arc<Mutex<Box<dyn WalletInst<'static, L, C, K>>>>,
 	args: EthArgs,
 ) -> Result<(), Error>
 where
@@ -2940,36 +2939,39 @@ where
 {
 	match args.subcommand {
 		EthSubcommand::Info => {
-			controller::owner_single_use(None, keychain_mask, Some(owner_api), |api, _m| {
-				let result = api.eth_info();
-				match result {
-					Ok((address, height, balance)) => {
-						display::eth_info(address, height, balance);
-						Ok(())
-					}
-					Err(e) => Err(ErrorKind::LibWallet(format!(
-						"Ethereum Chain Operation failed! {}",
-						e
-					))
-					.into()),
+			let result = owner_eth::info(wallet_inst);
+			match result {
+				Ok((address, height, balance)) => {
+					display::eth_info(address, height, balance);
+					Ok(())
 				}
-			})?;
-			Ok(())
+				Err(e) => Err(ErrorKind::LibWallet(format!(
+					"Ethereum Chain Operation failed!: {}",
+					e
+				))
+				.into()),
+			}
 		}
 		EthSubcommand::Send => {
-			controller::owner_single_use(None, keychain_mask, Some(owner_api), |api, _m| {
-				let dest = args.dest;
-				let amount = args.amount;
+			let dest = args.dest;
+			let amount = args.amount;
 
-				if dest.is_none() || amount.is_none() {
-					println!("Please sepecify destination address and amounts");
-					return Ok(());
+			if dest.is_none() || amount.is_none() {
+				println!("Please sepecify destination address and amounts");
+				return Ok(());
+			}
+			let result = owner_eth::transfer(wallet_inst, dest.clone(), amount.clone());
+			match result {
+				Ok(()) => {
+					println!("Transfer {} to {} done!!!", amount.unwrap(), dest.unwrap());
+					Ok(())
 				}
-				api.eth_transfer(dest.clone(), amount.clone())?;
-				println!("Transfer {} to {} done!!!", amount.unwrap(), dest.unwrap());
-				Ok(())
-			})?;
-			Ok(())
+				Err(e) => Err(ErrorKind::LibWallet(format!(
+					"Ethereum Chain Operation failed!: {}",
+					e
+				))
+				.into()),
+			}
 		}
 	}
 }

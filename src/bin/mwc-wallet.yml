@@ -818,6 +818,7 @@ subcommands:
             takes_value: true
         - amount:
             help: amounts send out
+            short: a
             long: amount
             takes_value: true
   - integrity:

@@ -81,6 +81,7 @@ pub use crate::slate_versions::{
 };
 pub use api_impl::foreign;
 pub use api_impl::owner;
+pub use api_impl::owner_eth;
 pub use api_impl::owner_libp2p;
 pub use api_impl::owner_swap;
 pub use api_impl::owner_updater::StatusMessage;
