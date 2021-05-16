@@ -147,8 +147,9 @@ where
 	}
 
 	/// Seller transfer eth from internal wallet to users' wallet
-	fn seller_transfer_secondary(&self, address: String, swap: &Swap) -> Result<H256, ErrorKind> {
+	fn seller_transfer_secondary(&self, swap: &Swap) -> Result<H256, ErrorKind> {
 		let c = self.eth_node_client.lock();
+		let address = swap.unwrap_seller().unwrap().0;
 		// convert ether to wei
 		c.transfer(to_eth_address(address).unwrap(), swap.secondary_amount)
 	}
@@ -321,6 +322,7 @@ where
 		electrum_node_uri2: Option<String>,
 		eth_swap_contract_address: Option<String>,
 		eth_infura_project_id: Option<String>,
+		eth_redirect_out_wallet: bool,
 		dry_run: bool,
 		tag: Option<String>,
 	) -> Result<Swap, ErrorKind> {
@@ -349,6 +351,7 @@ where
 			electrum_node_uri2,
 			eth_swap_contract_address,
 			eth_infura_project_id,
+			eth_redirect_out_wallet,
 			dry_run,
 			tag,
 		)?;
@@ -635,10 +638,10 @@ where
 	}
 
 	/// transfer amount to dedicated address.
-	fn transfer_scondary(&self, address: String, swap: &mut Swap) -> Result<(), ErrorKind> {
+	fn transfer_scondary(&self, swap: &mut Swap) -> Result<(), ErrorKind> {
 		assert!(swap.is_seller());
 
-		self.seller_transfer_secondary(address, swap)?;
+		self.seller_transfer_secondary(swap)?;
 		Ok(())
 	}
 

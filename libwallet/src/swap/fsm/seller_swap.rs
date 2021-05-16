@@ -1402,103 +1402,96 @@ where
 		_context: &Context,
 		tx_conf: &SwapTransactionsConfirmations,
 	) -> Result<StateProcessRespond, ErrorKind> {
-		match input {
-			Input::Check => {
-				// Be greedy, check the deadline for locking
-				post_refund_if_possible(self.node_client.clone(), swap, tx_conf)?;
+		if let Input::Check = input {
+			// Be greedy, check the deadline for locking
+			post_refund_if_possible(self.node_client.clone(), swap, tx_conf)?;
 
-				// Just waiting
-				if let Some(conf) = tx_conf.secondary_redeem_conf {
-					let secondary_redeem_conf = match swap.secondary_currency.is_btc_family() {
-						true => conf >= swap.secondary_confirmations,
-						_ => conf > 0,
-					};
-					if secondary_redeem_conf {
-						//for eth, now we try to transfer ethers from interal wallet to buyers' eth wallet.
-						if !swap.secondary_currency.is_btc_family() {
-							let secondary_redeem_address = swap.unwrap_seller().unwrap().0;
-							println!(
-								"secondary_redeem_address: {}, amount: {}",
-								secondary_redeem_address, swap.secondary_amount
-							);
-							self.swap_api
-								.transfer_scondary(secondary_redeem_address, swap)?;
-						}
-						// We are done
-						swap.add_journal_message(format!(
-							"{} redeem transaction has enough confirmations. Trade is complete",
-							swap.secondary_currency
-						));
-						return Ok(StateProcessRespond::new(StateId::SellerSwapComplete));
+			// Just waiting
+			if let Some(conf) = tx_conf.secondary_redeem_conf {
+				let secondary_redeem_conf = match swap.secondary_currency.is_btc_family() {
+					true => conf >= swap.secondary_confirmations,
+					_ => conf > 0,
+				};
+				if secondary_redeem_conf {
+					//for eth, now we try to transfer ethers from interal wallet to buyers' eth wallet.
+					if !swap.secondary_currency.is_btc_family()
+						&& swap.eth_redirect_to_private_wallet
+					{
+						self.swap_api.transfer_scondary(swap)?;
 					}
+					// We are done
+					swap.add_journal_message(format!(
+						"{} redeem transaction has enough confirmations. Trade is complete",
+						swap.secondary_currency
+					));
+					return Ok(StateProcessRespond::new(StateId::SellerSwapComplete));
+				}
 
-					// If transaction was published for a while ago and still in mem pool. we need to bump the fees.
-					// It is applicable to BTC only
-					if swap.secondary_currency == Currency::Btc && conf == 0 {
-						match swap.posted_secondary_height {
-							Some(h) => {
-								if h < tx_conf.secondary_tip
-									- state::SECONDARY_HEIGHT_TO_INCREASE_FEE
+				// If transaction was published for a while ago and still in mem pool. we need to bump the fees.
+				// It is applicable to BTC only
+				if swap.secondary_currency == Currency::Btc && conf == 0 {
+					match swap.posted_secondary_height {
+						Some(h) => {
+							if h < tx_conf.secondary_tip - state::SECONDARY_HEIGHT_TO_INCREASE_FEE {
+								// we can bump the fees if there is enough amount. Tx redeem size is about 660 bytes. And we don't want to spend more then half of the BTC funds.
+								if swap.secondary_fee
+									* state::SECONDARY_INCREASE_FEE_K * 660.0
+									* 2.0 < swap.secondary_amount as f32
 								{
-									// we can bump the fees if there is enough amount. Tx redeem size is about 660 bytes. And we don't want to spend more then half of the BTC funds.
-									if swap.secondary_fee
-										* state::SECONDARY_INCREASE_FEE_K * 660.0
-										* 2.0 < swap.secondary_amount as f32
-									{
-										swap.secondary_fee *= state::SECONDARY_INCREASE_FEE_K;
-										swap.posted_secondary_height = None;
-										swap.posted_redeem = None;
-										swap.add_journal_message(format!(
+									swap.secondary_fee *= state::SECONDARY_INCREASE_FEE_K;
+									swap.posted_secondary_height = None;
+									swap.posted_redeem = None;
+									swap.add_journal_message(format!(
 											"Fee for {} redeem transaction is increased. New fee is {} {}",
 											swap.secondary_currency,
 											swap.secondary_fee,
 											swap.secondary_currency.get_fee_units().0
 										));
-									}
 								}
 							}
-							None => (),
 						}
-					}
-
-					// If transaction in the memory pool for a long time or fee is different now, we should do a retry
-					if conf == 0
-						&& (self.swap_api.is_secondary_tx_fee_changed(swap)?
-							&& swap.posted_redeem.unwrap_or(0)
-								< swap::get_cur_time() - super::state::POST_SECONDARY_RETRY_PERIOD)
-					{
-						return Ok(StateProcessRespond::new(
-							StateId::SellerRedeemSecondaryCurrency,
-						));
-					}
-				} else {
-					// might need to retry
-					if swap.posted_redeem.unwrap_or(0)
-						< swap::get_cur_time() - super::state::POST_SECONDARY_RETRY_PERIOD
-					{
-						return Ok(StateProcessRespond::new(
-							StateId::SellerRedeemSecondaryCurrency,
-						));
+						None => (),
 					}
 				}
 
-				return Ok(
-					StateProcessRespond::new(StateId::SellerWaitingForRedeemConfirmations).action(
-						Action::WaitForSecondaryConfirmations {
-							name: "Redeeming funds".to_string(),
-							expected_to_be_posted: 0,
-							currency: swap.secondary_currency,
-							address: vec![swap.unwrap_seller()?.0],
-							required: swap.secondary_confirmations,
-							actual: tx_conf.secondary_redeem_conf.unwrap_or(0),
-						},
-					),
-				);
+				// If transaction in the memory pool for a long time or fee is different now, we should do a retry
+				if conf == 0
+					&& (self.swap_api.is_secondary_tx_fee_changed(swap)?
+						&& swap.posted_redeem.unwrap_or(0)
+							< swap::get_cur_time() - super::state::POST_SECONDARY_RETRY_PERIOD)
+				{
+					return Ok(StateProcessRespond::new(
+						StateId::SellerRedeemSecondaryCurrency,
+					));
+				}
+			} else {
+				// might need to retry
+				if swap.posted_redeem.unwrap_or(0)
+					< swap::get_cur_time() - super::state::POST_SECONDARY_RETRY_PERIOD
+				{
+					return Ok(StateProcessRespond::new(
+						StateId::SellerRedeemSecondaryCurrency,
+					));
+				}
 			}
-			_ => Err(ErrorKind::InvalidSwapStateInput(format!(
+
+			return Ok(
+				StateProcessRespond::new(StateId::SellerWaitingForRedeemConfirmations).action(
+					Action::WaitForSecondaryConfirmations {
+						name: "Redeeming funds".to_string(),
+						expected_to_be_posted: 0,
+						currency: swap.secondary_currency,
+						address: vec![swap.unwrap_seller()?.0],
+						required: swap.secondary_confirmations,
+						actual: tx_conf.secondary_redeem_conf.unwrap_or(0),
+					},
+				),
+			);
+		} else {
+			Err(ErrorKind::InvalidSwapStateInput(format!(
 				"SellerWaitingForRedeemConfirmations get {:?}",
 				input
-			))),
+			)))
 		}
 	}
 	fn get_prev_swap_state(&self) -> Option<StateId> {

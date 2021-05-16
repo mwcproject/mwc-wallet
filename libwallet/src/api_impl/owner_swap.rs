@@ -251,6 +251,7 @@ where
 		params.electrum_node_uri2.clone(),
 		params.eth_swap_contract_address.clone(),
 		params.eth_infura_project_id.clone(),
+		params.eth_redirect_to_private_wallet,
 		params.dry_run,
 		params.tag.clone(),
 	)?;

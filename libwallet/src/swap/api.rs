@@ -74,6 +74,7 @@ pub trait SwapApi<K: Keychain>: Sync + Send {
 		electrum_node_uri2: Option<String>,
 		eth_swap_contract_address: Option<String>,
 		eth_infura_project_id: Option<String>,
+		eth_redirect_out_wallet: bool,
 		dry_run: bool,
 		tag: Option<String>,
 	) -> Result<Swap, ErrorKind>;
@@ -143,7 +144,7 @@ pub trait SwapApi<K: Keychain>: Sync + Send {
 	fn post_secondary_lock_tx(&self, swap: &mut Swap) -> Result<(), ErrorKind>;
 
 	/// transfer amount to dedicated address.
-	fn transfer_scondary(&self, address: String, swap: &mut Swap) -> Result<(), ErrorKind>;
+	fn transfer_scondary(&self, swap: &mut Swap) -> Result<(), ErrorKind>;
 
 	/// Validate clients. We want to be sure that the clients able to acceess the servers
 	fn test_client_connections(&self) -> Result<(), ErrorKind>;

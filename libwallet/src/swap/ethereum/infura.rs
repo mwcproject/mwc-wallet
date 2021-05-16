@@ -256,16 +256,6 @@ impl EthNodeClient for InfuraNodeClient {
 
 			let latest = web3.eth().block_number().await.unwrap();
 			let refund_block = latest.as_u64() + refund_time;
-			// let nonce = web3
-			// 	.eth()
-			// 	.transaction_count(
-			// 		to_eth_address(self.wallet.address.clone().unwrap()).unwrap(),
-			// 		Some(BlockNumber::Pending),
-			// 	)
-			// 	.await
-			// 	.unwrap();
-			// options.nonce = Some(nonce + 100);
-
 			let gas_price = web3.eth().gas_price().await.unwrap();
 			let mut options = Options::default();
 			options.value = Some(U256::from(value));
@@ -338,18 +328,8 @@ impl EthNodeClient for InfuraNodeClient {
 				)
 				.await
 				.unwrap();
-			// let nonce = web3
-			// 	.eth()
-			// 	.transaction_count(
-			// 		to_eth_address(self.wallet.address.clone().unwrap()).unwrap(),
-			// 		None,
-			// 	)
-			// 	.await
-			// 	.unwrap();
 			let gas_price = web3.eth().gas_price().await.unwrap();
 			let mut options = Options::default();
-			// options.nonce = Some(nonce);
-			// options.value = None;
 			options.gas_price = Some(gas_price);
 			options.gas = Some(U256::from(TRANSACTION_DEFAULT_GAS));
 
@@ -447,19 +427,8 @@ impl EthNodeClient for InfuraNodeClient {
 			let contract =
 				Contract::from_json(web3.eth(), contract_address, ETH_SWAP_CONTRACT.as_bytes())
 					.unwrap();
-
-			// let nonce = web3
-			// 	.eth()
-			// 	.transaction_count(
-			// 		to_eth_address(self.wallet.address.clone().unwrap()).unwrap(),
-			// 		None,
-			// 	)
-			// 	.await
-			// 	.unwrap();
 			let gas_price = web3.eth().gas_price().await.unwrap();
 			let mut options = Options::default();
-			// options.nonce = Some(nonce);
-			// options.value = None;
 			options.gas_price = Some(gas_price);
 			options.gas = Some(U256::from(TRANSACTION_DEFAULT_GAS));
 

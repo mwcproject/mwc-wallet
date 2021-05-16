@@ -396,6 +396,8 @@ pub struct SwapStartArgs {
 	pub eth_swap_contract_address: Option<String>,
 	/// Ethereum Infura Project Id
 	pub eth_infura_project_id: Option<String>,
+	/// Ethereum transfer to users' private wallet directly
+	pub eth_redirect_to_private_wallet: bool,
 	/// Dry run flag. Use true if you want to validate config
 	pub dry_run: bool,
 	/// Tag for this offer. Needed for swap marketplace related offers management

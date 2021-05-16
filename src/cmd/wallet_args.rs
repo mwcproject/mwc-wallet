@@ -34,7 +34,6 @@ use grin_wallet_impls::{DefaultLCProvider, DefaultWalletImpl};
 use grin_wallet_impls::{PathToSlateGetter, SlateGetter};
 use grin_wallet_libwallet::proof::proofaddress;
 use grin_wallet_libwallet::proof::proofaddress::ProvableAddress;
-use grin_wallet_libwallet::swap::types::Currency;
 use grin_wallet_libwallet::Slate;
 use grin_wallet_libwallet::{
 	IssueInvoiceTxArgs, NodeClient, SwapStartArgs, WalletInst, WalletLCProvider,
@@ -46,7 +45,6 @@ use grin_wallet_util::grin_keychain as keychain;
 use linefeed::terminal::Signal;
 use linefeed::{Interface, ReadResult};
 use rpassword;
-use std::convert::TryFrom;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use uuid::Uuid;
@@ -1076,6 +1074,7 @@ pub fn parse_swap_start_args(args: &ArgMatches) -> Result<SwapStartArgs, ParseEr
 		.value_of("eth_infura_project_id")
 		.map(|s| String::from(s))
 		.filter(|s| !s.is_empty());
+	let eth_redirect_to_private_wallet = args.is_present("eth_redirect_to_private_wallet");
 
 	let secondary_fee = match args.value_of("secondary_fee") {
 		Some(fee_str) => Some(fee_str.parse::<f32>().map_err(|e| {
@@ -1107,6 +1106,7 @@ pub fn parse_swap_start_args(args: &ArgMatches) -> Result<SwapStartArgs, ParseEr
 		electrum_node_uri2,
 		eth_swap_contract_address,
 		eth_infura_project_id,
+		eth_redirect_to_private_wallet,
 		dry_run,
 		tag: args.value_of("tag").map(|s| s.to_string()),
 	})
@@ -1172,6 +1172,7 @@ pub fn parse_swap_args(args: &ArgMatches) -> Result<command::SwapArgs, ParseErro
 	let eth_infura_project_id = args
 		.value_of("eth_infura_project_id")
 		.map(|s| String::from(s));
+	let eth_redirect_to_priavte_wallet = args.is_present("eth_redirect_to_priavte_wallet");
 
 	Ok(command::SwapArgs {
 		subcommand,
@@ -1190,6 +1191,7 @@ pub fn parse_swap_args(args: &ArgMatches) -> Result<command::SwapArgs, ParseErro
 		electrum_node_uri2,
 		eth_swap_contract_address,
 		eth_infura_project_id,
+		eth_redirect_to_priavte_wallet,
 		wait_for_backup1: false, // waiting is a primary usage for qt wallet. We are not documented that properly to make available for all users.
 		tag: args.value_of("tag").map(|s| String::from(s)),
 	})

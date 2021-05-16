@@ -63,6 +63,7 @@ impl SellApi {
 		electrum_node_uri2: Option<String>,
 		eth_swap_contract_address: Option<String>,
 		eth_infura_project_id: Option<String>,
+		eth_redirect_to_private_wallet: bool,
 		dry_run: bool,
 		tag: Option<String>,
 	) -> Result<Swap, ErrorKind> {
@@ -136,6 +137,7 @@ impl SellApi {
 			electrum_node_uri2,
 			eth_swap_contract_address,
 			eth_infura_project_id,
+			eth_redirect_to_private_wallet,
 			last_process_error: None,
 			last_check_error: None,
 			wait_for_backup1: false,

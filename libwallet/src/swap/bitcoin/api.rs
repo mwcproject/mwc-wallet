@@ -445,6 +445,7 @@ where
 		electrum_node_uri2: Option<String>,
 		eth_swap_contract_address: Option<String>,
 		eth_infura_project_id: Option<String>,
+		_eth_redirect_out_wallet: bool,
 		dry_run: bool,
 		tag: Option<String>,
 	) -> Result<Swap, ErrorKind> {
@@ -484,6 +485,7 @@ where
 			electrum_node_uri2,
 			eth_swap_contract_address,
 			eth_infura_project_id,
+			false,
 			dry_run,
 			tag,
 		)?;
@@ -778,7 +780,7 @@ where
 	}
 
 	/// transfer amount to dedicated address.
-	fn transfer_scondary(&self, _address: String, _swap: &mut Swap) -> Result<(), ErrorKind> {
+	fn transfer_scondary(&self, _swap: &mut Swap) -> Result<(), ErrorKind> {
 		Ok(())
 	}
 

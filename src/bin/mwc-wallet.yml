@@ -640,6 +640,10 @@ subcommands:
             help: ethereum infura project id
             long: eth_infura_project_id
             takes_value: true
+        - eth_redirect_to_private_wallet:
+            help: ethereum transfer funds to users' private wallet
+            long: eth_redirect_to_private_wallet
+            takes_value: false
         - dry_run:
             help: verify parameters, do not create a new swap trade
             long: dry_run

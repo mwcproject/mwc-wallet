@@ -544,6 +544,7 @@ mod tests {
 				None,
 				None,
 				false,
+				false,
 				None,
 			)
 			.unwrap();
@@ -624,6 +625,7 @@ mod tests {
 				None,
 				None,
 				None,
+				false,
 				false,
 				None,
 			)
@@ -1693,6 +1695,7 @@ mod tests {
 					None,
 					None,
 					None,
+					false,
 					false,
 					None,
 				)
@@ -5562,6 +5565,7 @@ mod tests {
 				None,
 				None,
 				false,
+				false,
 				None,
 			)
 			.unwrap();
@@ -5720,6 +5724,7 @@ mod tests {
 				None,
 				None,
 				None,
+				false,
 				false,
 				None,
 			)
