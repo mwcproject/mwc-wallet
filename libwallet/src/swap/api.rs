@@ -142,6 +142,9 @@ pub trait SwapApi<K: Keychain>: Sync + Send {
 	/// deposit secondary currecny to lock account.
 	fn post_secondary_lock_tx(&self, swap: &mut Swap) -> Result<(), ErrorKind>;
 
+	/// transfer amount to dedicated address.
+	fn transfer_scondary(&self, address: String, swap: &mut Swap) -> Result<(), ErrorKind>;
+
 	/// Validate clients. We want to be sure that the clients able to acceess the servers
 	fn test_client_connections(&self) -> Result<(), ErrorKind>;
 }

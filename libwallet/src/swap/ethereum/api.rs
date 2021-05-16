@@ -146,6 +146,13 @@ where
 		c.redeem(eth_data.address_from_secret.clone().unwrap(), secret_key)
 	}
 
+	/// Seller transfer eth from internal wallet to users' wallet
+	fn seller_transfer_secondary(&self, address: String, swap: &Swap) -> Result<H256, ErrorKind> {
+		let c = self.eth_node_client.lock();
+		// convert ether to wei
+		c.transfer(to_eth_address(address).unwrap(), swap.secondary_amount)
+	}
+
 	/// buyer call contract function to refund their Ethers
 	fn buyer_refund<K: Keychain>(
 		&self,
@@ -624,6 +631,14 @@ where
 		let eth_data = swap.secondary_data.unwrap_eth_mut()?;
 		eth_data.lock_tx = Some(eth_tx);
 
+		Ok(())
+	}
+
+	/// transfer amount to dedicated address.
+	fn transfer_scondary(&self, address: String, swap: &mut Swap) -> Result<(), ErrorKind> {
+		assert!(swap.is_seller());
+
+		self.seller_transfer_secondary(address, swap)?;
 		Ok(())
 	}
 

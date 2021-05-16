@@ -1033,14 +1033,8 @@ pub fn parse_swap_start_args(args: &ArgMatches) -> Result<SwapStartArgs, ParseEr
 	}
 
 	let btc_amount = parse_required(args, "secondary_amount")?;
-	let currency = Currency::try_from(secondary_currency.as_str()).unwrap();
-	let secondary_redeem_address = match currency.is_btc_family() {
-		true => {
-			let btc_address = parse_required(args, "secondary_address")?;
-			btc_address.to_string()
-		}
-		_ => "".to_string(),
-	};
+	let btc_address = parse_required(args, "secondary_address")?;
+	let secondary_redeem_address = btc_address.to_string();
 
 	let who_lock_first = parse_required(args, "who_lock_first")?.to_lowercase();
 	if !(who_lock_first == "buyer" || who_lock_first == "seller") {

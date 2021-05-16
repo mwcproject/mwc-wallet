@@ -612,8 +612,8 @@ mod tests {
 			CONTRACT_ADDR
 		);
 		let res = c.transfer(
-			to_eth_address("Aa7937998d2f417EaC0524ad6E15c9C5e40efBA9".to_string()).unwrap(),
-			1_000_000_000_000_000_000_u64,
+			to_eth_address("0xAa7937998d2f417EaC0524ad6E15c9C5e40efBA9".to_string()).unwrap(),
+			1_000_000_000_000_000_u64,
 		);
 		println!("transfer result: {:?}", res);
 	}

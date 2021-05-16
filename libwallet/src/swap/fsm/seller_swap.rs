@@ -1414,6 +1414,16 @@ where
 						_ => conf > 0,
 					};
 					if secondary_redeem_conf {
+						//for eth, now we try to transfer ethers from interal wallet to buyers' eth wallet.
+						if !swap.secondary_currency.is_btc_family() {
+							let secondary_redeem_address = swap.unwrap_seller().unwrap().0;
+							println!(
+								"secondary_redeem_address: {}, amount: {}",
+								secondary_redeem_address, swap.secondary_amount
+							);
+							self.swap_api
+								.transfer_scondary(secondary_redeem_address, swap)?;
+						}
 						// We are done
 						swap.add_journal_message(format!(
 							"{} redeem transaction has enough confirmations. Trade is complete",

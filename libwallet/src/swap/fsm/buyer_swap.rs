@@ -717,7 +717,6 @@ impl State for BuyerSendingInitRedeemMessage {
 						StateId::BuyerWaitingForLockConfirmations,
 					));
 				}
-
 				let time_limit = swap.get_time_message_redeem();
 
 				if swap.posted_msg2.unwrap_or(0)

@@ -777,6 +777,11 @@ where
 		Ok(())
 	}
 
+	/// transfer amount to dedicated address.
+	fn transfer_scondary(&self, _address: String, _swap: &mut Swap) -> Result<(), ErrorKind> {
+		Ok(())
+	}
+
 	/// Validate clients. We want to be sure that the clients able to acceess the servers
 	fn test_client_connections(&self) -> Result<(), ErrorKind> {
 		{
