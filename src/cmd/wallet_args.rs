@@ -1172,7 +1172,7 @@ pub fn parse_swap_args(args: &ArgMatches) -> Result<command::SwapArgs, ParseErro
 	let eth_infura_project_id = args
 		.value_of("eth_infura_project_id")
 		.map(|s| String::from(s));
-	let eth_redirect_to_priavte_wallet = args.is_present("eth_redirect_to_priavte_wallet");
+	let eth_redirect_to_private_wallet = args.is_present("eth_redirect_to_private_wallet");
 
 	Ok(command::SwapArgs {
 		subcommand,
@@ -1191,7 +1191,7 @@ pub fn parse_swap_args(args: &ArgMatches) -> Result<command::SwapArgs, ParseErro
 		electrum_node_uri2,
 		eth_swap_contract_address,
 		eth_infura_project_id,
-		eth_redirect_to_priavte_wallet,
+		eth_redirect_to_private_wallet,
 		wait_for_backup1: false, // waiting is a primary usage for qt wallet. We are not documented that properly to make available for all users.
 		tag: args.value_of("tag").map(|s| String::from(s)),
 	})
