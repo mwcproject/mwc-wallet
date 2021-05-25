@@ -32,6 +32,5 @@ pub use grin_chain;
 pub use grin_core;
 pub use grin_keychain;
 pub use grin_p2p;
-pub use grin_servers;
 pub use grin_store;
 pub use grin_util;

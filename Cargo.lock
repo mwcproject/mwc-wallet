@@ -1792,16 +1792,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "fs2"
-version = "0.4.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9564fc758e15025b46aa6643b1b77d047d1a56a1aea6e01002ac0c7026876213"
-dependencies = [
- "libc",
- "winapi 0.3.9",
-]
-
-[[package]]
 name = "fuchsia-cprng"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2243,44 +2233,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "grin_servers"
-version = "4.4.0"
-source = "git+https://github.com/mwcproject/mwc-node?branch=master#2a75ab8b7eecdf4ac66244ee696e5a19377c1d46"
-dependencies = [
- "chrono",
- "dirs 1.0.5",
- "ed25519-dalek",
- "failure",
- "failure_derive",
- "fs2",
- "futures 0.3.15",
- "grin_api",
- "grin_chain",
- "grin_core",
- "grin_keychain",
- "grin_p2p",
- "grin_pool",
- "grin_store",
- "grin_util",
- "http 0.2.4",
- "hyper 0.13.10",
- "hyper-rustls 0.20.0",
- "hyper-rustls 0.21.0",
- "lmdb-zero",
- "log",
- "rand 0.6.5",
- "regex",
- "serde",
- "serde_derive",
- "serde_json",
- "sysinfo",
- "timer",
- "tokio 0.2.25",
- "tokio-util 0.2.0",
- "walkdir",
-]
-
-[[package]]
 name = "grin_store"
 version = "4.4.0"
 source = "git+https://github.com/mwcproject/mwc-node?branch=master#2a75ab8b7eecdf4ac66244ee696e5a19377c1d46"
@@ -2512,7 +2464,6 @@ dependencies = [
  "grin_core",
  "grin_keychain",
  "grin_p2p",
- "grin_servers",
  "grin_store",
  "grin_util",
  "pretty_assertions",
@@ -2567,7 +2518,7 @@ dependencies = [
  "indexmap",
  "slab",
  "tokio 0.2.25",
- "tokio-util 0.3.1",
+ "tokio-util",
  "tracing",
  "tracing-futures",
 ]
@@ -6117,20 +6068,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9a70f4fcd7b3b24fb194f837560168208f669ca8cb70d0c4b862944452396343"
 dependencies = [
  "native-tls",
- "tokio 0.2.25",
-]
-
-[[package]]
-name = "tokio-util"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "571da51182ec208780505a32528fc5512a8fe1443ab960b3f2f3ef093cd16930"
-dependencies = [
- "bytes 0.5.6",
- "futures-core",
- "futures-sink",
- "log",
- "pin-project-lite 0.1.12",
  "tokio 0.2.25",
 ]
 

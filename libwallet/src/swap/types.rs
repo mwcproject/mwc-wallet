@@ -1100,7 +1100,7 @@ impl fmt::Display for Action {
 			Action::SellerWaitForBuyerRedeemPublish {
 				mwc_tip,
 				lock_height,
-			} => format!("Waiting for Buyer to redeem MWC. If get no response, will post refund slate in {} minutes",(lock_height.saturating_sub(*mwc_tip))),
+			} => format!("Waiting for Buyer to redeem MWC. If we do not receive a response, a refund will be posted in {} minutes",(lock_height.saturating_sub(*mwc_tip))),
 			Action::WaitForMwcRefundUnlock {
 				mwc_tip,
 				lock_height,
