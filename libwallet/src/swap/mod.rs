@@ -2425,7 +2425,10 @@ mod tests {
 			seller.swap.get_time_message_redeem(),
 			lock_second_message_round_timelimit
 		);
-		assert_eq!(seller.swap.get_time_btc_lock_script(), btc_lock_time_limit);
+		assert_eq!(
+			seller.swap.get_time_secondary_lock_script(),
+			btc_lock_time_limit
+		);
 		assert_eq!(seller.swap.get_time_mwc_lock(), mwc_lock_time_limit);
 
 		test_responds(

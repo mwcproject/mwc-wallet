@@ -29,8 +29,8 @@ use crate::store::{self, option_to_not_found, to_key, to_key_u64, u64_to_key};
 use crate::core::core::Transaction;
 use crate::core::ser;
 use crate::libwallet::{
-	AcctPathMapping, Context, Error, ErrorKind, NodeClient, OutputData, ScannedBlockInfo,
-	TxLogEntry, TxProof, WalletBackend, WalletOutputBatch,
+	swap::ethereum::EthereumWallet, AcctPathMapping, Context, Error, ErrorKind, NodeClient,
+	OutputData, ScannedBlockInfo, TxLogEntry, TxProof, WalletBackend, WalletOutputBatch,
 };
 use crate::util::secp::constants::SECRET_KEY_SIZE;
 use crate::util::secp::key::SecretKey;
@@ -109,6 +109,8 @@ where
 	parent_key_id: Identifier,
 	/// wallet to node client
 	w2n_client: C,
+	/// ethereum wallet instance
+	ethereum_wallet: Option<EthereumWallet>,
 	///phantom
 	_phantom: &'ck PhantomData<C>,
 }
@@ -155,6 +157,7 @@ where
 			master_checksum: Box::new(None),
 			parent_key_id: LMDBBackend::<C, K>::default_path(),
 			w2n_client: n_client,
+			ethereum_wallet: None,
 			_phantom: &PhantomData,
 		};
 		Ok(res)
@@ -507,6 +510,27 @@ where
 		debug!("last_scanned_blocks: {:?}", blocks);
 
 		Ok(blocks)
+	}
+
+	/// set ethereum wallet instance
+	fn set_ethereum_wallet(
+		&mut self,
+		ethereum_wallet: Option<EthereumWallet>,
+	) -> Result<(), Error> {
+		self.ethereum_wallet = ethereum_wallet;
+		Ok(())
+	}
+
+	/// get ethereum wallet instance
+	fn get_ethereum_wallet(&self) -> Result<EthereumWallet, Error> {
+		if self.ethereum_wallet.is_some() {
+			Ok(self.ethereum_wallet.clone().unwrap())
+		} else {
+			Err(
+				ErrorKind::EthereumWalletError("Ethereum Wallet Not Generated!!!".to_string())
+					.into(),
+			)
+		}
 	}
 }
 

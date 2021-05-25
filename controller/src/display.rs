@@ -709,7 +709,7 @@ pub fn swap_trade(
 	}
 
 	let now_ts = Utc::now().timestamp();
-	let btc_lock_time = swap.get_time_btc_lock_publish();
+	let btc_lock_time = swap.get_time_secondary_lock_publish();
 	if now_ts < btc_lock_time {
 		let buyer_lock_time = btc_lock_time - now_ts;
 		let buy_lock_h = buyer_lock_time / 3600;

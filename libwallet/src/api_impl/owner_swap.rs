@@ -106,14 +106,9 @@ where
 		.map(|o| (o.output.commit.clone().unwrap(), o.output.value))
 		.collect();
 
-	let ethereum_wallet = wallet_inst
-		.clone()
-		.lock()
-		.lc_provider()?
-		.get_ethereum_wallet()?;
-
 	wallet_lock!(wallet_inst, w);
 	let node_client = w.w2n_client().clone();
+	let ethereum_wallet = w.get_ethereum_wallet()?.clone();
 	let keychain = w.keychain(keychain_mask)?;
 	let skey = get_swap_storage_key(&keychain)?;
 	let height = node_client.get_chain_tip()?.0;
@@ -328,11 +323,6 @@ where
 	C: NodeClient + 'a,
 	K: Keychain + 'a,
 {
-	let ethereum_wallet = wallet_inst
-		.clone()
-		.lock()
-		.lc_provider()?
-		.get_ethereum_wallet()?;
 	// Need to lock first to check if the wallet is open
 	wallet_lock!(wallet_inst, w);
 
@@ -340,6 +330,7 @@ where
 	let mut result: Vec<SwapListInfo> = Vec::new();
 
 	let node_client = w.w2n_client().clone();
+	let ethereum_wallet = w.get_ethereum_wallet()?.clone();
 	let keychain = w.keychain(keychain_mask)?;
 	let skey = get_swap_storage_key(&keychain)?;
 
@@ -481,16 +472,11 @@ where
 	C: NodeClient + 'a,
 	K: Keychain + 'a,
 {
-	let ethereum_wallet = wallet_inst
-		.clone()
-		.lock()
-		.lc_provider()?
-		.get_ethereum_wallet()?;
-
 	wallet_lock!(wallet_inst, w);
 	let keychain = w.keychain(keychain_mask)?;
 	let skey = get_swap_storage_key(&keychain)?;
-	let node_client = w.w2n_client();
+	let node_client = w.w2n_client().clone();
+	let ethereum_wallet = w.get_ethereum_wallet()?.clone();
 
 	let swap_lock = trades::get_swap_lock(&swap_id.to_string());
 	let _l = swap_lock.lock();
@@ -735,18 +721,13 @@ where
 	C: NodeClient + 'a,
 	K: Keychain + 'a,
 {
-	let ethereum_wallet = wallet_inst
-		.clone()
-		.lock()
-		.lc_provider()?
-		.get_ethereum_wallet()?;
-
 	wallet_lock!(wallet_inst, w);
 	let keychain = w.keychain(keychain_mask)?;
 	let skey = get_swap_storage_key(&keychain)?;
 	let swap_lock = trades::get_swap_lock(&"export".to_string());
 	let _l = swap_lock.lock();
-	let node_client = w.w2n_client();
+	let node_client = w.w2n_client().clone();
+	let ethereum_wallet = w.get_ethereum_wallet()?.clone();
 
 	// Checking if MWC node is available
 	let mwc_tip = node_client.get_chain_tip()?.0;
@@ -1020,14 +1001,9 @@ where
 	C: NodeClient + 'a,
 	K: Keychain + 'a,
 {
-	let ethereum_wallet = wallet_inst
-		.clone()
-		.lock()
-		.lc_provider()?
-		.get_ethereum_wallet()?;
-
 	wallet_lock!(wallet_inst, w);
 	let node_client = w.w2n_client().clone();
+	let ethereum_wallet = w.get_ethereum_wallet()?.clone();
 	let keychain = w.keychain(keychain_mask)?;
 	let skey = get_swap_storage_key(&keychain)?;
 	let swap_lock = trades::get_swap_lock(&swap_id.to_string());
@@ -1104,14 +1080,9 @@ where
 	C: NodeClient + 'a,
 	K: Keychain + 'a,
 {
-	let ethereum_wallet = wallet_inst
-		.clone()
-		.lock()
-		.lc_provider()?
-		.get_ethereum_wallet()?;
-
 	wallet_lock!(wallet_inst, w);
 	let node_client = w.w2n_client().clone();
+	let ethereum_wallet = w.get_ethereum_wallet()?.clone();
 	let keychain = w.keychain(keychain_mask)?;
 	let skey = get_swap_storage_key(&keychain)?;
 	let swap_lock = trades::get_swap_lock(&swap_id.to_string());
@@ -1193,12 +1164,6 @@ where
 	K: Keychain + 'a,
 	F: FnOnce(Message, String, String) -> Result<(bool, String), Error> + 'a,
 {
-	let ethereum_wallet = wallet_inst
-		.clone()
-		.lock()
-		.lc_provider()?
-		.get_ethereum_wallet()?;
-
 	if let Some(secondary_fee) = secondary_fee {
 		swap.secondary_fee = secondary_fee;
 	}
@@ -1240,6 +1205,8 @@ where
 				&swap.secondary_currency,
 				&swap.eth_infura_project_id,
 			)?;
+			wallet_lock!(wallet_inst.clone(), w);
+			let ethereum_wallet = w.get_ethereum_wallet()?.clone();
 			crate::swap::api::create_eth_instance(
 				&swap.secondary_currency,
 				node_client,
@@ -1625,7 +1592,8 @@ where
 	wallet_lock!(wallet_inst, w);
 	let keychain = w.keychain(keychain_mask)?;
 	let skey = get_swap_storage_key(&keychain)?;
-	let node_client = w.w2n_client();
+	let node_client = w.w2n_client().clone();
+	let ethereum_wallet = w.get_ethereum_wallet()?.clone();
 
 	let mut swaps: Vec<Swap> = Vec::new();
 
@@ -1677,17 +1645,38 @@ where
 				let (context, mut swap) =
 					trades::get_swap_trade(&swap.id.to_string(), &skey, &*swap_lock)?;
 
-				let (uri1, uri2) = trades::get_electrumx_uri(
-					&swap.secondary_currency,
-					&swap.electrum_node_uri1,
-					&swap.electrum_node_uri2,
-				)?;
-				let swap_api = crate::swap::api::create_btc_instance(
-					&swap.secondary_currency,
-					node_client.clone(),
-					uri1,
-					uri2,
-				)?;
+				let swap_api = match swap.secondary_currency.is_btc_family() {
+					true => {
+						let (uri1, uri2) = trades::get_electrumx_uri(
+							&swap.secondary_currency,
+							&swap.electrum_node_uri1,
+							&swap.electrum_node_uri2,
+						)?;
+						crate::swap::api::create_btc_instance(
+							&swap.secondary_currency,
+							node_client.clone(),
+							uri1,
+							uri2,
+						)?
+					}
+					_ => {
+						let eth_swap_contract_address = trades::get_eth_swap_contract_address(
+							&swap.secondary_currency,
+							&swap.eth_swap_contract_address,
+						)?;
+						let eth_infura_project_id = trades::get_eth_infura_projectid(
+							&swap.secondary_currency,
+							&swap.eth_infura_project_id,
+						)?;
+						crate::swap::api::create_eth_instance(
+							&swap.secondary_currency,
+							node_client.clone(),
+							ethereum_wallet.clone(),
+							eth_swap_contract_address,
+							eth_infura_project_id,
+						)?
+					}
+				};
 				let mut fsm = swap_api.get_fsm(&keychain, &swap);
 
 				if fsm.is_cancellable(&swap)? {
@@ -1738,14 +1727,9 @@ where
 
 	debug!("Get swap message {:?}", message);
 
-	let ethereum_wallet = wallet_inst
-		.clone()
-		.lock()
-		.lc_provider()?
-		.get_ethereum_wallet()?;
-
 	wallet_lock!(wallet_inst, w);
 	let node_client = w.w2n_client().clone();
+	let ethereum_wallet = w.get_ethereum_wallet()?.clone();
 	let keychain = w.keychain(keychain_mask)?;
 	let skey = get_swap_storage_key(&keychain)?;
 

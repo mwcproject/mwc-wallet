@@ -33,7 +33,6 @@ use grin_wallet_util::grin_api as api;
 use grin_wallet_util::grin_core as core;
 use grin_wallet_util::grin_keychain as keychain;
 use grin_wallet_util::grin_util as util;
-use grin_wallet_util::grin_servers;
 
 pub mod command;
 pub mod controller;

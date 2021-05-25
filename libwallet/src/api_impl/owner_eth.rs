@@ -17,7 +17,7 @@
 use crate::grin_keychain::Keychain;
 use crate::grin_util::Mutex;
 use crate::types::NodeClient;
-use crate::{WalletInst, WalletLCProvider};
+use crate::{wallet_lock, WalletInst, WalletLCProvider};
 use grin_wallet_util::grin_core::global;
 use std::sync::Arc;
 
@@ -36,11 +36,8 @@ where
 	C: NodeClient + 'a,
 	K: Keychain + 'a,
 {
-	let ethereum_wallet = wallet_inst
-		.clone()
-		.lock()
-		.lc_provider()?
-		.get_ethereum_wallet()?;
+	wallet_lock!(wallet_inst, w);
+	let ethereum_wallet = w.get_ethereum_wallet()?;
 
 	let eth_infura_project_id = trades::get_eth_infura_projectid(&Currency::Ether, &None).unwrap();
 	let chain = if global::is_mainnet() {
@@ -75,11 +72,8 @@ where
 	C: NodeClient + 'a,
 	K: Keychain + 'a,
 {
-	let ethereum_wallet = wallet_inst
-		.clone()
-		.lock()
-		.lc_provider()?
-		.get_ethereum_wallet()?;
+	wallet_lock!(wallet_inst, w);
+	let ethereum_wallet = w.get_ethereum_wallet()?;
 
 	let eth_infura_project_id = trades::get_eth_infura_projectid(&Currency::Ether, &None).unwrap();
 	let chain = if global::is_mainnet() {

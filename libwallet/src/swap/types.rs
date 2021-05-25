@@ -1074,15 +1074,19 @@ impl fmt::Display for Action {
 				};
 
 				let sec_str = if *sec_expected_to_be_posted==0 {
-					if sec_actual.unwrap() == 0 {
-						format!("{} {} are in memory pool", currency, address.join(","))
-					}
-					else if sec_actual.unwrap() >= *sec_required {
-						format!("{} {}, are locked", currency, address.join(","))
-					}
-					else {
-						format!("{} {}, {}/{}", currency, address.join(","), sec_actual.unwrap(), sec_required)
-					}
+						if sec_actual.is_none() {
+							format!("{} {}, hasn't been posted", currency, address.join(","))
+						} else {
+							if sec_actual.unwrap() == 0 {
+								format!("{} {} are in memory pool", currency, address.join(","))
+							}
+							else if sec_actual.unwrap() >= *sec_required {
+								format!("{} {}, are locked", currency, address.join(","))
+							}
+							else {
+								format!("{} {}, {}/{}", currency, address.join(","), sec_actual.unwrap(), sec_required)
+							}
+						}
 				}
 				else {
 					let sec_posted_str = currency.amount_to_hr_string(*sec_expected_to_be_posted, true);
@@ -1138,7 +1142,7 @@ pub struct SwapTransactionsConfirmations {
 	pub mwc_redeem_conf: Option<u64>,
 	/// Number of confirmations for refund transaction
 	pub mwc_refund_conf: Option<u64>,
-	/// BTC node tip
+	/// BTC/ETH node tip
 	pub secondary_tip: u64,
 	/// In ETH: 1 means confirmed, 0 means not confirmed
 	/// BTC/ETH lock (multisug account) number of confirmations

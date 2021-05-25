@@ -15,7 +15,7 @@
 use crate::grin_util::to_hex;
 use crate::swap::message::SecondaryUpdate;
 use crate::swap::ser::*;
-use crate::swap::types::{Network, SecondaryData};
+use crate::swap::types::SecondaryData;
 use crate::swap::ErrorKind;
 use regex::Regex;
 use web3::types::{Address, H256};
@@ -164,14 +164,6 @@ pub struct EthAcceptOfferUpdate {
 	pub lock_tx: Option<H256>,
 	/// Buyer swap contract index
 	pub address_from_secret: Option<Address>,
-}
-
-/// Map MWC network to matched ETH network
-pub fn eth_network(network: Network) -> String {
-	match network {
-		Network::Floonet => "ropsten".to_string(),
-		Network::Mainnet => "mainnet".to_string(),
-	}
 }
 
 /// to web3 Address

@@ -267,11 +267,10 @@ impl EthNodeClient for InfuraNodeClient {
 			)
 			.unwrap();
 			contract
-				.signed_call_with_confirmations(
+				.signed_call(
 					"initiate",
 					(refund_block, address_from_secret, participant),
 					options,
-					2,
 					SecretKeyRef::new(&key),
 				)
 				.await
@@ -291,7 +290,7 @@ impl EthNodeClient for InfuraNodeClient {
 		});
 
 		match res.unwrap() {
-			Ok(receipt) => Ok(receipt.transaction_hash),
+			Ok(tx_hash) => Ok(tx_hash),
 			Err(e) => {
 				warn!("initiate error: --- {:?}", e);
 				Err(ErrorKind::EthContractCallError)
@@ -375,7 +374,7 @@ impl EthNodeClient for InfuraNodeClient {
 			}
 
 			contract
-				.signed_call_with_confirmations(
+				.signed_call(
 					"redeem",
 					(
 						address_from_secret,
@@ -384,7 +383,6 @@ impl EthNodeClient for InfuraNodeClient {
 						signed_data.v,
 					),
 					options,
-					2,
 					SecretKeyRef::new(&key),
 				)
 				.await
@@ -405,7 +403,7 @@ impl EthNodeClient for InfuraNodeClient {
 		});
 
 		match res {
-			Ok(receipt) => Ok(receipt.transaction_hash),
+			Ok(tx_hash) => Ok(tx_hash),
 			Err(e) => {
 				warn!("redeem error: --- {:?}", e);
 				Err(ErrorKind::EthContractCallError)
@@ -437,11 +435,10 @@ impl EthNodeClient for InfuraNodeClient {
 			)
 			.unwrap();
 			contract
-				.signed_call_with_confirmations(
+				.signed_call(
 					"refund",
 					address_from_secret,
 					options,
-					2,
 					SecretKeyRef::new(&key),
 				)
 				.await
@@ -462,7 +459,7 @@ impl EthNodeClient for InfuraNodeClient {
 		});
 
 		match res {
-			Ok(receipt) => Ok(receipt.transaction_hash),
+			Ok(tx_hash) => Ok(tx_hash),
 			Err(e) => {
 				warn!("refund error: --- {:?}", e);
 				Err(ErrorKind::EthContractCallError)
@@ -620,8 +617,9 @@ mod tests {
 		);
 		let wallet_rand = EthereumWallet::new(&mut thread_rng()).unwrap();
 		let address_from_secret = to_eth_address(wallet_rand.address.clone().unwrap()).unwrap();
+		let height = nc.height().unwrap();
 		let res = nc.initiate(
-			2700,
+			height + 2700,
 			address_from_secret,
 			to_eth_address("Aa7937998d2f417EaC0524ad6E15c9C5e40efBA8".to_string()).unwrap(),
 			2000,

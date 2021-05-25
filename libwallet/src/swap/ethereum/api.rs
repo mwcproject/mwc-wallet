@@ -22,6 +22,7 @@ use crate::grin_util::{
 use crate::swap::fsm::machine::StateMachine;
 use crate::swap::fsm::{buyer_swap, seller_swap};
 use crate::swap::message::SecondaryUpdate;
+use crate::swap::swap;
 use crate::swap::types::{
 	BuyerContext, Context, Currency, RoleContext, SecondaryBuyerContext, SecondarySellerContext,
 	SellerContext, SwapTransactionsConfirmations,
@@ -112,26 +113,6 @@ where
 		}
 	}
 
-	/// Check transaction confirm status
-	pub(crate) fn check_eth_transaction_confirmed(
-		&self,
-		tx_id: Option<H256>,
-	) -> Result<u64, ErrorKind> {
-		if tx_id.is_none() {
-			return Err(ErrorKind::InvalidTxHash);
-		}
-
-		let c = self.eth_node_client.lock();
-		let res = c.retrieve_receipt(tx_id.unwrap());
-		match res {
-			Ok(receipt) => match receipt.status {
-				Some(status) if status == 1.into() => Ok(1u64),
-				_ => Ok(0u64),
-			},
-			_ => Err(ErrorKind::InvalidEthSwapTradeIndex),
-		}
-	}
-
 	/// Seller call contract function to redeem their Ethers, Status::Redeem
 	fn seller_post_redeem_tx<K: Keychain>(
 		&self,
@@ -169,10 +150,32 @@ where
 
 	/// buyer deposit eth to contract address
 	fn buyer_deposit(&self, swap: &mut Swap) -> Result<H256, ErrorKind> {
-		let eth_data = swap.secondary_data.unwrap_eth()?;
+		let eth_lock_time = swap.get_time_secondary_lock_script() as u64;
+		// Don't lock for more than 4 weeks. 4 weeks + 2 day, because max locking is expecting 2 weeks and 1 day to do the swap and 1 extra day for Buyer
+		if eth_lock_time > (swap::get_cur_time() + 3600 * 24 * (7 * 4 + 2)) as u64 {
+			return Err(ErrorKind::Generic(
+				"ETH locking time interval is larger than 4 weeks. Rejecting, looks like a scam."
+					.to_string(),
+			));
+		}
 
+		if eth_lock_time >= u32::MAX as u64 {
+			return Err(ErrorKind::Generic(
+				"ETH locking time is out of range. Rejecting, looks like a scam.".to_string(),
+			));
+		}
+
+		let refund_blocks = (eth_lock_time - swap::get_cur_time() as u64)
+			/ swap.secondary_currency.block_time_period_sec() as u64;
+		println!(
+			"eth_lock_time: {},  current_time: {}, refund_blocks: {}",
+			eth_lock_time,
+			swap::get_cur_time(),
+			refund_blocks
+		);
+		let eth_data = swap.secondary_data.unwrap_eth()?;
 		let height = self.eth_height()?;
-		let refund_time = height + 2700; //about 10 hours
+		let refund_time = height + refund_blocks;
 		let address_from_secret = eth_data.address_from_secret.clone().unwrap();
 		let participant = eth_data.redeem_address.clone().unwrap();
 		let value = swap.secondary_amount;
@@ -220,6 +223,78 @@ where
 			}
 		};
 		Ok(result)
+	}
+
+	/// Check transaction confirm status
+	pub(crate) fn check_eth_transaction_status(
+		&self,
+		tx_id: Option<H256>,
+	) -> Result<u64, ErrorKind> {
+		if tx_id.is_none() {
+			return Err(ErrorKind::InvalidTxHash);
+		}
+
+		let c = self.eth_node_client.lock();
+		let res = c.retrieve_receipt(tx_id.unwrap());
+		match res {
+			Ok(receipt) => match receipt.status {
+				Some(status) => {
+					if status == 1.into() {
+						Ok(1)
+					} else {
+						Ok(0)
+					}
+				}
+				_ => Ok(0),
+			},
+			_ => Err(ErrorKind::InvalidEthSwapTradeIndex),
+		}
+	}
+
+	/// check deposit transaction status
+	fn get_eth_initiate_tx_status(&self, swap: &Swap) -> Result<u64, ErrorKind> {
+		let eth_data = swap.secondary_data.unwrap_eth()?;
+		let eth_tip = self.eth_height()?;
+		match self.eth_swap_details(eth_data.address_from_secret.clone()) {
+			Ok((refund_time, _, participant, value)) => {
+				if (eth_data.redeem_address.clone().unwrap() == participant)
+				&& (refund_time > eth_tip + 100u64) //100 about 25 minutes, make sure we have enough time to redeem ether
+				&& value == swap.secondary_amount
+				&& swap.redeem_public.is_some()
+				{
+					let public_key = swap.redeem_public.clone().unwrap();
+					// convert mwc public key to ethereum public key format
+					let pub_key_array = public_key.0 .0;
+					let first_part: Vec<u8> = pub_key_array[..pub_key_array.len() / 2]
+						.to_owned()
+						.iter()
+						.rev()
+						.cloned()
+						.collect();
+					let second_part: Vec<u8> = pub_key_array[pub_key_array.len() / 2..]
+						.to_owned()
+						.iter()
+						.rev()
+						.cloned()
+						.collect();
+					let pub_key_vec: Vec<u8> = first_part
+						.into_iter()
+						.chain(second_part.into_iter())
+						.collect();
+					let wallet =
+						EthereumWallet::from_public_key(to_hex(&pub_key_vec).as_str()).unwrap();
+					let address = to_eth_address(wallet.address.clone().unwrap()).unwrap();
+					if eth_data.address_from_secret.unwrap() == address {
+						Ok(value)
+					} else {
+						Ok(0)
+					}
+				} else {
+					Ok(0)
+				}
+			}
+			_ => Ok(0),
+		}
 	}
 }
 
@@ -396,6 +471,10 @@ where
 		_post_tx: bool,
 	) -> Result<(), ErrorKind> {
 		assert!(swap.is_seller());
+		let eth_data = swap.secondary_data.unwrap_eth()?;
+		if eth_data.redeem_tx.is_some() {
+			return Ok(());
+		}
 
 		let eth_tx = self.seller_post_redeem_tx(keychain, swap)?;
 		let eth_data = swap.secondary_data.unwrap_eth_mut()?;
@@ -420,57 +499,33 @@ where
 		let mwc_refund_conf =
 			self.get_slate_confirmation_number(&mwc_tip, &swap.refund_slate, !is_seller)?;
 
-		// check eth transaction status
 		let secondary_tip = self.eth_height()?;
-		let mut secondary_lock_conf = None;
-		let eth_data = swap.secondary_data.unwrap_eth()?;
-		let secondary_lock_amount =
-			match self.eth_swap_details(eth_data.address_from_secret.clone()) {
-				Ok((refund_time, _, participant, value)) => {
-					let eth_data = swap.secondary_data.unwrap_eth()?;
-					//todo check locked eth money, 280 eth blocks ≈  1 hour
-					if (eth_data.redeem_address.clone().unwrap() == participant)
-						&& (refund_time > secondary_tip + 280u64)
-						&& value == swap.secondary_amount
-						&& swap.redeem_public.is_some()
-					{
-						let public_key = swap.redeem_public.clone().unwrap();
-						// convert mwc public key to ethereum public key format
-						let pub_key_array = public_key.0 .0;
-						let first_part: Vec<u8> = pub_key_array[..pub_key_array.len() / 2]
-							.to_owned()
-							.iter()
-							.rev()
-							.cloned()
-							.collect();
-						let second_part: Vec<u8> = pub_key_array[pub_key_array.len() / 2..]
-							.to_owned()
-							.iter()
-							.rev()
-							.cloned()
-							.collect();
-						let pub_key_vec: Vec<u8> = first_part
-							.into_iter()
-							.chain(second_part.into_iter())
-							.collect();
-						let wallet =
-							EthereumWallet::from_public_key(to_hex(&pub_key_vec).as_str()).unwrap();
-						let address = to_eth_address(wallet.address.clone().unwrap()).unwrap();
-						if eth_data.address_from_secret.unwrap() == address {
-							secondary_lock_conf = Some(1u64);
-						}
-					}
-					value
-				}
-				_ => 0,
-			};
-
-		let secondary_redeem_conf = match self.check_eth_transaction_confirmed(eth_data.redeem_tx) {
-			Ok(res) => Some(res),
+		// check eth transaction status
+		let secondary_lock_amount = self.get_eth_initiate_tx_status(swap)?;
+		let secondary_lock_conf = match secondary_lock_amount > 0 {
+			true => Some(1),
 			_ => None,
 		};
-		let secondary_refund_conf = match self.check_eth_transaction_confirmed(eth_data.refund_tx) {
-			Ok(res) => Some(res),
+
+		let eth_data = swap.secondary_data.unwrap_eth()?;
+		let secondary_redeem_conf = match self.check_eth_transaction_status(eth_data.redeem_tx) {
+			Ok(status) => {
+				if status == 0 {
+					None
+				} else {
+					Some(1)
+				}
+			}
+			_ => None,
+		};
+		let secondary_refund_conf = match self.check_eth_transaction_status(eth_data.refund_tx) {
+			Ok(status) => {
+				if status == 0 {
+					None
+				} else {
+					Some(1)
+				}
+			}
 			_ => None,
 		};
 
@@ -495,17 +550,9 @@ where
 		swap: &Swap,
 		_confirmations_needed: u64,
 	) -> Result<(u64, u64, u64), ErrorKind> {
-		let address_from_secret = swap.secondary_data.unwrap_eth()?.address_from_secret;
-		if address_from_secret.is_some() {
-			let c = self.eth_node_client.lock();
-			let swap_details = c.get_swap_details(address_from_secret.unwrap());
-			match swap_details {
-				Ok((_, _, _, value)) => Ok((0_u64, value, 0_u64)),
-				_ => Ok((0_u64, 0_u64, 0_u64)),
-			}
-		} else {
-			Ok((0_u64, 0_u64, 0_u64))
-		}
+		// check eth transaction status
+		let amount = self.get_eth_initiate_tx_status(swap)?;
+		Ok((0, amount, 0))
 	}
 
 	// Build state machine that match the swap data
@@ -618,6 +665,10 @@ where
 		post_tx: bool,
 	) -> Result<(), ErrorKind> {
 		assert!(!swap.is_seller());
+		let eth_data = swap.secondary_data.unwrap_eth()?;
+		if eth_data.refund_tx.is_some() {
+			return Ok(());
+		}
 
 		let eth_tx = self.buyer_refund(keychain, context, swap, post_tx)?;
 		let eth_data = swap.secondary_data.unwrap_eth_mut()?;
@@ -629,6 +680,10 @@ where
 	/// deposit secondary currecny to lock account.
 	fn post_secondary_lock_tx(&self, swap: &mut Swap) -> Result<(), ErrorKind> {
 		assert!(!swap.is_seller());
+		let eth_data = swap.secondary_data.unwrap_eth()?;
+		if eth_data.lock_tx.is_some() {
+			return Ok(());
+		}
 
 		let eth_tx = self.buyer_deposit(swap)?;
 		let eth_data = swap.secondary_data.unwrap_eth_mut()?;

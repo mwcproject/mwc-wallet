@@ -46,6 +46,7 @@ use grin_wallet_libwallet::swap::{message, Swap};
 use grin_wallet_libwallet::{Slate, TxLogEntry, WalletInst};
 use grin_wallet_util::grin_core::consensus::GRIN_BASE;
 use grin_wallet_util::grin_core::core::amount_to_hr_string;
+use grin_wallet_util::grin_core::global::{FLOONET_DNS_SEEDS, MAINNET_DNS_SEEDS};
 use grin_wallet_util::grin_p2p::libp2p_connection::ReceivedMessage;
 use grin_wallet_util::grin_p2p::{libp2p_connection, PeerAddr};
 use serde_json as json;
@@ -1729,7 +1730,7 @@ pub struct SwapArgs {
 	pub eth_swap_contract_address: Option<String>,
 	/// Ethereum Infura Project Id
 	pub eth_infura_project_id: Option<String>,
-	/// Ethereum redirect users' private wallet
+	/// Redirect to users' private ethereum wallet
 	pub eth_redirect_to_private_wallet: bool,
 	/// Need to wait for the first backup.
 	pub wait_for_backup1: bool,
@@ -2091,7 +2092,7 @@ where
 									"sellerLockingFirst" : swap.seller_lock_first,
 									"mwcLockHeight" : swap.refund_slate.lock_height,
 									"mwcLockTime" : "0".to_string(),
-									"secondaryLockTime" : swap.get_time_btc_lock_publish().to_string(),
+									"secondaryLockTime" : swap.get_time_secondary_lock_publish().to_string(),
 									"communicationMethod" : swap.communication_method,
 									"communicationAddress" : swap.communication_address,
 
@@ -2180,7 +2181,7 @@ where
 							"sellerLockingFirst" : swap.seller_lock_first,
 							"mwcLockHeight" : swap.refund_slate.lock_height,
 							"mwcLockTime" : mwc_lock_time.to_string(),
-							"secondaryLockTime" : swap.get_time_btc_lock_publish().to_string(),
+							"secondaryLockTime" : swap.get_time_secondary_lock_publish().to_string(),
 							"communicationMethod" : swap.communication_method,
 							"communicationAddress" : swap.communication_address,
 
@@ -2941,38 +2942,39 @@ where
 {
 	match args.subcommand {
 		EthSubcommand::Info => {
-			let result = owner_eth::info(wallet_inst);
+			let result = owner_eth::info(wallet_inst.clone());
 			match result {
 				Ok((address, height, balance)) => {
 					display::eth_info(address, height, balance);
-					Ok(())
+					return Ok(());
 				}
-				Err(e) => Err(ErrorKind::LibWallet(format!(
-					"Ethereum Chain Operation failed!: {}",
-					e
-				))
-				.into()),
+				_ => {
+					return Err(ErrorKind::LibWallet(
+						"Ethereum Chain Operation failed!".to_string(),
+					)
+					.into());
+				}
 			}
 		}
 		EthSubcommand::Send => {
 			let dest = args.dest;
 			let amount = args.amount;
-
 			if dest.is_none() || amount.is_none() {
-				println!("Please sepecify destination address and amounts");
+				println!("Please specify destination address and amounts");
 				return Ok(());
 			}
-			let result = owner_eth::transfer(wallet_inst, dest.clone(), amount.clone());
+			let result = owner_eth::transfer(wallet_inst.clone(), dest.clone(), amount.clone());
 			match result {
 				Ok(()) => {
 					println!("Transfer {} to {} done!!!", amount.unwrap(), dest.unwrap());
-					Ok(())
+					return Ok(());
 				}
-				Err(e) => Err(ErrorKind::LibWallet(format!(
-					"Ethereum Chain Operation failed!: {}",
-					e
-				))
-				.into()),
+				_ => {
+					return Err(ErrorKind::LibWallet(
+						"Ethereum Chain Operation failed!".to_string(),
+					)
+					.into());
+				}
 			}
 		}
 	}
@@ -3258,9 +3260,9 @@ where
 				// Adding seed nodes. Those onion addresses must match what we have for seeds.
 				// Please note, it is a secondary source, the primary source is the wallet's node
 				let seed_list = if global::is_mainnet() {
-					crate::grin_servers::MAINNET_DNS_SEEDS
+					MAINNET_DNS_SEEDS
 				} else {
-					crate::grin_servers::FLOONET_DNS_SEEDS
+					FLOONET_DNS_SEEDS
 				};
 
 				for seed in seed_list {

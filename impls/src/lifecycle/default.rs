@@ -21,7 +21,6 @@ use crate::config::{
 use crate::core::global;
 use crate::keychain::Keychain;
 use crate::libwallet::swap::ethereum::generate_ethereum_wallet;
-use crate::libwallet::swap::ethereum::EthereumWallet;
 use crate::libwallet::{Error, ErrorKind, NodeClient, WalletBackend, WalletLCProvider};
 use crate::lifecycle::seed::WalletSeed;
 use crate::util::secp::key::SecretKey;
@@ -39,7 +38,6 @@ where
 	data_dir: String,
 	node_client: C,
 	backend: Option<Box<dyn WalletBackend<'a, C, K> + 'a>>,
-	ethereum_wallet: Option<EthereumWallet>,
 }
 
 impl<'a, C, K> DefaultLCProvider<'a, C, K>
@@ -53,7 +51,6 @@ where
 			node_client,
 			data_dir: "default".to_owned(),
 			backend: None,
-			ethereum_wallet: None,
 		}
 	}
 }
@@ -262,30 +259,18 @@ where
 			))
 		})?;
 
-		//generate ethereum wallet account
-		self.ethereum_wallet = match wallet_seed.to_mnemonic() {
-			Ok(mnmenoic) => match global::is_mainnet() {
-				true => Some(
-					generate_ethereum_wallet(
-						"mainnet",
-						mnmenoic.as_str(),
-						&password,
-						"m/44'/0'/0'/0",
-					)
+		let mnmenoic = wallet_seed.to_mnemonic().unwrap();
+		let ethereum_wallet = match global::is_mainnet() {
+			true => Some(
+				generate_ethereum_wallet("mainnet", mnmenoic.as_str(), &password, "m/44'/0'/0'/0")
 					.unwrap(),
-				),
-				false => Some(
-					generate_ethereum_wallet(
-						"ropsten",
-						mnmenoic.as_str(),
-						&password,
-						"m/44'/0'/0'/0",
-					)
+			),
+			false => Some(
+				generate_ethereum_wallet("ropsten", mnmenoic.as_str(), &password, "m/44'/0'/0'/0")
 					.unwrap(),
-				),
-			},
-			_ => None,
+			),
 		};
+		wallet.set_ethereum_wallet(ethereum_wallet)?;
 
 		let keychain = wallet_seed
 			.derive_keychain(global::is_floonet())
@@ -424,13 +409,6 @@ where
 			.map_err(|e| ErrorKind::IO(format!("Failed to remove old seed file, {}", e)))?;
 
 		Ok(())
-	}
-
-	fn get_ethereum_wallet(&self) -> Result<EthereumWallet, Error> {
-		match self.ethereum_wallet.clone() {
-			None => Err(ErrorKind::Lifecycle("Wallet has not been opened".to_string()).into()),
-			Some(eth_wallet) => Ok(eth_wallet),
-		}
 	}
 
 	fn delete_wallet(&self, _name: Option<&str>) -> Result<(), Error> {

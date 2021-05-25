@@ -140,9 +140,6 @@ where
 		wallet_data_dir: Option<&str>,
 	) -> Result<(), Error>;
 
-	/// get ethereum wallet instant
-	fn get_ethereum_wallet(&self) -> Result<EthereumWallet, Error>;
-
 	/// deletes wallet
 	fn delete_wallet(&self, name: Option<&str>) -> Result<(), Error>;
 
@@ -261,6 +258,13 @@ where
 
 	/// last block scanned during scan or restore
 	fn last_scanned_blocks(&mut self) -> Result<Vec<ScannedBlockInfo>, Error>;
+
+	/// set ethereum wallet instance
+	fn set_ethereum_wallet(&mut self, ethereum_wallet: Option<EthereumWallet>)
+		-> Result<(), Error>;
+
+	/// get ethereum wallet instance
+	fn get_ethereum_wallet(&self) -> Result<EthereumWallet, Error>;
 }
 
 /// Batch trait to update the output data backend atomically. Trying to use a

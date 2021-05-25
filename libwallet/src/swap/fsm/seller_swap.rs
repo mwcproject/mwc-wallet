@@ -1257,7 +1257,9 @@ where
 				swap.secondary_currency,
 				swap.unwrap_seller().unwrap_or(("XXXXXX".to_string(), 0)).0
 			))
-			.end_time(swap.get_time_btc_lock_script() - swap.get_timeinterval_btc_lock()),
+			.end_time(
+				swap.get_time_secondary_lock_script() - swap.get_timeinterval_secondary_lock(),
+			),
 		)
 	}
 	fn is_cancellable(&self) -> bool {
@@ -1304,7 +1306,8 @@ where
 							address: swap.unwrap_seller()?.0,
 						})
 						.time_limit(
-							swap.get_time_btc_lock_script() - swap.get_timeinterval_btc_lock(),
+							swap.get_time_secondary_lock_script()
+								- swap.get_timeinterval_secondary_lock(),
 						),
 				)
 			}

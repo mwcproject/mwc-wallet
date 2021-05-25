@@ -352,7 +352,9 @@ impl BtcData {
 
 				(cosign_ser, redeem_ser)
 			}
-			Currency::Ether => panic!("Ether  not supported"),
+			Currency::Ether => {
+				return Err(ErrorKind::Generic("Ether not supported".to_string()));
+			}
 		};
 
 		let script_sig = Builder::new()
@@ -531,7 +533,9 @@ impl BtcData {
 					None,
 				));
 			}
-			Currency::Ether => panic!("Ether not supported"),
+			Currency::Ether => {
+				return Err(ErrorKind::Generic("Ether not supported".to_string()));
+			}
 		};
 
 		let mut cursor = Cursor::new(Vec::with_capacity(tx_size));
@@ -571,7 +575,9 @@ impl BtcData {
 				sign_ser.push(0x01); // SIGHASH_ALL
 				sign_ser
 			}
-			Currency::Ether => panic!("Ether not supported"),
+			Currency::Ether => {
+				return Err(ErrorKind::Generic("Ether not supported".to_string()));
+			}
 		};
 
 		let script_sig = Builder::new()
