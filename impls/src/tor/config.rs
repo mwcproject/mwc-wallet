@@ -312,10 +312,11 @@ pub fn is_tor_address(input: &str) -> Result<(), Error> {
 }
 
 pub fn complete_tor_address(input: &str) -> Result<String, Error> {
-	let input = if input.ends_with("/") {
-		&input[..input.len() - 1]
-	} else {
-		input
+	let (input, trailing_data) = match input.to_uppercase().find(".ONION") {
+		Some(index) => {
+			input.split_at(index + ".ONION".len())
+		}
+		None => (input, "")
 	};
 	is_tor_address(input)?;
 	let mut input = input.to_uppercase();
@@ -325,7 +326,7 @@ pub fn complete_tor_address(input: &str) -> Result<String, Error> {
 	if !input.ends_with(".ONION") {
 		input = format!("{}.ONION", input);
 	}
-	Ok(input.to_lowercase())
+	Ok(format!("{}{}", input.to_lowercase(), trailing_data))
 }
 
 #[cfg(test)]
