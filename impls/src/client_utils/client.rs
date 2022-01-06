@@ -99,15 +99,15 @@ pub struct Client {
 
 impl Client {
 	/// New client
-	pub fn new(use_socks: bool, socks_proxy_addr: Option<SocketAddr>) -> Result<Self,Error> {
-		let (https_client, socks_client) = Self::construct_client(use_socks, socks_proxy_addr)?;
+	pub fn new(use_socks: bool, socks_proxy_addr: Option<SocketAddr>, read_timeout: Option<u64>) -> Result<Self,Error> {
+		let (https_client, socks_client) = Self::construct_client(use_socks, socks_proxy_addr, read_timeout)?;
 		Ok(Client {
 			https_client: Arc::new(https_client),
 			socks_client: Arc::new(socks_client),
 		})
 	}
 
-	fn construct_client(use_socks: bool, socks_proxy_addr: Option<SocketAddr>) ->
+	fn construct_client(use_socks: bool, socks_proxy_addr: Option<SocketAddr>, read_timeout: Option<u64>) ->
 									Result< (Option<hyper::Client<TimeoutConnector<hyper_rustls::HttpsConnector<HttpConnector>>>>,
 										Option<hyper::Client<TimeoutConnector<hyper_socks2::SocksConnector<hyper_rustls::HttpsConnector<HttpConnector>>>>>), Error> {
 		if !use_socks {
@@ -117,7 +117,7 @@ impl Client {
 			#[cfg(not(target_os = "android"))]
 			{
 				connector.set_connect_timeout(Some(Duration::from_secs(10)));
-				connector.set_read_timeout(Some(Duration::from_secs(20)));
+				connector.set_read_timeout(Some(Duration::from_secs(read_timeout.unwrap_or(20))));
 				connector.set_write_timeout(Some(Duration::from_secs(20)));
 			}
 
@@ -125,7 +125,7 @@ impl Client {
 			{
 				// For android timeouts need to be longer because we already experiencing some connection issues.
 				connector.set_connect_timeout(Some(Duration::from_secs(30)));
-				connector.set_read_timeout(Some(Duration::from_secs(30)));
+				connector.set_read_timeout(Some(Duration::from_secs(read_timeout.unwrap_or(30))));
 				connector.set_write_timeout(Some(Duration::from_secs(30)));
 			}
 
@@ -152,7 +152,7 @@ impl Client {
 			};
 			let mut connector = TimeoutConnector::new(socks);
 			connector.set_connect_timeout(Some(Duration::from_secs(10)));
-			connector.set_read_timeout(Some(Duration::from_secs(120))); // For TOR the timeout need to be pretty long. It takes time to builkd a route
+			connector.set_read_timeout(Some(Duration::from_secs(read_timeout.unwrap_or(120)))); // For TOR the timeout need to be pretty long. It takes time to builkd a route
 			connector.set_write_timeout(Some(Duration::from_secs(120)));
 			let client = HyperClient::builder()
 				.pool_idle_timeout(Duration::from_secs(300))
