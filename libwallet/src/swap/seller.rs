@@ -153,7 +153,7 @@ impl SellApi {
 		let start_time = swap.get_time_start();
 
 		// Lock slate
-		let mut lock_slate = &mut swap.lock_slate;
+		let lock_slate = &mut swap.lock_slate;
 
 		#[cfg(test)]
 		if test_mode {
@@ -165,7 +165,7 @@ impl SellApi {
 		lock_slate.height = height;
 
 		// Refund slate
-		let mut refund_slate = &mut swap.refund_slate;
+		let refund_slate = &mut swap.refund_slate;
 		#[cfg(test)]
 		if test_mode {
 			refund_slate.id = Uuid::parse_str("703fac15-913c-4e66-a7c2-5f648ca4ca7d").unwrap();
@@ -195,7 +195,7 @@ impl SellApi {
 		}
 
 		// Redeem slate
-		let mut redeem_slate = &mut swap.redeem_slate;
+		let redeem_slate = &mut swap.redeem_slate;
 		#[cfg(test)]
 		if test_mode {
 			redeem_slate.id = Uuid::parse_str("fc750aae-035f-4c6c-bb0c-05aabc764f8e").unwrap();

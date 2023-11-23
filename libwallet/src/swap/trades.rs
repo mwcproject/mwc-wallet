@@ -278,7 +278,7 @@ pub fn get_swap_trade(
 }
 
 fn read_swap_content(path: &Path, dec_key: &SecretKey) -> Result<String, ErrorKind> {
-	let mut swap_deal_f = File::open(path.clone()).map_err(|e| {
+	let mut swap_deal_f = File::open(path).map_err(|e| {
 		ErrorKind::IO(format!(
 			"Unable to open file {}, {}",
 			path.to_str().unwrap(),

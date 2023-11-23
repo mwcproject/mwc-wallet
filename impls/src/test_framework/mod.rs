@@ -242,7 +242,7 @@ where
 			..Default::default()
 		};
 		let slate_i = owner::init_send_tx(&mut **w, keychain_mask, &args, test_mode, routputs)?;
-		let slate = client.send_tx_slate_direct(dest.clone(), &slate_i)?;
+		let slate = client.send_tx_slate_direct(dest, &slate_i)?;
 		owner::tx_lock_outputs(
 			&mut **w,
 			keychain_mask,
