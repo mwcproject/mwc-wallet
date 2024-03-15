@@ -489,29 +489,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "bindgen"
-version = "0.56.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2da379dbebc0b76ef63ca68d8fc6e71c0f13e59432e0987e508c1820e6ab5239"
-dependencies = [
- "bitflags 1.2.1",
- "cexpr",
- "clang-sys",
- "clap",
- "env_logger",
- "lazy_static",
- "lazycell",
- "log",
- "peeking_take_while",
- "proc-macro2 1.0.28",
- "quote 1.0.9",
- "regex",
- "rustc-hash",
- "shlex",
- "which 3.1.1",
-]
-
-[[package]]
 name = "bit-vec"
 version = "0.6.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -525,7 +502,7 @@ dependencies = [
  "bech32 0.7.3",
  "bitcoin_hashes",
  "bitcoinconsensus",
- "grin_secp256k1zkp",
+ "grin_secp256k1zkp 0.7.10 (git+https://github.com/mwcproject/rust-secp256k1-zkp?branch=master)",
 ]
 
 [[package]]
@@ -822,15 +799,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "cexpr"
-version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f4aedb84272dbe89af497cf81375129abda4fc0a9e7c5d317498c15cc30c0d27"
-dependencies = [
- "nom",
-]
-
-[[package]]
 name = "cfg-if"
 version = "0.1.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -909,17 +877,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "12f8e7987cbd042a63249497f41aed09f8e65add917ea6566effbc56578d6801"
 dependencies = [
  "generic-array 0.14.4",
-]
-
-[[package]]
-name = "clang-sys"
-version = "1.3.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4cc00842eed744b858222c4c9faf7243aafc6d33f92f96935263ef4d8a41ce21"
-dependencies = [
- "glob",
- "libc",
- "libloading",
 ]
 
 [[package]]
@@ -1083,24 +1040,21 @@ dependencies = [
 
 [[package]]
 name = "croaring"
-version = "0.4.6"
+version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a00d14ad7d8cc067d7a5c93e8563791bfec3f7182361db955530db11d94ed63c"
+checksum = "7266f0a7275b00ce4c4f4753e8c31afdefe93828101ece83a06e2ddab1dd1010"
 dependencies = [
  "byteorder",
  "croaring-sys",
- "libc",
 ]
 
 [[package]]
 name = "croaring-sys"
-version = "0.4.6"
+version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c5d6a46501bb403a61e43bc7cd19977b4f9c54efd703949b00259cc61afb5a86"
+checksum = "e47112498c394a7067949ebc07ef429b7384a413cf0efcf675846a47bcd307fb"
 dependencies = [
- "bindgen",
  "cc",
- "libc",
 ]
 
 [[package]]
@@ -1554,19 +1508,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "be4551092f4d519593039259a9ed8daedf0da12e5109c5280338073eaeb81180"
 dependencies = [
  "num-traits 0.1.43",
-]
-
-[[package]]
-name = "env_logger"
-version = "0.8.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a19187fea3ac7e84da7dacf48de0c45d63c6a76f9490dae389aead16c243fce3"
-dependencies = [
- "atty",
- "humantime 2.1.0",
- "log",
- "regex",
- "termcolor",
 ]
 
 [[package]]
@@ -2041,12 +1982,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "glob"
-version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9b919933a397b79c37e33b77bb2aa3dc8eb6e165ad809e58ff75bc7db2e34574"
-
-[[package]]
 name = "gloo-timers"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2062,7 +1997,7 @@ dependencies = [
 [[package]]
 name = "grin_api"
 version = "4.4.2"
-source = "git+https://github.com/mwcproject/mwc-node?branch=master#4532f3dbf2e41c1667b87975f9dbc6fd57150f38"
+source = "git+https://github.com/mwcproject/mwc-node?branch=master#a14d1e13e5318c3927bb19099cd5945d0d7e5045"
 dependencies = [
  "bytes 0.5.6",
  "chrono",
@@ -2097,7 +2032,7 @@ dependencies = [
 [[package]]
 name = "grin_chain"
 version = "4.4.2"
-source = "git+https://github.com/mwcproject/mwc-node?branch=master#4532f3dbf2e41c1667b87975f9dbc6fd57150f38"
+source = "git+https://github.com/mwcproject/mwc-node?branch=master#a14d1e13e5318c3927bb19099cd5945d0d7e5045"
 dependencies = [
  "bit-vec",
  "bitflags 1.2.1",
@@ -2121,7 +2056,7 @@ dependencies = [
 [[package]]
 name = "grin_core"
 version = "4.4.2"
-source = "git+https://github.com/mwcproject/mwc-node?branch=master#4532f3dbf2e41c1667b87975f9dbc6fd57150f38"
+source = "git+https://github.com/mwcproject/mwc-node?branch=master#a14d1e13e5318c3927bb19099cd5945d0d7e5045"
 dependencies = [
  "blake2-rfc",
  "byteorder",
@@ -2147,7 +2082,7 @@ dependencies = [
 [[package]]
 name = "grin_keychain"
 version = "4.4.2"
-source = "git+https://github.com/mwcproject/mwc-node?branch=master#4532f3dbf2e41c1667b87975f9dbc6fd57150f38"
+source = "git+https://github.com/mwcproject/mwc-node?branch=master#a14d1e13e5318c3927bb19099cd5945d0d7e5045"
 dependencies = [
  "blake2-rfc",
  "byteorder",
@@ -2171,7 +2106,7 @@ dependencies = [
 [[package]]
 name = "grin_p2p"
 version = "4.4.2"
-source = "git+https://github.com/mwcproject/mwc-node?branch=master#4532f3dbf2e41c1667b87975f9dbc6fd57150f38"
+source = "git+https://github.com/mwcproject/mwc-node?branch=master#a14d1e13e5318c3927bb19099cd5945d0d7e5045"
 dependencies = [
  "async-std",
  "bitflags 1.2.1",
@@ -2205,7 +2140,7 @@ dependencies = [
 [[package]]
 name = "grin_pool"
 version = "4.4.2"
-source = "git+https://github.com/mwcproject/mwc-node?branch=master#4532f3dbf2e41c1667b87975f9dbc6fd57150f38"
+source = "git+https://github.com/mwcproject/mwc-node?branch=master#a14d1e13e5318c3927bb19099cd5945d0d7e5045"
 dependencies = [
  "blake2-rfc",
  "chrono",
@@ -2219,6 +2154,21 @@ dependencies = [
  "rand 0.6.5",
  "serde",
  "serde_derive",
+]
+
+[[package]]
+name = "grin_secp256k1zkp"
+version = "0.7.10"
+source = "git+https://github.com/mwcproject/rust-secp256k1-zkp?tag=0.7.10#916bebb3df5e1d4188a385c1f97af3474772d2e5"
+dependencies = [
+ "arrayvec 0.3.25",
+ "cc",
+ "libc",
+ "rand 0.5.6",
+ "rustc-serialize",
+ "serde",
+ "serde_json",
+ "zeroize",
 ]
 
 [[package]]
@@ -2239,7 +2189,7 @@ dependencies = [
 [[package]]
 name = "grin_store"
 version = "4.4.2"
-source = "git+https://github.com/mwcproject/mwc-node?branch=master#4532f3dbf2e41c1667b87975f9dbc6fd57150f38"
+source = "git+https://github.com/mwcproject/mwc-node?branch=master#a14d1e13e5318c3927bb19099cd5945d0d7e5045"
 dependencies = [
  "byteorder",
  "croaring",
@@ -2259,7 +2209,7 @@ dependencies = [
 [[package]]
 name = "grin_util"
 version = "4.4.2"
-source = "git+https://github.com/mwcproject/mwc-node?branch=master#4532f3dbf2e41c1667b87975f9dbc6fd57150f38"
+source = "git+https://github.com/mwcproject/mwc-node?branch=master#a14d1e13e5318c3927bb19099cd5945d0d7e5045"
 dependencies = [
  "backtrace",
  "base64 0.12.3",
@@ -2268,7 +2218,7 @@ dependencies = [
  "ed25519-dalek",
  "failure",
  "failure_derive",
- "grin_secp256k1zkp",
+ "grin_secp256k1zkp 0.7.10 (git+https://github.com/mwcproject/rust-secp256k1-zkp?tag=0.7.10)",
  "lazy_static",
  "log",
  "log4rs",
@@ -2668,12 +2618,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "humantime"
-version = "2.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9a3a5bfb195931eeb336b2a7b4d761daec841b97f947d34394601737a7bba5e4"
-
-[[package]]
 name = "hyper"
 version = "0.12.36"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3052,12 +2996,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e2abad23fbc42b3700f2f279844dc832adb2b2eb069b2df918f455c4e18cc646"
 
 [[package]]
-name = "lazycell"
-version = "1.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "830d08ce1d1d941e6b30645f1a0eb5643013d835ce3779a5fc208261dbe10f55"
-
-[[package]]
 name = "libc"
 version = "0.2.150"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3083,16 +3021,6 @@ checksum = "feed38a3a580f60bf61aaa067b0ff4123395966839adeaf67258a9e50c4d2e49"
 dependencies = [
  "gcc",
  "libc",
-]
-
-[[package]]
-name = "libloading"
-version = "0.7.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "efbc0f03f9a775e9f6aed295c6a1ba2253c5757a9e03d55c6caa46a681abcddd"
-dependencies = [
- "cfg-if 1.0.0",
- "winapi 0.3.9",
 ]
 
 [[package]]
@@ -3422,7 +3350,7 @@ dependencies = [
  "chrono",
  "flate2",
  "fnv",
- "humantime 1.3.0",
+ "humantime",
  "libc",
  "log",
  "log-mdc",
@@ -4155,12 +4083,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "peeking_take_while"
-version = "0.1.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "19b17cddbe7ec3f8bc800887bab5e717348c95ea2ca0b1bf0837fb964dc67099"
-
-[[package]]
 name = "percent-encoding"
 version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4461,7 +4383,7 @@ dependencies = [
  "prost",
  "prost-types",
  "tempfile",
- "which 4.2.4",
+ "which",
 ]
 
 [[package]]
@@ -5018,12 +4940,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dead70b0b5e03e9c814bcb6b01e03e68f7c57a80aa48c72ec92152ab3e818d49"
 
 [[package]]
-name = "rustc-hash"
-version = "1.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "08d43f7aa6b08d49f382cde6a7982047c3426db949b1424bc4b7ec9ae12c6ce2"
-
-[[package]]
 name = "rustc-hex"
 version = "2.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5433,12 +5349,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "shlex"
-version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7fdf1b9db47230893d76faad238fd6097fd6d6a9245cd7a4d90dbd639536bbd2"
-
-[[package]]
 name = "signal-hook-registry"
 version = "1.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5713,15 +5623,6 @@ dependencies = [
  "byteorder",
  "dirs 1.0.5",
  "winapi 0.3.9",
-]
-
-[[package]]
-name = "termcolor"
-version = "1.1.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2dfed899f0eb03f32ee8c6a0aabdb8a7949659e3466561fc0adf54e26d88c5f4"
-dependencies = [
- "winapi-util",
 ]
 
 [[package]]
@@ -6612,15 +6513,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d743fdedc5c64377b5fc2bc036b01c7fd642205a0d96356034ae3404d49eb7fb"
 dependencies = [
  "cc",
-]
-
-[[package]]
-name = "which"
-version = "3.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d011071ae14a2f6671d0b74080ae0cd8ebf3a6f8c9589a2cd45f23126fe29724"
-dependencies = [
- "libc",
 ]
 
 [[package]]
