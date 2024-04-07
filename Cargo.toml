@@ -24,7 +24,7 @@ clap = { version = "2.31", features = ["yaml"] }
 rpassword = "2.0.0"
 failure = "0.1"
 failure_derive = "0.1"
-prettytable-rs = "0.7"
+prettytable-rs = "0.10.0"
 log = "0.4"
 linefeed = "0.6"
 semver = "0.9"
