@@ -55,8 +55,8 @@ libp2p = { git = "https://github.com/mwcproject/rust-libp2p", branch = "master",
 tokio = { version = "0.2.1", features = ["full"] }
 futures-timer = "3.0.2"
 crossbeam-utils = "0.7"
-bitcoin = { version = "0.26", git = "https://github.com/mwcproject/rust-bitcoin", branch = "zkp", features = ["bitcoinconsensus"] }
-#bitcoin = { version = "0.26", path = "../../rust-bitcoin", features = ["bitcoinconsensus"] }
+bitcoin = { version = "0.27", git = "https://github.com/mwcproject/rust-bitcoin", branch = "zkp", features = ["bitcoinconsensus"] }
+#bitcoin = { version = "0.27", path = "../../rust-bitcoin", features = ["bitcoinconsensus"] }
 bitcoin_hashes = { version = "0.9.1", features = ["serde"] }
 bch = { git = "https://github.com/mwcproject/rust-bch", branch = "master" }
 #bch = { path = "../../rust-bch" }
