@@ -445,7 +445,7 @@ checksum = "8c3c1a368f70d6cf7302d78f8f7093da241fb8e8807c05cc9e51a125895a6d5b"
 [[package]]
 name = "bch"
 version = "0.2.0"
-source = "git+https://github.com/mwcproject/rust-bch?branch=master#1a25701dc5ad49819f724ff1775a72064e59b6cf"
+source = "git+https://github.com/mwcproject/rust-bch?branch=master#cc08eaf8804c79afb1e51d7750ed2665c13a8de3"
 dependencies = [
  "byteorder",
  "digest 0.7.6",
