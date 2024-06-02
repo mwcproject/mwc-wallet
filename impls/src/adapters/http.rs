@@ -34,6 +34,7 @@ use grin_wallet_libwallet::proof::proofaddress::ProvableAddress;
 use grin_wallet_libwallet::slatepack::SlatePurpose;
 
 const TOR_CONFIG_PATH: &str = "tor/sender";
+const SEND_TX_TIMEOUT_DURATION_SECTIONS: u64 = 5 * 60;
 
 #[derive(Clone)]
 pub struct HttpDataSender {
@@ -114,7 +115,7 @@ impl HttpDataSender {
 				"params": []
 			});
 
-			let res = self.post(url, self.apisecret.clone(), req);
+			let res = self.post(url, self.apisecret.clone(), req, None);
 
 			let diff_time = start_time.elapsed().as_millis();
 			trace!("elapsed time check version = {}", diff_time);
@@ -236,7 +237,7 @@ impl HttpDataSender {
 				"params": []
 			});
 
-			let res = self.post(url, self.apisecret.clone(), req);
+			let res = self.post(url, self.apisecret.clone(), req, None);
 
 			let diff_time = start_time.elapsed().as_millis();
 			trace!("elapsed time check proof address = {}", diff_time);
@@ -308,12 +309,13 @@ impl HttpDataSender {
 		url: &str,
 		api_secret: Option<String>,
 		input: IN,
+		read_timeout: Option<u64>,
 	) -> Result<String, ClientError>
 	where
 		IN: Serialize,
 	{
 		// For state sender we want send and disconnect
-		let client = Client::new(self.use_socks, self.socks_proxy_addr)?;
+		let client = Client::new(self.use_socks, self.socks_proxy_addr, read_timeout)?;
 		let req = client.create_post_request(url, Some("mwc".to_string()), api_secret, &input)?;
 		let res = client.send_request(req)?;
 		Ok(res)
@@ -489,7 +491,7 @@ impl SlateSender for HttpDataSender {
 			});
 			trace!("Sending receive_tx request: {}", req);
 
-			let res = self.post(&url_str, self.apisecret.clone(), req);
+			let res = self.post(&url_str, self.apisecret.clone(), req, Some(SEND_TX_TIMEOUT_DURATION_SECTIONS));
 
 			let diff_time = start_time.elapsed().as_millis();
 			trace!("diff time slate send = {}", diff_time);
@@ -602,7 +604,7 @@ impl SwapMessageSender for HttpDataSender {
 			});
 			trace!("Sending receive_swap_message request: {}", req);
 
-			let res = self.post(&url_str, self.apisecret.clone(), req);
+			let res = self.post(&url_str, self.apisecret.clone(), req, None);
 
 			let diff_time = start_time.elapsed().as_millis();
 			if !res.is_err() {
@@ -655,7 +657,7 @@ impl MarketplaceMessageSender for HttpDataSender {
 			});
 			trace!("Sending marketplace_message request: {}", req);
 
-			let res = self.post(&url_str, self.apisecret.clone(), req);
+			let res = self.post(&url_str, self.apisecret.clone(), req, None);
 
 			let diff_time = start_time.elapsed().as_millis();
 			if !res.is_err() {
