@@ -23,6 +23,7 @@ use grin_wallet_util::grin_core::global;
 use grin_wallet_libwallet as libwallet;
 use impls::test_framework::{self, LocalWalletClient};
 use libwallet::InitTxArgs;
+use std::sync::atomic::Ordering;
 use std::thread;
 use std::time::Duration;
 
@@ -36,6 +37,7 @@ fn self_send_test_impl(test_dir: &'static str) -> Result<(), wallet::Error> {
 	global::set_local_chain_type(global::ChainTypes::AutomatedTesting);
 	let mut wallet_proxy = create_wallet_proxy(test_dir);
 	let chain = wallet_proxy.chain.clone();
+	let stopper = wallet_proxy.running.clone();
 
 	// Create a new wallet test client, and set its queues to communicate with the
 	// proxy
@@ -133,6 +135,7 @@ fn self_send_test_impl(test_dir: &'static str) -> Result<(), wallet::Error> {
 	})?;
 
 	// let logging finish
+	stopper.store(false, Ordering::Relaxed);
 	thread::sleep(Duration::from_millis(200));
 	Ok(())
 }

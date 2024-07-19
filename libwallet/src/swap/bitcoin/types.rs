@@ -303,7 +303,7 @@ impl BtcData {
 
 			inputs.push(BchTxIn {
 				prev_output,
-				/// Signature script for confirming authorization
+				// Signature script for confirming authorization
 				sig_script,
 				sequence: tx_in.sequence,
 			})
@@ -312,7 +312,7 @@ impl BtcData {
 		for tx_out in &tx.output {
 			outputs.push(BchTxOut {
 				amount: bch::util::Amount(tx_out.value as i64),
-				/// Public key script to claim the output
+				// Public key script to claim the output
 				pk_script: bch::script::Script(tx_out.script_pubkey.to_bytes()),
 			})
 		}

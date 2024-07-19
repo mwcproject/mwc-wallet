@@ -27,6 +27,7 @@ use impls::test_framework::{self, LocalWalletClient};
 use impls::{PathToSlatePutter, SlatePutter};
 use libwallet::proof::proofaddress;
 use libwallet::{InitTxArgs, NodeClient};
+use std::sync::atomic::Ordering;
 use std::thread;
 use std::time::Duration;
 use util::ZeroingString;
@@ -53,6 +54,7 @@ fn scan_impl(test_dir: &'static str) -> Result<(), wallet::Error> {
 	// Create a new proxy to simulate server and wallet responses
 	let mut wallet_proxy = create_wallet_proxy(test_dir);
 	let chain = wallet_proxy.chain.clone();
+	let stopper = wallet_proxy.running.clone();
 
 	// Create a new wallet test client, and set its queues to communicate with the
 	// proxy
@@ -229,12 +231,12 @@ fn scan_impl(test_dir: &'static str) -> Result<(), wallet::Error> {
 	})?;
 
 	// let logging finish
+	stopper.store(false, Ordering::Relaxed);
 	thread::sleep(Duration::from_millis(200));
 	Ok(())
 }
 
 fn two_wallets_one_seed_impl(test_dir: &'static str) -> Result<(), wallet::Error> {
-	setup(test_dir);
 	global::set_local_chain_type(global::ChainTypes::AutomatedTesting);
 	let seed_phrase = "affair pistol cancel crush garment candy ancient flag work \
 	                   market crush dry stand focus mutual weapon offer ceiling rival turn team spring \
@@ -244,6 +246,7 @@ fn two_wallets_one_seed_impl(test_dir: &'static str) -> Result<(), wallet::Error
 	// Create a new proxy to simulate server and wallet responses
 	let mut wallet_proxy = create_wallet_proxy(test_dir);
 	let chain = wallet_proxy.chain.clone();
+	let stopper = wallet_proxy.running.clone();
 
 	// Create a new wallet test client, and set its queues to communicate with the
 	// proxy
@@ -768,6 +771,7 @@ fn two_wallets_one_seed_impl(test_dir: &'static str) -> Result<(), wallet::Error
 	})?;
 
 	// let logging finish
+	stopper.store(false, Ordering::Relaxed);
 	thread::sleep(Duration::from_millis(200));
 	Ok(())
 }
@@ -778,6 +782,7 @@ fn output_scanning_impl(test_dir: &'static str) -> Result<(), wallet::Error> {
 	global::set_local_chain_type(global::ChainTypes::AutomatedTesting);
 	let mut wallet_proxy = create_wallet_proxy(test_dir);
 	let chain = wallet_proxy.chain.clone();
+	let stopper = wallet_proxy.running.clone();
 	// Create a new wallet test client, and set its queues to communicate with the
 	// proxy
 	create_wallet_and_add!(
@@ -854,6 +859,9 @@ fn output_scanning_impl(test_dir: &'static str) -> Result<(), wallet::Error> {
 		assert_eq!(outputs.2.len(), 16);
 	}
 
+	// let logging finish
+	stopper.store(false, Ordering::Relaxed);
+	thread::sleep(Duration::from_millis(200));
 	Ok(())
 }
 

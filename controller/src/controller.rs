@@ -374,33 +374,33 @@ where
 					minimum_confirmations: 10,
 					max_outputs: 500,
 					num_change_outputs: 1,
-					/// If `true`, attempt to use up as many outputs as
-					/// possible to create the transaction, up the 'soft limit' of `max_outputs`. This helps
-					/// to reduce the size of the UTXO set and the amount of data stored in the wallet, and
-					/// minimizes fees. This will generally result in many inputs and a large change output(s),
-					/// usually much larger than the amount being sent. If `false`, the transaction will include
-					/// as many outputs as are needed to meet the amount, (and no more) starting with the smallest
-					/// value outputs.
+					// If `true`, attempt to use up as many outputs as
+					// possible to create the transaction, up the 'soft limit' of `max_outputs`. This helps
+					// to reduce the size of the UTXO set and the amount of data stored in the wallet, and
+					// minimizes fees. This will generally result in many inputs and a large change output(s),
+					// usually much larger than the amount being sent. If `false`, the transaction will include
+					// as many outputs as are needed to meet the amount, (and no more) starting with the smallest
+					// value outputs.
 					selection_strategy_is_use_all: false,
 					message: None,
-					/// Optionally set the output target slate version (acceptable
-					/// down to the minimum slate version compatible with the current. If `None` the slate
-					/// is generated with the latest version.
+					// Optionally set the output target slate version (acceptable
+					// down to the minimum slate version compatible with the current. If `None` the slate
+					// is generated with the latest version.
 					target_slate_version: None,
-					/// Number of blocks from current after which TX should be ignored
+					// Number of blocks from current after which TX should be ignored
 					ttl_blocks: None,
-					/// If set, require a payment proof for the particular recipient
+					// If set, require a payment proof for the particular recipient
 					payment_proof_recipient_address: None,
 					address: Some(from.get_full_name()),
-					/// If true, just return an estimate of the resulting slate, containing fees and amounts
-					/// locked without actually locking outputs or creating the transaction. Note if this is set to
-					/// 'true', the amount field in the slate will contain the total amount locked, not the provided
-					/// transaction amount
+					// If true, just return an estimate of the resulting slate, containing fees and amounts
+					// locked without actually locking outputs or creating the transaction. Note if this is set to
+					// 'true', the amount field in the slate will contain the total amount locked, not the provided
+					// transaction amount
 					estimate_only: None,
 					exclude_change_outputs: Some(false),
 					minimum_confirmations_change_outputs: 1,
-					/// Sender arguments. If present, the underlying function will also attempt to send the
-					/// transaction to a destination and optionally finalize the result
+					// Sender arguments. If present, the underlying function will also attempt to send the
+					// transaction to a destination and optionally finalize the result
 					send_args: None,
 					outputs: None,
 					// Lack later flag. Require compact slate workflow

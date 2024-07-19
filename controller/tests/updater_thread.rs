@@ -24,6 +24,7 @@ extern crate grin_wallet_libwallet as libwallet;
 
 use grin_wallet_util::grin_core::global;
 use impls::test_framework::{self, LocalWalletClient};
+use std::sync::atomic::Ordering;
 use std::thread;
 use std::time::Duration;
 
@@ -37,6 +38,7 @@ fn updater_thread_test_impl(test_dir: &'static str) -> Result<(), wallet::Error>
 	// Create a new proxy to simulate server and wallet responses
 	let mut wallet_proxy = create_wallet_proxy(test_dir);
 	let chain = wallet_proxy.chain.clone();
+	let stopper = wallet_proxy.running.clone();
 
 	// Create a new wallet test client, and set its queues to communicate with the
 	// proxy
@@ -107,6 +109,7 @@ fn updater_thread_test_impl(test_dir: &'static str) -> Result<(), wallet::Error>
 	assert!(messages.len() >= 15); // grin has 32 lines, mwc has 25 lines.  We don't want ot validate content, it will change. Just checking that it alive.
 
 	owner_api.stop_updater()?;
+	stopper.store(false, Ordering::Relaxed);
 	thread::sleep(Duration::from_secs(2));
 	Ok(())
 }

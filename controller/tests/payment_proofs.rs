@@ -21,6 +21,7 @@ extern crate grin_wallet_util;
 use grin_wallet_libwallet as libwallet;
 use impls::test_framework::{self, LocalWalletClient};
 use libwallet::{InitTxArgs, Slate};
+use std::sync::atomic::Ordering;
 use std::thread;
 use std::time::Duration;
 
@@ -36,6 +37,7 @@ fn payment_proofs_test_impl(test_dir: &'static str) -> Result<(), wallet::Error>
 	global::set_local_chain_type(global::ChainTypes::AutomatedTesting);
 	let mut wallet_proxy = create_wallet_proxy(test_dir);
 	let chain = wallet_proxy.chain.clone();
+	let stopper = wallet_proxy.running.clone();
 
 	create_wallet_and_add!(
 		client1,
@@ -169,6 +171,7 @@ fn payment_proofs_test_impl(test_dir: &'static str) -> Result<(), wallet::Error>
 	})?;
 
 	// let logging finish
+	stopper.store(false, Ordering::Relaxed);
 	thread::sleep(Duration::from_millis(200));
 	Ok(())
 }

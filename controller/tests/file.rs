@@ -21,6 +21,7 @@ use grin_wallet_util::grin_core as core;
 
 use impls::test_framework::{self, LocalWalletClient};
 use impls::{PathToSlateGetter, PathToSlatePutter, SlateGetter, SlatePutter};
+use std::sync::atomic::Ordering;
 use std::thread;
 use std::time::Duration;
 
@@ -42,6 +43,7 @@ fn file_exchange_test_impl(test_dir: &'static str) -> Result<(), wallet::Error> 
 	// Create a new proxy to simulate server and wallet responses
 	let mut wallet_proxy = create_wallet_proxy(test_dir);
 	let chain = wallet_proxy.chain.clone();
+	let stopper = wallet_proxy.running.clone();
 
 	// Create a new wallet test client, and set its queues to communicate with the
 	// proxy
@@ -244,6 +246,7 @@ fn file_exchange_test_impl(test_dir: &'static str) -> Result<(), wallet::Error> 
 	})?;
 
 	// let logging finish
+	stopper.store(false, Ordering::Relaxed);
 	thread::sleep(Duration::from_millis(200));
 	Ok(())
 }
