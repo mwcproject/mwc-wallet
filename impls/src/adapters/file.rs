@@ -89,7 +89,7 @@ impl SlatePutter for PathToSlatePutter {
 	fn put_tx(
 		&self,
 		slate: &Slate,
-		slatepack_secret: &DalekSecretKey,
+		slatepack_secret: Option<&DalekSecretKey>,
 		use_test_rng: bool,
 	) -> Result<String, Error> {
 		let out_slate = {
@@ -102,6 +102,13 @@ impl SlatePutter for PathToSlatePutter {
 					.into());
 				}
 
+				if slatepack_secret.is_none() {
+					return Err(ErrorKind::ArgumentError(
+						"slatepack_secret is not defiled for encrypted slatepack".to_string(),
+					)
+					.into());
+				}
+
 				// Do the slatepack
 				VersionedSlate::into_version(
 					slate.clone(),
@@ -109,7 +116,7 @@ impl SlatePutter for PathToSlatePutter {
 					self.content.clone().unwrap(),
 					self.sender.clone().unwrap(),
 					self.recipient.clone(),
-					slatepack_secret,
+					slatepack_secret.unwrap(),
 					use_test_rng,
 				)
 				.map_err(|e| {
@@ -164,7 +171,7 @@ impl SlatePutter for PathToSlatePutter {
 }
 
 impl SlateGetter for PathToSlateGetter {
-	fn get_tx(&self, slatepack_secret: &DalekSecretKey) -> Result<SlateGetData, Error> {
+	fn get_tx(&self, slatepack_secret: Option<&DalekSecretKey>) -> Result<SlateGetData, Error> {
 		let content = match &self.slate_str {
 			Some(str) => str.clone(),
 			None => {
@@ -204,7 +211,13 @@ impl SlateGetter for PathToSlateGetter {
 			})?;
 			Ok(SlateGetData::PlainSlate(slate))
 		} else {
-			let sp = Slate::deserialize_upgrade_slatepack(&content, slatepack_secret)?;
+			if slatepack_secret.is_none() {
+				return Err(ErrorKind::ArgumentError(
+					"slatepack_secret is none for get encrypted slatepack".into(),
+				)
+				.into());
+			}
+			let sp = Slate::deserialize_upgrade_slatepack(&content, slatepack_secret.unwrap())?;
 			Ok(SlateGetData::Slatepack(sp))
 		}
 	}

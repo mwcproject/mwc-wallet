@@ -197,7 +197,9 @@ where
 	)?;
 
 	outputs.retain(|o| {
-		o.output.status == OutputStatus::Unspent || o.output.status == OutputStatus::Unconfirmed
+		o.output.status == OutputStatus::Unspent
+			|| o.output.status == OutputStatus::Unconfirmed
+			|| o.output.status == OutputStatus::Reverted
 	});
 
 	// Let's check if fee already paid.
@@ -310,7 +312,10 @@ where
 	// Check if integrity outputs still in the waiting state
 	if outputs
 		.iter()
-		.find(|o| o.output.status == OutputStatus::Unconfirmed)
+		.find(|o| {
+			o.output.status == OutputStatus::Unconfirmed
+				|| o.output.status == OutputStatus::Reverted
+		})
 		.is_some()
 	{
 		return Ok(results);

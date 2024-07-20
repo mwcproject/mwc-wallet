@@ -95,9 +95,10 @@ where
 	for out in outputs {
 		// Filtering out Unconfirmed from cancelled (not active) transactions
 		if out.status == OutputStatus::Unconfirmed
-			&& !tx_log_is_active
-				.get(&out.tx_log_entry.clone().unwrap_or(std::u32::MAX))
-				.unwrap_or(&true)
+			|| out.status == OutputStatus::Reverted
+				&& !tx_log_is_active
+					.get(&out.tx_log_entry.clone().unwrap_or(std::u32::MAX))
+					.unwrap_or(&true)
 		{
 			continue;
 		}
@@ -174,7 +175,8 @@ where
 				true => {
 					!tx_entry.confirmed
 						&& (tx_entry.tx_type == TxLogEntryType::TxReceived
-							|| tx_entry.tx_type == TxLogEntryType::TxSent)
+							|| tx_entry.tx_type == TxLogEntryType::TxSent
+							|| tx_entry.tx_type == TxLogEntryType::TxReverted)
 				}
 				false => true,
 			};
@@ -217,7 +219,7 @@ where
 pub fn cancel_tx_and_outputs<'a, T: ?Sized, C, K>(
 	wallet: &mut T,
 	keychain_mask: Option<&SecretKey>,
-	tx: TxLogEntry,
+	mut tx: TxLogEntry,
 	outputs: Vec<OutputData>,
 	parent_key_id: &Identifier,
 ) -> Result<(), Error>
@@ -230,7 +232,7 @@ where
 
 	for mut o in outputs {
 		// unlock locked outputs
-		//if o.status == OutputStatus::Unconfirmed {   WMC don't delete outputs, we want to keep them mapped to cancelled trasactions
+		//if o.status == OutputStatus::Unconfirmed || o.status == OutputStatus::Reverted {   WMC don't delete outputs, we want to keep them mapped to cancelled trasactions
 		//	batch.delete(&o.key_id, &o.mmr_index)?;
 		//}
 		if o.status == OutputStatus::Locked {
@@ -238,12 +240,12 @@ where
 			batch.save(o)?;
 		}
 	}
-	let mut tx = tx;
-	if tx.tx_type == TxLogEntryType::TxSent {
-		tx.tx_type = TxLogEntryType::TxSentCancelled;
-	}
-	if tx.tx_type == TxLogEntryType::TxReceived {
-		tx.tx_type = TxLogEntryType::TxReceivedCancelled;
+	match tx.tx_type {
+		TxLogEntryType::TxSent => tx.tx_type = TxLogEntryType::TxSentCancelled,
+		TxLogEntryType::TxReceived | TxLogEntryType::TxReverted => {
+			tx.tx_type = TxLogEntryType::TxReceivedCancelled
+		}
+		_ => {}
 	}
 	batch.save_tx_log_entry(tx, parent_key_id)?;
 	batch.commit()?;
@@ -280,6 +282,7 @@ where
 	let mut awaiting_finalization_total = 0;
 	let mut unconfirmed_total = 0;
 	let mut locked_total = 0;
+	let mut reverted_total = 0;
 
 	for out in outputs {
 		match out.status {
@@ -312,6 +315,7 @@ where
 			OutputStatus::Locked => {
 				locked_total += out.value;
 			}
+			OutputStatus::Reverted => reverted_total += out.value,
 			OutputStatus::Spent => {}
 		}
 	}
@@ -325,6 +329,7 @@ where
 		amount_immature: immature_total,
 		amount_locked: locked_total,
 		amount_currently_spendable: unspent_total,
+		amount_reverted: reverted_total,
 	})
 }
 

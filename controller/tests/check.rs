@@ -25,7 +25,6 @@ use self::core::global;
 use grin_wallet_libwallet as libwallet;
 use impls::test_framework::{self, LocalWalletClient};
 use impls::{PathToSlatePutter, SlatePutter};
-use libwallet::proof::proofaddress;
 use libwallet::{InitTxArgs, NodeClient};
 use std::sync::atomic::Ordering;
 use std::thread;
@@ -193,17 +192,9 @@ fn scan_impl(test_dir: &'static str) -> Result<(), wallet::Error> {
 		};
 		let slate = api.init_send_tx(m, &args, 1)?;
 
-		let sec_key = {
-			let mut w_lock = api.wallet_inst.lock();
-			let w = w_lock.lc_provider()?.wallet_inst()?;
-			let k = w.keychain(m)?;
-			let sec_key = proofaddress::payment_proof_address_dalek_secret(&k, None)?;
-			sec_key
-		};
-
 		// output tx file
 		let send_file = format!("{}/part_tx_1.tx", test_dir);
-		PathToSlatePutter::build_plain(Some(send_file.into())).put_tx(&slate, &sec_key, true)?;
+		PathToSlatePutter::build_plain(Some(send_file.into())).put_tx(&slate, None, true)?;
 		api.tx_lock_outputs(m, &slate, None, 0)?;
 		Ok(())
 	})?;

@@ -1040,9 +1040,9 @@ dependencies = [
 
 [[package]]
 name = "croaring"
-version = "1.0.1"
+version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7266f0a7275b00ce4c4f4753e8c31afdefe93828101ece83a06e2ddab1dd1010"
+checksum = "611eaefca84c93e431ad82dfb848f6e05a99e25148384f45a3852b0fbe1c8086"
 dependencies = [
  "byteorder",
  "croaring-sys",
@@ -1050,9 +1050,9 @@ dependencies = [
 
 [[package]]
 name = "croaring-sys"
-version = "1.1.0"
+version = "2.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e47112498c394a7067949ebc07ef429b7384a413cf0efcf675846a47bcd307fb"
+checksum = "3e5fed89265a702f0085844237a7ebbadf8a7c42de6304fddca30a5013f9aecb"
 dependencies = [
  "cc",
 ]
@@ -2017,7 +2017,7 @@ dependencies = [
 [[package]]
 name = "grin_api"
 version = "4.4.2"
-source = "git+https://github.com/mwcproject/mwc-node?branch=master#be16ffde4dd9b01704f02e0c5d13c1a73bc63f9e"
+source = "git+https://github.com/mwcproject/mwc-node?tag=4.4.4#be16ffde4dd9b01704f02e0c5d13c1a73bc63f9e"
 dependencies = [
  "bytes 0.5.6",
  "chrono",
@@ -2052,7 +2052,7 @@ dependencies = [
 [[package]]
 name = "grin_chain"
 version = "4.4.2"
-source = "git+https://github.com/mwcproject/mwc-node?branch=master#be16ffde4dd9b01704f02e0c5d13c1a73bc63f9e"
+source = "git+https://github.com/mwcproject/mwc-node?tag=4.4.4#be16ffde4dd9b01704f02e0c5d13c1a73bc63f9e"
 dependencies = [
  "bit-vec",
  "bitflags 1.2.1",
@@ -2076,7 +2076,7 @@ dependencies = [
 [[package]]
 name = "grin_core"
 version = "4.4.2"
-source = "git+https://github.com/mwcproject/mwc-node?branch=master#be16ffde4dd9b01704f02e0c5d13c1a73bc63f9e"
+source = "git+https://github.com/mwcproject/mwc-node?tag=4.4.4#be16ffde4dd9b01704f02e0c5d13c1a73bc63f9e"
 dependencies = [
  "blake2-rfc",
  "byteorder",
@@ -2102,7 +2102,7 @@ dependencies = [
 [[package]]
 name = "grin_keychain"
 version = "4.4.2"
-source = "git+https://github.com/mwcproject/mwc-node?branch=master#be16ffde4dd9b01704f02e0c5d13c1a73bc63f9e"
+source = "git+https://github.com/mwcproject/mwc-node?tag=4.4.4#be16ffde4dd9b01704f02e0c5d13c1a73bc63f9e"
 dependencies = [
  "blake2-rfc",
  "byteorder",
@@ -2126,7 +2126,7 @@ dependencies = [
 [[package]]
 name = "grin_p2p"
 version = "4.4.2"
-source = "git+https://github.com/mwcproject/mwc-node?branch=master#be16ffde4dd9b01704f02e0c5d13c1a73bc63f9e"
+source = "git+https://github.com/mwcproject/mwc-node?tag=4.4.4#be16ffde4dd9b01704f02e0c5d13c1a73bc63f9e"
 dependencies = [
  "async-std",
  "bitflags 1.2.1",
@@ -2160,7 +2160,7 @@ dependencies = [
 [[package]]
 name = "grin_pool"
 version = "4.4.2"
-source = "git+https://github.com/mwcproject/mwc-node?branch=master#be16ffde4dd9b01704f02e0c5d13c1a73bc63f9e"
+source = "git+https://github.com/mwcproject/mwc-node?tag=4.4.4#be16ffde4dd9b01704f02e0c5d13c1a73bc63f9e"
 dependencies = [
  "blake2-rfc",
  "chrono",
@@ -2193,7 +2193,7 @@ dependencies = [
 [[package]]
 name = "grin_store"
 version = "4.4.2"
-source = "git+https://github.com/mwcproject/mwc-node?branch=master#be16ffde4dd9b01704f02e0c5d13c1a73bc63f9e"
+source = "git+https://github.com/mwcproject/mwc-node?tag=4.4.4#be16ffde4dd9b01704f02e0c5d13c1a73bc63f9e"
 dependencies = [
  "byteorder",
  "croaring",
@@ -2213,7 +2213,7 @@ dependencies = [
 [[package]]
 name = "grin_util"
 version = "4.4.2"
-source = "git+https://github.com/mwcproject/mwc-node?branch=master#be16ffde4dd9b01704f02e0c5d13c1a73bc63f9e"
+source = "git+https://github.com/mwcproject/mwc-node?tag=4.4.4#be16ffde4dd9b01704f02e0c5d13c1a73bc63f9e"
 dependencies = [
  "backtrace",
  "base64 0.12.3",

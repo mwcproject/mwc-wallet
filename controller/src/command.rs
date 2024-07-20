@@ -505,7 +505,7 @@ where
 						recipient,
 						args.method == "slatepack",
 					)
-					.put_tx(&slate, &slatepack_secret, false)
+					.put_tx(&slate, Some(&slatepack_secret), false)
 					.map_err(|e| {
 						ErrorKind::IO(format!("Unable to store the file at {}, {}", args.dest, e))
 					})?;
@@ -613,21 +613,20 @@ where
 			slatepack_secret
 		};
 
-		let slate_pkg =
-			match &args.input_file {
-				Some(file_name) => PathToSlateGetter::build_form_path(file_name.into())
-					.get_tx(&slatepack_secret)?,
-				None => match &args.input_slatepack_message {
-					Some(message) => PathToSlateGetter::build_form_str(message.clone())
-						.get_tx(&slatepack_secret)?,
-					None => {
-						return Err(ErrorKind::ArgumentError(
-							"Please specify 'file' or 'content' argument".to_string(),
-						)
-						.into())
-					}
-				},
-			};
+		let slate_pkg = match &args.input_file {
+			Some(file_name) => PathToSlateGetter::build_form_path(file_name.into())
+				.get_tx(Some(&slatepack_secret))?,
+			None => match &args.input_slatepack_message {
+				Some(message) => PathToSlateGetter::build_form_str(message.clone())
+					.get_tx(Some(&slatepack_secret))?,
+				None => {
+					return Err(ErrorKind::ArgumentError(
+						"Please specify 'file' or 'content' argument".to_string(),
+					)
+					.into())
+				}
+			},
+		};
 
 		let (mut slate, sender, _recipient, content, slatepack_format) = slate_pkg.to_slate()?;
 
@@ -664,7 +663,7 @@ where
 			sender,
 			slatepack_format,
 		)
-		.put_tx(&slate, &slatepack_secret, false)?;
+		.put_tx(&slate, Some(&slatepack_secret), false)?;
 
 		if let Some(response_file) = &response_file {
 			info!("Response file {}.response generated, and can be sent back to the transaction originator.", response_file);
@@ -701,26 +700,25 @@ where
 			slatepack_secret
 		};
 
-		let slate_pkg =
-			match &args.input_file {
-				Some(file_name) => PathToSlateGetter::build_form_path(file_name.into())
-					.get_tx(&slatepack_secret)?,
-				None => match &args.input_slatepack_message {
-					Some(message) => PathToSlateGetter::build_form_str(message.clone())
-						.get_tx(&slatepack_secret)?,
-					None => {
-						return Err(ErrorKind::ArgumentError(
-							"Please specify 'file' or 'content' argument".to_string(),
-						)
-						.into())
-					}
-				},
-			};
+		let slate_pkg = match &args.input_file {
+			Some(file_name) => PathToSlateGetter::build_form_path(file_name.into())
+				.get_tx(Some(&slatepack_secret))?,
+			None => match &args.input_slatepack_message {
+				Some(message) => PathToSlateGetter::build_form_str(message.clone())
+					.get_tx(Some(&slatepack_secret))?,
+				None => {
+					return Err(ErrorKind::ArgumentError(
+						"Please specify 'file' or 'content' argument".to_string(),
+					)
+					.into())
+				}
+			},
+		};
 
 		let (slate, sender, recipient, content, _slatepack_format) = slate_pkg.to_slate()?;
 
 		let slate_str =
-			PathToSlatePutter::build_plain(None).put_tx(&slate, &slatepack_secret, false)?;
+			PathToSlatePutter::build_plain(None).put_tx(&slate, Some(&slatepack_secret), false)?;
 
 		println!();
 		println!("SLATEPACK CONTENTS");
@@ -786,21 +784,20 @@ where
 			slatepack_secret
 		};
 
-		let slate_pkg =
-			match &args.input_file {
-				Some(file_name) => PathToSlateGetter::build_form_path(file_name.into())
-					.get_tx(&slatepack_secret)?,
-				None => match &args.input_slatepack_message {
-					Some(message) => PathToSlateGetter::build_form_str(message.clone())
-						.get_tx(&slatepack_secret)?,
-					None => {
-						return Err(ErrorKind::ArgumentError(
-							"Please specify 'file' or 'content' argument".to_string(),
-						)
-						.into())
-					}
-				},
-			};
+		let slate_pkg = match &args.input_file {
+			Some(file_name) => PathToSlateGetter::build_form_path(file_name.into())
+				.get_tx(Some(&slatepack_secret))?,
+			None => match &args.input_slatepack_message {
+				Some(message) => PathToSlateGetter::build_form_str(message.clone())
+					.get_tx(Some(&slatepack_secret))?,
+				None => {
+					return Err(ErrorKind::ArgumentError(
+						"Please specify 'file' or 'content' argument".to_string(),
+					)
+					.into())
+				}
+			},
+		};
 
 		let (slate2, sender2, recipient2, content2, slatepack_format2) = slate_pkg.to_slate()?;
 		slate = slate2;
@@ -904,7 +901,7 @@ where
 				sender,
 				slatepack_format,
 			)
-			.put_tx(&slate, &slatepack_secret, false)?;
+			.put_tx(&slate, Some(&slatepack_secret), false)?;
 
 			Ok(())
 		})?;
@@ -956,7 +953,7 @@ where
 			recipient,
 			recipient.is_some(),
 		)
-		.put_tx(&slate, &slatepack_secret, false)?;
+		.put_tx(&slate, Some(&slatepack_secret), false)?;
 		Ok(())
 	})?;
 	Ok(())
@@ -997,7 +994,7 @@ where
 	};
 
 	let slate_pkg =
-		PathToSlateGetter::build_form_path((&args.input).into()).get_tx(&slatepack_secret)?;
+		PathToSlateGetter::build_form_path((&args.input).into()).get_tx(Some(&slatepack_secret))?;
 
 	let (slate, sender_pk, _recepient, content, _encrypted) = slate_pkg.to_slate()?;
 
@@ -1073,7 +1070,7 @@ where
 					// Process invoice slate is not required to send anywhere. Let's write it for our records.
 					PathToSlatePutter::build_plain(Some((&args.dest).into())).put_tx(
 						&slate,
-						&slatepack_secret,
+						Some(&slatepack_secret),
 						false,
 					)?;
 					api.tx_lock_outputs(m, &slate, Some(String::from("file")), 1)?;
@@ -1262,7 +1259,7 @@ where
 
 	// Post expected to be internal api call, so there is no reasons to work with slatepacks.
 	let slate = PathToSlateGetter::build_form_path((&args.input).into())
-		.get_tx(&slatepack_secret)?
+		.get_tx(Some(&slatepack_secret))?
 		.to_slate()?
 		.0;
 

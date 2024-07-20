@@ -78,7 +78,7 @@ pub trait SlatePutter {
 	fn put_tx(
 		&self,
 		slate: &Slate,
-		slatepack_secret: &DalekSecretKey,
+		slatepack_secret: Option<&DalekSecretKey>,
 		use_test_rng: bool,
 	) -> Result<String, Error>;
 }
@@ -94,7 +94,7 @@ pub enum SlateGetData {
 /// Checks for a transaction from a corresponding SlatePutter, returns the transaction if it exists
 pub trait SlateGetter {
 	/// Receive a transaction sync. Just read it from wherever and return the slate.
-	fn get_tx(&self, slatepack_secret: &DalekSecretKey) -> Result<SlateGetData, Error>;
+	fn get_tx(&self, slatepack_secret: Option<&DalekSecretKey>) -> Result<SlateGetData, Error>;
 }
 
 /// Swap Message Sender

@@ -47,7 +47,7 @@ fn output_slatepack(
 	sender_secret: &DalekSecretKey,
 ) -> Result<(), libwallet::Error> {
 	PathToSlatePutter::build_encrypted(Some(file_name.into()), content, sender, recipients, true)
-		.put_tx(&slate, &sender_secret, true)
+		.put_tx(&slate, Some(&sender_secret), true)
 		.map_err(|e| {
 			libwallet::ErrorKind::GenericError(format!("Unable to store the slate, {}", e))
 		})?;
@@ -59,7 +59,7 @@ fn slate_from_packed(
 	dec_key: &DalekSecretKey,
 ) -> Result<Slatepacker, libwallet::Error> {
 	match PathToSlateGetter::build_form_path(file.into())
-		.get_tx(dec_key)
+		.get_tx(Some(dec_key))
 		.map_err(|e| {
 			libwallet::ErrorKind::GenericError(format!("Unable to read the slate, {}", e))
 		})? {
@@ -473,7 +473,6 @@ fn slatepack_exchange_test_impl(test_dir: &'static str) -> Result<(), libwallet:
 }
 
 #[test]
-#[ignore]
 fn slatepack_exchange() {
 	let test_dir = "test_output/slatepack_exchange";
 	setup(test_dir);

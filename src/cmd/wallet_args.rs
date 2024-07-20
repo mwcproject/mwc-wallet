@@ -811,11 +811,12 @@ pub fn parse_process_invoice_args(
 	if prompt {
 		// Now we need to prompt the user whether they want to do this,
 		// which requires reading the slate
-		let slate =
-			match PathToSlateGetter::build_form_path((&tx_file).into()).get_tx(slatepack_secret) {
-				Ok(s) => s,
-				Err(e) => return Err(ParseError::ArgumentError(format!("{}", e))),
-			};
+		let slate = match PathToSlateGetter::build_form_path((&tx_file).into())
+			.get_tx(Some(slatepack_secret))
+		{
+			Ok(s) => s,
+			Err(e) => return Err(ParseError::ArgumentError(format!("{}", e))),
+		};
 		let slate = slate
 			.to_slate()
 			.map_err(|e| ParseError::ArgumentError(format!("Unable to read the slate, {}", e)))?

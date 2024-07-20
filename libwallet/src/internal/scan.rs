@@ -989,7 +989,7 @@ where
 					// Next workflow will take case about the transaction state as well as Spent/Unconfirmed uncertainty
 					out.output.status = match &out.output.status {
 						OutputStatus::Locked => OutputStatus::Spent,
-						OutputStatus::Unspent => OutputStatus::Unconfirmed,
+						OutputStatus::Unspent => OutputStatus::Reverted,
 						a => {
 							debug_assert!(false);
 							a.clone()
@@ -1352,12 +1352,12 @@ where
 						w_out.updated = true;
 						w_out.output.status = OutputStatus::Locked;
 					}
-					OutputStatus::Unconfirmed => {
+					OutputStatus::Unconfirmed | OutputStatus::Reverted => {
 						// Very expected event. Output is at the chain and we get a confirmation.
 						if let Some(ref s) = status_send_channel {
 							let _ = match &w_out.output.commit {
-								Some(commit) => s.send(StatusMessage::Info(format!("Changing status for output {} from Unconfirmed to Unspent", commit))),
-								None => s.send(StatusMessage::Info(format!("Changing status for coin base output at height {} from Unconfirmed to Unspent", w_out.output.height))),
+								Some(commit) => s.send(StatusMessage::Info(format!("Changing status for output {} from Unconfirmed/Reverted to Unspent", commit))),
+								None => s.send(StatusMessage::Info(format!("Changing status for coin base output at height {} from Unconfirmed/Reverted to Unspent", w_out.output.height))),
 							};
 						}
 						w_out.updated = true;
@@ -1395,7 +1395,7 @@ where
 		if w_out.output.height >= start_height && !w_out.at_chain {
 			match w_out.output.status {
 				OutputStatus::Spent => (), // Spent not expected to be found at the chain
-				OutputStatus::Unconfirmed => (), // Unconfirmed not expected as well
+				OutputStatus::Unconfirmed | OutputStatus::Reverted => (), // Unconfirmed/Reverted are not expected as well
 				OutputStatus::Unspent => {
 					// Unspent not found - likely it is reorg and that is why the last transaction can't be confirmed now.
 					if let Some(ref s) = status_send_channel {
@@ -1635,7 +1635,7 @@ fn validate_outputs_ownership<'a, L, C, K>(
 					);
 				}
 			}
-			OutputStatus::Unconfirmed => {
+			OutputStatus::Unconfirmed | OutputStatus::Reverted => {
 				// Unconfirmed can be anything. We can delete that output
 			}
 			OutputStatus::Unspent => {
@@ -1693,7 +1693,7 @@ fn delete_unconfirmed(
 					transaction2cancel.insert(uuid.clone());
 				}
 			}
-			OutputStatus::Unconfirmed => {
+			OutputStatus::Unconfirmed | OutputStatus::Reverted => {
 				for uuid in &w_out.tx_output_uuid {
 					transaction2cancel.insert(uuid.clone());
 				}
@@ -1747,7 +1747,9 @@ fn validate_consistancy(
 			// Inputs can't be spendable
 			for out in &tx_info.input_commit {
 				if let Some(out) = outputs.get_mut(out) {
-					if out.output.status == OutputStatus::Unconfirmed {
+					if out.output.status == OutputStatus::Unconfirmed
+						|| out.output.status == OutputStatus::Reverted
+					{
 						out.output.status = OutputStatus::Spent;
 						out.updated = true;
 					}
@@ -1756,7 +1758,9 @@ fn validate_consistancy(
 
 			for out in &tx_info.output_commit {
 				if let Some(out) = outputs.get_mut(out) {
-					if out.output.status == OutputStatus::Unconfirmed {
+					if out.output.status == OutputStatus::Unconfirmed
+						|| out.output.status == OutputStatus::Reverted
+					{
 						out.output.status = OutputStatus::Spent;
 						out.updated = true;
 					}
@@ -1768,7 +1772,7 @@ fn validate_consistancy(
 			for out in &tx_info.output_commit {
 				if let Some(out) = outputs.get_mut(out) {
 					if out.output.status == OutputStatus::Spent {
-						out.output.status = OutputStatus::Unconfirmed;
+						out.output.status = OutputStatus::Reverted;
 						out.updated = true;
 					}
 				}
@@ -1817,7 +1821,7 @@ where
 		// Unconfirmed without any transactions must be deleted as well
 		if (output.is_orphan_output() && !output.output.is_coinbase) ||
 			// Delete expired mining outputs
-			( output.output.is_coinbase && (output.output.status == OutputStatus::Unconfirmed) && ((output.output.height < tip_height) || (output.commit != *last_output)) )
+			( output.output.is_coinbase && (output.output.status == OutputStatus::Unconfirmed || output.output.status == OutputStatus::Reverted) && ((output.output.height < tip_height) || (output.commit != *last_output)) )
 		{
 			if let Some(ref s) = status_send_channel {
 				let _ = s.send(StatusMessage::Warning(format!(
@@ -1912,7 +1916,10 @@ where
 			}
 		}
 
-		if !outputs_state.is_empty() && !outputs_state.contains(&OutputStatus::Unconfirmed) {
+		if !outputs_state.is_empty()
+			&& !outputs_state.contains(&OutputStatus::Unconfirmed)
+			&& !outputs_state.contains(&OutputStatus::Reverted)
+		{
 			if tx_info.tx_log.is_cancelled() {
 				tx_info.tx_log.uncancel();
 				tx_info.updated = true;
@@ -1932,7 +1939,9 @@ where
 
 				tx_info.updated = true;
 			}
-		} else if outputs_state.contains(&OutputStatus::Unconfirmed) {
+		} else if outputs_state.contains(&OutputStatus::Unconfirmed)
+			|| outputs_state.contains(&OutputStatus::Reverted)
+		{
 			if tx_info.tx_log.confirmed {
 				tx_info.tx_log.confirmed = false;
 				tx_info.updated = true;

@@ -24,7 +24,6 @@ use grin_wallet_util::grin_core::global;
 use self::libwallet::{InitTxArgs, Slate};
 use impls::test_framework::{self, LocalWalletClient};
 use impls::{PathToSlateGetter, PathToSlatePutter, SlateGetter, SlatePutter};
-use libwallet::proof::proofaddress;
 use std::sync::atomic::Ordering;
 use std::thread;
 use std::time::Duration;
@@ -122,16 +121,8 @@ fn file_repost_test_impl(test_dir: &'static str) -> Result<(), wallet::Error> {
 			..Default::default()
 		};
 
-		let sec_key = {
-			let mut w_lock = api.wallet_inst.lock();
-			let w = w_lock.lc_provider()?.wallet_inst()?;
-			let k = w.keychain(m)?;
-			let sec_key = proofaddress::payment_proof_address_dalek_secret(&k, None)?;
-			sec_key
-		};
-
 		let slate = api.init_send_tx(m, &args, 1)?;
-		PathToSlatePutter::build_plain(Some((&send_file).into())).put_tx(&slate, &sec_key, true)?;
+		PathToSlatePutter::build_plain(Some((&send_file).into())).put_tx(&slate, None, true)?;
 		api.tx_lock_outputs(m, &slate, None, 0)?;
 		Ok(())
 	})?;
@@ -146,21 +137,12 @@ fn file_repost_test_impl(test_dir: &'static str) -> Result<(), wallet::Error> {
 	}
 
 	wallet::controller::foreign_single_use(wallet1.clone(), mask1_i.clone(), |api| {
-		let sec_key = {
-			let mut w_lock = api.wallet_inst.lock();
-			let w = w_lock.lc_provider()?.wallet_inst()?;
-			let k = w.keychain(None)?; // mask is none, so it is fine...
-			let sec_key = proofaddress::payment_proof_address_dalek_secret(&k, None)?;
-			sec_key
-		};
-
 		slate = PathToSlateGetter::build_form_path((&send_file).into())
-			.get_tx(&sec_key)?
+			.get_tx(None)?
 			.to_slate()?
 			.0;
 		slate = api.receive_tx(&slate, None, None, None)?;
-		PathToSlatePutter::build_plain(Some((&receive_file).into()))
-			.put_tx(&slate, &sec_key, true)?;
+		PathToSlatePutter::build_plain(Some((&receive_file).into())).put_tx(&slate, None, true)?;
 		Ok(())
 	})?;
 
@@ -172,16 +154,8 @@ fn file_repost_test_impl(test_dir: &'static str) -> Result<(), wallet::Error> {
 
 	// wallet 1 finalize
 	wallet::controller::owner_single_use(Some(wallet1.clone()), mask1, None, |api, m| {
-		let sec_key = {
-			let mut w_lock = api.wallet_inst.lock();
-			let w = w_lock.lc_provider()?.wallet_inst()?;
-			let k = w.keychain(m)?;
-			let sec_key = proofaddress::payment_proof_address_dalek_secret(&k, None)?;
-			sec_key
-		};
-
 		slate = PathToSlateGetter::build_form_path((&receive_file).into())
-			.get_tx(&sec_key)?
+			.get_tx(None)?
 			.to_slate()?
 			.0;
 		slate = api.finalize_tx(m, &slate)?;
