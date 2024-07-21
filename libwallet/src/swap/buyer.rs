@@ -89,8 +89,8 @@ impl BuyApi {
 		}
 		if lock_slate.fee
 			!= tx_fee(
-				lock_slate.tx.body.inputs.len(),
-				lock_slate.tx.body.outputs.len() + 1,
+				lock_slate.tx_or_err()?.body.inputs.len(),
+				lock_slate.tx_or_err()?.body.outputs.len() + 1,
 				1,
 				None,
 			) {
@@ -104,12 +104,12 @@ impl BuyApi {
 			));
 		}
 
-		if lock_slate.tx.body.kernels.len() != 1 {
+		if lock_slate.tx_or_err()?.body.kernels.len() != 1 {
 			return Err(ErrorKind::InvalidMessageData(
 				"Lock Slate invalid kernels".to_string(),
 			));
 		}
-		match lock_slate.tx.body.kernels[0].features {
+		match lock_slate.tx_or_err()?.body.kernels[0].features {
 			KernelFeatures::Plain { fee } => {
 				if fee != lock_slate.fee {
 					return Err(ErrorKind::InvalidMessageData(
@@ -126,13 +126,13 @@ impl BuyApi {
 
 		// Let's check inputs. They must exist, we want real inspent coins. We can't check amount, that will be later when we cound validate the sum.
 		// Height of the inputs is not important, we are relaying on locking transaction confirmations that is weaker.
-		if lock_slate.tx.body.inputs.is_empty() {
+		if lock_slate.tx_or_err()?.body.inputs.is_empty() {
 			return Err(ErrorKind::InvalidMessageData(
 				"Lock Slate empty inputs".to_string(),
 			));
 		}
-		let res = node_client.get_outputs_from_node(&lock_slate.tx.inputs_committed())?;
-		if res.len() != lock_slate.tx.body.inputs.len() {
+		let res = node_client.get_outputs_from_node(&lock_slate.tx_or_err()?.inputs_committed())?;
+		if res.len() != lock_slate.tx_or_err()?.body.inputs.len() {
 			return Err(ErrorKind::InvalidMessageData(
 				"Lock Slate inputs are not found at the chain".to_string(),
 			));
@@ -147,17 +147,17 @@ impl BuyApi {
 		// Checking Refund slate.
 		// Refund tx needs to be locked until exactly as offer specify. For MWC we are expecting one block every 1 minute.
 		// So numbers should match with accuracy of few blocks.
-		// Note!!! We can't valiry exact number because we don't know what height seller get when he created the offer
+		// Note!!! We can't verify exact number because we don't know what height seller get when he created the offer
 		let refund_slate: Slate = offer.refund_slate.into_slate_plain()?;
 		// expecting at least half of the interval
 
 		// Lock_height will be verified later
-		if refund_slate.tx.body.kernels.len() != 1 {
+		if refund_slate.tx_or_err()?.body.kernels.len() != 1 {
 			return Err(ErrorKind::InvalidMessageData(
 				"Refund Slate invalid kernel".to_string(),
 			));
 		}
-		match refund_slate.tx.body.kernels[0].features {
+		match refund_slate.tx_or_err()?.body.kernels[0].features {
 			KernelFeatures::HeightLocked { fee, lock_height } => {
 				if fee != refund_slate.fee || lock_height != refund_slate.lock_height {
 					return Err(ErrorKind::InvalidMessageData(
@@ -173,7 +173,7 @@ impl BuyApi {
 		}
 		if refund_slate.num_participants != 2 {
 			return Err(ErrorKind::InvalidMessageData(
-				"Refund Slate participans doesn't match expected value".to_string(),
+				"Refund Slate participants doesn't match expected value".to_string(),
 			));
 		}
 		if refund_slate.amount + refund_slate.fee != lock_slate.amount {
@@ -502,7 +502,7 @@ impl BuyApi {
 		let mut proof = RangeProof::zero();
 		proof.plen = crate::grin_util::secp::constants::MAX_PROOF_SIZE;
 
-		tx_add_output(slate, swap.multisig.commit(keychain.secp())?, proof);
+		tx_add_output(slate, swap.multisig.commit(keychain.secp())?, proof)?;
 
 		// Sign slate
 		slate.fill_round_1(
@@ -553,7 +553,7 @@ impl BuyApi {
 		}
 
 		// Add multisig input to slate
-		tx_add_input(slate, commit);
+		tx_add_input(slate, commit)?;
 
 		// Sign slate
 		slate.fill_round_1(
@@ -588,7 +588,7 @@ impl BuyApi {
 			.sub_blinding_factor(BlindingFactor::from_secret_key(
 				swap.multisig_secret(keychain, context)?,
 			))
-			.sub_blinding_factor(swap.redeem_slate.tx.offset.clone());
+			.sub_blinding_factor(swap.redeem_slate.tx_or_err()?.offset.clone());
 		let sec_key = keychain.blind_sum(&sum)?.secret_key()?;
 
 		Ok(sec_key)
@@ -619,7 +619,7 @@ impl BuyApi {
 
 		#[cfg(test)]
 		{
-			slate.tx.offset = if is_test_mode() {
+			slate.tx_or_err_mut()?.offset = if is_test_mode() {
 				BlindingFactor::from_hex(
 					"90de4a3812c7b78e567548c86926820d838e7e0b43346b1ba63066cd5cc7d999",
 				)
@@ -632,11 +632,12 @@ impl BuyApi {
 		// Release Doesn't have any tweaking
 		#[cfg(not(test))]
 		{
-			slate.tx.offset = BlindingFactor::from_secret_key(SecretKey::new(&mut thread_rng()));
+			slate.tx_or_err_mut()?.offset =
+				BlindingFactor::from_secret_key(SecretKey::new(&mut thread_rng()));
 		}
 
 		// Add multisig input to slate
-		tx_add_input(slate, swap.multisig.commit(keychain.secp())?);
+		tx_add_input(slate, swap.multisig.commit(keychain.secp())?)?;
 
 		let mut sec_key = Self::redeem_tx_secret(keychain, swap, context)?;
 		let slate = &mut swap.redeem_slate;

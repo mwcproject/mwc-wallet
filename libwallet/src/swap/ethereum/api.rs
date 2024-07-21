@@ -221,12 +221,12 @@ where
 		slate: &Slate,
 		outputs_ok: bool,
 	) -> Result<Option<u64>, ErrorKind> {
-		let result: Option<u64> = if slate.tx.kernels().is_empty() {
+		let result: Option<u64> = if slate.tx_or_err()?.kernels().is_empty() {
 			None
 		} else {
-			debug_assert!(slate.tx.kernels().len() == 1);
+			debug_assert!(slate.tx_or_err()?.kernels().len() == 1);
 
-			let kernel = &slate.tx.kernels()[0].excess;
+			let kernel = &slate.tx_or_err()?.kernels()[0].excess;
 			if kernel.0.to_vec().iter().any(|v| *v != 0) {
 				// kernel is non zero - we can check transaction by kernel
 				match self
@@ -241,7 +241,8 @@ where
 			} else {
 				if outputs_ok {
 					// kernel is not valid, still can use outputs.
-					let wallet_outputs: Vec<pedersen::Commitment> = slate.tx.outputs_committed();
+					let wallet_outputs: Vec<pedersen::Commitment> =
+						slate.tx_or_err()?.outputs_committed();
 					let res = self.node_client.get_outputs_from_node(&wallet_outputs)?;
 					let height = res.values().map(|v| v.1).max();
 					match height {

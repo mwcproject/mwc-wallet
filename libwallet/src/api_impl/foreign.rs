@@ -190,7 +190,7 @@ where
 			return Err(ErrorKind::TransactionAlreadyReceived(ret_slate.id.to_string()).into());
 		}
 		if let Some(offset) = t.kernel_offset {
-			let offset_skey = slate.tx.offset.secret_key()?;
+			let offset_skey = slate.tx_or_err()?.offset.secret_key()?;
 			let keychain = w.keychain(keychain_mask)?;
 			let offset_commit = keychain.secp().commit(0, offset_skey)?;
 			if offset == offset_commit {
@@ -308,7 +308,7 @@ where
 
 	// Participant id 0 for mwc713 compatibility
 	tx::complete_tx(&mut *w, keychain_mask, &mut sl, 0, &context)?;
-	tx::update_stored_tx(&mut *w, keychain_mask, &context, &sl, true)?;
+	tx::update_stored_tx(&mut *w, keychain_mask, &context, &mut sl, true)?;
 	tx::update_message(&mut *w, keychain_mask, &sl)?;
 	{
 		let mut batch = w.batch(keychain_mask)?;

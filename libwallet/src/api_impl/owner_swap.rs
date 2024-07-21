@@ -137,7 +137,7 @@ where
 				if swap.posted_lock.is_none() {
 					// So funds are not posted, transaction doesn't exist and outpuyts are not locked.
 					// We have to exclude those outputs
-					for inp in swap.lock_slate.tx.inputs_committed() {
+					for inp in swap.lock_slate.tx_or_err()?.inputs_committed() {
 						let in_commit = to_hex(&inp.0);
 						if let Some(amount) = outs.remove(&in_commit) {
 							swap_reserved_amount += amount;
@@ -1375,7 +1375,7 @@ where
 		Action::SellerPublishMwcLockTx => {
 			wallet_lock!(wallet_inst, w);
 			// Checking if transaction is already created.
-			let kernel = &swap.lock_slate.tx.body.kernels[0].excess;
+			let kernel = &swap.lock_slate.tx_or_err()?.body.kernels[0].excess;
 			if w.tx_log_iter()
 				.filter(|tx| tx.kernel_excess.filter(|c| c == kernel).is_some())
 				.count() == 0
@@ -1419,7 +1419,7 @@ where
 			wallet_lock!(wallet_inst, w);
 
 			// Checking if this transaction already exist
-			let kernel = &swap.redeem_slate.tx.body.kernels[0].excess;
+			let kernel = &swap.redeem_slate.tx_or_err()?.body.kernels[0].excess;
 			if w.tx_log_iter()
 				.filter(|tx| tx.kernel_excess.filter(|c| c == kernel).is_some())
 				.count() == 0
@@ -1441,7 +1441,7 @@ where
 
 			wallet_lock!(wallet_inst, w);
 
-			let kernel = &swap.refund_slate.tx.body.kernels[0].excess;
+			let kernel = &swap.refund_slate.tx_or_err()?.body.kernels[0].excess;
 			if w.tx_log_iter()
 				.filter(|tx| tx.kernel_excess.filter(|c| c == kernel).is_some())
 				.count() == 0
@@ -1582,16 +1582,16 @@ where
 	t.amount_credited = slate.amount;
 	t.address = Some(tx_name);
 	t.num_outputs = 1;
-	t.output_commits = slate.tx.outputs_committed();
+	t.output_commits = slate.tx_or_err()?.outputs_committed();
 	t.messages = None;
 	t.ttl_cutoff_height = None;
 	// when invoicing, this will be invalid
-	assert!(slate.tx.body.kernels.len() == 1);
-	t.kernel_excess = Some(slate.tx.body.kernels[0].excess);
+	assert!(slate.tx_or_err()?.body.kernels.len() == 1);
+	t.kernel_excess = Some(slate.tx_or_err()?.body.kernels[0].excess);
 	t.kernel_lookup_min_height = Some(slate.height);
 	batch.save_tx_log_entry(t, parent_key_id)?;
 
-	assert!(slate.tx.body.outputs.len() == 1);
+	assert!(slate.tx_or_err()?.body.outputs.len() == 1);
 
 	// Creating output for that
 	batch.save(OutputData {
@@ -1599,7 +1599,7 @@ where
 		key_id: output_key_id.clone(),
 		mmr_index: None,
 		n_child: output_key_id.to_path().last_path_index(),
-		commit: Some(to_hex(&slate.tx.outputs_committed()[0].0)),
+		commit: Some(to_hex(&slate.tx_or_err()?.outputs_committed()[0].0)),
 		value: slate.amount,
 		status: OutputStatus::Unconfirmed,
 		height: slate.height,

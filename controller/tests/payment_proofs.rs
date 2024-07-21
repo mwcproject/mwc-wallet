@@ -147,7 +147,7 @@ fn payment_proofs_test_impl(test_dir: &'static str) -> Result<(), wallet::Error>
 		assert!(pp.is_err());
 
 		slate = sender_api.finalize_tx(m, &slate)?;
-		sender_api.post_tx(m, &slate.tx, true)?;
+		sender_api.post_tx(m, slate.tx_or_err()?, true)?;
 		Ok(())
 	})?;
 

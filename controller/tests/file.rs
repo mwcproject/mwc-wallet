@@ -27,8 +27,6 @@ use std::time::Duration;
 
 use grin_wallet_libwallet::InitTxArgs;
 
-use ed25519_dalek::SecretKey as DalekSecretKey;
-use grin_wallet_libwallet::proof::proofaddress;
 use grin_wallet_util::grin_core::global;
 
 use serde_json;
@@ -110,8 +108,6 @@ fn file_exchange_test_impl(test_dir: &'static str) -> Result<(), wallet::Error> 
 	// test optional message
 	let message = "sender test message, sender test message";
 
-	let mut wallet1_slatepack_secret = DalekSecretKey::from_bytes(&[0; 32]).unwrap();
-
 	// Should have 5 in account1 (5 spendable), 5 in account (2 spendable)
 	wallet::controller::owner_single_use(Some(wallet1.clone()), mask1, None, |api, m| {
 		let (wallet1_refreshed, wallet1_info) = api.retrieve_summary_info(m, true, 1)?;
@@ -129,17 +125,10 @@ fn file_exchange_test_impl(test_dir: &'static str) -> Result<(), wallet::Error> 
 			message: Some(message.to_owned()),
 			..Default::default()
 		};
-		let mut slate = api.init_send_tx(m, &args, 1)?;
-
-		{
-			let mut w_lock = api.wallet_inst.lock();
-			let w = w_lock.lc_provider()?.wallet_inst()?;
-			let k = w.keychain(m)?;
-			wallet1_slatepack_secret = proofaddress::payment_proof_address_dalek_secret(&k, None)?;
-		}
+		let slate = api.init_send_tx(m, &args, 1)?;
 
 		// output tx file
-		PathToSlatePutter::build_plain(Some((&send_file).into())).put_tx(&mut slate, None, true)?;
+		PathToSlatePutter::build_plain(Some((&send_file).into())).put_tx(&slate, None, true)?;
 		api.tx_lock_outputs(m, &slate, None, 0)?;
 		Ok(())
 	})?;
@@ -181,7 +170,7 @@ fn file_exchange_test_impl(test_dir: &'static str) -> Result<(), wallet::Error> 
 			.0;
 		api.verify_slate_messages(m, &slate)?;
 		slate = api.finalize_tx(m, &slate)?;
-		api.post_tx(m, &slate.tx, false)?;
+		api.post_tx(m, slate.tx_or_err()?, false)?;
 		bh += 1;
 		Ok(())
 	})?;

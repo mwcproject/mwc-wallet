@@ -562,7 +562,7 @@ where
 
 			slate = api.finalize_tx(m, &slate)?;
 
-			let result = api.post_tx(m, &slate.tx, args.fluff);
+			let result = api.post_tx(m, slate.tx_or_err()?, args.fluff);
 			match result {
 				Ok(_) => {
 					info!("slate [{}] finalized successfully", slate.id.to_string());
@@ -835,7 +835,7 @@ where
 				))
 				.into());
 			}
-			slate = api.finalize_invoice_tx(&mut slate)?;
+			slate = api.finalize_invoice_tx(&slate)?;
 			Ok(())
 		})?;
 	} else {
@@ -856,14 +856,14 @@ where
 				))
 				.into());
 			}
-			slate = api.finalize_tx(m, &mut slate)?;
+			slate = api.finalize_tx(m, &slate)?;
 			Ok(())
 		})?;
 	}
 
 	if !args.nopost {
 		controller::owner_single_use(None, keychain_mask, Some(owner_api), |api, m| {
-			let result = api.post_tx(m, &slate.tx, args.fluff);
+			let result = api.post_tx(m, slate.tx_or_err()?, args.fluff);
 			match result {
 				Ok(_) => {
 					info!(
@@ -1264,7 +1264,7 @@ where
 		.0;
 
 	controller::owner_single_use(None, keychain_mask, Some(owner_api), |api, m| {
-		api.post_tx(m, &slate.tx, args.fluff)?;
+		api.post_tx(m, slate.tx_or_err()?, args.fluff)?;
 		info!("Posted transaction");
 		return Ok(());
 	})?;

@@ -35,6 +35,7 @@ use crate::grin_util::{self, secp, RwLock};
 use crate::Context;
 use serde::ser::{Serialize, Serializer};
 use serde_json;
+use std::convert::TryFrom;
 use std::fmt;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -184,7 +185,9 @@ pub struct Slate {
 	pub id: Uuid,
 	/// The core transaction data:
 	/// inputs, outputs, kernels, kernel offset
-	pub tx: Transaction,
+	/// Optional as of V4(aka V3) to allow for a compact
+	/// transaction initiation
+	pub tx: Option<Transaction>,
 	/// base amount (excluding fee)
 	#[serde(with = "secp_ser::string_or_u64")]
 	pub amount: u64,
@@ -238,6 +241,23 @@ pub struct ParticipantMessages {
 }
 
 impl Slate {
+	/// Return the transaction, throwing an error if it doesn't exist
+	/// to be used at points in the code where the existence of a transaction
+	/// is assumed
+	pub fn tx_or_err(&self) -> Result<&Transaction, Error> {
+		match &self.tx {
+			Some(t) => Ok(t),
+			None => Err(ErrorKind::SlateTransactionRequired.into()),
+		}
+	}
+
+	/// As above, but return mutable reference
+	pub fn tx_or_err_mut(&mut self) -> Result<&mut Transaction, Error> {
+		match &mut self.tx {
+			Some(t) => Ok(t),
+			None => Err(ErrorKind::SlateTransactionRequired.into()),
+		}
+	}
 	/// Attempt to find slate version
 	pub fn parse_slate_version(slate_json: &str) -> Result<u16, Error> {
 		let probe: SlateVersionProbe = serde_json::from_str(slate_json).map_err(|e| {
@@ -312,11 +332,14 @@ impl Slate {
 			0 => 2,
 			n => n,
 		};
-		let mut slate = Slate {
+		// The transaction inputs type need to be Commit and feature. So let's fix that now while it is empty.
+		let mut tx = Transaction::empty();
+		tx.body.inputs = Inputs::FeaturesAndCommit(vec![]);
+		let slate = Slate {
 			compact_slate,
 			num_participants: np, // assume 2 if not present
 			id: Uuid::new_v4(),
-			tx: Transaction::empty(),
+			tx: Some(tx),
 			amount: 0,
 			fee: 0,
 			height: 0,
@@ -330,8 +353,6 @@ impl Slate {
 			payment_proof: None,
 			offset: BlindingFactor::zero(),
 		};
-		// The transaction inputs type need need to be Commit and feature. So let's fix that now while it is empty.
-		slate.tx.body.inputs = Inputs::FeaturesAndCommit(vec![]);
 		slate
 	}
 
@@ -348,8 +369,8 @@ impl Slate {
 				return Err(ErrorKind::SlateValidation("fee mismatch".to_string()).into());
 			}
 			// Checking transaction...
-			// Inputs must match excatly
-			if send_slate.tx.body.inputs != respond_slate.tx.body.inputs {
+			// Inputs must match exactly
+			if send_slate.tx_or_err()?.body.inputs != respond_slate.tx_or_err()?.body.inputs {
 				return Err(ErrorKind::SlateValidation("inputs mismatch".to_string()).into());
 			}
 
@@ -364,14 +385,14 @@ impl Slate {
 			}
 
 			// Respond outputs must include send_slate's. Expected that some was added
-			for output in &send_slate.tx.body.outputs {
-				if !respond_slate.tx.body.outputs.contains(&output) {
+			for output in &send_slate.tx_or_err()?.body.outputs {
+				if !respond_slate.tx_or_err()?.body.outputs.contains(&output) {
 					return Err(ErrorKind::SlateValidation("outputs mismatch".to_string()).into());
 				}
 			}
 
-			// Kernels must match excatly
-			if send_slate.tx.body.kernels != respond_slate.tx.body.kernels {
+			// Kernels must match exactly
+			if send_slate.tx_or_err()?.body.kernels != respond_slate.tx_or_err()?.body.kernels {
 				return Err(ErrorKind::SlateValidation("kernels mismatch".to_string()).into());
 			}
 		}
@@ -379,7 +400,7 @@ impl Slate {
 			return Err(ErrorKind::SlateValidation("lock_height mismatch".to_string()).into());
 		}
 		if send_slate.height != respond_slate.height {
-			return Err(ErrorKind::SlateValidation("heigh mismatch".to_string()).into());
+			return Err(ErrorKind::SlateValidation("height mismatch".to_string()).into());
 		}
 		if send_slate.ttl_cutoff_height != respond_slate.ttl_cutoff_height {
 			return Err(ErrorKind::SlateValidation("ttl_cutoff mismatch".to_string()).into());
@@ -397,15 +418,15 @@ impl Slate {
 			return Err(ErrorKind::SlateValidation("amount mismatch".to_string()).into());
 		}
 		if invoice_slate.height != respond_slate.height {
-			return Err(ErrorKind::SlateValidation("heigh mismatch".to_string()).into());
+			return Err(ErrorKind::SlateValidation("height mismatch".to_string()).into());
 		}
 		if invoice_slate.ttl_cutoff_height != respond_slate.ttl_cutoff_height {
 			return Err(ErrorKind::SlateValidation("ttl_cutoff mismatch".to_string()).into());
 		}
-		assert!(invoice_slate.tx.body.inputs.is_empty());
+		assert!(invoice_slate.tx_or_err()?.body.inputs.is_empty());
 		// Respond outputs must include original ones. Expected that some was added
-		for output in &invoice_slate.tx.body.outputs {
-			if !respond_slate.tx.body.outputs.contains(&output) {
+		for output in &invoice_slate.tx_or_err()?.body.outputs {
+			if !respond_slate.tx_or_err()?.body.outputs.contains(&output) {
 				return Err(ErrorKind::SlateValidation("outputs mismatch".to_string()).into());
 			}
 		}
@@ -443,23 +464,26 @@ impl Slate {
 		K: Keychain,
 		B: ProofBuild,
 	{
-		self.update_kernel();
+		self.update_kernel()?;
 		if elems.is_empty() {
 			return Ok(BlindingFactor::zero());
 		}
-		let (tx, blind) = build::partial_transaction(self.tx.clone(), &elems, keychain, builder)?;
-		self.tx = tx;
+		let (tx, blind) =
+			build::partial_transaction(self.tx_or_err()?.clone(), &elems, keychain, builder)?;
+		self.tx = Some(tx);
 		Ok(blind)
 	}
 
 	/// Update the tx kernel based on kernel features derived from the current slate.
 	/// The fee may change as we build a transaction and we need to
 	/// update the tx kernel to reflect this during the tx building process.
-	pub fn update_kernel(&mut self) {
-		self.tx = self
-			.tx
-			.clone()
-			.replace_kernel(TxKernel::with_features(self.kernel_features()));
+	pub fn update_kernel(&mut self) -> Result<(), Error> {
+		self.tx = Some(
+			self.tx_or_err()?
+				.clone()
+				.replace_kernel(TxKernel::with_features(self.kernel_features())),
+		);
+		Ok(())
 	}
 
 	/// Completes callers part of round 1, adding public key info
@@ -478,7 +502,7 @@ impl Slate {
 	{
 		if !self.compact_slate {
 			// Generating offset for backward compability. Offset ONLY for the TX, the slate copy is kept the same.
-			if self.tx.offset == BlindingFactor::zero() {
+			if self.tx_or_err()?.offset == BlindingFactor::zero() {
 				self.generate_legacy_offset(keychain, sec_key, use_test_rng)?;
 			}
 		}
@@ -712,7 +736,7 @@ impl Slate {
 		// Generate a random kernel offset here
 		// and subtract it from the blind_sum so we create
 		// the aggsig context with the "split" key
-		self.tx.offset = match use_test_rng {
+		self.tx_or_err_mut()?.offset = match use_test_rng {
 			false => BlindingFactor::from_secret_key(SecretKey::new(&mut thread_rng())),
 			true => {
 				// allow for consistent test results
@@ -724,7 +748,7 @@ impl Slate {
 		let blind_offset = keychain.blind_sum(
 			&BlindSum::new()
 				.add_blinding_factor(BlindingFactor::from_secret_key(sec_key.clone()))
-				.sub_blinding_factor(self.tx.offset.clone()),
+				.sub_blinding_factor(self.tx_or_err()?.offset.clone()),
 		)?;
 		*sec_key = blind_offset.secret_key()?;
 		Ok(())
@@ -766,19 +790,20 @@ impl Slate {
 
 	/// Checks the fees in the transaction in the given slate are valid
 	fn check_fees(&self) -> Result<(), Error> {
+		let tx = self.tx_or_err()?;
 		// double check the fee amount included in the partial tx
 		// we don't necessarily want to just trust the sender
 		// we could just overwrite the fee here (but we won't) due to the sig
 		let fee = tx_fee(
-			self.tx.inputs().len(),
-			self.tx.outputs().len(),
-			self.tx.kernels().len(),
+			tx.inputs().len(),
+			tx.outputs().len(),
+			tx.kernels().len(),
 			None,
 		);
 
-		if fee > self.tx.fee() {
+		if fee > tx.fee() {
 			return Err(
-				ErrorKind::Fee(format!("Fee Dispute Error: {}, {}", self.tx.fee(), fee,)).into(),
+				ErrorKind::Fee(format!("Fee Dispute Error: {}, {}", tx.fee(), fee,)).into(),
 			);
 		}
 
@@ -908,8 +933,8 @@ impl Slate {
 			Ok(Commitment::from_pubkey(&sum)?)
 		} else {
 			// Legacy method
-			let kernel_offset = &self.tx.offset;
-			let tx = self.tx.clone();
+			let tx = self.tx_or_err()?.clone();
+			let kernel_offset = tx.offset.clone();
 			let overage = tx.fee() as i64;
 			let tx_excess = tx.sum_commitments(overage)?;
 
@@ -940,7 +965,7 @@ impl Slate {
 
 		debug!("Final Tx excess: {:?}", final_excess);
 
-		let mut final_tx = self.tx.clone();
+		let final_tx = self.tx_or_err_mut()?;
 
 		// update the tx kernel to reflect the offset excess and sig
 		assert_eq!(final_tx.kernels().len(), 1);
@@ -960,7 +985,6 @@ impl Slate {
 		let verifier_cache = Arc::new(RwLock::new(LruVerifierCache::new()));
 		final_tx.validate(Weighting::AsTransaction, verifier_cache)?;
 
-		self.tx = final_tx;
 		Ok(())
 	}
 }
@@ -977,7 +1001,10 @@ impl Serialize for Slate {
 			3 => v3.serialize(serializer),
 			// left as a reminder
 			2 => {
-				let v2 = SlateV2::from(&v3);
+				let v2 = match SlateV2::try_from(&v3) {
+					Ok(s) => s,
+					Err(e) => return Err(S::Error::custom(format!("{}", e))),
+				};
 				v2.serialize(serializer)
 			}
 			v => Err(S::Error::custom(format!("Unknown slate version {}", v))),
@@ -1042,15 +1069,21 @@ impl From<Slate> for SlateV3 {
 			Some(p) => Some(PaymentInfoV3::from(&p)),
 			None => None,
 		};
-		let mut tx = TransactionV3::from(tx);
-		if compact_slate {
-			// for compact the Slate offset is dominate
-			tx.offset = tx_offset;
-		}
+		let tx = match tx {
+			Some(t) => {
+				let mut t = TransactionV3::from(t);
+				if compact_slate {
+					// for compact the Slate offset is dominate
+					t.offset = tx_offset;
+				}
+				Some(t)
+			}
+			None => None,
+		};
 		SlateV3 {
 			num_participants,
 			id,
-			tx,
+			tx: tx,
 			amount,
 			fee,
 			height,
@@ -1085,7 +1118,6 @@ impl From<&Slate> for SlateV3 {
 		} = slate;
 		let num_participants = *num_participants;
 		let id = *id;
-		let mut tx = TransactionV3::from(tx);
 		let amount = *amount;
 		let fee = *fee;
 		let height = *height;
@@ -1097,10 +1129,18 @@ impl From<&Slate> for SlateV3 {
 			Some(p) => Some(PaymentInfoV3::from(p)),
 			None => None,
 		};
-		if *compact_slate {
-			// for compact the Slate offset is dominate
-			tx.offset = tx_offset.clone();
-		}
+		let tx = match tx {
+			Some(t) => {
+				let mut t = TransactionV3::from(t);
+				if *compact_slate {
+					// for compact the Slate offset is dominate
+					t.offset = tx_offset.clone();
+				}
+				Some(t)
+			}
+			None => None,
+		};
+
 		SlateV3 {
 			num_participants,
 			id,

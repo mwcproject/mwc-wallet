@@ -529,9 +529,9 @@ where
 	}
 
 	// mwc713 payment proof support.
-	context.input_commits = slate.tx.inputs_committed();
+	context.input_commits = slate.tx_or_err()?.inputs_committed();
 
-	for output in slate.tx.outputs() {
+	for output in slate.tx_or_err()?.outputs() {
 		context.output_commits.push(output.commitment());
 	}
 

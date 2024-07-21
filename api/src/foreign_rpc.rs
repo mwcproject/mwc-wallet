@@ -970,7 +970,6 @@ where
 					content
 				)));
 			}
-
 			(slate_from, sender)
 		} else {
 			let slate_from = in_slate.into_slate_plain().map_err(|e| e.kind())?;

@@ -349,7 +349,7 @@ where
 
 		if slate.num_participants > slate.participant_data.len() {
 			//TODO: this needs to be changed to properly figure out if this slate is an invoice or a send
-			if slate.tx.inputs().len() == 0 {
+			if slate.tx_or_err()?.inputs().len() == 0 {
 				// mwc-wallet doesn't support invoices
 				Err(ErrorKind::DoesNotAcceptInvoices)?;
 

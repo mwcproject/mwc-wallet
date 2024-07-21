@@ -338,7 +338,7 @@ impl SellApi {
 		let signature = signature_as_secret(
 			&swap
 				.redeem_slate
-				.tx
+				.tx_or_err()?
 				.kernels()
 				.get(0)
 				.ok_or(ErrorKind::UnexpectedAction("Seller Fn calculate_redeem_secret() redeem slate is not initialized, no kernels found".to_string()))?
@@ -480,7 +480,7 @@ impl SellApi {
 			.add_blinding_factor(BlindingFactor::from_secret_key(
 				swap.multisig_secret(keychain, context)?,
 			))
-			.sub_blinding_factor(swap.lock_slate.tx.offset.clone());
+			.sub_blinding_factor(swap.lock_slate.tx_or_err()?.offset.clone());
 		let sec_key = keychain.blind_sum(&sum)?.secret_key()?;
 
 		Ok(sec_key)
@@ -511,11 +511,12 @@ impl SellApi {
 		}
 		elems.push(build::output(change, scontext.change_output.clone()));
 		slate.add_transaction_elements(keychain, &proof::ProofBuilder::new(keychain), elems)?;
-		slate.tx.offset = BlindingFactor::from_secret_key(SecretKey::new(&mut thread_rng()));
+		slate.tx_or_err_mut()?.offset =
+			BlindingFactor::from_secret_key(SecretKey::new(&mut thread_rng()));
 
 		#[cfg(test)]
 		if is_test_mode() {
-			slate.tx.offset = BlindingFactor::from_hex(
+			slate.tx_or_err_mut()?.offset = BlindingFactor::from_hex(
 				"d9da697c9c8bf7ff85116dd401f53e4d58bc0155fb6db56b15a99aa8884a44e9",
 			)
 			.unwrap()
@@ -560,7 +561,7 @@ impl SellApi {
 		slate.participant_data.push(part);
 
 		// Add multisig output to slate
-		tx_add_output(slate, commit, proof);
+		tx_add_output(slate, commit, proof)?;
 
 		// Sign + finalize slate
 		slate.fill_round_2(
@@ -588,7 +589,7 @@ impl SellApi {
 				swap.multisig_secret(keychain, context)?,
 			))
 			.add_key_id(scontext.refund_output.to_value_path(swap.refund_amount()))
-			.sub_blinding_factor(swap.refund_slate.tx.offset.clone());
+			.sub_blinding_factor(swap.refund_slate.tx_or_err()?.offset.clone());
 		let sec_key = keychain.blind_sum(&sum)?.secret_key()?;
 
 		Ok(sec_key)
@@ -615,11 +616,12 @@ impl SellApi {
 		let mut elems = Vec::new();
 		elems.push(build::output(refund_amount, scontext.refund_output.clone()));
 		slate.add_transaction_elements(keychain, &proof::ProofBuilder::new(keychain), elems)?;
-		slate.tx.offset = BlindingFactor::from_secret_key(SecretKey::new(&mut thread_rng()));
+		slate.tx_or_err_mut()?.offset =
+			BlindingFactor::from_secret_key(SecretKey::new(&mut thread_rng()));
 
 		#[cfg(test)]
 		if is_test_mode() {
-			slate.tx.offset = BlindingFactor::from_hex(
+			slate.tx_or_err_mut()?.offset = BlindingFactor::from_hex(
 				"53ac7d0ad9833568cf63dfa8aa607e2b27be525111b1e0de92aa0caa50f838ae",
 			)
 			.unwrap();
@@ -663,7 +665,7 @@ impl SellApi {
 		slate.participant_data.push(part);
 
 		// Add multisig input to slate
-		tx_add_input(slate, commit);
+		tx_add_input(slate, commit)?;
 
 		// Sign + finalize slate
 		slate.fill_round_2(
@@ -727,7 +729,7 @@ impl SellApi {
 		redeem_slate: &mut Slate,
 	) -> Result<Commitment, ErrorKind> {
 		let excess = redeem_slate.calc_excess(Some(keychain))?;
-		redeem_slate.tx.body.kernels[0].excess = excess.clone();
+		redeem_slate.tx_or_err_mut()?.body.kernels[0].excess = excess.clone();
 		Ok(excess)
 	}
 

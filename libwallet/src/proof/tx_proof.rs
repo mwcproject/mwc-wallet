@@ -641,7 +641,7 @@ fn verify_tx_proof(
 	let inputs_ex = tx_proof.inputs.iter().collect::<HashSet<_>>();
 
 	let mut inputs: Vec<pedersen::Commitment> = slate
-		.tx
+		.tx_or_err()?
 		.inputs_committed()
 		.iter()
 		.filter(|c| !inputs_ex.contains(c))
@@ -651,7 +651,7 @@ fn verify_tx_proof(
 	let outputs_ex = tx_proof.outputs.iter().collect::<HashSet<_>>();
 
 	let outputs: Vec<pedersen::Commitment> = slate
-		.tx
+		.tx_or_err()?
 		.outputs()
 		.iter()
 		.map(|o| o.commitment())
@@ -670,10 +670,10 @@ fn verify_tx_proof(
 	let commit_amount = secp.commit_value(tx_proof.amount)?;
 	inputs.push(commit_amount);
 
-	let mut input_com: Vec<pedersen::Commitment> = slate.tx.inputs_committed();
-	let mut output_com: Vec<pedersen::Commitment> = slate.tx.outputs_committed();
+	let mut input_com: Vec<pedersen::Commitment> = slate.tx_or_err()?.inputs_committed();
+	let mut output_com: Vec<pedersen::Commitment> = slate.tx_or_err()?.outputs_committed();
 
-	input_com.push(secp.commit(0, slate.tx.offset.secret_key()?)?);
+	input_com.push(secp.commit(0, slate.tx_or_err()?.offset.secret_key()?)?);
 
 	output_com.push(secp.commit_value(slate.fee)?);
 

@@ -30,6 +30,7 @@ use crate::grin_util::secp::Signature;
 use crate::proof::proofaddress;
 use crate::proof::proofaddress::ProvableAddress;
 use crate::slate::CompatKernelFeatures;
+use std::convert::TryFrom;
 use uuid::Uuid;
 
 use crate::grin_core::core::transaction::Transaction;
@@ -49,7 +50,9 @@ pub struct SlateV3 {
 	pub id: Uuid,
 	/// The core transaction data:
 	/// inputs, outputs, kernels, kernel offset
-	pub tx: TransactionV3,
+	/// Optional as of V4(v3) to allow for a compact
+	/// transaction initiation
+	pub tx: Option<TransactionV3>,
 	/// base amount (excluding fee)
 	#[serde(with = "secp_ser::string_or_u64")]
 	pub amount: u64,
@@ -109,10 +112,18 @@ impl SlateV3 {
 			Some(p) => Some(PaymentInfo::from(&p)),
 			None => None,
 		};
-		let tx = Transaction::from(self.tx);
+
+		let (offset, tx) = match self.tx {
+			Some(t) => {
+				let t = Transaction::from(t);
+				(t.offset.clone(), Some(t))
+			}
+			None => (BlindingFactor::zero(), None),
+		};
+
 		Ok(Slate {
 			compact_slate: self.compact_slate.unwrap_or(false),
-			offset: tx.offset.clone(),
+			offset,
 			num_participants: self.num_participants,
 			id: self.id,
 			tx,
@@ -287,7 +298,7 @@ impl From<SlateV2> for SlateV3 {
 		SlateV3 {
 			num_participants,
 			id,
-			tx,
+			tx: Some(tx),
 			amount,
 			fee,
 			height,
@@ -404,8 +415,9 @@ impl From<&TxKernelV2> for TxKernelV3 {
 
 // V3 to V2
 #[allow(unused_variables)]
-impl From<&SlateV3> for SlateV2 {
-	fn from(slate: &SlateV3) -> SlateV2 {
+impl TryFrom<&SlateV3> for SlateV2 {
+	type Error = Error;
+	fn try_from(slate: &SlateV3) -> Result<SlateV2, Error> {
 		let SlateV3 {
 			num_participants,
 			id,
@@ -427,7 +439,6 @@ impl From<&SlateV3> for SlateV2 {
 		}
 		let num_participants = *num_participants;
 		let id = *id;
-		let tx = TransactionV2::from(tx);
 		let amount = *amount;
 		let fee = *fee;
 		let height = *height;
@@ -442,7 +453,16 @@ impl From<&SlateV3> for SlateV2 {
 			Some(n) => Some(n.to_string()),
 			None => None,
 		};
-		SlateV2 {
+		let tx = match tx {
+			Some(t) => TransactionV2::from(t),
+			None => {
+				return Err(ErrorKind::SlateInvalidDowngrade(
+					"Full transaction info required".to_owned(),
+				)
+				.into())
+			}
+		};
+		Ok(SlateV2 {
 			num_participants,
 			id,
 			tx,
@@ -454,7 +474,7 @@ impl From<&SlateV3> for SlateV2 {
 			network_type,
 			participant_data,
 			version_info,
-		}
+		})
 	}
 }
 

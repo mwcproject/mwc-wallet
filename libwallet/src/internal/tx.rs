@@ -516,7 +516,7 @@ where
 		.into());
 	}
 
-	wallet.store_tx(&format!("{}", tx.tx_slate_id.unwrap()), &slate.tx)?;
+	wallet.store_tx(&format!("{}", tx.tx_slate_id.unwrap()), slate.tx_or_err()?)?;
 	let parent_key = tx.parent_key_id.clone();
 
 	let keychain = wallet.keychain(keychain_mask)?;
@@ -524,10 +524,10 @@ where
 	if slate.compact_slate {
 		tx.kernel_excess = Some(slate.calc_excess(Some(&keychain))?);
 	} else {
-		tx.kernel_excess = Some(slate.tx.body.kernels[0].excess);
+		tx.kernel_excess = Some(slate.tx_or_err()?.body.kernels[0].excess);
 	}
 
-	if let Some(ref p) = slate.payment_proof {
+	if let Some(ref p) = slate.clone().payment_proof {
 		let derivation_index = match context.payment_proof_derivation_index {
 			Some(i) => i,
 			None => get_address_index(),
@@ -559,7 +559,7 @@ where
 		})
 	}
 
-	wallet.store_tx(&format!("{}", slate.id), &slate.tx)?;
+	wallet.store_tx(&format!("{}", slate.id), slate.tx_or_err()?)?;
 
 	let mut batch = wallet.batch(keychain_mask)?;
 	batch.save_tx_log_entry(tx, &parent_key)?;
@@ -715,9 +715,9 @@ where
 		.into());
 	}
 
-	if let Some(ref p) = slate.payment_proof {
+	if let Some(ref p) = slate.clone().payment_proof {
 		let orig_proof_info = match orig_proof_info {
-			Some(p) => p,
+			Some(p) => p.clone(),
 			None => {
 				return Err(ErrorKind::PaymentProof(
 					"Original proof info not stored in tx".to_owned(),

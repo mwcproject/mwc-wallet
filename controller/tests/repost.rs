@@ -223,7 +223,7 @@ fn file_repost_test_impl(test_dir: &'static str) -> Result<(), wallet::Error> {
 		let slate_i = sender_api.init_send_tx(m, &args, 1)?;
 		slate = client1.send_tx_slate_direct("wallet2", &slate_i)?;
 		sender_api.tx_lock_outputs(m, &slate, None, 0)?;
-		slate = sender_api.finalize_tx(m, &mut slate)?;
+		slate = sender_api.finalize_tx(m, &slate)?;
 		Ok(())
 	})?;
 

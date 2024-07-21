@@ -824,7 +824,7 @@ impl<K: Keychain> State for BuyerWaitingForRespondRedeemMessage<K> {
 
 				if swap
 					.refund_slate
-					.tx
+					.tx_or_err()?
 					.validate(
 						Weighting::AsTransaction,
 						Arc::new(RwLock::new(LruVerifierCache::new())),
@@ -859,7 +859,7 @@ impl<K: Keychain> State for BuyerWaitingForRespondRedeemMessage<K> {
 			Input::IncomeMessage(message) => {
 				if swap
 					.redeem_slate
-					.tx
+					.tx_or_err()?
 					.validate(
 						Weighting::AsTransaction,
 						Arc::new(RwLock::new(LruVerifierCache::new())),
@@ -878,7 +878,7 @@ impl<K: Keychain> State for BuyerWaitingForRespondRedeemMessage<K> {
 				}
 				debug_assert!(swap
 					.redeem_slate
-					.tx
+					.tx_or_err()?
 					.validate(
 						Weighting::AsTransaction,
 						Arc::new(RwLock::new(LruVerifierCache::new()))
@@ -1013,7 +1013,11 @@ where
 					));
 				}
 
-				swap::publish_transaction(&*self.node_client, &swap.redeem_slate.tx, false)?;
+				swap::publish_transaction(
+					&*self.node_client,
+					swap.redeem_slate.tx_or_err()?,
+					false,
+				)?;
 				swap.posted_redeem = Some(swap::get_cur_time());
 				swap.add_journal_message("MWC Redeem slate is posted".to_string());
 				Ok(StateProcessRespond::new(

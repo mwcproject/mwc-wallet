@@ -306,7 +306,10 @@ where
 		batch.commit()?;
 		t
 	};
-	wallet.store_tx(&format!("{}", tx_entry.tx_slate_id.unwrap()), &slate.tx)?;
+	wallet.store_tx(
+		&format!("{}", tx_entry.tx_slate_id.unwrap()),
+		slate.tx_or_err()?,
+	)?;
 	Ok(())
 }
 
@@ -464,7 +467,7 @@ where
 	t.messages = messages;
 	t.ttl_cutoff_height = slate.ttl_cutoff_height;
 	//add the offset to the database tx record.
-	let offset_skey = slate.tx.offset.secret_key()?;
+	let offset_skey = slate.tx_or_err()?.offset.secret_key()?;
 	let offset_commit = keychain.secp().commit(0, offset_skey)?;
 	t.kernel_offset = Some(offset_commit);
 
@@ -970,6 +973,6 @@ where
 	}
 	slate.add_transaction_elements(&keychain, &ProofBuilder::new(&keychain), parts)?;
 	// restore the original offset
-	slate.tx.offset = slate.offset.clone();
+	slate.tx_or_err_mut()?.offset = slate.offset.clone();
 	Ok(())
 }

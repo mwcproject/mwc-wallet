@@ -826,7 +826,7 @@ where
 				);
 
 				if sa.post_tx {
-					self.post_tx(keychain_mask, &slate.tx, sa.fluff)?;
+					self.post_tx(keychain_mask, slate.tx_or_err()?, sa.fluff)?;
 				}
 				println!(
 					"slate [{}] posted successfully in owner_api",
@@ -1109,7 +1109,7 @@ where
 		let mut w_lock = self.wallet_inst.lock();
 		let w = w_lock.lc_provider()?.wallet_inst()?;
 		let (slate_res, _context) =
-			owner::finalize_tx(&mut **w, keychain_mask, &slate, true, self.doctest_mode)?;
+			owner::finalize_tx(&mut **w, keychain_mask, slate, true, self.doctest_mode)?;
 
 		Ok(slate_res)
 	}
@@ -1162,7 +1162,7 @@ where
 	///		// Retrieve slate back from recipient
 	///		//
 	///		let res = api_owner.finalize_tx(None, &slate);
-	///		let res = api_owner.post_tx(None, &slate.tx, true);
+	///		let res = api_owner.post_tx(None, slate.tx_or_err().unwrap(), true);
 	/// }
 	/// ```
 
@@ -2639,7 +2639,7 @@ macro_rules! doctest_helper_setup_doc_env {
 
 		grin_wallet_util::grin_core::global::set_local_chain_type(
 			grin_wallet_util::grin_core::global::ChainTypes::AutomatedTesting,
-			);
+		);
 
 		let dir = tempdir().map_err(|e| format!("{:#?}", e)).unwrap();
 		let dir = dir
@@ -2655,7 +2655,7 @@ macro_rules! doctest_helper_setup_doc_env {
 		let node_client = HTTPNodeClient::new(node_list, None).unwrap();
 		let mut wallet = Box::new(
 			DefaultWalletImpl::<'static, HTTPNodeClient>::new(node_client.clone()).unwrap(),
-			)
+		)
 			as Box<
 				WalletInst<
 					'static,
@@ -2663,7 +2663,7 @@ macro_rules! doctest_helper_setup_doc_env {
 					HTTPNodeClient,
 					ExtKeychain,
 				>,
-				>;
+			>;
 		let lc = wallet.lc_provider().unwrap();
 		let _ = lc.set_top_level_directory(&wallet_config.data_file_dir);
 		lc.open_wallet(None, pw, false, false, None);

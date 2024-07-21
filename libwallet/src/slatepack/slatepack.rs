@@ -584,7 +584,7 @@ impl Slatepack {
 		}
 
 		if write_inputs {
-			match &slate.tx.body.inputs {
+			match &slate.tx_or_err()?.body.inputs {
 				Inputs::CommitOnly(commit_wrapper) => {
 					w.write(1, 0)?;
 					// Using stop bit because normally we have few inputs...
@@ -620,7 +620,7 @@ impl Slatepack {
 			// Using stop bit because normally we have few inputs...
 			let mut has_data = false;
 			// Because usually expecting 1 output, it is better to use a stop symbol instead on length
-			for out in &slate.tx.body.outputs {
+			for out in &slate.tx_or_err()?.body.outputs {
 				if has_data {
 					w.write(1, 1)?; // go bit
 				}
@@ -638,7 +638,7 @@ impl Slatepack {
 			// Using stop bit because normally there is only one kernel
 			let mut has_data = false;
 			// Because usually expecting 1 output, it is better to use a stop symbol instead on length
-			for kernel in &slate.tx.body.kernels {
+			for kernel in &slate.tx_or_err()?.body.kernels {
 				if has_data {
 					w.write(1, 1)?; // go bit
 				}
@@ -879,7 +879,7 @@ impl Slatepack {
 						break;
 					}
 				}
-				slate.tx.body.inputs = Inputs::CommitOnly(input_commit);
+				slate.tx_or_err_mut()?.body.inputs = Inputs::CommitOnly(input_commit);
 			} else {
 				// Inputs::FeaturesAndCommit(Vec<Input>) type
 				let mut inputs: Vec<Input> = vec![];
@@ -896,7 +896,7 @@ impl Slatepack {
 						break;
 					}
 				}
-				slate.tx.body.inputs = Inputs::FeaturesAndCommit(inputs);
+				slate.tx_or_err_mut()?.body.inputs = Inputs::FeaturesAndCommit(inputs);
 			}
 		}
 
@@ -915,7 +915,7 @@ impl Slatepack {
 					proof.proof[i as usize] = proof_data[i as usize];
 				}
 
-				slate.tx.body.outputs.push(Output {
+				slate.tx_or_err_mut()?.body.outputs.push(Output {
 					identifier: OutputIdentifier {
 						features: OutputFeatures::Plain,
 						commit: Commitment(commit),
@@ -939,7 +939,7 @@ impl Slatepack {
 				let mut signature: [u8; 64] = [0; 64];
 				r.read_bytes(&mut signature)?;
 
-				slate.tx.body.kernels.push(TxKernel {
+				slate.tx_or_err_mut()?.body.kernels.push(TxKernel {
 					features: KernelFeatures::Plain { fee },
 					excess: Commitment(excess),
 					excess_sig: Signature::from_compact(&signature)?,
@@ -1102,12 +1102,14 @@ impl Slatepack {
 		};
 
 		// Updating tx kernel and offset with what slate has
-		if slate.tx.body.kernels.is_empty() {
-			slate.tx.body.kernels.push(kernel);
+		let offset = slate.offset.clone();
+		let tx = slate.tx_or_err_mut()?;
+		if tx.body.kernels.is_empty() {
+			tx.body.kernels.push(kernel);
 		} else {
-			slate.tx.body.kernels[0] = kernel;
+			tx.body.kernels[0] = kernel;
 		}
-		slate.tx.offset = slate.offset.clone();
+		tx.offset = offset;
 
 		Ok(())
 	}

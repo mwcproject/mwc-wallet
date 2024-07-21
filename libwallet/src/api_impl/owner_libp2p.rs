@@ -403,7 +403,7 @@ where
 
 			results[i] = (Some(integrity_context), false);
 
-			slate.tx
+			slate.tx_or_err()?.clone()
 		};
 
 		// Posting transaction...
@@ -475,7 +475,7 @@ where
 	let (slate, _context1) = owner::finalize_tx(&mut **w, keychain_mask, &slate, false, false)?;
 
 	// Posting transaction...
-	owner::post_tx(w.w2n_client(), &slate.tx, false)?;
+	owner::post_tx(w.w2n_client(), slate.tx_or_err()?, false)?;
 
 	Ok(args.amount)
 }

@@ -230,6 +230,14 @@ pub enum ErrorKind {
 	#[fail(display = "Unable to validate slate, {}", _0)]
 	SlateValidation(String),
 
+	/// Attempt to use slate transaction data that doesn't exists
+	#[fail(display = "Get empty slate, Slate transaction required in this context")]
+	SlateTransactionRequired,
+
+	/// Attempt to downgrade slate that can't be downgraded
+	#[fail(display = "Can't downgrade slate: {}", _0)]
+	SlateInvalidDowngrade(String),
+
 	/// Compatibility error between incoming slate versions and what's expected
 	#[fail(display = "Compatibility Error: {}", _0)]
 	Compatibility(String),

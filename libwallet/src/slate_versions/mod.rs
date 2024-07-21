@@ -26,6 +26,7 @@ use crate::Slatepacker;
 use crate::{Error, ErrorKind};
 use ed25519_dalek::PublicKey as DalekPublicKey;
 use ed25519_dalek::SecretKey as DalekSecretKey;
+use std::convert::TryFrom;
 
 pub mod ser;
 
@@ -139,7 +140,7 @@ impl VersionedSlate {
 			// the release of a new slate
 			SlateVersion::V2 => {
 				let s = SlateV3::from(slate);
-				let s = SlateV2::from(&s);
+				let s = SlateV2::try_from(&s)?;
 				Ok(VersionedSlate::V2(s))
 			}
 		}

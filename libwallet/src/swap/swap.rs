@@ -322,7 +322,7 @@ impl Swap {
 	) -> Result<Option<(TxKernel, u64)>, ErrorKind> {
 		let excess = &self
 			.redeem_slate
-			.tx
+			.tx_or_err()?
 			.kernels()
 			.get(0)
 			.ok_or(ErrorKind::UnexpectedAction(
@@ -526,8 +526,8 @@ impl ser::Readable for Swap {
 }
 
 /// Add an input to a tx at the appropriate position
-pub fn tx_add_input(slate: &mut Slate, commit: Commitment) {
-	match &mut slate.tx.body.inputs {
+pub fn tx_add_input(slate: &mut Slate, commit: Commitment) -> Result<(), ErrorKind> {
+	match &mut slate.tx_or_err_mut()?.body.inputs {
 		Inputs::FeaturesAndCommit(inputs) => {
 			let input = tx::Input {
 				features: tx::OutputFeatures::Plain,
@@ -546,10 +546,15 @@ pub fn tx_add_input(slate: &mut Slate, commit: Commitment) {
 				.map(|e| commits.insert(e, cmt));
 		}
 	}
+	Ok(())
 }
 
 /// Add an output to a tx at the appropriate position
-pub fn tx_add_output(slate: &mut Slate, commit: Commitment, proof: RangeProof) {
+pub fn tx_add_output(
+	slate: &mut Slate,
+	commit: Commitment,
+	proof: RangeProof,
+) -> Result<(), ErrorKind> {
 	let output = tx::Output {
 		identifier: OutputIdentifier {
 			features: tx::OutputFeatures::Plain,
@@ -557,11 +562,12 @@ pub fn tx_add_output(slate: &mut Slate, commit: Commitment, proof: RangeProof) {
 		},
 		proof,
 	};
-	let outputs = &mut slate.tx.body.outputs;
+	let outputs = &mut slate.tx_or_err_mut()?.body.outputs;
 	outputs
 		.binary_search(&output)
 		.err()
 		.map(|e| outputs.insert(e, output));
+	Ok(())
 }
 
 /// Interpret the final 32 bytes of the signature as a secret key

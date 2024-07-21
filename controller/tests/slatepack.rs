@@ -270,7 +270,7 @@ fn slatepack_exchange_test_impl(test_dir: &'static str) -> Result<(), libwallet:
 			None,
 			&secret_1,
 		)?;
-		api.post_tx(m, &slate.tx, false)?;
+		api.post_tx(m, slate.tx_or_err()?, false)?;
 		bh += 1;
 		println!("finalize_tx read slate: {:?}", slate);
 
@@ -460,7 +460,7 @@ fn slatepack_exchange_test_impl(test_dir: &'static str) -> Result<(), libwallet:
 			None,
 			&secret_1,
 		)?;
-		api.post_tx(m, &slate.tx, false)?;
+		api.post_tx(m, slate.tx_or_err()?, false)?;
 		bh += 1;
 		Ok(())
 	})

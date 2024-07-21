@@ -3447,7 +3447,7 @@ pub fn run_doctest_owner(
 	}
 
 	if payment_proof {
-		api_impl::owner::post_tx(&client1, &slate_outer.tx, true).unwrap();
+		api_impl::owner::post_tx(&client1, slate_outer.tx_or_err().unwrap(), true).unwrap();
 	}
 
 	if perform_tx && lock_tx && finalize_tx {

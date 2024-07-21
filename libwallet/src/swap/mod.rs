@@ -581,7 +581,7 @@ mod tests {
 		); // Swap cannot be accepted
 	}
 
-	// Because of gonden output new line symbol we skipping Windows.
+	// Because of golden output new line symbol we skipping Windows.
 	#[cfg(not(target_os = "windows"))]
 	#[test]
 	#[serial]
@@ -693,7 +693,7 @@ mod tests {
 
 		// Add inputs to utxo set
 		nc.mine_blocks(2);
-		for input in swap_sell.lock_slate.tx.inputs_committed() {
+		for input in swap_sell.lock_slate.tx_or_err().unwrap().inputs_committed() {
 			nc.push_output(input);
 		}
 
@@ -1841,7 +1841,13 @@ mod tests {
 
 		// Add inputs to utxo set
 		nc.mine_blocks(2);
-		for input in seller.swap.lock_slate.tx.inputs_committed() {
+		for input in seller
+			.swap
+			.lock_slate
+			.tx_or_err()
+			.unwrap()
+			.inputs_committed()
+		{
 			nc.push_output(input);
 		}
 
@@ -1931,10 +1937,11 @@ mod tests {
 			// Offer lock slate has height (kernel value - attack)
 			let (id, mut offer, secondary_update) = message1.clone().unwrap_offer().unwrap();
 			let mut lock_slate: Slate = offer.lock_slate.into_slate_plain().unwrap();
-			lock_slate.tx.body.kernels[0].features = KernelFeatures::HeightLocked {
-				fee: lock_slate.fee,
-				lock_height: 10,
-			};
+			lock_slate.tx_or_err_mut().unwrap().body.kernels[0].features =
+				KernelFeatures::HeightLocked {
+					fee: lock_slate.fee,
+					lock_height: 10,
+				};
 			offer.lock_slate =
 				VersionedSlate::into_version_plain(lock_slate, SlateVersion::V3).unwrap();
 			assert_eq!(
@@ -1956,10 +1963,11 @@ mod tests {
 			let (id, mut offer, secondary_update) = message1.clone().unwrap_offer().unwrap();
 			let mut lock_slate: Slate = offer.lock_slate.into_slate_plain().unwrap();
 			lock_slate.lock_height = 10;
-			lock_slate.tx.body.kernels[0].features = KernelFeatures::HeightLocked {
-				fee: lock_slate.fee,
-				lock_height: 10,
-			};
+			lock_slate.tx_or_err_mut().unwrap().body.kernels[0].features =
+				KernelFeatures::HeightLocked {
+					fee: lock_slate.fee,
+					lock_height: 10,
+				};
 			offer.lock_slate =
 				VersionedSlate::into_version_plain(lock_slate, SlateVersion::V3).unwrap();
 			assert_eq!(
@@ -2003,7 +2011,7 @@ mod tests {
 			// Offer lock slate has height
 			let (id, mut offer, secondary_update) = message1.clone().unwrap_offer().unwrap();
 			let mut lock_slate: Slate = offer.lock_slate.into_slate_plain().unwrap();
-			lock_slate.tx.body.kernels[0].features = KernelFeatures::Plain {
+			lock_slate.tx_or_err_mut().unwrap().body.kernels[0].features = KernelFeatures::Plain {
 				fee: lock_slate.fee + 1,
 			};
 			offer.lock_slate =
@@ -2026,7 +2034,7 @@ mod tests {
 			// Offer lock slate has height
 			let (id, mut offer, secondary_update) = message1.clone().unwrap_offer().unwrap();
 			let mut lock_slate: Slate = offer.lock_slate.into_slate_plain().unwrap();
-			lock_slate.tx.body.kernels[0].features = KernelFeatures::Plain {
+			lock_slate.tx_or_err_mut().unwrap().body.kernels[0].features = KernelFeatures::Plain {
 				fee: lock_slate.fee - 1,
 			};
 			offer.lock_slate =
@@ -2050,7 +2058,7 @@ mod tests {
 			let (id, mut offer, secondary_update) = message1.clone().unwrap_offer().unwrap();
 			let mut lock_slate: Slate = offer.lock_slate.into_slate_plain().unwrap();
 			lock_slate.fee += 2;
-			lock_slate.tx.body.kernels[0].features = KernelFeatures::Plain {
+			lock_slate.tx_or_err_mut().unwrap().body.kernels[0].features = KernelFeatures::Plain {
 				fee: lock_slate.fee,
 			};
 			offer.lock_slate =
@@ -2074,7 +2082,7 @@ mod tests {
 			// No inputs at lock
 			let (id, mut offer, secondary_update) = message1.clone().unwrap_offer().unwrap();
 			let mut lock_slate: Slate = offer.lock_slate.into_slate_plain().unwrap();
-			lock_slate.tx.body.inputs = Inputs::CommitOnly(vec![]);
+			lock_slate.tx_or_err_mut().unwrap().body.inputs = Inputs::CommitOnly(vec![]);
 			offer.lock_slate =
 				VersionedSlate::into_version_plain(lock_slate, SlateVersion::V3).unwrap();
 			assert_eq!(
@@ -2159,7 +2167,12 @@ mod tests {
 			// Refund slate must have expected lock value, tweaking kernel, adding one more plain one
 			let (id, mut offer, secondary_update) = message1.clone().unwrap_offer().unwrap();
 			let mut refund_slate: Slate = offer.refund_slate.into_slate_plain().unwrap();
-			refund_slate.tx.body.kernels.push(TxKernel::empty());
+			refund_slate
+				.tx_or_err_mut()
+				.unwrap()
+				.body
+				.kernels
+				.push(TxKernel::empty());
 			offer.refund_slate =
 				VersionedSlate::into_version_plain(refund_slate, SlateVersion::V3).unwrap();
 			assert_eq!(
@@ -2180,9 +2193,10 @@ mod tests {
 			// Refund slate must have expected lock value, tweaking kernel to plain
 			let (id, mut offer, secondary_update) = message1.clone().unwrap_offer().unwrap();
 			let mut refund_slate: Slate = offer.refund_slate.into_slate_plain().unwrap();
-			refund_slate.tx.body.kernels[0].features = KernelFeatures::Plain {
-				fee: refund_slate.fee,
-			};
+			refund_slate.tx_or_err_mut().unwrap().body.kernels[0].features =
+				KernelFeatures::Plain {
+					fee: refund_slate.fee,
+				};
 			offer.refund_slate =
 				VersionedSlate::into_version_plain(refund_slate, SlateVersion::V3).unwrap();
 			assert_eq!(
@@ -2203,10 +2217,11 @@ mod tests {
 			// Refund slate must have expected lock value, tweaking kernel's height to plain
 			let (id, mut offer, secondary_update) = message1.clone().unwrap_offer().unwrap();
 			let mut refund_slate: Slate = offer.refund_slate.into_slate_plain().unwrap();
-			refund_slate.tx.body.kernels[0].features = KernelFeatures::HeightLocked {
-				fee: refund_slate.fee,
-				lock_height: refund_slate.lock_height - 1,
-			};
+			refund_slate.tx_or_err_mut().unwrap().body.kernels[0].features =
+				KernelFeatures::HeightLocked {
+					fee: refund_slate.fee,
+					lock_height: refund_slate.lock_height - 1,
+				};
 			offer.refund_slate =
 				VersionedSlate::into_version_plain(refund_slate, SlateVersion::V3).unwrap();
 			assert_eq!(
@@ -2227,10 +2242,11 @@ mod tests {
 			// Refund slate must have expected lock value, tweaking kernel's height to plain
 			let (id, mut offer, secondary_update) = message1.clone().unwrap_offer().unwrap();
 			let mut refund_slate: Slate = offer.refund_slate.into_slate_plain().unwrap();
-			refund_slate.tx.body.kernels[0].features = KernelFeatures::HeightLocked {
-				fee: refund_slate.fee,
-				lock_height: 0,
-			};
+			refund_slate.tx_or_err_mut().unwrap().body.kernels[0].features =
+				KernelFeatures::HeightLocked {
+					fee: refund_slate.fee,
+					lock_height: 0,
+				};
 			offer.refund_slate =
 				VersionedSlate::into_version_plain(refund_slate, SlateVersion::V3).unwrap();
 			assert_eq!(
@@ -2251,10 +2267,11 @@ mod tests {
 			// Refund slate must have expected lock value, tweaking kernel's height to plain
 			let (id, mut offer, secondary_update) = message1.clone().unwrap_offer().unwrap();
 			let mut refund_slate: Slate = offer.refund_slate.into_slate_plain().unwrap();
-			refund_slate.tx.body.kernels[0].features = KernelFeatures::HeightLocked {
-				fee: refund_slate.fee,
-				lock_height: 1,
-			};
+			refund_slate.tx_or_err_mut().unwrap().body.kernels[0].features =
+				KernelFeatures::HeightLocked {
+					fee: refund_slate.fee,
+					lock_height: 1,
+				};
 			offer.refund_slate =
 				VersionedSlate::into_version_plain(refund_slate, SlateVersion::V3).unwrap();
 			assert_eq!(
@@ -2296,10 +2313,11 @@ mod tests {
 			// Refund fees
 			let (id, mut offer, secondary_update) = message1.clone().unwrap_offer().unwrap();
 			let mut refund_slate: Slate = offer.refund_slate.into_slate_plain().unwrap();
-			refund_slate.tx.body.kernels[0].features = KernelFeatures::HeightLocked {
-				fee: refund_slate.fee + 1,
-				lock_height: refund_slate.lock_height,
-			};
+			refund_slate.tx_or_err_mut().unwrap().body.kernels[0].features =
+				KernelFeatures::HeightLocked {
+					fee: refund_slate.fee + 1,
+					lock_height: refund_slate.lock_height,
+				};
 			offer.refund_slate =
 				VersionedSlate::into_version_plain(refund_slate, SlateVersion::V3).unwrap();
 			assert_eq!(
@@ -2341,7 +2359,7 @@ mod tests {
 		// Secondary Data has only public key. Not much what we can tweak to steal the funds.
 
 		// ----------------------------------------------------------------------------------------------
-		// Finaly going with buyer. Happy path
+		// Finally going with buyer. Happy path
 		let mut buyer = {
 			let (id, offer, secondary_update) = message1.clone().unwrap_offer().unwrap();
 			let swap_buy = BuyApi::accept_swap_offer(
@@ -4526,7 +4544,7 @@ mod tests {
 				nc.set_state(&nc_state_ready);
 				assert_eq!(
 					nc.get_kernel(
-						&seller.swap.refund_slate.tx.body.kernels[0].excess,
+						&seller.swap.refund_slate.tx_or_err().unwrap().body.kernels[0].excess,
 						None,
 						None
 					)
@@ -4541,7 +4559,7 @@ mod tests {
 				nc.mine_block();
 				assert_eq!(
 					nc.get_kernel(
-						&seller.swap.refund_slate.tx.body.kernels[0].excess,
+						&seller.swap.refund_slate.tx_or_err().unwrap().body.kernels[0].excess,
 						None,
 						None
 					)
@@ -4554,7 +4572,7 @@ mod tests {
 				nc.set_state(&nc_state_ready);
 				assert_eq!(
 					nc.get_kernel(
-						&seller.swap.refund_slate.tx.body.kernels[0].excess,
+						&seller.swap.refund_slate.tx_or_err().unwrap().body.kernels[0].excess,
 						None,
 						None
 					)
@@ -4571,7 +4589,7 @@ mod tests {
 				nc.mine_block();
 				assert_eq!(
 					nc.get_kernel(
-						&seller.swap.refund_slate.tx.body.kernels[0].excess,
+						&seller.swap.refund_slate.tx_or_err().unwrap().body.kernels[0].excess,
 						None,
 						None
 					)
@@ -4583,7 +4601,7 @@ mod tests {
 				nc.set_state(&nc_state_ready);
 				assert_eq!(
 					nc.get_kernel(
-						&seller.swap.refund_slate.tx.body.kernels[0].excess,
+						&seller.swap.refund_slate.tx_or_err().unwrap().body.kernels[0].excess,
 						None,
 						None
 					)
@@ -4600,7 +4618,7 @@ mod tests {
 				nc.mine_block();
 				assert_eq!(
 					nc.get_kernel(
-						&seller.swap.refund_slate.tx.body.kernels[0].excess,
+						&seller.swap.refund_slate.tx_or_err().unwrap().body.kernels[0].excess,
 						None,
 						None
 					)
@@ -4613,7 +4631,7 @@ mod tests {
 				nc.set_state(&nc_state_ready);
 				assert_eq!(
 					nc.get_kernel(
-						&seller.swap.refund_slate.tx.body.kernels[0].excess,
+						&seller.swap.refund_slate.tx_or_err().unwrap().body.kernels[0].excess,
 						None,
 						None
 					)
@@ -4627,7 +4645,7 @@ mod tests {
 				nc.mine_block();
 				assert_eq!(
 					nc.get_kernel(
-						&seller.swap.refund_slate.tx.body.kernels[0].excess,
+						&seller.swap.refund_slate.tx_or_err().unwrap().body.kernels[0].excess,
 						None,
 						None
 					)
@@ -4636,11 +4654,11 @@ mod tests {
 					true
 				);
 
-				// At complete step - there is no more retrys
+				// At complete step - there is no more retry
 				nc.set_state(&nc_state_ready);
 				assert_eq!(
 					nc.get_kernel(
-						&seller.swap.refund_slate.tx.body.kernels[0].excess,
+						&seller.swap.refund_slate.tx_or_err().unwrap().body.kernels[0].excess,
 						None,
 						None
 					)
@@ -4653,7 +4671,7 @@ mod tests {
 				nc.mine_block();
 				assert_eq!(
 					nc.get_kernel(
-						&seller.swap.refund_slate.tx.body.kernels[0].excess,
+						&seller.swap.refund_slate.tx_or_err().unwrap().body.kernels[0].excess,
 						None,
 						None
 					)
@@ -4809,7 +4827,7 @@ mod tests {
 				// Checking if redeem timeout works
 				assert_eq!(
 					nc.get_kernel(
-						&seller.swap.refund_slate.tx.body.kernels[0].excess,
+						&seller.swap.refund_slate.tx_or_err().unwrap().body.kernels[0].excess,
 						None,
 						None
 					)
@@ -4829,7 +4847,7 @@ mod tests {
 
 				assert_eq!(
 					nc.get_kernel(
-						&seller.swap.refund_slate.tx.body.kernels[0].excess,
+						&seller.swap.refund_slate.tx_or_err().unwrap().body.kernels[0].excess,
 						None,
 						None
 					)
@@ -4848,7 +4866,7 @@ mod tests {
 				nc.mine_blocks(1);
 				assert_eq!(
 					nc.get_kernel(
-						&seller.swap.refund_slate.tx.body.kernels[0].excess,
+						&seller.swap.refund_slate.tx_or_err().unwrap().body.kernels[0].excess,
 						None,
 						None
 					)
@@ -5535,7 +5553,7 @@ mod tests {
 	}
 
 	// Manual test that is used to test if workflow from the secondary currencies works.
-	// Since we need to support many combinations, it is easuer to have the semiautomatic test.
+	// Since we need to support many combinations, it is easier to have the semiautomatic test.
 	// Note: Test is expected to run against real ElectrumX & Nodes. The point of that test is to verify is
 	//   everything works with real blockchain
 	// The workflow ends at the BTC redeem/refund state. No needs to finish with MWC part of swap
@@ -5610,7 +5628,7 @@ mod tests {
 			.unwrap();
 
 		nc.mine_blocks(2);
-		for input in swap_sell.lock_slate.tx.inputs_committed() {
+		for input in swap_sell.lock_slate.tx_or_err().unwrap().inputs_committed() {
 			nc.push_output(input);
 		}
 
@@ -5649,7 +5667,7 @@ mod tests {
 		btc_data.accepted_offer(btc_update).unwrap();
 
 		// Locking MWC
-		swap::publish_transaction(&nc, &swap_sell.lock_slate.tx, false).unwrap();
+		swap::publish_transaction(&nc, &swap_sell.lock_slate.tx_or_err().unwrap(), false).unwrap();
 		nc.mine_blocks(2);
 
 		// Generatring lock address as get_secondary_lock_address does
@@ -5697,7 +5715,7 @@ mod tests {
 		BuyApi::finalize_redeem_slate(&kc_buy, &mut swap_buy, &ctx_buy, redeem.redeem_participant)
 			.unwrap();
 
-		swap::publish_transaction(&nc, &swap_buy.redeem_slate.tx, false).unwrap();
+		swap::publish_transaction(&nc, &swap_buy.redeem_slate.tx_or_err().unwrap(), false).unwrap();
 		nc.mine_blocks(1);
 
 		let found = crate::swap::fsm::seller_swap::check_mwc_redeem(&mut swap_sell, &nc).unwrap();

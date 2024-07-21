@@ -553,7 +553,7 @@ where
 					return Self::generate_cancel_respond(swap);
 				}
 				// Posting the transaction
-				swap::publish_transaction(&*self.node_client, &swap.lock_slate.tx, false)?;
+				swap::publish_transaction(&*self.node_client, swap.lock_slate.tx_or_err()?, false)?;
 				swap.posted_lock = Some(swap::get_cur_time());
 				swap.add_journal_message("MWC lock slate posted".to_string());
 
@@ -936,7 +936,7 @@ where
 			Input::Check => {
 				// Checking if can redeem. The Buyer can be sneaky and try to fool us. We should assume that
 				// message was delivered and buyer can do the redeem.
-				if !swap.redeem_slate.tx.kernels().is_empty() {
+				if !swap.redeem_slate.tx_or_err()?.kernels().is_empty() {
 					if check_mwc_redeem(swap, &*self.node_client)? {
 						// Buyer did a redeem, we can continue processing and redeem BTC
 						swap.posted_msg2 = Some(u32::MAX as i64);
@@ -1040,7 +1040,7 @@ pub(crate) fn check_mwc_redeem<C: NodeClient>(
 		// Replace kernel
 		let _ = std::mem::replace(
 			swap.redeem_slate
-				.tx
+				.tx_or_err_mut()?
 				.body
 				.kernels
 				.get_mut(0)
@@ -1129,7 +1129,7 @@ where
 
 				// Checking if can redeem first because redeem can be made when we can do refund.
 				// Then we want to do redeem and refund from redeem branch.
-				if !swap.redeem_slate.tx.kernels().is_empty() {
+				if !swap.redeem_slate.tx_or_err()?.kernels().is_empty() {
 					if check_mwc_redeem(swap, &*self.node_client)? {
 						// Buyer did a redeem, we can continue processing and redeem BTC
 						return Ok(StateProcessRespond::new(
@@ -1199,7 +1199,7 @@ fn post_refund_if_possible<C: NodeClient>(
 		&& tx_conf.mwc_redeem_conf.is_none()
 		&& tx_conf.mwc_refund_conf.is_none()
 	{
-		let res = swap::publish_transaction(&*node_client, &swap.refund_slate.tx, false);
+		let res = swap::publish_transaction(&*node_client, swap.refund_slate.tx_or_err()?, false);
 		if let Err(e) = res {
 			info!("MWC refund can be issued even likely it will fail. Trying to post it. get an error {}", e);
 		} else {
@@ -1767,7 +1767,11 @@ where
 				// Executing the MWC lock transaction
 				// Posting the transaction
 				debug_assert!(tx_conf.mwc_refund_conf.is_none());
-				swap::publish_transaction(&*self.node_client, &swap.refund_slate.tx, false)?;
+				swap::publish_transaction(
+					&*self.node_client,
+					swap.refund_slate.tx_or_err()?,
+					false,
+				)?;
 				swap.posted_refund = Some(swap::get_cur_time());
 				swap.add_journal_message("MWC refund slate is posted".to_string());
 				Ok(StateProcessRespond::new(

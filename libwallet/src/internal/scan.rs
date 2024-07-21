@@ -2170,6 +2170,6 @@ where
 		let _ = w.keychain(keychain_mask)?;
 		w.w2n_client().clone()
 	};
-	owner::post_tx(&client, &slate.tx, false)?;
+	owner::post_tx(&client, slate.tx_or_err()?, false)?;
 	Ok(())
 }

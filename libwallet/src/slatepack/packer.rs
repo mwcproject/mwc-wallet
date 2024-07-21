@@ -180,11 +180,11 @@ fn slatepack_io_test() {
 		compact_slate: true, // Slatepack works only for compact models.
 		num_participants: 2,
 		id: Uuid::from_bytes(bytes_16),
-		tx: Transaction::empty()
+		tx: Some(Transaction::empty()
 			.with_offset(BlindingFactor::from_slice(&bytes_32) )
 			.with_input( Input::new( OutputFeatures::Plain, Commitment(bytes_33)) )
 			.with_output( Output::new(OutputFeatures::Plain, Commitment(bytes_33), RangeProof::zero()))
-			.with_kernel( TxKernel::with_features(KernelFeatures::Plain { fee: 321 }) ),
+			.with_kernel( TxKernel::with_features(KernelFeatures::Plain { fee: 321 }) )),
 		offset: BlindingFactor::from_slice(&bytes_32),
 		amount: 30000000000000000,
 		fee: 321,
@@ -220,7 +220,8 @@ fn slatepack_io_test() {
 		}),
 	};
 	// updating kernel excess
-	slate_enc.tx.body.kernels[0].excess = slate_enc.calc_excess::<ExtKeychain>(None).unwrap();
+	slate_enc.tx_or_err_mut().unwrap().body.kernels[0].excess =
+		slate_enc.calc_excess::<ExtKeychain>(None).unwrap();
 
 	let slate_enc_str = format!("{:?}", slate_enc);
 	println!("start encrypted slate = {}", slate_enc_str);
