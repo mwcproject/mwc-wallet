@@ -159,7 +159,7 @@ where
 	/// use libwallet::WalletInst;
 	/// use config::parse_node_address_string;
 	///
-	/// global::init_global_chain_type(global::ChainTypes::Mainnet);
+	/// global::set_local_chain_type(global::ChainTypes::AutomatedTesting);
 	///
 	/// let mut wallet_config = WalletConfig::default();
 	/// # let dir = tempdir().map_err(|e| format!("{:#?}", e)).unwrap();
@@ -2648,9 +2648,8 @@ macro_rules! doctest_helper_setup_doc_env {
 
 		use uuid::Uuid;
 
-		// Various levels of magic going on in these doctests and we need to ensure
-		// the global chain_type is set correctly.
-		global::init_global_chain_type(global::ChainTypes::Mainnet);
+		// Set our local chain_type for testing.
+		global::set_local_chain_type(global::ChainTypes::AutomatedTesting);
 
 		let dir = tempdir().map_err(|e| format!("{:#?}", e)).unwrap();
 		let dir = dir
