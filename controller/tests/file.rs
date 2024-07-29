@@ -130,7 +130,8 @@ fn file_exchange_test_impl(test_dir: &'static str) -> Result<(), wallet::Error> 
 		let slate = api.init_send_tx(m, &args, 1)?;
 
 		// output tx file
-		PathToSlatePutter::build_plain(Some((&send_file).into())).put_tx(&slate, None, true, &secp)?;
+		PathToSlatePutter::build_plain(Some((&send_file).into()))
+			.put_tx(&slate, None, true, &secp)?;
 		api.tx_lock_outputs(m, &slate, None, 0)?;
 		Ok(())
 	})?;
@@ -143,7 +144,7 @@ fn file_exchange_test_impl(test_dir: &'static str) -> Result<(), wallet::Error> 
 
 	let height = {
 		wallet_inst!(wallet2, w);
-		let (height,_,_) = w.w2n_client().get_chain_tip().unwrap();
+		let (height, _, _) = w.w2n_client().get_chain_tip().unwrap();
 		height
 	};
 
@@ -166,7 +167,8 @@ fn file_exchange_test_impl(test_dir: &'static str) -> Result<(), wallet::Error> 
 	// wallet 2 receives file, completes, sends file back
 	wallet::controller::foreign_single_use(wallet2.clone(), mask2_i.clone(), |api| {
 		slate = api.receive_tx(&slate, None, None, Some(sender2_message.clone()))?;
-		PathToSlatePutter::build_plain(Some((&receive_file).into())).put_tx(&slate, None, true, &secp)?;
+		PathToSlatePutter::build_plain(Some((&receive_file).into()))
+			.put_tx(&slate, None, true, &secp)?;
 		Ok(())
 	})?;
 

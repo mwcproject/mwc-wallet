@@ -69,7 +69,12 @@ impl Slatepacker {
 	}
 
 	/// return slatepack
-	pub fn decrypt_slatepack(data: &[u8], dec_key: &DalekSecretKey, height: u64, secp: &Secp256k1 ) -> Result<Self, Error> {
+	pub fn decrypt_slatepack(
+		data: &[u8],
+		dec_key: &DalekSecretKey,
+		height: u64,
+		secp: &Secp256k1,
+	) -> Result<Self, Error> {
 		let (slate_bytes, encrypted) = SlatepackArmor::decode(data)?;
 
 		let slatepack = Slatepack::from_binary(&slate_bytes, encrypted, dec_key, height, secp)?;
@@ -126,9 +131,9 @@ fn slatepack_io_test() {
 	use crate::proof::proofaddress::ProvableAddress;
 	use crate::slate::{PaymentInfo, VersionCompatInfo};
 	use crate::ParticipantData;
+	use grin_wallet_util::grin_util::secp::Secp256k1;
 	use uuid::Uuid;
 	use x25519_dalek::PublicKey as xDalekPublicKey;
-	use grin_wallet_util::grin_util::secp::Secp256k1;
 
 	global::set_local_chain_type(global::ChainTypes::AutomatedTesting);
 
@@ -226,8 +231,9 @@ fn slatepack_io_test() {
 	let height = 67;
 
 	// updating kernel excess
-	slate_enc.tx_or_err_mut().unwrap().body.kernels[0].excess =
-		slate_enc.calc_excess::<ExtKeychain>(&secp, None, height ).unwrap();
+	slate_enc.tx_or_err_mut().unwrap().body.kernels[0].excess = slate_enc
+		.calc_excess::<ExtKeychain>(&secp, None, height)
+		.unwrap();
 
 	let slate_enc_str = format!("{:?}", slate_enc);
 	println!("start encrypted slate = {}", slate_enc_str);
@@ -263,8 +269,13 @@ fn slatepack_io_test() {
 	assert!(slatepack_string_encrypted.len() > slatepack_string_binary.len());
 
 	// Testing if can open from a backup
-	let slatepack =
-		Slatepacker::decrypt_slatepack(slatepack_string_encrypted.as_bytes(), &dalek_sk, height, &secp).unwrap();
+	let slatepack = Slatepacker::decrypt_slatepack(
+		slatepack_string_encrypted.as_bytes(),
+		&dalek_sk,
+		height,
+		&secp,
+	)
+	.unwrap();
 	let res_slate = slatepack.to_result_slate();
 	let slate2_str = format!("{:?}", res_slate);
 	println!("res_slate = {:?}", slate2_str);
@@ -272,8 +283,13 @@ fn slatepack_io_test() {
 	assert_eq!(slate_enc_str, slate2_str);
 
 	// Testing if another party can open it
-	let slatepack =
-		Slatepacker::decrypt_slatepack(slatepack_string_encrypted.as_bytes(), &dalek_sk2, height, &secp).unwrap();
+	let slatepack = Slatepacker::decrypt_slatepack(
+		slatepack_string_encrypted.as_bytes(),
+		&dalek_sk2,
+		height,
+		&secp,
+	)
+	.unwrap();
 	let res_slate = slatepack.to_result_slate();
 	let slate2_str = format!("{:?}", res_slate);
 	println!("res_slate2 = {:?}", slate2_str);

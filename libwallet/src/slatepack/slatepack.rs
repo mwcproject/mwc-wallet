@@ -12,9 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::convert::TryInto;
 /// Slatepack Types + Serialization implementation
 use ed25519_dalek::{PublicKey as DalekPublicKey, SecretKey as DalekSecretKey, PUBLIC_KEY_LENGTH};
+use std::convert::TryInto;
 
 use crate::grin_util::secp::key::PublicKey;
 
@@ -38,11 +38,11 @@ use crate::proof::proofaddress;
 use crate::slate::PaymentInfo;
 use bitstream_io::{BigEndian, BitReader, BitWriter, Endianness};
 use crc::{crc32, Hasher32};
+use grin_wallet_util::grin_util::secp::Secp256k1;
 use rand::{thread_rng, Rng};
 use ring::aead;
 use smaz;
 use uuid::Uuid;
-use grin_wallet_util::grin_util::secp::Secp256k1;
 
 /// Basic Slatepack definition
 #[derive(Debug, Clone)]
@@ -957,7 +957,9 @@ impl Slatepack {
 				r.read_bytes(&mut signature)?;
 
 				slate.tx_or_err_mut()?.body.kernels.push(TxKernel {
-					features: KernelFeatures::Plain { fee: fee.try_into()? },
+					features: KernelFeatures::Plain {
+						fee: fee.try_into()?,
+					},
 					excess: Commitment(excess),
 					excess_sig: Signature::from_compact(secp, &signature)?,
 				});

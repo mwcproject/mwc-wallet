@@ -18,8 +18,8 @@ extern crate grin_wallet_controller as wallet;
 extern crate grin_wallet_impls as impls;
 extern crate grin_wallet_libwallet as libwallet;
 
-use std::convert::TryInto;
 use grin_wallet_util::grin_core as core;
+use std::convert::TryInto;
 
 use self::core::core::transaction;
 use self::core::global;
@@ -131,7 +131,9 @@ fn basic_transaction_api(test_dir: &'static str) -> Result<(), wallet::Error> {
 				.first()
 				.map(|k| k.features)
 				.unwrap(),
-			transaction::KernelFeatures::Plain { fee: (2000000 as u64).try_into().unwrap() }
+			transaction::KernelFeatures::Plain {
+				fee: (2000000 as u64).try_into().unwrap()
+			}
 		);
 
 		Ok(())

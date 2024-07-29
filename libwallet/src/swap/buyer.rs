@@ -160,7 +160,9 @@ impl BuyApi {
 		}
 		match refund_slate.tx_or_err()?.body.kernels[0].features {
 			KernelFeatures::HeightLocked { fee, lock_height } => {
-				if fee.fee(current_height) != refund_slate.fee || lock_height != refund_slate.lock_height {
+				if fee.fee(current_height) != refund_slate.fee
+					|| lock_height != refund_slate.lock_height
+				{
 					return Err(ErrorKind::InvalidMessageData(
 						"Refund Slate invalid kernel fee or height".to_string(),
 					));
@@ -713,7 +715,8 @@ impl BuyApi {
 		}
 
 		let sec_key = Self::redeem_tx_secret(keychain, swap, context)?;
-		let (pub_nonce_sum, pub_blind_sum, message) = swap.redeem_tx_fields(&swap.redeem_slate, keychain.secp())?;
+		let (pub_nonce_sum, pub_blind_sum, message) =
+			swap.redeem_tx_fields(&swap.redeem_slate, keychain.secp())?;
 
 		let adaptor_signature = aggsig::sign_single(
 			keychain.secp(),

@@ -26,8 +26,8 @@ use crate::Slatepacker;
 use crate::{Error, ErrorKind};
 use ed25519_dalek::PublicKey as DalekPublicKey;
 use ed25519_dalek::SecretKey as DalekSecretKey;
-use std::convert::TryFrom;
 use grin_wallet_util::grin_util::secp::Secp256k1;
+use std::convert::TryFrom;
 
 pub mod ser;
 
@@ -150,10 +150,20 @@ impl VersionedSlate {
 	}
 
 	/// Decode into the slate and sender address.
-	pub fn into_slatepack(&self, dec_key: &DalekSecretKey, height: u64, secp: &Secp256k1) -> Result<Slatepacker, Error> {
+	pub fn into_slatepack(
+		&self,
+		dec_key: &DalekSecretKey,
+		height: u64,
+		secp: &Secp256k1,
+	) -> Result<Slatepacker, Error> {
 		match self {
 			VersionedSlate::SP(arm_slatepack) => {
-				let packer = Slatepacker::decrypt_slatepack(arm_slatepack.as_bytes(), dec_key, height, secp)?;
+				let packer = Slatepacker::decrypt_slatepack(
+					arm_slatepack.as_bytes(),
+					dec_key,
+					height,
+					secp,
+				)?;
 				Ok(packer)
 			}
 			VersionedSlate::V3(s) => Ok(Slatepacker::wrap_slate(s.clone().to_slate()?)),

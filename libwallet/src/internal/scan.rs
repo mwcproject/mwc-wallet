@@ -1482,12 +1482,13 @@ where
 						tx_info.updated = true;
 						tx_info.tx_log.tx_type = match &tx_info.tx_log.tx_type {
 							TxLogEntryType::TxReceived => {
-								tx_info.tx_log.reverted_after = tx_info.tx_log.confirmation_ts.clone().and_then(|t| {
-									let now = chrono::Utc::now();
-									(now - t).to_std().ok()
-								});
+								tx_info.tx_log.reverted_after =
+									tx_info.tx_log.confirmation_ts.clone().and_then(|t| {
+										let now = chrono::Utc::now();
+										(now - t).to_std().ok()
+									});
 								TxLogEntryType::TxReverted
-							},
+							}
 							t => t.clone(),
 						};
 						if let Some(ref s) = status_send_channel {
@@ -1719,10 +1720,11 @@ fn delete_unconfirmed(
 						tx.tx_log.tx_type = TxLogEntryType::TxSentCancelled;
 					}
 					TxLogEntryType::TxReceived => {
-						tx.tx_log.reverted_after = tx.tx_log.confirmation_ts.clone().and_then(|t| {
-							let now = chrono::Utc::now();
-							(now - t).to_std().ok()
-						});
+						tx.tx_log.reverted_after =
+							tx.tx_log.confirmation_ts.clone().and_then(|t| {
+								let now = chrono::Utc::now();
+								(now - t).to_std().ok()
+							});
 						tx.tx_log.tx_type = TxLogEntryType::TxReverted;
 					}
 					TxLogEntryType::ConfirmedCoinbase => {
@@ -2039,7 +2041,10 @@ fn report_transaction_collision(
 		tx_uuid
 			.iter()
 			.map(|tx_uuid| transactions.get(tx_uuid))
-			.filter(|wtx| wtx.map(|tx| !tx.tx_log.is_cancelled_reverted()).unwrap_or(false))
+			.filter(|wtx| {
+				wtx.map(|tx| !tx.tx_log.is_cancelled_reverted())
+					.unwrap_or(false)
+			})
 			.for_each(|wtx| {
 				if cancelled_tx.len() > 0 {
 					cancelled_tx.push_str(", ");
@@ -2084,7 +2089,7 @@ where
 					TxLogEntryType::TxReceivedCancelled | TxLogEntryType::TxReverted => {
 						wtx.tx_log.reverted_after = None;
 						TxLogEntryType::TxReceived
-					},
+					}
 					TxLogEntryType::TxSentCancelled => TxLogEntryType::TxSent,
 					_ => panic!(
 						"Internal error. Expected cancelled transaction, but get different value"
@@ -2131,7 +2136,7 @@ where
 {
 	//spend this output to the account itself.
 	let fee = tx_fee(1, 1, 1); //there is only one input and one output and one kernel
-								 //let amount = output.eligible_to_spend(current_height, minimum_confirmations);
+						   //let amount = output.eligible_to_spend(current_height, minimum_confirmations);
 
 	let mut output_vec = Vec::new();
 	output_vec.push(commit_string);

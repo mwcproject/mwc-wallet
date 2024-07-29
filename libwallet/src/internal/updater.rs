@@ -94,11 +94,10 @@ where
 
 	for out in outputs {
 		// Filtering out Unconfirmed from cancelled (not active) transactions
-		if (out.status == OutputStatus::Unconfirmed
-			|| out.status == OutputStatus::Reverted)
-				&& !tx_log_is_active
-					.get(&out.tx_log_entry.clone().unwrap_or(std::u32::MAX))
-					.unwrap_or(&true)
+		if (out.status == OutputStatus::Unconfirmed || out.status == OutputStatus::Reverted)
+			&& !tx_log_is_active
+				.get(&out.tx_log_entry.clone().unwrap_or(std::u32::MAX))
+				.unwrap_or(&true)
 		{
 			continue;
 		}
@@ -238,8 +237,7 @@ where
 		if o.status == OutputStatus::Locked {
 			o.status = OutputStatus::Unspent;
 			batch.save(o)?;
-		}
-		else if o.status == OutputStatus::Reverted {
+		} else if o.status == OutputStatus::Reverted {
 			o.status = OutputStatus::Unconfirmed;
 			batch.save(o)?;
 		}

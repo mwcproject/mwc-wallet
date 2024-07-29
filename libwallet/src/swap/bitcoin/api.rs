@@ -34,8 +34,8 @@ use crate::swap::{ErrorKind, SellApi, Swap, SwapApi};
 use crate::{NodeClient, Slate};
 use bitcoin::{Script, Txid};
 use failure::_core::marker::PhantomData;
-use std::sync::Arc;
 use grin_wallet_util::grin_util::secp::Secp256k1;
+use std::sync::Arc;
 
 /// SwapApi trait implementation for BTC
 #[derive(Clone)]
@@ -737,7 +737,11 @@ where
 
 	/// Get a secondary addresses for the lock account
 	/// We can have several addresses because of different formats
-	fn get_secondary_lock_address(&self, swap: &Swap, secp: &Secp256k1) -> Result<Vec<String>, ErrorKind> {
+	fn get_secondary_lock_address(
+		&self,
+		swap: &Swap,
+		secp: &Secp256k1,
+	) -> Result<Vec<String>, ErrorKind> {
 		let input_script = self.script(swap, secp)?;
 		let address = swap.secondary_data.unwrap_btc()?.address(
 			swap.secondary_currency,

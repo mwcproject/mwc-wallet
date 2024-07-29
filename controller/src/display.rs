@@ -27,8 +27,8 @@ use chrono::Local;
 use colored::*;
 use grin_wallet_libwallet::swap::swap::SwapJournalRecord;
 use grin_wallet_libwallet::swap::types::SwapTransactionsConfirmations;
-use prettytable;
 use grin_wallet_util::grin_util::secp::Secp256k1;
+use prettytable;
 
 /// Display outputs in a pretty way
 pub fn outputs(
@@ -63,7 +63,7 @@ pub fn outputs(
 	]);
 
 	for m in outputs {
-        let commit = format!("{}", m.commit.as_ref().to_hex());
+		let commit = format!("{}", m.commit.as_ref().to_hex());
 		let index = match m.output.mmr_index {
 			None => "None".to_owned(),
 			Some(t) => t.to_string(),
@@ -507,7 +507,11 @@ pub fn accounts(acct_mappings: Vec<AcctPathMapping>) {
 }
 
 /// Display transaction log messages
-pub fn tx_messages(tx: &TxLogEntry, dark_background_color_scheme: bool, secp: &Secp256k1) -> Result<(), Error> {
+pub fn tx_messages(
+	tx: &TxLogEntry,
+	dark_background_color_scheme: bool,
+	secp: &Secp256k1,
+) -> Result<(), Error> {
 	println!();
 	println!(
 		"{}",
@@ -538,13 +542,13 @@ pub fn tx_messages(tx: &TxLogEntry, dark_background_color_scheme: bool, secp: &S
 
 	for m in msgs.messages {
 		let id = format!("{}", m.id);
-        let public_key = format!("{}", m.public_key.serialize_vec(secp, true).to_hex());
+		let public_key = format!("{}", m.public_key.serialize_vec(secp, true).to_hex());
 		let message = match m.message {
 			Some(m) => format!("{}", m),
 			None => "None".to_owned(),
 		};
 		let message_sig = match m.message_sig {
-            Some(s) => format!("{}", s.serialize_der(secp).to_hex()),
+			Some(s) => format!("{}", s.serialize_der(secp).to_hex()),
 			None => "None".to_owned(),
 		};
 		if dark_background_color_scheme {

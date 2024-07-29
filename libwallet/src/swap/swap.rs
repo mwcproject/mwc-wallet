@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::convert::TryInto;
 use super::message::*;
 use super::multisig::{Builder as MultisigBuilder, Hashed};
 use super::ser::*;
@@ -30,6 +29,7 @@ use crate::grin_util::secp::{Message as SecpMessage, Secp256k1, Signature};
 use crate::swap::fsm::state::StateId;
 use crate::{NodeClient, Slate};
 use chrono::{DateTime, Utc};
+use std::convert::TryInto;
 use uuid::Uuid;
 
 #[cfg(test)]
@@ -309,7 +309,10 @@ impl Swap {
 		let pub_blind_sum = PublicKey::from_combination(secp, pub_blinds)?;
 
 		let features = KernelFeatures::Plain {
-			fee: redeem_slate.fee.try_into().map_err(|e| ErrorKind::Generic(format!("Invalid fee, {}", e)))?,
+			fee: redeem_slate
+				.fee
+				.try_into()
+				.map_err(|e| ErrorKind::Generic(format!("Invalid fee, {}", e)))?,
 		};
 		let message = features
 			.kernel_sig_msg()
@@ -345,7 +348,7 @@ impl Swap {
 	}
 
 	/// Common nonce for the BulletProof is sum_i H(C_i) where C_i is the commitment of participant i
-	pub(super) fn common_nonce(&self, secp: &Secp256k1,) -> Result<SecretKey, ErrorKind> {
+	pub(super) fn common_nonce(&self, secp: &Secp256k1) -> Result<SecretKey, ErrorKind> {
 		let hashed_nonces: Vec<SecretKey> = self
 			.multisig
 			.participants
@@ -573,9 +576,12 @@ pub fn tx_add_output(
 }
 
 /// Interpret the final 32 bytes of the signature as a secret key
-pub fn signature_as_secret(secp: &Secp256k1, signature: &Signature) -> Result<SecretKey, ErrorKind> {
+pub fn signature_as_secret(
+	secp: &Secp256k1,
+	signature: &Signature,
+) -> Result<SecretKey, ErrorKind> {
 	let ser = signature.to_raw_data();
-	let key = SecretKey::from_slice( secp, &ser[32..])?;
+	let key = SecretKey::from_slice(secp, &ser[32..])?;
 	Ok(key)
 }
 
@@ -585,12 +591,9 @@ pub fn publish_transaction<C: NodeClient>(
 	tx: &tx::Transaction,
 	fluff: bool,
 ) -> Result<(), ErrorKind> {
-	let (height, _ , _ ) = node_client.get_chain_tip()?;
-	tx.validate(
-		Weighting::AsTransaction,
-		height,
-	)
-	.map_err(|e| ErrorKind::UnexpectedAction(format!("slate is not valid, {}", e)))?;
+	let (height, _, _) = node_client.get_chain_tip()?;
+	tx.validate(Weighting::AsTransaction, height)
+		.map_err(|e| ErrorKind::UnexpectedAction(format!("slate is not valid, {}", e)))?;
 
 	node_client.post_tx(tx, fluff)?;
 	Ok(())

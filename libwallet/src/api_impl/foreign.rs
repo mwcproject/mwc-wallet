@@ -390,7 +390,7 @@ where
 			ErrorKind::SlatepackDecodeError(format!("Unable to build key to decrypt, {}", e))
 		})?;
 	let (current_height, _, _) = w.w2n_client().get_chain_tip()?;
-	let sp = encrypted_slate.into_slatepack(&sec_key,current_height, keychain.secp())?;
+	let sp = encrypted_slate.into_slatepack(&sec_key, current_height, keychain.secp())?;
 	let sender = sp.get_sender();
 	let recipient = sp.get_recipient();
 	let content = sp.get_content();

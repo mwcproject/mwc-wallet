@@ -40,13 +40,13 @@ use crate::util::logger::LoggingConfig;
 use crate::util::secp::key::SecretKey;
 use crate::util::{from_hex, Mutex, ZeroingString};
 use grin_wallet_util::grin_util::secp::key::PublicKey;
+use grin_wallet_util::grin_util::static_secp_instance;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, Sender};
 use std::sync::Arc;
 use std::thread;
 use std::thread::JoinHandle;
 use std::time::Duration;
-use grin_wallet_util::grin_util::static_secp_instance;
 
 /// Main interface into all wallet API functions.
 /// Wallet APIs are split into two seperate blocks of functionality

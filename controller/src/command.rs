@@ -50,6 +50,8 @@ use grin_wallet_util::grin_core::core::amount_to_hr_string;
 use grin_wallet_util::grin_core::global::{FLOONET_DNS_SEEDS, MAINNET_DNS_SEEDS};
 use grin_wallet_util::grin_p2p::libp2p_connection::ReceivedMessage;
 use grin_wallet_util::grin_p2p::{libp2p_connection, PeerAddr};
+use grin_wallet_util::grin_util::secp::{ContextFlag, Secp256k1};
+use grin_wallet_util::grin_util::static_secp_instance;
 use serde_json as json;
 use serde_json::json;
 use serde_json::{Map as JsonMap, Value as JsonValue};
@@ -63,8 +65,6 @@ use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 use uuid::Uuid;
-use grin_wallet_util::grin_util::secp::{ContextFlag, Secp256k1};
-use grin_wallet_util::grin_util::static_secp_instance;
 
 lazy_static! {
 	/// Recieve account can be specified separately and must be allpy to ALL receive operations
@@ -475,7 +475,7 @@ where
 				recipient = Some(sp_address.tor_public_key()?);
 			}
 
-			let (slatepack_secret, slatepack_sender, height, secp ) = {
+			let (slatepack_secret, slatepack_sender, height, secp) = {
 				let mut w_lock = api.wallet_inst.lock();
 				let w = w_lock.lc_provider()?.wallet_inst()?;
 				let keychain = w.keychain(keychain_mask)?;
@@ -483,7 +483,12 @@ where
 					proofaddress::payment_proof_address_dalek_secret(&keychain, None)?;
 				let slate_pub_key = DalekPublicKey::from(&slatepack_secret);
 				let (height, _, _) = w.w2n_client().get_chain_tip()?;
-				(slatepack_secret, slate_pub_key, height, keychain.secp().clone())
+				(
+					slatepack_secret,
+					slate_pub_key,
+					height,
+					keychain.secp().clone(),
+				)
 			};
 
 			match args.method.as_str() {
@@ -550,7 +555,7 @@ where
 						recipient,
 						wallet_info,
 						height,
-						&secp
+						&secp,
 					)?;
 					// Restore back ttl, because it can be gone
 					slate.ttl_cutoff_height = original_slate.ttl_cutoff_height.clone();
@@ -614,16 +619,22 @@ where
 			let keychain = w.keychain(keychain_mask)?;
 			let slatepack_secret =
 				proofaddress::payment_proof_address_dalek_secret(&keychain, None)?;
-			let (height, _,_) = w.w2n_client().get_chain_tip()?;
+			let (height, _, _) = w.w2n_client().get_chain_tip()?;
 			(slatepack_secret, height, keychain.secp().clone())
 		};
 
 		let slate_pkg = match &args.input_file {
-			Some(file_name) => PathToSlateGetter::build_form_path(file_name.into())
-				.get_tx(Some(&slatepack_secret), height, &secp)?,
+			Some(file_name) => PathToSlateGetter::build_form_path(file_name.into()).get_tx(
+				Some(&slatepack_secret),
+				height,
+				&secp,
+			)?,
 			None => match &args.input_slatepack_message {
-				Some(message) => PathToSlateGetter::build_form_str(message.clone())
-					.get_tx(Some(&slatepack_secret), height, &secp)?,
+				Some(message) => PathToSlateGetter::build_form_str(message.clone()).get_tx(
+					Some(&slatepack_secret),
+					height,
+					&secp,
+				)?,
 				None => {
 					return Err(ErrorKind::ArgumentError(
 						"Please specify 'file' or 'content' argument".to_string(),
@@ -707,11 +718,17 @@ where
 		};
 
 		let slate_pkg = match &args.input_file {
-			Some(file_name) => PathToSlateGetter::build_form_path(file_name.into())
-				.get_tx(Some(&slatepack_secret), height, &secp)?,
+			Some(file_name) => PathToSlateGetter::build_form_path(file_name.into()).get_tx(
+				Some(&slatepack_secret),
+				height,
+				&secp,
+			)?,
 			None => match &args.input_slatepack_message {
-				Some(message) => PathToSlateGetter::build_form_str(message.clone())
-					.get_tx(Some(&slatepack_secret), height, &secp)?,
+				Some(message) => PathToSlateGetter::build_form_str(message.clone()).get_tx(
+					Some(&slatepack_secret),
+					height,
+					&secp,
+				)?,
 				None => {
 					return Err(ErrorKind::ArgumentError(
 						"Please specify 'file' or 'content' argument".to_string(),
@@ -723,8 +740,12 @@ where
 
 		let (slate, sender, recipient, content, _slatepack_format) = slate_pkg.to_slate()?;
 
-		let slate_str =
-			PathToSlatePutter::build_plain(None).put_tx(&slate, Some(&slatepack_secret), false, &secp)?;
+		let slate_str = PathToSlatePutter::build_plain(None).put_tx(
+			&slate,
+			Some(&slatepack_secret),
+			false,
+			&secp,
+		)?;
 
 		println!();
 		println!("SLATEPACK CONTENTS");
@@ -792,11 +813,17 @@ where
 		};
 
 		let slate_pkg = match &args.input_file {
-			Some(file_name) => PathToSlateGetter::build_form_path(file_name.into())
-				.get_tx(Some(&slatepack_secret), height, &secp)?,
+			Some(file_name) => PathToSlateGetter::build_form_path(file_name.into()).get_tx(
+				Some(&slatepack_secret),
+				height,
+				&secp,
+			)?,
 			None => match &args.input_slatepack_message {
-				Some(message) => PathToSlateGetter::build_form_str(message.clone())
-					.get_tx(Some(&slatepack_secret), height, &secp)?,
+				Some(message) => PathToSlateGetter::build_form_str(message.clone()).get_tx(
+					Some(&slatepack_secret),
+					height,
+					&secp,
+				)?,
 				None => {
 					return Err(ErrorKind::ArgumentError(
 						"Please specify 'file' or 'content' argument".to_string(),
@@ -1001,8 +1028,11 @@ where
 		(slatepack_secret, height, keychain.secp().clone())
 	};
 
-	let slate_pkg =
-		PathToSlateGetter::build_form_path((&args.input).into()).get_tx(Some(&slatepack_secret), height, &secp)?;
+	let slate_pkg = PathToSlateGetter::build_form_path((&args.input).into()).get_tx(
+		Some(&slatepack_secret),
+		height,
+		&secp,
+	)?;
 
 	let (slate, sender_pk, _recepient, content, _encrypted) = slate_pkg.to_slate()?;
 
@@ -2583,12 +2613,14 @@ where
 					offer_update.from_address = from_address;
 				}
 
-				let ack = sender.send_swap_message(&swap_message, &secp).map_err(|e| {
-					crate::libwallet::ErrorKind::SwapError(format!(
-						"Unable to deliver the message {} by {}: {}",
-						swap_id2, method, e
-					))
-				})?;
+				let ack = sender
+					.send_swap_message(&swap_message, &secp)
+					.map_err(|e| {
+						crate::libwallet::ErrorKind::SwapError(format!(
+							"Unable to deliver the message {} by {}: {}",
+							swap_id2, method, e
+						))
+					})?;
 				Ok((ack, format!("{} {}", method, destination)))
 			};
 
@@ -3126,9 +3158,7 @@ where
 			}
 
 			let max_fee = args.fee.iter().max().unwrap_or(&0);
-			let reservation_amount = args
-				.reserve
-				.unwrap_or(std::cmp::max(MWC_BASE, max_fee * 2));
+			let reservation_amount = args.reserve.unwrap_or(std::cmp::max(MWC_BASE, max_fee * 2));
 
 			let res = owner_libp2p::create_integral_balance(
 				wallet_inst.clone(),

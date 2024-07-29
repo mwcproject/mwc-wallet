@@ -665,7 +665,7 @@ where
 	};
 
 	// update slate current height
-	let (height, _,_) = w.w2n_client().get_chain_tip()?;
+	let (height, _, _) = w.w2n_client().get_chain_tip()?;
 	ret_slate.height = height;
 
 	// update ttl if desired
@@ -713,7 +713,8 @@ where
 
 		// needs to be stored as we're removing sig data for return trip. this needs to be present
 		// when locking transaction context and updating tx log with excess later
-		context.calculated_excess = Some(ret_slate.calc_excess(keychain.secp(), Some(&keychain), height)?);
+		context.calculated_excess =
+			Some(ret_slate.calc_excess(keychain.secp(), Some(&keychain), height)?);
 
 		// if self-sending, merge contexts
 		if let Ok(c) = context_res {

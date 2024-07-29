@@ -27,8 +27,8 @@ use crate::swap::{swap, Context, ErrorKind, SellApi, Swap, SwapApi};
 use crate::NodeClient;
 use chrono::{Local, TimeZone};
 use failure::_core::marker::PhantomData;
-use std::sync::Arc;
 use grin_wallet_util::grin_util::secp::Secp256k1;
+use std::sync::Arc;
 
 /// State SellerOfferCreated
 pub struct SellerOfferCreated {}
@@ -59,7 +59,7 @@ impl State for SellerOfferCreated {
 		_context: &Context,
 		_height: u64,
 		_tx_conf: &SwapTransactionsConfirmations,
-		_secp: &Secp256k1
+		_secp: &Secp256k1,
 	) -> Result<StateProcessRespond, ErrorKind> {
 		match input {
 			Input::Cancel => {
@@ -268,14 +268,26 @@ impl<K: Keychain> State for SellerWaitingForAcceptanceMessage<K> {
 						true => {
 							let btc_update =
 								secondary_update.unwrap_btc()?.unwrap_accept_offer()?;
-							SellApi::accepted_offer(&*self.keychain, swap, context, accept_offer, height)?;
+							SellApi::accepted_offer(
+								&*self.keychain,
+								swap,
+								context,
+								accept_offer,
+								height,
+							)?;
 							let btc_data = swap.secondary_data.unwrap_btc_mut()?;
 							btc_data.accepted_offer(btc_update)?;
 						}
 						_ => {
 							let eth_update =
 								secondary_update.unwrap_eth()?.unwrap_accept_offer()?;
-							SellApi::accepted_offer(&*self.keychain, swap, context, accept_offer, height)?;
+							SellApi::accepted_offer(
+								&*self.keychain,
+								swap,
+								context,
+								accept_offer,
+								height,
+							)?;
 							let eth_data = swap.secondary_data.unwrap_eth_mut()?;
 							eth_data.accepted_offer(eth_update)?;
 						}

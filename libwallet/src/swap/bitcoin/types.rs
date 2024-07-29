@@ -37,8 +37,8 @@ use bch::messages::{Tx as BchTx, TxIn as BchTxIn, TxOut as BchTxOut};
 use bitcoin_hashes::hex::ToHex;
 use bitcoin_hashes::{hash160, Hash};
 
-use zcash_primitives::transaction as zcash_tx;
 use grin_wallet_util::grin_util::secp::Secp256k1;
+use zcash_primitives::transaction as zcash_tx;
 
 /// BTC transaction ready to post (any type). Here it is a redeem tx
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -125,7 +125,12 @@ impl BtcData {
 	}
 
 	/// Generate the multisig-with-timelocked-refund script
-	pub fn script(&self, redeem: &PublicKey, btc_lock_time: u64, secp: &Secp256k1) -> Result<Script, ErrorKind> {
+	pub fn script(
+		&self,
+		redeem: &PublicKey,
+		btc_lock_time: u64,
+		secp: &Secp256k1,
+	) -> Result<Script, ErrorKind> {
 		// Don't lock for more than 4 weeks. 4 weeks + 2 day, because max locking is expecting 2 weeks and 1 day to do the swap and 1 extra day for Byer
 		if btc_lock_time > (swap::get_cur_time() + 3600 * 24 * (7 * 4 + 2)) as u64 {
 			return Err(ErrorKind::Generic(
@@ -740,9 +745,9 @@ mod tests {
 	use crate::grin_util::secp::{ContextFlag, Secp256k1};
 	use bitcoin::util::address::Payload;
 	use bitcoin::util::key::PublicKey as BTCPublicKey;
+	use grin_wallet_util::grin_util::static_secp_instance;
 	use rand::{thread_rng, Rng, RngCore};
 	use std::collections::HashMap;
-	use grin_wallet_util::grin_util::static_secp_instance;
 
 	#[test]
 	/// Test vector from the PoC
@@ -753,7 +758,8 @@ mod tests {
 		let secp = secp_inst.lock();
 
 		let data = BtcData {
-			cosign: PublicKey::from_slice(&secp,
+			cosign: PublicKey::from_slice(
+				&secp,
 				&from_hex(
 					"02b4e59070d367a364a31981a71fc5ab6c5034d0e279eecec19287f3c95db84aef".into(),
 				)
@@ -761,7 +767,8 @@ mod tests {
 			)
 			.unwrap(),
 			refund: Some(
-				PublicKey::from_slice(&secp,
+				PublicKey::from_slice(
+					&secp,
 					&from_hex(
 						"022fd8c0455bede249ad3b9a9fb8159829e8cfb2c360863896e5309ea133d122f2".into(),
 					)
@@ -776,7 +783,8 @@ mod tests {
 
 		let input_script = data
 			.script(
-				&PublicKey::from_slice(&secp,
+				&PublicKey::from_slice(
+					&secp,
 					&from_hex(
 						"03cf15041579b5fb7accbac2997fb2f3e1001e9a522a19c83ceabe5ae51a596c7c".into(),
 					)
@@ -885,7 +893,8 @@ mod tests {
 			funding_txs.insert(tx.txid(), tx);
 		}
 
-		let redeem_address = Address::new_btc().p2pkh(&secp,
+		let redeem_address = Address::new_btc().p2pkh(
+			&secp,
 			&BTCPublicKey {
 				compressed: true,
 				key: PublicKey::from_secret_key(&secp, &SecretKey::new(&secp, rng)).unwrap(),

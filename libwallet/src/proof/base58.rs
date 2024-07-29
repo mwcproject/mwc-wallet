@@ -12,10 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use grin_wallet_util::grin_util::secp::{ContextFlag, Secp256k1};
 use crate::error::{Error, ErrorKind};
 use crate::grin_keychain::base58;
 use crate::grin_util::secp::key::PublicKey;
+use grin_wallet_util::grin_util::secp::{ContextFlag, Secp256k1};
 
 ///
 pub trait Base58<T> {

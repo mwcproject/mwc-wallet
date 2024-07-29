@@ -28,8 +28,8 @@ use crate::swap::{BuyApi, Context, ErrorKind, Swap, SwapApi};
 use crate::NodeClient;
 use chrono::{Local, TimeZone};
 use failure::_core::marker::PhantomData;
-use std::sync::Arc;
 use grin_wallet_util::grin_util::secp::Secp256k1;
+use std::sync::Arc;
 
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -838,10 +838,7 @@ impl<K: Keychain> State for BuyerWaitingForRespondRedeemMessage<K> {
 				if swap
 					.refund_slate
 					.tx_or_err()?
-					.validate(
-						Weighting::AsTransaction,
-						height
-					)
+					.validate(Weighting::AsTransaction, height)
 					.is_ok()
 				{
 					// Was already processed. Can go to the next step
@@ -873,10 +870,7 @@ impl<K: Keychain> State for BuyerWaitingForRespondRedeemMessage<K> {
 				if swap
 					.redeem_slate
 					.tx_or_err()?
-					.validate(
-						Weighting::AsTransaction,
-						height,
-					)
+					.validate(Weighting::AsTransaction, height)
 					.is_err()
 				{
 					let (_, redeem, _) = message.unwrap_redeem()?;
@@ -893,10 +887,7 @@ impl<K: Keychain> State for BuyerWaitingForRespondRedeemMessage<K> {
 				debug_assert!(swap
 					.redeem_slate
 					.tx_or_err()?
-					.validate(
-						Weighting::AsTransaction,
-						height,
-					)
+					.validate(Weighting::AsTransaction, height,)
 					.is_ok());
 				Ok(StateProcessRespond::new(StateId::BuyerRedeemMwc))
 			}

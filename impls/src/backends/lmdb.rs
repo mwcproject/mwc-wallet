@@ -37,9 +37,9 @@ use crate::util::secp::key::SecretKey;
 use crate::util::{self, ToHex};
 
 use grin_wallet_libwallet::IntegrityContext;
+use grin_wallet_util::grin_core::ser::DeserializationMode;
 use rand::rngs::mock::StepRng;
 use rand::thread_rng;
-use grin_wallet_util::grin_core::ser::DeserializationMode;
 
 pub const DB_DIR: &str = "db";
 pub const TX_SAVE_DIR: &str = "saved_txs";
@@ -273,11 +273,10 @@ where
 			Ok(None)
 		} else {*/
 		Ok(Some(
-			self
-				.keychain(keychain_mask)?
+			self.keychain(keychain_mask)?
 				.commit(amount, &id, SwitchCommitmentType::Regular)?
 				.0
-                .to_hex(), // TODO: proper support for different switch commitment schemes
+				.to_hex(), // TODO: proper support for different switch commitment schemes
 		))
 		/*}*/
 	}
@@ -320,7 +319,7 @@ where
 				protocol_version,
 				ser::DeserializationMode::default(),
 			)
-				.map_err(From::from)
+			.map_err(From::from)
 		});
 		let iter = prefix_iter.expect("deserialize").into_iter();
 		Box::new(iter)
@@ -334,7 +333,7 @@ where
 				protocol_version,
 				ser::DeserializationMode::default(),
 			)
-				.map_err(From::from)
+			.map_err(From::from)
 		});
 		let iter = prefix_iter.expect("deserialize").into_iter();
 		Box::new(iter)
@@ -376,7 +375,7 @@ where
 					protocol_version,
 					ser::DeserializationMode::default(),
 				)
-					.map_err(From::from)
+				.map_err(From::from)
 			});
 		let iter = prefix_iter.expect("deserialize").into_iter();
 		Box::new(iter)
@@ -394,7 +393,7 @@ where
 			.join(filename);
 		let path_buf = Path::new(&path).to_path_buf();
 		let mut stored_tx = File::create(path_buf)?;
-        let tx_hex = ser::ser_vec(tx, ser::ProtocolVersion(1)).unwrap().to_hex();
+		let tx_hex = ser::ser_vec(tx, ser::ProtocolVersion(1)).unwrap().to_hex();
 		stored_tx.write_all(&tx_hex.as_bytes())?;
 		stored_tx.sync_all()?;
 		Ok(())
@@ -445,11 +444,14 @@ where
 		let tx_bin = util::from_hex(&content).map_err(|e| {
 			ErrorKind::StoredTransactionError(format!("Unable to decode the data, {}", e))
 		})?;
-		Ok(
-			ser::deserialize(&mut &tx_bin[..], ser::ProtocolVersion(1), ser::DeserializationMode::default()).map_err(|e| {
-				ErrorKind::StoredTransactionError(format!("Unable to deserialize the data, {}", e))
-			})?,
+		Ok(ser::deserialize(
+			&mut &tx_bin[..],
+			ser::ProtocolVersion(1),
+			ser::DeserializationMode::default(),
 		)
+		.map_err(|e| {
+			ErrorKind::StoredTransactionError(format!("Unable to deserialize the data, {}", e))
+		})?)
 	}
 
 	fn batch<'a>(
@@ -608,9 +610,10 @@ where
 			Some(i) => to_key_u64(OUTPUT_PREFIX, &mut id.to_bytes().to_vec(), *i),
 			None => to_key(OUTPUT_PREFIX, &mut id.to_bytes().to_vec()),
 		};
-		option_to_not_found(self.db.borrow().as_ref().unwrap().get_ser(&key, None), || {
-			format!("Key ID: {}", id)
-		})
+		option_to_not_found(
+			self.db.borrow().as_ref().unwrap().get_ser(&key, None),
+			|| format!("Key ID: {}", id),
+		)
 		.map_err(|e| e.into())
 	}
 
@@ -624,7 +627,7 @@ where
 				protocol_version,
 				ser::DeserializationMode::default(),
 			)
-				.map_err(From::from)
+			.map_err(From::from)
 		});
 		let iter = prefix_iter.expect("deserialize").into_iter();
 		Box::new(iter)
@@ -645,7 +648,13 @@ where
 
 	fn next_tx_log_id(&mut self, parent_key_id: &Identifier) -> Result<u32, Error> {
 		let tx_id_key = to_key(TX_LOG_ID_PREFIX, &mut parent_key_id.to_bytes().to_vec());
-		let last_tx_log_id = match self.db.borrow().as_ref().unwrap().get_ser(&tx_id_key, None)? {
+		let last_tx_log_id = match self
+			.db
+			.borrow()
+			.as_ref()
+			.unwrap()
+			.get_ser(&tx_id_key, None)?
+		{
 			Some(t) => t,
 			None => 0,
 		};
@@ -667,7 +676,7 @@ where
 				protocol_version,
 				ser::DeserializationMode::default(),
 			)
-				.map_err(From::from)
+			.map_err(From::from)
 		});
 		let iter = prefix_iter.expect("deserialize").into_iter();
 		Box::new(iter)
@@ -855,7 +864,7 @@ where
 				protocol_version,
 				ser::DeserializationMode::default(),
 			)
-				.map_err(From::from)
+			.map_err(From::from)
 		});
 		let iter = prefix_iter.expect("deserialize").into_iter();
 		Box::new(iter)
@@ -942,10 +951,10 @@ where
 		let ctx_key = to_key(INTEGRITY_CONTEXT_PREFIX, &mut slate_id.to_vec());
 		let (blind_xor_key, _nonce_xor_key) = private_ctx_xor_keys(self.keychain(), slate_id)?;
 
-		let mut ctx: IntegrityContext =
-			option_to_not_found(self.db.borrow().as_ref().unwrap().get_ser(&ctx_key, None), || {
-				format!("Slate id: {:x?}", slate_id.to_vec())
-			})?;
+		let mut ctx: IntegrityContext = option_to_not_found(
+			self.db.borrow().as_ref().unwrap().get_ser(&ctx_key, None),
+			|| format!("Slate id: {:x?}", slate_id.to_vec()),
+		)?;
 
 		for i in 0..SECRET_KEY_SIZE {
 			ctx.sec_key.0[i] ^= blind_xor_key[i];

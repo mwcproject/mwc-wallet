@@ -15,8 +15,8 @@
 use crate::swap::fsm::state::{Input, State, StateEtaInfo, StateId, StateProcessRespond};
 use crate::swap::types::SwapTransactionsConfirmations;
 use crate::swap::{Context, ErrorKind, Swap};
-use std::collections::HashMap;
 use grin_wallet_util::grin_util::secp::Secp256k1;
+use std::collections::HashMap;
 
 /// Swap State machine
 pub struct StateMachine<'a> {
@@ -106,7 +106,11 @@ impl<'a> StateMachine<'a> {
 	}
 
 	/// Build a roadmap for the swap process
-	pub fn get_swap_roadmap(&self, swap: &Swap, secp: &Secp256k1) -> Result<Vec<StateEtaInfo>, ErrorKind> {
+	pub fn get_swap_roadmap(
+		&self,
+		swap: &Swap,
+		secp: &Secp256k1,
+	) -> Result<Vec<StateEtaInfo>, ErrorKind> {
 		let state = self
 			.state_map
 			.get(&swap.state)

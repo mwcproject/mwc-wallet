@@ -17,10 +17,10 @@ use crate::util::RwLock;
 use crate::{Error, ErrorKind};
 use chrono::Utc;
 use grin_wallet_libwallet::IntegrityContext;
+use grin_wallet_util::grin_util::secp::Secp256k1;
 use libp2p::gossipsub::IdentTopic as Topic;
 use std::thread;
 use uuid::Uuid;
-use grin_wallet_util::grin_util::secp::Secp256k1;
 
 /// Publishing message
 #[derive(Clone, Debug)]

@@ -332,8 +332,8 @@ pub fn complete_tor_address(input: &str) -> Result<String, Error> {
 mod tests {
 	use super::*;
 
-	use rand::rngs::mock::StepRng;
 	use grin_wallet_util::grin_util::static_secp_instance;
+	use rand::rngs::mock::StepRng;
 
 	use crate::util::{self, secp};
 

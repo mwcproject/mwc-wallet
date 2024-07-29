@@ -191,7 +191,8 @@ where
 
 	match addr_type {
 		ProofAddressType::MQS => {
-			let sender_address_pub_key = crypto::public_key_from_secret_key(keychain.secp(), &secret_key)?;
+			let sender_address_pub_key =
+				crypto::public_key_from_secret_key(keychain.secp(), &secret_key)?;
 			Ok(ProvableAddress::from_pub_key(&sender_address_pub_key))
 		}
 		ProofAddressType::Onion => {

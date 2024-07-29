@@ -304,7 +304,8 @@ impl SellApi {
 		let (pub_nonce_sum, _, message) = swap.redeem_tx_fields(&redeem_slate, keychain.secp())?;
 		// Calculate sum of blinding factors from in- and outputs so we know we can use this excess
 		// later to find the on-chain signature and calculate the redeem secret
-		let pub_blind_sum = Self::redeem_excess(keychain, &mut redeem_slate, height)?.to_pubkey(keychain.secp())?;
+		let pub_blind_sum =
+			Self::redeem_excess(keychain, &mut redeem_slate, height)?.to_pubkey(keychain.secp())?;
 		if !aggsig::verify_single(
 			keychain.secp(),
 			&init_redeem.adaptor_signature,
@@ -334,10 +335,12 @@ impl SellApi {
 		keychain: &K,
 		swap: &Swap,
 	) -> Result<SecretKey, ErrorKind> {
-		let adaptor_signature =
-			signature_as_secret( keychain.secp(), &swap.adaptor_signature.ok_or(ErrorKind::UnexpectedAction(
+		let adaptor_signature = signature_as_secret(
+			keychain.secp(),
+			&swap.adaptor_signature.ok_or(ErrorKind::UnexpectedAction(
 				"Seller Fn calculate_redeem_secret() multisig is empty".to_string(),
-			))?)?;
+			))?,
+		)?;
 		let signature = signature_as_secret( keychain.secp(),
 			&swap
 				.redeem_slate
@@ -357,8 +360,9 @@ impl SellApi {
 				.ok_or(ErrorKind::UnexpectedAction("Seller Fn calculate_redeem_secret() redeem slate is not initialized, participant signature not found".to_string()))?,
 		)?;
 
-		let redeem =
-			keychain.secp().blind_sum(vec![adaptor_signature, seller_signature], vec![signature])?;
+		let redeem = keychain
+			.secp()
+			.blind_sum(vec![adaptor_signature, seller_signature], vec![signature])?;
 		let redeem_pub = PublicKey::from_secret_key(keychain.secp(), &redeem)?;
 		if swap.redeem_public != Some(redeem_pub) {
 			// If this happens - mean that swap is broken, somewhere there is a security flaw. Probably didn't check something.
@@ -515,7 +519,7 @@ impl SellApi {
 		elems.push(build::output(change, scontext.change_output.clone()));
 		slate.add_transaction_elements(keychain, &proof::ProofBuilder::new(keychain), elems)?;
 		slate.tx_or_err_mut()?.offset =
-			BlindingFactor::from_secret_key(SecretKey::new( keychain.secp(), &mut thread_rng()));
+			BlindingFactor::from_secret_key(SecretKey::new(keychain.secp(), &mut thread_rng()));
 
 		#[cfg(test)]
 		if is_test_mode() {

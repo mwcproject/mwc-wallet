@@ -443,7 +443,7 @@ impl SlateSender for HttpDataSender {
 					recipient,
 					slatepack_secret,
 					false,
-					secp
+					secp,
 				)?
 			}
 			SlateVersion::V3B => {
@@ -573,7 +573,12 @@ impl SlateSender for HttpDataSender {
 					slate_str, e
 				))
 			})?;
-			let sp = Slate::deserialize_upgrade_slatepack(&slatepack_str, &slatepack_secret, height, secp)?;
+			let sp = Slate::deserialize_upgrade_slatepack(
+				&slatepack_str,
+				&slatepack_secret,
+				height,
+				secp,
+			)?;
 			sp.to_result_slate()
 		};
 

@@ -111,18 +111,18 @@ mod tests {
 	use crate::grin_util::secp::key::{PublicKey, SecretKey};
 	use crate::grin_util::secp::pedersen::{Commitment, RangeProof};
 	use crate::grin_util::to_hex;
-	use crate::grin_util::{Mutex};
+	use crate::grin_util::Mutex;
 	use crate::{NodeClient, Slate, SlateVersion, VersionedSlate};
 	use bitcoin_lib::network::constants::Network as BtcNetwork;
 	use bitcoin_lib::util::key::PublicKey as BtcPublicKey;
 	use bitcoin_lib::{Address, AddressType, Transaction as BtcTransaction, TxOut};
+	use grin_wallet_util::grin_util::secp::Secp256k1;
 	use std::collections::HashMap;
 	use std::convert::TryInto;
 	#[cfg(not(target_os = "windows"))]
 	use std::fs::{read_to_string, write};
 	use std::mem;
 	use std::sync::Arc;
-	use grin_wallet_util::grin_util::secp::Secp256k1;
 
 	use super::bitcoin::*;
 	use super::ethereum::*;
@@ -200,7 +200,8 @@ mod tests {
 	// Method is used for testing. Normally we have multiple currencies, so the names must be different...
 	fn btc_address(kc: &ExtKeychain) -> String {
 		let key = PublicKey::from_secret_key(kc.secp(), &key(kc, 2, 0)).unwrap();
-		let address = Address::new_btc().p2pkh(kc.secp(),
+		let address = Address::new_btc().p2pkh(
+			kc.secp(),
 			&BtcPublicKey {
 				compressed: true,
 				key,
@@ -401,11 +402,8 @@ mod tests {
 		}
 		fn post_tx(&self, tx: &Transaction, _fluff: bool) -> Result<(), crate::Error> {
 			let (height, _, _) = self.get_chain_tip()?;
-			tx.validate(
-				Weighting::AsTransaction,
-				height,
-			)
-			.map_err(|e| crate::ErrorKind::Node(format!("Node failure, {}", e)))?;
+			tx.validate(Weighting::AsTransaction, height)
+				.map_err(|e| crate::ErrorKind::Node(format!("Node failure, {}", e)))?;
 
 			let mut state = self.state.lock();
 			for input in tx.inputs_committed() {
@@ -557,7 +555,14 @@ mod tests {
 			.unwrap();
 
 		let message = match fsm_sell
-			.process(Input::Check, &mut swap, &ctx_sell, height, &tx_state, kc_sell.secp())
+			.process(
+				Input::Check,
+				&mut swap,
+				&ctx_sell,
+				height,
+				&tx_state,
+				kc_sell.secp(),
+			)
 			.unwrap()
 			.action
 			.unwrap()
@@ -641,7 +646,14 @@ mod tests {
 			.request_tx_confirmations(&kc_sell, &swap_sell)
 			.unwrap();
 		let sell_resp = fsm_sell
-			.process(Input::Check, &mut swap_sell, &ctx_sell, nc.get_chain_tip().unwrap().0, &tx_conf, kc_sell.secp())
+			.process(
+				Input::Check,
+				&mut swap_sell,
+				&ctx_sell,
+				nc.get_chain_tip().unwrap().0,
+				&tx_conf,
+				kc_sell.secp(),
+			)
 			.unwrap();
 
 		assert_eq!(swap_sell.state, StateId::SellerSendingOffer);
@@ -653,7 +665,14 @@ mod tests {
 			.request_tx_confirmations(&kc_sell, &swap_sell)
 			.unwrap();
 		let sell_resp = fsm_sell
-			.process(Input::Execute, &mut swap_sell, &ctx_sell, nc.get_chain_tip().unwrap().0, &tx_conf, kc_sell.secp())
+			.process(
+				Input::Execute,
+				&mut swap_sell,
+				&ctx_sell,
+				nc.get_chain_tip().unwrap().0,
+				&tx_conf,
+				kc_sell.secp(),
+			)
 			.unwrap();
 		assert_eq!(
 			sell_resp.action.unwrap().get_id_str(),
@@ -716,7 +735,14 @@ mod tests {
 			.request_tx_confirmations(&kc_buy, &swap_buy)
 			.unwrap();
 		let buy_resp = fsm_buy
-			.process(Input::Check, &mut swap_buy, &ctx_buy, nc.get_chain_tip().unwrap().0, &tx_conf, kc_sell.secp())
+			.process(
+				Input::Check,
+				&mut swap_buy,
+				&ctx_buy,
+				nc.get_chain_tip().unwrap().0,
+				&tx_conf,
+				kc_sell.secp(),
+			)
 			.unwrap();
 
 		assert_eq!(swap_buy.state, StateId::BuyerSendingAcceptOfferMessage);
@@ -728,7 +754,14 @@ mod tests {
 			.request_tx_confirmations(&kc_buy, &swap_buy)
 			.unwrap();
 		let buy_resp = fsm_buy
-			.process(Input::Execute, &mut swap_buy, &ctx_buy, nc.get_chain_tip().unwrap().0, &tx_conf, kc_sell.secp())
+			.process(
+				Input::Execute,
+				&mut swap_buy,
+				&ctx_buy,
+				nc.get_chain_tip().unwrap().0,
+				&tx_conf,
+				kc_sell.secp(),
+			)
 			.unwrap();
 		assert_eq!(swap_buy.state, StateId::BuyerWaitingForSellerToLock);
 
@@ -753,7 +786,14 @@ mod tests {
 			.request_tx_confirmations(&kc_buy, &swap_buy)
 			.unwrap();
 		let buy_resp = fsm_buy
-			.process(Input::Check, &mut swap_buy, &ctx_buy, nc.get_chain_tip().unwrap().0, &tx_conf, kc_sell.secp())
+			.process(
+				Input::Check,
+				&mut swap_buy,
+				&ctx_buy,
+				nc.get_chain_tip().unwrap().0,
+				&tx_conf,
+				kc_sell.secp(),
+			)
 			.unwrap();
 
 		assert_eq!(
@@ -791,7 +831,14 @@ mod tests {
 			.request_tx_confirmations(&kc_buy, &swap_buy)
 			.unwrap();
 		let buy_resp = fsm_buy
-			.process(Input::Check, &mut swap_buy, &ctx_buy, nc.get_chain_tip().unwrap().0, &tx_conf, kc_sell.secp())
+			.process(
+				Input::Check,
+				&mut swap_buy,
+				&ctx_buy,
+				nc.get_chain_tip().unwrap().0,
+				&tx_conf,
+				kc_sell.secp(),
+			)
 			.unwrap();
 		assert_eq!(
 			swap_buy.state,
@@ -823,7 +870,14 @@ mod tests {
 			.request_tx_confirmations(&kc_buy, &swap_buy)
 			.unwrap();
 		let buy_resp = fsm_buy
-			.process(Input::Check, &mut swap_buy, &ctx_buy, nc.get_chain_tip().unwrap().0, &tx_conf, kc_sell.secp())
+			.process(
+				Input::Check,
+				&mut swap_buy,
+				&ctx_buy,
+				nc.get_chain_tip().unwrap().0,
+				&tx_conf,
+				kc_sell.secp(),
+			)
 			.unwrap();
 		assert_eq!(swap_buy.state, StateId::BuyerWaitingForLockConfirmations);
 
@@ -846,7 +900,14 @@ mod tests {
 			.request_tx_confirmations(&kc_buy, &swap_buy)
 			.unwrap();
 		let buy_resp = fsm_buy
-			.process(Input::Check, &mut swap_buy, &ctx_buy, nc.get_chain_tip().unwrap().0, &tx_conf, kc_sell.secp())
+			.process(
+				Input::Check,
+				&mut swap_buy,
+				&ctx_buy,
+				nc.get_chain_tip().unwrap().0,
+				&tx_conf,
+				kc_sell.secp(),
+			)
 			.unwrap();
 		assert_eq!(swap_buy.state, StateId::BuyerWaitingForLockConfirmations);
 		match buy_resp.action.unwrap() {
@@ -941,7 +1002,14 @@ mod tests {
 			.request_tx_confirmations(&kc_sell, &swap_sell)
 			.unwrap();
 		let sell_resp = fsm_sell
-			.process(Input::Execute, &mut swap_sell, &ctx_sell, nc.get_chain_tip().unwrap().0, &tx_conf, kc_sell.secp())
+			.process(
+				Input::Execute,
+				&mut swap_sell,
+				&ctx_sell,
+				nc.get_chain_tip().unwrap().0,
+				&tx_conf,
+				kc_sell.secp(),
+			)
 			.unwrap();
 		assert_eq!(swap_sell.state, StateId::SellerWaitingForLockConfirmations);
 		match sell_resp.action.unwrap() {
@@ -979,7 +1047,14 @@ mod tests {
 			.request_tx_confirmations(&kc_sell, &swap_sell)
 			.unwrap();
 		let sell_resp = fsm_sell
-			.process(Input::Check, &mut swap_sell, &ctx_sell, nc.get_chain_tip().unwrap().0, &tx_conf, kc_sell.secp())
+			.process(
+				Input::Check,
+				&mut swap_sell,
+				&ctx_sell,
+				nc.get_chain_tip().unwrap().0,
+				&tx_conf,
+				kc_sell.secp(),
+			)
 			.unwrap();
 		assert_eq!(swap_sell.state, StateId::SellerWaitingForLockConfirmations);
 		match sell_resp.action.unwrap() {
@@ -1001,7 +1076,14 @@ mod tests {
 			.request_tx_confirmations(&kc_buy, &swap_buy)
 			.unwrap();
 		let buy_resp = fsm_buy
-			.process(Input::Check, &mut swap_buy, &ctx_buy, nc.get_chain_tip().unwrap().0, &tx_conf, kc_sell.secp())
+			.process(
+				Input::Check,
+				&mut swap_buy,
+				&ctx_buy,
+				nc.get_chain_tip().unwrap().0,
+				&tx_conf,
+				kc_sell.secp(),
+			)
 			.unwrap();
 		assert_eq!(swap_buy.state, StateId::BuyerWaitingForLockConfirmations);
 		match buy_resp.action.unwrap() {
@@ -1032,7 +1114,14 @@ mod tests {
 			.request_tx_confirmations(&kc_sell, &swap_sell)
 			.unwrap();
 		let sell_resp = fsm_sell
-			.process(Input::Check, &mut swap_sell, &ctx_sell, nc.get_chain_tip().unwrap().0, &tx_conf, kc_sell.secp())
+			.process(
+				Input::Check,
+				&mut swap_sell,
+				&ctx_sell,
+				nc.get_chain_tip().unwrap().0,
+				&tx_conf,
+				kc_sell.secp(),
+			)
 			.unwrap();
 		assert_eq!(swap_sell.state, StateId::SellerWaitingForLockConfirmations);
 		match sell_resp.action.unwrap() {
@@ -1070,13 +1159,27 @@ mod tests {
 			.request_tx_confirmations(&kc_sell, &swap_sell)
 			.unwrap();
 		let sell_resp = fsm_sell
-			.process(Input::Check, &mut swap_sell, &ctx_sell, nc.get_chain_tip().unwrap().0, &tx_conf, kc_sell.secp())
+			.process(
+				Input::Check,
+				&mut swap_sell,
+				&ctx_sell,
+				nc.get_chain_tip().unwrap().0,
+				&tx_conf,
+				kc_sell.secp(),
+			)
 			.unwrap();
 		let tx_conf = api_buy
 			.request_tx_confirmations(&kc_buy, &swap_buy)
 			.unwrap();
 		let buy_resp = fsm_buy
-			.process(Input::Check, &mut swap_buy, &ctx_buy, nc.get_chain_tip().unwrap().0, &tx_conf, kc_sell.secp())
+			.process(
+				Input::Check,
+				&mut swap_buy,
+				&ctx_buy,
+				nc.get_chain_tip().unwrap().0,
+				&tx_conf,
+				kc_sell.secp(),
+			)
 			.unwrap();
 
 		assert_eq!(swap_sell.state, StateId::SellerWaitingForInitRedeemMessage);
@@ -1093,7 +1196,14 @@ mod tests {
 			.request_tx_confirmations(&kc_buy, &swap_buy)
 			.unwrap();
 		fsm_buy
-			.process(Input::Execute, &mut swap_buy, &ctx_buy, nc.get_chain_tip().unwrap().0, &tx_conf, kc_sell.secp())
+			.process(
+				Input::Execute,
+				&mut swap_buy,
+				&ctx_buy,
+				nc.get_chain_tip().unwrap().0,
+				&tx_conf,
+				kc_sell.secp(),
+			)
 			.unwrap();
 		assert_eq!(swap_buy.state, StateId::BuyerWaitingForRespondRedeemMessage);
 
@@ -1124,7 +1234,14 @@ mod tests {
 			.request_tx_confirmations(&kc_sell, &swap_sell)
 			.unwrap();
 		let sell_resp = fsm_sell
-			.process(Input::Check, &mut swap_sell, &ctx_sell, nc.get_chain_tip().unwrap().0, &tx_conf, kc_sell.secp())
+			.process(
+				Input::Check,
+				&mut swap_sell,
+				&ctx_sell,
+				nc.get_chain_tip().unwrap().0,
+				&tx_conf,
+				kc_sell.secp(),
+			)
 			.unwrap();
 		assert_eq!(swap_sell.state, StateId::SellerWaitingForInitRedeemMessage);
 		assert_eq!(
@@ -1155,7 +1272,14 @@ mod tests {
 			.request_tx_confirmations(&kc_sell, &swap_sell)
 			.unwrap();
 		let sell_resp = fsm_sell
-			.process(Input::Execute, &mut swap_sell, &ctx_sell, nc.get_chain_tip().unwrap().0, &tx_conf, kc_sell.secp())
+			.process(
+				Input::Execute,
+				&mut swap_sell,
+				&ctx_sell,
+				nc.get_chain_tip().unwrap().0,
+				&tx_conf,
+				kc_sell.secp(),
+			)
 			.unwrap();
 		// Seller: wait for buyer's on-chain redeem tx
 		assert_eq!(swap_sell.state, StateId::SellerWaitingForBuyerToRedeemMwc);
@@ -1191,7 +1315,14 @@ mod tests {
 			.request_tx_confirmations(&kc_buy, &swap_buy)
 			.unwrap();
 		let buy_resp = fsm_buy
-			.process(Input::Check, &mut swap_buy, &ctx_buy, nc.get_chain_tip().unwrap().0, &tx_conf, kc_sell.secp())
+			.process(
+				Input::Check,
+				&mut swap_buy,
+				&ctx_buy,
+				nc.get_chain_tip().unwrap().0,
+				&tx_conf,
+				kc_sell.secp(),
+			)
 			.unwrap();
 		assert_eq!(swap_buy.state, StateId::BuyerWaitingForRespondRedeemMessage);
 		assert_eq!(
@@ -1222,7 +1353,14 @@ mod tests {
 			.request_tx_confirmations(&kc_buy, &swap_buy)
 			.unwrap();
 		let buy_resp = fsm_buy
-			.process(Input::Execute, &mut swap_buy, &ctx_buy, nc.get_chain_tip().unwrap().0, &tx_conf, kc_sell.secp())
+			.process(
+				Input::Execute,
+				&mut swap_buy,
+				&ctx_buy,
+				nc.get_chain_tip().unwrap().0,
+				&tx_conf,
+				kc_sell.secp(),
+			)
 			.unwrap();
 		assert_eq!(swap_buy.state, StateId::BuyerWaitForRedeemMwcConfirmations);
 		assert_eq!(
@@ -1237,7 +1375,14 @@ mod tests {
 			.request_tx_confirmations(&kc_buy, &swap_buy)
 			.unwrap();
 		let buy_resp = fsm_buy
-			.process(Input::Check, &mut swap_buy, &ctx_buy, nc.get_chain_tip().unwrap().0, &tx_conf, kc_sell.secp())
+			.process(
+				Input::Check,
+				&mut swap_buy,
+				&ctx_buy,
+				nc.get_chain_tip().unwrap().0,
+				&tx_conf,
+				kc_sell.secp(),
+			)
 			.unwrap();
 		assert_eq!(swap_buy.state, StateId::BuyerWaitForRedeemMwcConfirmations);
 		match buy_resp.action.unwrap() {
@@ -1272,7 +1417,14 @@ mod tests {
 			.request_tx_confirmations(&kc_sell, &swap_sell)
 			.unwrap();
 		let sell_resp = fsm_sell
-			.process(Input::Check, &mut swap_sell, &ctx_sell, nc.get_chain_tip().unwrap().0, &tx_conf, kc_sell.secp())
+			.process(
+				Input::Check,
+				&mut swap_sell,
+				&ctx_sell,
+				nc.get_chain_tip().unwrap().0,
+				&tx_conf,
+				kc_sell.secp(),
+			)
 			.unwrap();
 		assert_eq!(swap_sell.state, StateId::SellerRedeemSecondaryCurrency);
 		assert_eq!(
@@ -1298,7 +1450,14 @@ mod tests {
 			.request_tx_confirmations(&kc_sell, &swap_sell)
 			.unwrap();
 		let sell_resp = fsm_sell
-			.process(Input::Execute, &mut swap_sell, &ctx_sell, nc.get_chain_tip().unwrap().0, &tx_conf, kc_sell.secp())
+			.process(
+				Input::Execute,
+				&mut swap_sell,
+				&ctx_sell,
+				nc.get_chain_tip().unwrap().0,
+				&tx_conf,
+				kc_sell.secp(),
+			)
 			.unwrap();
 		assert_eq!(
 			swap_sell.state,
@@ -1325,7 +1484,14 @@ mod tests {
 			.request_tx_confirmations(&kc_sell, &swap_sell)
 			.unwrap();
 		let sell_resp = fsm_sell
-			.process(Input::Check, &mut swap_sell, &ctx_sell, nc.get_chain_tip().unwrap().0, &tx_conf, kc_sell.secp())
+			.process(
+				Input::Check,
+				&mut swap_sell,
+				&ctx_sell,
+				nc.get_chain_tip().unwrap().0,
+				&tx_conf,
+				kc_sell.secp(),
+			)
 			.unwrap();
 		assert_eq!(
 			swap_sell.state,
@@ -1354,13 +1520,27 @@ mod tests {
 			.request_tx_confirmations(&kc_sell, &swap_sell)
 			.unwrap();
 		let sell_resp = fsm_sell
-			.process(Input::Check, &mut swap_sell, &ctx_sell, nc.get_chain_tip().unwrap().0, &tx_conf, kc_sell.secp())
+			.process(
+				Input::Check,
+				&mut swap_sell,
+				&ctx_sell,
+				nc.get_chain_tip().unwrap().0,
+				&tx_conf,
+				kc_sell.secp(),
+			)
 			.unwrap();
 		let tx_conf = &api_buy
 			.request_tx_confirmations(&kc_buy, &swap_buy)
 			.unwrap();
 		let buy_resp = fsm_buy
-			.process(Input::Check, &mut swap_buy, &ctx_buy, nc.get_chain_tip().unwrap().0, &tx_conf, kc_sell.secp())
+			.process(
+				Input::Check,
+				&mut swap_buy,
+				&ctx_buy,
+				nc.get_chain_tip().unwrap().0,
+				&tx_conf,
+				kc_sell.secp(),
+			)
 			.unwrap();
 
 		// Seller & Buyer: complete!
@@ -1450,9 +1630,15 @@ mod tests {
 	}
 
 	impl<'a> Trader<'a> {
-		pub fn process(&mut self, input: Input, height: u64, secp: &Secp256k1) -> Result<StateProcessRespond, ErrorKind> {
+		pub fn process(
+			&mut self,
+			input: Input,
+			height: u64,
+			secp: &Secp256k1,
+		) -> Result<StateProcessRespond, ErrorKind> {
 			let tx_conf = self.api.request_tx_confirmations(&self.kc, &self.swap)?;
-			self.fsm.process(input, &mut self.swap, &self.ctx, height, &tx_conf, secp)
+			self.fsm
+				.process(input, &mut self.swap, &self.ctx, height, &tx_conf, secp)
 		}
 
 		pub fn _get_tx_conf(&self) -> Result<SwapTransactionsConfirmations, ErrorKind> {
@@ -1748,7 +1934,9 @@ mod tests {
 
 		// Go to the next step
 		swap::set_testing_cur_time(START_TIME + 20);
-		let res = seller.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+		let res = seller
+			.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp())
+			.unwrap();
 		assert_eq!(seller.swap.state, StateId::SellerSendingOffer);
 		assert_eq!(
 			res.time_limit.clone().unwrap(),
@@ -1778,7 +1966,13 @@ mod tests {
 			kc_sell.secp(),
 		);
 		// Seller send the message, so confirming to FSM with that
-		let res = seller.process(Input::Execute, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+		let res = seller
+			.process(
+				Input::Execute,
+				nc.get_chain_tip().unwrap().0,
+				kc_sell.secp(),
+			)
+			.unwrap();
 		assert_eq!(
 			seller.swap.state,
 			StateId::SellerWaitingForAcceptanceMessage
@@ -1794,29 +1988,39 @@ mod tests {
 		);
 
 		// Let's test send retry logic
-		let res = seller.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+		let res = seller
+			.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp())
+			.unwrap();
 		assert_eq!(
 			res.next_state_id,
 			StateId::SellerWaitingForAcceptanceMessage
 		);
-		let res = seller.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+		let res = seller
+			.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp())
+			.unwrap();
 		assert_eq!(
 			res.next_state_id,
 			StateId::SellerWaitingForAcceptanceMessage
 		);
 
 		swap::set_testing_cur_time(swap::get_cur_time() + 61 * 5);
-		let res = seller.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+		let res = seller
+			.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp())
+			.unwrap();
 		assert_eq!(res.next_state_id, StateId::SellerSendingOffer);
 		// simulate ack that we get from the network...
 		seller.swap.ack_msg1();
-		let res = seller.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+		let res = seller
+			.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp())
+			.unwrap();
 		assert_eq!(
 			res.next_state_id,
 			StateId::SellerWaitingForAcceptanceMessage
 		);
 		swap::set_testing_cur_time(swap::get_cur_time() + 61 * 5);
-		let res = seller.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+		let res = seller
+			.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp())
+			.unwrap();
 		assert_eq!(
 			res.next_state_id,
 			StateId::SellerWaitingForAcceptanceMessage
@@ -2463,7 +2667,9 @@ mod tests {
 		);
 
 		swap::set_testing_cur_time(START_TIME + 120);
-		let res = buyer.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+		let res = buyer
+			.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp())
+			.unwrap();
 		assert_eq!(buyer.swap.state, StateId::BuyerSendingAcceptOfferMessage);
 		assert_eq!(
 			res.time_limit.clone().unwrap(),
@@ -2518,23 +2724,37 @@ mod tests {
 		);
 		swap::set_testing_cur_time(START_TIME + 130);
 		// Reporting that message is sent...
-		let res = buyer.process(Input::Execute, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+		let res = buyer
+			.process(
+				Input::Execute,
+				nc.get_chain_tip().unwrap().0,
+				kc_sell.secp(),
+			)
+			.unwrap();
 		assert_eq!(buyer.swap.state, StateId::BuyerWaitingForSellerToLock);
 		assert_eq!(res.next_state_id, buyer.swap.state);
 		assert_eq!(res.time_limit.clone().unwrap(), lock_start_timelimit);
 		assert_eq!(res.action.unwrap().get_id_str(), "WaitForMwcConfirmations");
 
 		// Checking send message retry...
-		let res = buyer.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+		let res = buyer
+			.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp())
+			.unwrap();
 		assert_eq!(res.next_state_id, StateId::BuyerWaitingForSellerToLock);
-		let res = buyer.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+		let res = buyer
+			.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp())
+			.unwrap();
 		assert_eq!(res.next_state_id, StateId::BuyerWaitingForSellerToLock);
 		swap::set_testing_cur_time(swap::get_cur_time() + 61 * 5);
-		let res = buyer.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+		let res = buyer
+			.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp())
+			.unwrap();
 		assert_eq!(res.next_state_id, StateId::BuyerSendingAcceptOfferMessage);
 		// simulate ack
 		buyer.swap.ack_msg1();
-		let res = buyer.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+		let res = buyer
+			.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp())
+			.unwrap();
 		assert_eq!(res.next_state_id, StateId::BuyerWaitingForSellerToLock);
 
 		// Seller is waiting for the message form the buyer...
@@ -2569,12 +2789,20 @@ mod tests {
 			// try to process wrong message
 			assert_eq!(
 				seller
-					.process(Input::IncomeMessage(message1.clone()), nc.get_chain_tip().unwrap().0, kc_sell.secp() )
+					.process(
+						Input::IncomeMessage(message1.clone()),
+						nc.get_chain_tip().unwrap().0,
+						kc_sell.secp()
+					)
 					.is_err(),
 				true
 			);
 			let res = seller
-				.process(Input::IncomeMessage(message2.clone()), nc.get_chain_tip().unwrap().0, kc_sell.secp() )
+				.process(
+					Input::IncomeMessage(message2.clone()),
+					nc.get_chain_tip().unwrap().0,
+					kc_sell.secp(),
+				)
 				.unwrap();
 			assert_eq!(seller.swap.state, StateId::SellerWaitingForBuyerLock);
 			assert_eq!(res.next_state_id, seller.swap.state);
@@ -2586,7 +2814,11 @@ mod tests {
 			// Double processing should be fine as well
 			assert_eq!(seller.swap.state, StateId::SellerWaitingForBuyerLock);
 			let res = seller
-				.process(Input::IncomeMessage(message2.clone()), nc.get_chain_tip().unwrap().0, kc_sell.secp() )
+				.process(
+					Input::IncomeMessage(message2.clone()),
+					nc.get_chain_tip().unwrap().0,
+					kc_sell.secp(),
+				)
 				.unwrap();
 			assert_eq!(res.next_state_id, StateId::SellerWaitingForBuyerLock);
 
@@ -2706,12 +2938,16 @@ mod tests {
 			buyer.pushs();
 			seller.pushs();
 
-			let res = buyer.process(Input::Cancel, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+			let res = buyer
+				.process(Input::Cancel, nc.get_chain_tip().unwrap().0, kc_sell.secp())
+				.unwrap();
 			assert_eq!(res.next_state_id, StateId::BuyerCancelled);
 			assert_eq!(res.action.is_some(), false);
 			assert_eq!(res.time_limit.is_some(), false);
 
-			let res = seller.process(Input::Cancel, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+			let res = seller
+				.process(Input::Cancel, nc.get_chain_tip().unwrap().0, kc_sell.secp())
+				.unwrap();
 			assert_eq!(res.next_state_id, StateId::SellerCancelled);
 			assert_eq!(res.action.is_some(), false);
 			assert_eq!(res.time_limit.is_some(), false);
@@ -2779,12 +3015,20 @@ mod tests {
 		// try to process wrong message
 		assert_eq!(
 			seller
-				.process(Input::IncomeMessage(message1.clone()), nc.get_chain_tip().unwrap().0, kc_sell.secp() )
+				.process(
+					Input::IncomeMessage(message1.clone()),
+					nc.get_chain_tip().unwrap().0,
+					kc_sell.secp()
+				)
 				.is_err(),
 			true
 		);
 		let res = seller
-			.process(Input::IncomeMessage(message2.clone()), nc.get_chain_tip().unwrap().0, kc_sell.secp() )
+			.process(
+				Input::IncomeMessage(message2.clone()),
+				nc.get_chain_tip().unwrap().0,
+				kc_sell.secp(),
+			)
 			.unwrap();
 		assert_eq!(seller.swap.state, StateId::SellerPostingLockMwcSlate);
 		assert_eq!(res.next_state_id, seller.swap.state);
@@ -2794,7 +3038,11 @@ mod tests {
 		// Double processing should be fine
 		assert_eq!(seller.swap.state, StateId::SellerPostingLockMwcSlate);
 		let res = seller
-			.process(Input::IncomeMessage(message2.clone()), nc.get_chain_tip().unwrap().0, kc_sell.secp() )
+			.process(
+				Input::IncomeMessage(message2.clone()),
+				nc.get_chain_tip().unwrap().0,
+				kc_sell.secp(),
+			)
 			.unwrap();
 		assert_eq!(res.next_state_id, StateId::SellerPostingLockMwcSlate);
 
@@ -2821,7 +3069,13 @@ mod tests {
 		let nc_nolock_state = nc.get_state();
 		{
 			// Let's check what happens if MWC is not published. Seller need to do a retry.
-			let res = seller.process(Input::Execute, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+			let res = seller
+				.process(
+					Input::Execute,
+					nc.get_chain_tip().unwrap().0,
+					kc_sell.secp(),
+				)
+				.unwrap();
 			assert_eq!(
 				seller.swap.state,
 				StateId::SellerWaitingForLockConfirmations
@@ -2845,11 +3099,22 @@ mod tests {
 			// nothing was mined, should be not confirmed yet
 
 			// Expecting that we will switch to the publish MWC lock state
-			let res = seller.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+			let res = seller
+				.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp())
+				.unwrap();
 			assert_eq!(seller.swap.state, StateId::SellerPostingLockMwcSlate);
 			assert_eq!(res.action.unwrap().get_id_str(), "SellerPublishMwcLockTx");
 			// SellerPostingLockMwcSlate expecting to fail because tx into the tx pool
-			assert_eq!(seller.process(Input::Execute, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).is_err(), true);
+			assert_eq!(
+				seller
+					.process(
+						Input::Execute,
+						nc.get_chain_tip().unwrap().0,
+						kc_sell.secp()
+					)
+					.is_err(),
+				true
+			);
 			// Let's check the cancel now is different.
 			test_responds(
 				&mut seller,
@@ -2872,7 +3137,9 @@ mod tests {
 				// BRANCH - Check if cancel in far future is different.
 				seller.pushs();
 				nc.mine_blocks(600);
-				let res = seller.process(Input::Cancel, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+				let res = seller
+					.process(Input::Cancel, nc.get_chain_tip().unwrap().0, kc_sell.secp())
+					.unwrap();
 				assert_eq!(res.next_state_id, StateId::SellerPostingRefundSlate);
 				seller.pops();
 			}
@@ -2899,7 +3166,13 @@ mod tests {
 				kc_sell.secp(),
 			);
 
-			let _res = seller.process(Input::Execute, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+			let _res = seller
+				.process(
+					Input::Execute,
+					nc.get_chain_tip().unwrap().0,
+					kc_sell.secp(),
+				)
+				.unwrap();
 			assert_eq!(
 				seller.swap.state,
 				StateId::SellerWaitingForLockConfirmations
@@ -2928,7 +3201,13 @@ mod tests {
 				kc_sell.secp(),
 			);
 
-			let _res = seller.process(Input::Execute, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+			let _res = seller
+				.process(
+					Input::Execute,
+					nc.get_chain_tip().unwrap().0,
+					kc_sell.secp(),
+				)
+				.unwrap();
 			assert_eq!(
 				seller.swap.state,
 				StateId::SellerWaitingForLockConfirmations
@@ -2945,7 +3224,11 @@ mod tests {
 				StateId::SellerWaitingForLockConfirmations
 			);
 			let res = seller
-				.process(Input::IncomeMessage(message2.clone()), nc.get_chain_tip().unwrap().0, kc_sell.secp() )
+				.process(
+					Input::IncomeMessage(message2.clone()),
+					nc.get_chain_tip().unwrap().0,
+					kc_sell.secp(),
+				)
 				.unwrap();
 			assert_eq!(
 				res.next_state_id,
@@ -2979,14 +3262,18 @@ mod tests {
 			nc.set_state(&nc_nolock_state);
 			// Expecting switch to SellerPostingLockMwcSlate
 			// not a time for retry
-			let res = seller.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+			let res = seller
+				.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp())
+				.unwrap();
 			assert_eq!(
 				res.next_state_id,
 				StateId::SellerWaitingForLockConfirmations
 			);
 			// let's trigger retry
 			swap::set_testing_cur_time(START_TIME + 150 + 60 * 5 * 3 + 3);
-			let res = seller.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+			let res = seller
+				.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp())
+				.unwrap();
 			assert_eq!(res.next_state_id, StateId::SellerPostingLockMwcSlate);
 			seller.pops();
 			// Last pop return us to a stage where seller already published MWC transaciton. So we can continue with Buyer
@@ -3016,7 +3303,9 @@ mod tests {
 
 			// No retry if MWC are posted...
 			buyer.swap.posted_msg1 = Some(swap::get_cur_time() - 60 * 10);
-			let res = buyer.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+			let res = buyer
+				.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp())
+				.unwrap();
 			assert_eq!(
 				res.next_state_id,
 				StateId::BuyerPostingSecondaryToMultisigAccount
@@ -3026,7 +3315,9 @@ mod tests {
 			buyer.pops();
 		}
 
-		let res = buyer.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+		let res = buyer
+			.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp())
+			.unwrap();
 		assert_eq!(
 			buyer.swap.state,
 			StateId::BuyerPostingSecondaryToMultisigAccount
@@ -3051,7 +3342,9 @@ mod tests {
 
 			// No retry if MWC are posted...
 			buyer.swap.posted_msg1 = Some(swap::get_cur_time() - 60 * 10);
-			let res = buyer.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+			let res = buyer
+				.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp())
+				.unwrap();
 			assert_eq!(
 				res.next_state_id,
 				StateId::BuyerPostingSecondaryToMultisigAccount
@@ -3064,12 +3357,16 @@ mod tests {
 			nc.set_state(&nc_nolock_state);
 			buyer.swap.posted_msg1 = Some(swap::get_cur_time());
 
-			let res = buyer.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+			let res = buyer
+				.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp())
+				.unwrap();
 			assert_eq!(
 				res.next_state_id,
 				StateId::BuyerPostingSecondaryToMultisigAccount
 			);
-			let res = buyer.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+			let res = buyer
+				.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp())
+				.unwrap();
 			assert_eq!(
 				res.next_state_id,
 				StateId::BuyerPostingSecondaryToMultisigAccount
@@ -3077,12 +3374,16 @@ mod tests {
 
 			swap::set_testing_cur_time(swap::get_cur_time() + 61 * 5);
 
-			let res = buyer.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+			let res = buyer
+				.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp())
+				.unwrap();
 			assert_eq!(res.next_state_id, StateId::BuyerSendingAcceptOfferMessage);
 			// simulate ack, so should return back to the current step
 			nc.set_state(&st);
 			buyer.swap.ack_msg1();
-			let res = buyer.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+			let res = buyer
+				.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp())
+				.unwrap();
 			assert_eq!(
 				res.next_state_id,
 				StateId::BuyerPostingSecondaryToMultisigAccount
@@ -3130,7 +3431,9 @@ mod tests {
 			nc.get_chain_tip().unwrap().0,
 			kc_sell.secp(),
 		);
-		let res = buyer.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+		let res = buyer
+			.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp())
+			.unwrap();
 		assert_eq!(
 			buyer.swap.state,
 			StateId::BuyerPostingSecondaryToMultisigAccount
@@ -3154,7 +3457,9 @@ mod tests {
 			buyer.pushs();
 			let cur_ts = swap::get_cur_time();
 			swap::set_testing_cur_time(btc_lock_time_limit + 1 + 600 * 5); // Will wait 5 blocks before refund
-			let res = buyer.process(Input::Cancel, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+			let res = buyer
+				.process(Input::Cancel, nc.get_chain_tip().unwrap().0, kc_sell.secp())
+				.unwrap();
 			assert_eq!(res.next_state_id, StateId::BuyerPostingRefundForSecondary);
 			swap::set_testing_cur_time(cur_ts);
 			buyer.pops();
@@ -3223,7 +3528,9 @@ mod tests {
 		}
 
 		// Buyer is good to go to the waiting step
-		let res = buyer.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+		let res = buyer
+			.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp())
+			.unwrap();
 		assert_eq!(buyer.swap.state, StateId::BuyerWaitingForLockConfirmations);
 		assert_eq!(res.time_limit.unwrap(), lock_second_message_round_timelimit);
 		assert_eq!(res.action.unwrap().get_id_str(), "WaitForLockConfirmations");
@@ -3251,7 +3558,9 @@ mod tests {
 
 			// No retry if MWC are posted...
 			buyer.swap.posted_msg1 = Some(swap::get_cur_time() - 60 * 10);
-			let res = buyer.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+			let res = buyer
+				.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp())
+				.unwrap();
 			assert_eq!(res.next_state_id, StateId::BuyerWaitingForLockConfirmations);
 			assert_eq!(buyer.swap.posted_msg1.unwrap(), u32::MAX as i64);
 
@@ -3261,19 +3570,27 @@ mod tests {
 			nc.set_state(&nc_nolock_state);
 			buyer.swap.posted_msg1 = Some(swap::get_cur_time());
 
-			let res = buyer.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+			let res = buyer
+				.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp())
+				.unwrap();
 			assert_eq!(res.next_state_id, StateId::BuyerWaitingForLockConfirmations);
-			let res = buyer.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+			let res = buyer
+				.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp())
+				.unwrap();
 			assert_eq!(res.next_state_id, StateId::BuyerWaitingForLockConfirmations);
 
 			swap::set_testing_cur_time(swap::get_cur_time() + 61 * 5);
 
-			let res = buyer.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+			let res = buyer
+				.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp())
+				.unwrap();
 			assert_eq!(res.next_state_id, StateId::BuyerSendingAcceptOfferMessage);
 			// simulate ack, so should return back to the current step
 			buyer.swap.ack_msg1();
 			nc.set_state(&st);
-			let res = buyer.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+			let res = buyer
+				.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp())
+				.unwrap();
 			assert_eq!(res.next_state_id, StateId::BuyerWaitingForLockConfirmations);
 
 			buyer.pops();
@@ -3320,7 +3637,9 @@ mod tests {
 				nc.get_chain_tip().unwrap().0,
 				kc_sell.secp(),
 			);
-			let res = buyer.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+			let res = buyer
+				.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp())
+				.unwrap();
 			assert_eq!(
 				buyer.swap.state,
 				StateId::BuyerPostingSecondaryToMultisigAccount
@@ -3355,7 +3674,9 @@ mod tests {
 
 			let time_to_restore = swap::get_cur_time();
 
-			let res = buyer.process(Input::Cancel, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+			let res = buyer
+				.process(Input::Cancel, nc.get_chain_tip().unwrap().0, kc_sell.secp())
+				.unwrap();
 			assert_eq!(res.next_state_id, StateId::BuyerWaitingForRefundTime);
 			assert_eq!(res.action.unwrap().get_id_str(), "WaitingForBtcRefund");
 			assert_eq!(res.time_limit.unwrap(), btc_lock_time_limit + 600 * 5); // waiting for 5 extra blocks before refund
@@ -3363,7 +3684,9 @@ mod tests {
 			let lock_height = seller.swap.refund_slate.lock_height;
 			let need_blocks = lock_height - nc.state.lock().height;
 
-			let res = seller.process(Input::Cancel, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+			let res = seller
+				.process(Input::Cancel, nc.get_chain_tip().unwrap().0, kc_sell.secp())
+				.unwrap();
 			assert_eq!(res.next_state_id, StateId::SellerWaitingForRefundHeight);
 			assert_eq!(res.action.unwrap().get_id_str(), "WaitForMwcRefundUnlock");
 			assert_eq!(
@@ -3408,7 +3731,9 @@ mod tests {
 				kc_sell.secp(),
 			);
 
-			let res = seller.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+			let res = seller
+				.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp())
+				.unwrap();
 			assert_eq!(res.next_state_id, StateId::SellerPostingRefundSlate);
 			assert_eq!(res.action.unwrap().get_id_str(), "SellerPublishMwcRefundTx");
 			assert_eq!(res.time_limit.is_none(), true);
@@ -3432,7 +3757,13 @@ mod tests {
 
 			let nc_state_prepost = nc.get_state();
 
-			let res = seller.process(Input::Execute, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+			let res = seller
+				.process(
+					Input::Execute,
+					nc.get_chain_tip().unwrap().0,
+					kc_sell.secp(),
+				)
+				.unwrap();
 			assert_eq!(
 				res.next_state_id,
 				StateId::SellerWaitingForRefundConfirmations
@@ -3440,21 +3771,38 @@ mod tests {
 			assert_eq!(res.action.unwrap().get_id_str(), "WaitForMwcConfirmations");
 			assert_eq!(res.time_limit.is_none(), true);
 			// Checking post retry workflow. nc not mined, so not cofirmed until
-			let res = seller.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+			let res = seller
+				.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp())
+				.unwrap();
 			assert_eq!(
 				res.next_state_id,
 				StateId::SellerWaitingForRefundConfirmations
 			);
 			//
 			swap::set_testing_cur_time(swap::get_cur_time() + 60 * 6);
-			let res = seller.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+			let res = seller
+				.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp())
+				.unwrap();
 			assert_eq!(res.next_state_id, StateId::SellerPostingRefundSlate);
 			// test network not supported repost
-			assert_eq!(seller.process(Input::Execute, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).is_err(), true);
-			let res = seller.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+			assert_eq!(
+				seller
+					.process(
+						Input::Execute,
+						nc.get_chain_tip().unwrap().0,
+						kc_sell.secp()
+					)
+					.is_err(),
+				true
+			);
+			let res = seller
+				.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp())
+				.unwrap();
 			assert_eq!(res.next_state_id, StateId::SellerPostingRefundSlate);
 			nc.mine_block();
-			let res = seller.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+			let res = seller
+				.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp())
+				.unwrap();
 			assert_eq!(
 				res.next_state_id,
 				StateId::SellerWaitingForRefundConfirmations
@@ -3462,15 +3810,25 @@ mod tests {
 
 			// reorg should trigger retry
 			nc.set_state(&nc_state_prepost);
-			let res = seller.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+			let res = seller
+				.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp())
+				.unwrap();
 			assert_eq!(res.next_state_id, StateId::SellerPostingRefundSlate);
-			let res = seller.process(Input::Execute, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+			let res = seller
+				.process(
+					Input::Execute,
+					nc.get_chain_tip().unwrap().0,
+					kc_sell.secp(),
+				)
+				.unwrap();
 			assert_eq!(
 				res.next_state_id,
 				StateId::SellerWaitingForRefundConfirmations
 			);
 			nc.mine_block();
-			let res = seller.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+			let res = seller
+				.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp())
+				.unwrap();
 			assert_eq!(
 				res.next_state_id,
 				StateId::SellerWaitingForRefundConfirmations
@@ -3514,7 +3872,9 @@ mod tests {
 				kc_sell.secp(),
 			);
 
-			let res = seller.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+			let res = seller
+				.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp())
+				.unwrap();
 			assert_eq!(res.next_state_id, StateId::SellerCancelledRefunded);
 			assert_eq!(res.action.is_none(), true);
 			assert_eq!(res.time_limit.is_none(), true);
@@ -3539,7 +3899,9 @@ mod tests {
 
 			swap::set_testing_cur_time(btc_lock_time_limit + 1 + 600 * 5);
 
-			let res = buyer.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+			let res = buyer
+				.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp())
+				.unwrap();
 			assert_eq!(res.next_state_id, StateId::BuyerPostingRefundForSecondary);
 			assert_eq!(
 				res.action.unwrap().get_id_str(),
@@ -3566,7 +3928,13 @@ mod tests {
 
 			let btc_state_prerefund = btc_nc.get_state();
 
-			let res = buyer.process(Input::Execute, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+			let res = buyer
+				.process(
+					Input::Execute,
+					nc.get_chain_tip().unwrap().0,
+					kc_sell.secp(),
+				)
+				.unwrap();
 			assert_eq!(
 				res.next_state_id,
 				StateId::BuyerWaitingForRefundConfirmations
@@ -3576,7 +3944,9 @@ mod tests {
 				"WaitForSecondaryConfirmations"
 			);
 			assert_eq!(res.time_limit.is_none(), true);
-			let res = buyer.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+			let res = buyer
+				.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp())
+				.unwrap();
 			assert_eq!(
 				res.next_state_id,
 				StateId::BuyerWaitingForRefundConfirmations
@@ -3588,21 +3958,27 @@ mod tests {
 				buyer.pushs();
 				let cur_time = swap::get_cur_time();
 
-				let res = buyer.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+				let res = buyer
+					.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp())
+					.unwrap();
 				assert_eq!(
 					res.next_state_id,
 					StateId::BuyerWaitingForRefundConfirmations
 				);
 
 				swap::set_testing_cur_time(cur_time * 61 * 5);
-				let res = buyer.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+				let res = buyer
+					.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp())
+					.unwrap();
 				assert_eq!(
 					res.next_state_id,
 					StateId::BuyerWaitingForRefundConfirmations
 				);
 				// Changing fees, expecting to switch back to the posting
 				buyer.swap.secondary_fee = 12.0;
-				let res = buyer.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+				let res = buyer
+					.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp())
+					.unwrap();
 				assert_eq!(res.next_state_id, StateId::BuyerPostingRefundForSecondary);
 
 				swap::set_testing_cur_time(cur_time);
@@ -3613,17 +3989,23 @@ mod tests {
 			let btc_state_refund_posted = btc_nc.get_state();
 			btc_nc.set_state(&btc_state_prerefund);
 			// no retry because of timeout
-			let res = buyer.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+			let res = buyer
+				.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp())
+				.unwrap();
 			assert_eq!(
 				res.next_state_id,
 				StateId::BuyerWaitingForRefundConfirmations
 			);
 			swap::set_testing_cur_time(swap::get_cur_time() + 60 * 6);
-			let res = buyer.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+			let res = buyer
+				.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp())
+				.unwrap();
 			assert_eq!(res.next_state_id, StateId::BuyerPostingRefundForSecondary);
 			// Check be restored
 			btc_nc.set_state(&btc_state_refund_posted);
-			let res = buyer.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+			let res = buyer
+				.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp())
+				.unwrap();
 			assert_eq!(
 				res.next_state_id,
 				StateId::BuyerWaitingForRefundConfirmations
@@ -3632,7 +4014,9 @@ mod tests {
 			let fee = buyer.swap.secondary_fee;
 			btc_nc.mine_blocks_no_pending(9);
 			swap::set_testing_cur_time(swap::get_cur_time() + 60 * 6);
-			let res = buyer.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+			let res = buyer
+				.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp())
+				.unwrap();
 			assert_eq!(
 				res.next_state_id,
 				StateId::BuyerWaitingForRefundConfirmations
@@ -3663,21 +4047,27 @@ mod tests {
 				buyer.pushs();
 				let cur_time = swap::get_cur_time();
 
-				let res = buyer.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+				let res = buyer
+					.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp())
+					.unwrap();
 				assert_eq!(
 					res.next_state_id,
 					StateId::BuyerWaitingForRefundConfirmations
 				);
 
 				swap::set_testing_cur_time(cur_time * 61 * 5);
-				let res = buyer.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+				let res = buyer
+					.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp())
+					.unwrap();
 				assert_eq!(
 					res.next_state_id,
 					StateId::BuyerWaitingForRefundConfirmations
 				);
 				// Changing fees, expecting to switch back to the posting
 				buyer.swap.secondary_fee = 12.0;
-				let res = buyer.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+				let res = buyer
+					.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp())
+					.unwrap();
 				assert_eq!(
 					res.next_state_id,
 					StateId::BuyerWaitingForRefundConfirmations
@@ -3705,7 +4095,9 @@ mod tests {
 				kc_sell.secp(),
 			);
 
-			let res = buyer.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+			let res = buyer
+				.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp())
+				.unwrap();
 			assert_eq!(res.next_state_id, StateId::BuyerCancelledRefunded);
 			assert_eq!(res.action.is_none(), true);
 			assert_eq!(res.time_limit.is_none(), true);
@@ -3727,7 +4119,9 @@ mod tests {
 				kc_sell.secp(),
 			);
 
-			let res = buyer.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+			let res = buyer
+				.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp())
+				.unwrap();
 			assert_eq!(res.next_state_id, StateId::BuyerCancelledRefunded);
 			assert_eq!(res.action.is_none(), true);
 			assert_eq!(res.time_limit.is_none(), true);
@@ -3903,7 +4297,9 @@ mod tests {
 			kc_sell.secp(),
 		);
 
-		let res = buyer.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+		let res = buyer
+			.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp())
+			.unwrap();
 		assert_eq!(res.next_state_id, StateId::BuyerSendingInitRedeemMessage);
 		assert_eq!(res.time_limit.unwrap(), lock_second_message_round_timelimit);
 		let message3 = match res.action.unwrap() {
@@ -3921,7 +4317,11 @@ mod tests {
 			);
 			assert_eq!(
 				seller
-					.process(Input::IncomeMessage(message3.clone()), nc.get_chain_tip().unwrap().0, kc_sell.secp() )
+					.process(
+						Input::IncomeMessage(message3.clone()),
+						nc.get_chain_tip().unwrap().0,
+						kc_sell.secp()
+					)
 					.is_ok(),
 				true
 			);
@@ -3929,7 +4329,9 @@ mod tests {
 			seller.pops();
 		}
 
-		let res = seller.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+		let res = seller
+			.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp())
+			.unwrap();
 		assert_eq!(
 			res.next_state_id,
 			StateId::SellerWaitingForInitRedeemMessage
@@ -4076,7 +4478,13 @@ mod tests {
 
 		// Message is already known from steps above, it is message3.
 		// Finishing execution
-		let res = buyer.process(Input::Execute, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+		let res = buyer
+			.process(
+				Input::Execute,
+				nc.get_chain_tip().unwrap().0,
+				kc_sell.secp(),
+			)
+			.unwrap();
 		assert_eq!(
 			res.next_state_id,
 			StateId::BuyerWaitingForRespondRedeemMessage
@@ -4088,16 +4496,22 @@ mod tests {
 		);
 
 		// Checking send message retry
-		let res = buyer.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+		let res = buyer
+			.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp())
+			.unwrap();
 		assert_eq!(
 			res.next_state_id,
 			StateId::BuyerWaitingForRespondRedeemMessage
 		);
 		swap::set_testing_cur_time(swap::get_cur_time() + 61 * 5);
-		let res = buyer.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+		let res = buyer
+			.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp())
+			.unwrap();
 		assert_eq!(res.next_state_id, StateId::BuyerSendingInitRedeemMessage);
 		buyer.swap.ack_msg2();
-		let res = buyer.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+		let res = buyer
+			.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp())
+			.unwrap();
 		assert_eq!(
 			res.next_state_id,
 			StateId::BuyerWaitingForRespondRedeemMessage
@@ -4105,18 +4519,30 @@ mod tests {
 
 		assert_eq!(
 			seller
-				.process(Input::IncomeMessage(message1.clone()), nc.get_chain_tip().unwrap().0, kc_sell.secp() )
+				.process(
+					Input::IncomeMessage(message1.clone()),
+					nc.get_chain_tip().unwrap().0,
+					kc_sell.secp()
+				)
 				.is_err(),
 			true
 		);
 		assert_eq!(
 			seller
-				.process(Input::IncomeMessage(message2.clone()), nc.get_chain_tip().unwrap().0, kc_sell.secp() )
+				.process(
+					Input::IncomeMessage(message2.clone()),
+					nc.get_chain_tip().unwrap().0,
+					kc_sell.secp()
+				)
 				.is_err(),
 			true
 		);
 		let res = seller
-			.process(Input::IncomeMessage(message3.clone()), nc.get_chain_tip().unwrap().0, kc_sell.secp() )
+			.process(
+				Input::IncomeMessage(message3.clone()),
+				nc.get_chain_tip().unwrap().0,
+				kc_sell.secp(),
+			)
 			.unwrap();
 		assert_eq!(res.next_state_id, StateId::SellerSendingInitRedeemMessage);
 		assert_eq!(res.time_limit.unwrap(), lock_second_message_round_timelimit);
@@ -4180,21 +4606,35 @@ mod tests {
 
 			// Buyer is getting the messege but never respond back.
 			let res = buyer
-				.process(Input::IncomeMessage(message4.clone()), nc.get_chain_tip().unwrap().0, kc_sell.secp() )
+				.process(
+					Input::IncomeMessage(message4.clone()),
+					nc.get_chain_tip().unwrap().0,
+					kc_sell.secp(),
+				)
 				.unwrap();
 			assert_eq!(res.next_state_id, StateId::BuyerRedeemMwc);
 			// Still nothing happens, seller still sending the message
-			let res = seller.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+			let res = seller
+				.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp())
+				.unwrap();
 			assert_eq!(res.next_state_id, StateId::SellerSendingInitRedeemMessage);
 
 			// Buyer posting MWC slate
-			let res = buyer.process(Input::Execute, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+			let res = buyer
+				.process(
+					Input::Execute,
+					nc.get_chain_tip().unwrap().0,
+					kc_sell.secp(),
+				)
+				.unwrap();
 			assert_eq!(
 				res.next_state_id,
 				StateId::BuyerWaitForRedeemMwcConfirmations
 			);
 			// Still nothing happens, seller still sending the message
-			let res = seller.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+			let res = seller
+				.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp())
+				.unwrap();
 			assert_eq!(res.next_state_id, StateId::SellerSendingInitRedeemMessage);
 
 			// The block is mined, so the secret can be revealed
@@ -4202,7 +4642,9 @@ mod tests {
 
 			// Now seller should detect the fact that MWC are redeemed, the secret is revealed, so the message does delivered
 			assert_eq!(seller.swap.posted_msg2.is_none(), true);
-			let res = seller.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+			let res = seller
+				.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp())
+				.unwrap();
 			assert_eq!(res.next_state_id, StateId::SellerRedeemSecondaryCurrency);
 			assert_eq!(seller.swap.posted_msg2.is_none(), false);
 
@@ -4262,19 +4704,27 @@ mod tests {
 			swap::set_testing_cur_time(START_TIME + MSG_EXCHANGE_TIME);
 
 			// Checking if glitch will be recoverable...
-			let res = buyer.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+			let res = buyer
+				.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp())
+				.unwrap();
 			assert_eq!(res.next_state_id, StateId::BuyerWaitingForLockConfirmations);
-			let res = seller.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+			let res = seller
+				.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp())
+				.unwrap();
 			assert_eq!(res.next_state_id, StateId::SellerPostingLockMwcSlate);
 
 			nc.set_state(&nc_state);
 
-			let res = buyer.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+			let res = buyer
+				.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp())
+				.unwrap();
 			assert_eq!(
 				res.next_state_id,
 				StateId::BuyerWaitingForRespondRedeemMessage
 			);
-			let res = seller.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+			let res = seller
+				.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp())
+				.unwrap();
 			assert_eq!(res.next_state_id, StateId::SellerSendingInitRedeemMessage);
 
 			swap::set_testing_cur_time(cur_time);
@@ -4354,7 +4804,13 @@ mod tests {
 		}
 
 		// processing message
-		let res = seller.process(Input::Execute, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+		let res = seller
+			.process(
+				Input::Execute,
+				nc.get_chain_tip().unwrap().0,
+				kc_sell.secp(),
+			)
+			.unwrap();
 		assert_eq!(res.next_state_id, StateId::SellerWaitingForBuyerToRedeemMwc);
 		assert_eq!(
 			res.time_limit.unwrap(),
@@ -4372,35 +4828,57 @@ mod tests {
 		);
 
 		// Check if send message retyr does work as expected
-		let res = seller.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+		let res = seller
+			.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp())
+			.unwrap();
 		assert_eq!(res.next_state_id, StateId::SellerWaitingForBuyerToRedeemMwc);
 		swap::set_testing_cur_time(swap::get_cur_time() + 61 * 5);
-		let res = seller.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+		let res = seller
+			.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp())
+			.unwrap();
 		assert_eq!(res.next_state_id, StateId::SellerSendingInitRedeemMessage);
 		seller.swap.ack_msg2();
-		let res = seller.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+		let res = seller
+			.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp())
+			.unwrap();
 		assert_eq!(res.next_state_id, StateId::SellerWaitingForBuyerToRedeemMwc);
 
 		assert_eq!(
 			buyer
-				.process(Input::IncomeMessage(message1.clone()), nc.get_chain_tip().unwrap().0, kc_sell.secp() )
+				.process(
+					Input::IncomeMessage(message1.clone()),
+					nc.get_chain_tip().unwrap().0,
+					kc_sell.secp()
+				)
 				.is_err(),
 			true
 		);
 		assert_eq!(
 			buyer
-				.process(Input::IncomeMessage(message2.clone()), nc.get_chain_tip().unwrap().0, kc_sell.secp() )
+				.process(
+					Input::IncomeMessage(message2.clone()),
+					nc.get_chain_tip().unwrap().0,
+					kc_sell.secp()
+				)
 				.is_err(),
 			true
 		);
 		assert_eq!(
 			buyer
-				.process(Input::IncomeMessage(message3.clone()), nc.get_chain_tip().unwrap().0, kc_sell.secp() )
+				.process(
+					Input::IncomeMessage(message3.clone()),
+					nc.get_chain_tip().unwrap().0,
+					kc_sell.secp()
+				)
 				.is_err(),
 			true
 		);
 		let res = buyer
-			.process(Input::IncomeMessage(message4.clone()), nc.get_chain_tip().unwrap().0, kc_sell.secp() )
+			.process(
+				Input::IncomeMessage(message4.clone()),
+				nc.get_chain_tip().unwrap().0,
+				kc_sell.secp(),
+			)
 			.unwrap();
 		assert_eq!(res.next_state_id, StateId::BuyerRedeemMwc);
 		assert_eq!(
@@ -4412,7 +4890,11 @@ mod tests {
 		// Double processing should be fine
 		assert_eq!(buyer.swap.state, StateId::BuyerRedeemMwc);
 		let res = buyer
-			.process(Input::IncomeMessage(message4.clone()), nc.get_chain_tip().unwrap().0, kc_sell.secp() )
+			.process(
+				Input::IncomeMessage(message4.clone()),
+				nc.get_chain_tip().unwrap().0,
+				kc_sell.secp(),
+			)
 			.unwrap();
 		assert_eq!(res.next_state_id, StateId::BuyerRedeemMwc);
 
@@ -4512,34 +4994,59 @@ mod tests {
 				// ----------------------------------------------------
 				// Try scenario: Buyer does redeem. It rolled back, so it will retry.
 				//    Seller does nothing
-				let res = buyer.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+				let res = buyer
+					.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp())
+					.unwrap();
 				assert_eq!(res.next_state_id, StateId::BuyerRedeemMwc);
 
-				let res = buyer.process(Input::Execute, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+				let res = buyer
+					.process(
+						Input::Execute,
+						nc.get_chain_tip().unwrap().0,
+						kc_sell.secp(),
+					)
+					.unwrap();
 				assert_eq!(
 					res.next_state_id,
 					StateId::BuyerWaitForRedeemMwcConfirmations
 				);
 
-				let res = buyer.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+				let res = buyer
+					.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp())
+					.unwrap();
 				assert_eq!(
 					res.next_state_id,
 					StateId::BuyerWaitForRedeemMwcConfirmations
 				);
 				// Check retry at the same block...
 				swap::set_testing_cur_time(swap::get_cur_time() + 60 * 6);
-				let res = buyer.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+				let res = buyer
+					.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp())
+					.unwrap();
 				assert_eq!(res.next_state_id, StateId::BuyerRedeemMwc);
-				assert_eq!(buyer.process(Input::Execute, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).is_err(), true); // For test node, repost doesn't work by some reasons
-														  // We should be good now
+				assert_eq!(
+					buyer
+						.process(
+							Input::Execute,
+							nc.get_chain_tip().unwrap().0,
+							kc_sell.secp()
+						)
+						.is_err(),
+					true
+				); // For test node, repost doesn't work by some reasons
+   // We should be good now
 				nc.mine_block();
-				let res = buyer.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+				let res = buyer
+					.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp())
+					.unwrap();
 				assert_eq!(
 					res.next_state_id,
 					StateId::BuyerWaitForRedeemMwcConfirmations
 				);
 				swap::set_testing_cur_time(swap::get_cur_time() + 60 * 6);
-				let res = buyer.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+				let res = buyer
+					.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp())
+					.unwrap();
 				assert_eq!(
 					res.next_state_id,
 					StateId::BuyerWaitForRedeemMwcConfirmations
@@ -4549,41 +5056,59 @@ mod tests {
 
 				// Do roll back
 				nc.set_state(&nc_state_ready);
-				let res = buyer.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+				let res = buyer
+					.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp())
+					.unwrap();
 				assert_eq!(res.next_state_id, StateId::BuyerRedeemMwc);
 				// Switch to exist data
 				nc.set_state(&state_with_redeem);
-				let res = buyer.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+				let res = buyer
+					.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp())
+					.unwrap();
 				assert_eq!(
 					res.next_state_id,
 					StateId::BuyerWaitForRedeemMwcConfirmations
 				);
 				// Do roll back & publish
 				nc.set_state(&nc_state_ready);
-				let res = buyer.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+				let res = buyer
+					.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp())
+					.unwrap();
 				assert_eq!(res.next_state_id, StateId::BuyerRedeemMwc);
-				let res = buyer.process(Input::Execute, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+				let res = buyer
+					.process(
+						Input::Execute,
+						nc.get_chain_tip().unwrap().0,
+						kc_sell.secp(),
+					)
+					.unwrap();
 				assert_eq!(
 					res.next_state_id,
 					StateId::BuyerWaitForRedeemMwcConfirmations
 				);
 				nc.mine_block();
 				swap::set_testing_cur_time(swap::get_cur_time() + 60 * 6);
-				let res = buyer.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+				let res = buyer
+					.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp())
+					.unwrap();
 				assert_eq!(
 					res.next_state_id,
 					StateId::BuyerWaitForRedeemMwcConfirmations
 				);
 				nc.mine_block();
 				swap::set_testing_cur_time(swap::get_cur_time() + 60 * 6);
-				let res = buyer.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+				let res = buyer
+					.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp())
+					.unwrap();
 				assert_eq!(
 					res.next_state_id,
 					StateId::BuyerWaitForRedeemMwcConfirmations
 				);
 				nc.mine_block();
 				swap::set_testing_cur_time(swap::get_cur_time() + 60 * 6);
-				let res = buyer.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+				let res = buyer
+					.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp())
+					.unwrap();
 				assert_eq!(
 					res.next_state_id,
 					StateId::BuyerWaitForRedeemMwcConfirmations
@@ -4595,11 +5120,19 @@ mod tests {
 				seller.pushs();
 				// ----------------------------------------------------
 				// Try scenario: Do Refund with reties. Buyer does nothing.
-				let res = seller.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+				let res = seller
+					.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp())
+					.unwrap();
 				assert_eq!(res.next_state_id, StateId::SellerPostingRefundSlate);
 				assert_eq!(res.action.unwrap().get_id_str(), "SellerPublishMwcRefundTx");
 				assert_eq!(res.time_limit.is_none(), true);
-				let res = seller.process(Input::Execute, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+				let res = seller
+					.process(
+						Input::Execute,
+						nc.get_chain_tip().unwrap().0,
+						kc_sell.secp(),
+					)
+					.unwrap();
 				assert_eq!(
 					res.next_state_id,
 					StateId::SellerWaitingForRefundConfirmations
@@ -4608,7 +5141,9 @@ mod tests {
 				assert_eq!(res.time_limit.is_none(), true);
 				// Let's do retry cycle. for the post
 				// Still waiting, no retry
-				let res = seller.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+				let res = seller
+					.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp())
+					.unwrap();
 				assert_eq!(
 					res.next_state_id,
 					StateId::SellerWaitingForRefundConfirmations
@@ -4627,11 +5162,15 @@ mod tests {
 				assert_eq!(res.time_limit.is_none(), true);
 				// Retry should be triggered.
 				swap::set_testing_cur_time(swap::get_cur_time() + 6 * 60);
-				let res = seller.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+				let res = seller
+					.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp())
+					.unwrap();
 				assert_eq!(res.next_state_id, StateId::SellerPostingRefundSlate);
 				nc.mine_blocks(2);
 				// Now transaction is visible, we don't need to repost any more. Let's check how we handle that.
-				let res = seller.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+				let res = seller
+					.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp())
+					.unwrap();
 				assert_eq!(
 					res.next_state_id,
 					StateId::SellerWaitingForRefundConfirmations
@@ -4650,7 +5189,9 @@ mod tests {
 				//let nc_state_refund = nc.get_state();
 				// Let's simulate the reog
 				nc.set_state(&nc_state_ready);
-				let res = seller.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+				let res = seller
+					.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp())
+					.unwrap();
 				assert_eq!(res.next_state_id, StateId::SellerPostingRefundSlate);
 				seller.pops();
 			}
@@ -4662,7 +5203,13 @@ mod tests {
 			{
 				buyer.pushs();
 				seller.pushs();
-				let res = buyer.process(Input::Execute, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+				let res = buyer
+					.process(
+						Input::Execute,
+						nc.get_chain_tip().unwrap().0,
+						kc_sell.secp(),
+					)
+					.unwrap();
 				assert_eq!(
 					res.next_state_id,
 					StateId::BuyerWaitForRedeemMwcConfirmations
@@ -4670,10 +5217,14 @@ mod tests {
 				assert_eq!(res.action.unwrap().get_id_str(), "WaitForMwcConfirmations");
 				assert_eq!(res.time_limit.is_none(), true);
 				// Seller doesn't see the transaction yet
-				let res = seller.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+				let res = seller
+					.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp())
+					.unwrap();
 				assert_eq!(res.next_state_id, StateId::SellerPostingRefundSlate);
 				nc.mine_blocks(1);
-				let res = seller.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+				let res = seller
+					.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp())
+					.unwrap();
 				assert_eq!(res.next_state_id, StateId::SellerRedeemSecondaryCurrency);
 
 				// Let's mwc chain to loos all data, it shoudn't affect anything at that stage
@@ -4689,7 +5240,9 @@ mod tests {
 					false
 				);
 
-				let res = seller.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+				let res = seller
+					.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp())
+					.unwrap();
 				assert_eq!(res.next_state_id, StateId::SellerRedeemSecondaryCurrency);
 				// Check if refund was posted...
 				nc.mine_block();
@@ -4717,7 +5270,13 @@ mod tests {
 					false
 				);
 
-				let res = seller.process(Input::Execute, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+				let res = seller
+					.process(
+						Input::Execute,
+						nc.get_chain_tip().unwrap().0,
+						kc_sell.secp(),
+					)
+					.unwrap();
 				assert_eq!(
 					res.next_state_id,
 					StateId::SellerWaitingForRedeemConfirmations
@@ -4746,7 +5305,9 @@ mod tests {
 					false
 				);
 
-				let res = seller.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+				let res = seller
+					.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp())
+					.unwrap();
 				assert_eq!(
 					res.next_state_id,
 					StateId::SellerWaitingForRedeemConfirmations
@@ -4776,7 +5337,9 @@ mod tests {
 					false
 				);
 
-				let res = seller.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+				let res = seller
+					.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp())
+					.unwrap();
 				assert_eq!(res.next_state_id, StateId::SellerSwapComplete);
 				nc.mine_block();
 				assert_eq!(
@@ -4802,7 +5365,9 @@ mod tests {
 					.is_some(),
 					false
 				);
-				let res = seller.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+				let res = seller
+					.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp())
+					.unwrap();
 				assert_eq!(res.next_state_id, StateId::SellerSwapComplete);
 				nc.mine_block();
 				assert_eq!(
@@ -4828,29 +5393,52 @@ mod tests {
 				buyer.pushs();
 				seller.pushs();
 
-				let res = seller.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+				let res = seller
+					.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp())
+					.unwrap();
 				assert_eq!(res.next_state_id, StateId::SellerPostingRefundSlate);
-				let res = seller.process(Input::Execute, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+				let res = seller
+					.process(
+						Input::Execute,
+						nc.get_chain_tip().unwrap().0,
+						kc_sell.secp(),
+					)
+					.unwrap();
 				assert_eq!(
 					res.next_state_id,
 					StateId::SellerWaitingForRefundConfirmations
 				);
 
 				nc.mine_block();
-				let res = seller.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+				let res = seller
+					.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp())
+					.unwrap();
 				assert_eq!(
 					res.next_state_id,
 					StateId::SellerWaitingForRefundConfirmations
 				);
 
-				let res = buyer.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+				let res = buyer
+					.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp())
+					.unwrap();
 				assert_eq!(res.next_state_id, StateId::BuyerRedeemMwc);
 				// Check if Buyer can't publish tx
-				assert_eq!(buyer.process(Input::Execute, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).is_err(), true);
+				assert_eq!(
+					buyer
+						.process(
+							Input::Execute,
+							nc.get_chain_tip().unwrap().0,
+							kc_sell.secp()
+						)
+						.is_err(),
+					true
+				);
 
 				// let's rollback. So buyer can publish...
 				// Validate seller retry logic first...
-				let res = seller.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+				let res = seller
+					.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp())
+					.unwrap();
 				assert_eq!(
 					res.next_state_id,
 					StateId::SellerWaitingForRefundConfirmations
@@ -4866,10 +5454,18 @@ mod tests {
 					nc.set_state(&nc_state_ready);
 					nc.mine_blocks(2);
 
-					let res = seller.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+					let res = seller
+						.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp())
+						.unwrap();
 					assert_eq!(res.next_state_id, StateId::SellerPostingRefundSlate);
 
-					let res = buyer.process(Input::Execute, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+					let res = buyer
+						.process(
+							Input::Execute,
+							nc.get_chain_tip().unwrap().0,
+							kc_sell.secp(),
+						)
+						.unwrap();
 					assert_eq!(
 						res.next_state_id,
 						StateId::BuyerWaitForRedeemMwcConfirmations
@@ -4877,16 +5473,26 @@ mod tests {
 
 					nc.mine_block();
 
-					let res = seller.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+					let res = seller
+						.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp())
+						.unwrap();
 					assert_eq!(res.next_state_id, StateId::SellerRedeemSecondaryCurrency);
-					let res = seller.process(Input::Execute, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+					let res = seller
+						.process(
+							Input::Execute,
+							nc.get_chain_tip().unwrap().0,
+							kc_sell.secp(),
+						)
+						.unwrap();
 					assert_eq!(
 						res.next_state_id,
 						StateId::SellerWaitingForRedeemConfirmations
 					);
 
 					// Checking seller retry logic for Secondary redeem
-					let res = seller.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+					let res = seller
+						.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp())
+						.unwrap();
 					assert_eq!(
 						res.next_state_id,
 						StateId::SellerWaitingForRedeemConfirmations
@@ -4894,24 +5500,32 @@ mod tests {
 					// reset data
 					let btc_state_posted = btc_nc.get_state();
 					btc_nc.set_state(&btc_state_ready);
-					let res = seller.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+					let res = seller
+						.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp())
+						.unwrap();
 					assert_eq!(
 						res.next_state_id,
 						StateId::SellerWaitingForRedeemConfirmations
 					);
 					// timeout is over, shold switch to post state
 					swap::set_testing_cur_time(swap::get_cur_time() + 60 * 6);
-					let res = seller.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+					let res = seller
+						.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp())
+						.unwrap();
 					assert_eq!(res.next_state_id, StateId::SellerRedeemSecondaryCurrency);
 					// let's recover the network.
 					btc_nc.set_state(&btc_state_posted);
-					let res = seller.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+					let res = seller
+						.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp())
+						.unwrap();
 					assert_eq!(
 						res.next_state_id,
 						StateId::SellerWaitingForRedeemConfirmations
 					);
 					btc_nc.mine_block();
-					let res = buyer.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+					let res = buyer
+						.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp())
+						.unwrap();
 					assert_eq!(
 						res.next_state_id,
 						StateId::BuyerWaitForRedeemMwcConfirmations
@@ -4928,13 +5542,21 @@ mod tests {
 				nc.mine_blocks(2);
 
 				// Interruption at SellerWaitingForRefundConfirmations and continue
-				let res = seller.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+				let res = seller
+					.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp())
+					.unwrap();
 				assert_eq!(
 					res.next_state_id,
 					StateId::SellerWaitingForRefundConfirmations
 				);
 
-				let res = buyer.process(Input::Execute, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+				let res = buyer
+					.process(
+						Input::Execute,
+						nc.get_chain_tip().unwrap().0,
+						kc_sell.secp(),
+					)
+					.unwrap();
 				assert_eq!(
 					res.next_state_id,
 					StateId::BuyerWaitForRedeemMwcConfirmations
@@ -4942,14 +5564,24 @@ mod tests {
 
 				nc.mine_block();
 
-				let res = seller.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+				let res = seller
+					.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp())
+					.unwrap();
 				assert_eq!(res.next_state_id, StateId::SellerRedeemSecondaryCurrency);
-				let res = seller.process(Input::Execute, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+				let res = seller
+					.process(
+						Input::Execute,
+						nc.get_chain_tip().unwrap().0,
+						kc_sell.secp(),
+					)
+					.unwrap();
 				assert_eq!(
 					res.next_state_id,
 					StateId::SellerWaitingForRedeemConfirmations
 				);
-				let res = buyer.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+				let res = buyer
+					.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp())
+					.unwrap();
 				assert_eq!(
 					res.next_state_id,
 					StateId::BuyerWaitForRedeemMwcConfirmations
@@ -4971,14 +5603,18 @@ mod tests {
 					.is_some(),
 					false
 				);
-				let res = seller.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+				let res = seller
+					.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp())
+					.unwrap();
 				assert_eq!(
 					res.next_state_id,
 					StateId::SellerWaitingForRedeemConfirmations
 				);
 
 				swap::set_testing_cur_time(swap::get_cur_time() + 60 * 6);
-				let res = buyer.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+				let res = buyer
+					.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp())
+					.unwrap();
 				assert_eq!(res.next_state_id, StateId::BuyerRedeemMwc);
 
 				assert_eq!(
@@ -4991,9 +5627,17 @@ mod tests {
 					.is_some(),
 					false
 				);
-				let res = seller.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+				let res = seller
+					.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp())
+					.unwrap();
 				assert_eq!(res.next_state_id, StateId::SellerRedeemSecondaryCurrency);
-				let res = seller.process(Input::Execute, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+				let res = seller
+					.process(
+						Input::Execute,
+						nc.get_chain_tip().unwrap().0,
+						kc_sell.secp(),
+					)
+					.unwrap();
 				assert_eq!(
 					res.next_state_id,
 					StateId::SellerWaitingForRedeemConfirmations
@@ -5011,17 +5655,36 @@ mod tests {
 					true
 				);
 				// Attacker Buyer lost everything. His fault, seller was able to protect himself.
-				let res = buyer.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+				let res = buyer
+					.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp())
+					.unwrap();
 				assert_eq!(res.next_state_id, StateId::BuyerRedeemMwc);
-				assert_eq!(buyer.process(Input::Execute, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).is_err(), true);
+				assert_eq!(
+					buyer
+						.process(
+							Input::Execute,
+							nc.get_chain_tip().unwrap().0,
+							kc_sell.secp()
+						)
+						.is_err(),
+					true
+				);
 
 				// Another rollback. Now Buyer redeem MWC, seller continue to redeem BTC.
 				nc.set_state(&nc_state_ready);
 				nc.mine_blocks(2);
 
-				let res = buyer.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+				let res = buyer
+					.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp())
+					.unwrap();
 				assert_eq!(res.next_state_id, StateId::BuyerRedeemMwc);
-				let res = buyer.process(Input::Execute, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+				let res = buyer
+					.process(
+						Input::Execute,
+						nc.get_chain_tip().unwrap().0,
+						kc_sell.secp(),
+					)
+					.unwrap();
 				assert_eq!(
 					res.next_state_id,
 					StateId::BuyerWaitForRedeemMwcConfirmations
@@ -5029,12 +5692,16 @@ mod tests {
 				nc.mine_block();
 				btc_nc.mine_block();
 
-				let res = seller.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+				let res = seller
+					.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp())
+					.unwrap();
 				assert_eq!(
 					res.next_state_id,
 					StateId::SellerWaitingForRedeemConfirmations
 				);
-				let res = buyer.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+				let res = buyer
+					.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp())
+					.unwrap();
 				assert_eq!(
 					res.next_state_id,
 					StateId::BuyerWaitForRedeemMwcConfirmations
@@ -5052,14 +5719,24 @@ mod tests {
 		// Now let's finish with happy path
 		// At this point Buyer Can reed, seller is waiting for this moment
 
-		let res = seller.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+		let res = seller
+			.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp())
+			.unwrap();
 		assert_eq!(res.next_state_id, StateId::SellerWaitingForBuyerToRedeemMwc);
 
-		let res = buyer.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+		let res = buyer
+			.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp())
+			.unwrap();
 		assert_eq!(res.next_state_id, StateId::BuyerRedeemMwc);
 
 		// Let's buyer to redeem
-		let res = buyer.process(Input::Execute, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+		let res = buyer
+			.process(
+				Input::Execute,
+				nc.get_chain_tip().unwrap().0,
+				kc_sell.secp(),
+			)
+			.unwrap();
 		assert_eq!(
 			res.next_state_id,
 			StateId::BuyerWaitForRedeemMwcConfirmations
@@ -5073,14 +5750,20 @@ mod tests {
 			StateId::BuyerWaitForRedeemMwcConfirmations
 		);
 		let res = buyer
-			.process(Input::IncomeMessage(message4.clone()), nc.get_chain_tip().unwrap().0, kc_sell.secp() )
+			.process(
+				Input::IncomeMessage(message4.clone()),
+				nc.get_chain_tip().unwrap().0,
+				kc_sell.secp(),
+			)
 			.unwrap();
 		assert_eq!(
 			res.next_state_id,
 			StateId::BuyerWaitForRedeemMwcConfirmations
 		);
 
-		let res = seller.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+		let res = seller
+			.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp())
+			.unwrap();
 		assert_eq!(res.next_state_id, StateId::SellerWaitingForBuyerToRedeemMwc);
 		// Seller doesn't see the transaction yet
 		// !!!! Here cancellation branch is not tested because it depend on chain height. That was test above
@@ -5136,7 +5819,9 @@ mod tests {
 			nc.get_chain_tip().unwrap().0,
 			kc_sell.secp(),
 		);
-		let res = seller.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+		let res = seller
+			.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp())
+			.unwrap();
 		assert_eq!(res.next_state_id, StateId::SellerRedeemSecondaryCurrency);
 		test_responds(
 			&mut seller,
@@ -5155,7 +5840,13 @@ mod tests {
 			kc_sell.secp(),
 		);
 
-		let res = seller.process(Input::Execute, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+		let res = seller
+			.process(
+				Input::Execute,
+				nc.get_chain_tip().unwrap().0,
+				kc_sell.secp(),
+			)
+			.unwrap();
 		assert_eq!(
 			res.next_state_id,
 			StateId::SellerWaitingForRedeemConfirmations
@@ -5172,21 +5863,27 @@ mod tests {
 			seller.pushs();
 			let cur_time = swap::get_cur_time();
 
-			let res = seller.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+			let res = seller
+				.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp())
+				.unwrap();
 			assert_eq!(
 				res.next_state_id,
 				StateId::SellerWaitingForRedeemConfirmations
 			);
 
 			swap::set_testing_cur_time(cur_time + 61 * 5);
-			let res = seller.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+			let res = seller
+				.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp())
+				.unwrap();
 			assert_eq!(
 				res.next_state_id,
 				StateId::SellerWaitingForRedeemConfirmations
 			);
 			// Changing fees, expecting to switch back to the posting
 			seller.swap.secondary_fee = 12.0;
-			let res = seller.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+			let res = seller
+				.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp())
+				.unwrap();
 			assert_eq!(res.next_state_id, StateId::SellerRedeemSecondaryCurrency);
 
 			swap::set_testing_cur_time(cur_time);
@@ -5204,7 +5901,9 @@ mod tests {
 				let cur_time = swap::get_cur_time();
 				let start_fee = seller.swap.secondary_fee;
 
-				let res = seller.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+				let res = seller
+					.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp())
+					.unwrap();
 				assert_eq!(
 					res.next_state_id,
 					StateId::SellerWaitingForRedeemConfirmations
@@ -5212,7 +5911,9 @@ mod tests {
 
 				btc_nc.mine_blocks_no_pending(3);
 				swap::set_testing_cur_time(cur_time + 60 * 3);
-				let res = seller.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+				let res = seller
+					.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp())
+					.unwrap();
 				assert_eq!(
 					res.next_state_id,
 					StateId::SellerWaitingForRedeemConfirmations
@@ -5249,7 +5950,9 @@ mod tests {
 				// 6 blocks - should trigger fees changes...
 				btc_nc.mine_block_no_pending();
 
-				let res = seller.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+				let res = seller
+					.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp())
+					.unwrap();
 				assert_eq!(res.next_state_id, StateId::SellerRedeemSecondaryCurrency);
 				assert!(state::SECONDARY_INCREASE_FEE_K > 1.0);
 				assert!(start_fee < seller.swap.secondary_fee);
@@ -5258,7 +5961,13 @@ mod tests {
 					seller.swap.secondary_fee
 				);
 
-				let res = seller.process(Input::Execute, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+				let res = seller
+					.process(
+						Input::Execute,
+						nc.get_chain_tip().unwrap().0,
+						kc_sell.secp(),
+					)
+					.unwrap();
 				assert_eq!(
 					res.next_state_id,
 					StateId::SellerWaitingForRedeemConfirmations
@@ -5322,21 +6031,27 @@ mod tests {
 			seller.pushs();
 			let cur_time = swap::get_cur_time();
 
-			let res = seller.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+			let res = seller
+				.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp())
+				.unwrap();
 			assert_eq!(
 				res.next_state_id,
 				StateId::SellerWaitingForRedeemConfirmations
 			);
 
 			swap::set_testing_cur_time(cur_time * 61 * 5);
-			let res = seller.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+			let res = seller
+				.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp())
+				.unwrap();
 			assert_eq!(
 				res.next_state_id,
 				StateId::SellerWaitingForRedeemConfirmations
 			);
 			// Changing fees, because Tx is already mined, nothing should happen
 			seller.swap.secondary_fee = 12.0;
-			let res = seller.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+			let res = seller
+				.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp())
+				.unwrap();
 			assert_eq!(
 				res.next_state_id,
 				StateId::SellerWaitingForRedeemConfirmations
@@ -5385,19 +6100,27 @@ mod tests {
 		);
 
 		// Final step
-		let res = seller.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+		let res = seller
+			.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp())
+			.unwrap();
 		assert_eq!(res.next_state_id, StateId::SellerSwapComplete);
 		assert_eq!(res.action.is_none(), true);
 		assert_eq!(res.time_limit.is_none(), true);
 
-		let res = buyer.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+		let res = buyer
+			.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp())
+			.unwrap();
 		assert_eq!(res.next_state_id, StateId::BuyerSwapComplete);
 		assert_eq!(res.action.is_none(), true);
 		assert_eq!(res.time_limit.is_none(), true);
 
-		let res = seller.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp() ).unwrap();
+		let res = seller
+			.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp())
+			.unwrap();
 		assert_eq!(res.next_state_id, StateId::SellerSwapComplete);
-		let res = buyer.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp()).unwrap();
+		let res = buyer
+			.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp())
+			.unwrap();
 		assert_eq!(res.next_state_id, StateId::BuyerSwapComplete);
 
 		test_responds(
@@ -5818,7 +6541,14 @@ mod tests {
 			.unwrap()
 			.unwrap_accept_offer()
 			.unwrap();
-		SellApi::accepted_offer(&kc_sell, &mut swap_sell, &ctx_sell, accept_offer_update, nc.get_chain_tip().unwrap().0).unwrap();
+		SellApi::accepted_offer(
+			&kc_sell,
+			&mut swap_sell,
+			&ctx_sell,
+			accept_offer_update,
+			nc.get_chain_tip().unwrap().0,
+		)
+		.unwrap();
 		let btc_data = swap_sell.secondary_data.unwrap_btc_mut().unwrap();
 		btc_data.accepted_offer(btc_update).unwrap();
 
@@ -5864,12 +6594,25 @@ mod tests {
 		let init_redeem_message = BuyApi::init_redeem_message(&swap_buy).unwrap();
 		let (_uuid, init_redeem, _secondary_update) =
 			init_redeem_message.unwrap_init_redeem().unwrap();
-		SellApi::init_redeem(&kc_sell, &mut swap_sell, &ctx_sell, init_redeem, nc.get_chain_tip().unwrap().0).unwrap();
+		SellApi::init_redeem(
+			&kc_sell,
+			&mut swap_sell,
+			&ctx_sell,
+			init_redeem,
+			nc.get_chain_tip().unwrap().0,
+		)
+		.unwrap();
 
 		let redeem_message = SellApi::redeem_message(&swap_sell).unwrap();
 		let (_uuid, redeem, _secondary_update) = redeem_message.unwrap_redeem().unwrap();
-		BuyApi::finalize_redeem_slate(&kc_buy, &mut swap_buy, &ctx_buy, redeem.redeem_participant, nc.get_chain_tip().unwrap().0)
-			.unwrap();
+		BuyApi::finalize_redeem_slate(
+			&kc_buy,
+			&mut swap_buy,
+			&ctx_buy,
+			redeem.redeem_participant,
+			nc.get_chain_tip().unwrap().0,
+		)
+		.unwrap();
 
 		swap::publish_transaction(&nc, &swap_buy.redeem_slate.tx_or_err().unwrap(), false).unwrap();
 		nc.mine_blocks(1);
@@ -5956,7 +6699,14 @@ mod tests {
 			.unwrap();
 
 		let message = match fsm_sell
-			.process(Input::Check, &mut swap, &ctx_sell, height, &tx_state, kc_sell.secp())
+			.process(
+				Input::Check,
+				&mut swap,
+				&ctx_sell,
+				height,
+				&tx_state,
+				kc_sell.secp(),
+			)
 			.unwrap()
 			.action
 			.unwrap()

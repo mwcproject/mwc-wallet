@@ -1185,8 +1185,7 @@ impl TxLogEntry {
 			//sample time string: 2020-10-07T23:57:00+00:00
 			let time_converted = DateTime::parse_from_rfc3339(&time);
 			let time_stamp = time_converted.unwrap().timestamp();
-			let confirmed_t =
-				Utc.timestamp_opt(time_stamp, 0).unwrap();
+			let confirmed_t = Utc.timestamp_opt(time_stamp, 0).unwrap();
 			self.confirmation_ts = Some(confirmed_t);
 		}
 		//query the node to get the confirmation time
@@ -1211,7 +1210,8 @@ impl TxLogEntry {
 	/// Return true if transaction cancelled or reverted ()
 	pub fn is_cancelled_reverted(&self) -> bool {
 		return self.tx_type == TxLogEntryType::TxReceivedCancelled
-			|| self.tx_type == TxLogEntryType::TxSentCancelled || self.tx_type == TxLogEntryType::TxReverted;
+			|| self.tx_type == TxLogEntryType::TxSentCancelled
+			|| self.tx_type == TxLogEntryType::TxReverted;
 	}
 
 	/// Un Cancel transaction
@@ -1220,7 +1220,7 @@ impl TxLogEntry {
 			TxLogEntryType::TxReverted | TxLogEntryType::TxReceivedCancelled => {
 				self.reverted_after = None;
 				TxLogEntryType::TxReceived
-			},
+			}
 			TxLogEntryType::TxSentCancelled => TxLogEntryType::TxSent,
 			any => any.clone(),
 		};

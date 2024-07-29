@@ -31,9 +31,9 @@ use crate::swap::{ErrorKind, SellApi, Swap, SwapApi};
 use crate::{NodeClient, Slate};
 use failure::_core::marker::PhantomData;
 use grin_wallet_util::grin_core::core::Committed;
+use grin_wallet_util::grin_util::secp::Secp256k1;
 use std::sync::Arc;
 use web3::types::{Address, H256};
-use grin_wallet_util::grin_util::secp::Secp256k1;
 
 /// SwapApi trait implementaiton for ETH
 #[derive(Clone)]
@@ -728,7 +728,11 @@ where
 	}
 
 	/// Get a secondary address for the lock account
-	fn get_secondary_lock_address(&self, swap: &Swap, _secp: &Secp256k1) -> Result<Vec<String>, ErrorKind> {
+	fn get_secondary_lock_address(
+		&self,
+		swap: &Swap,
+		_secp: &Secp256k1,
+	) -> Result<Vec<String>, ErrorKind> {
 		let eth_data = swap.secondary_data.unwrap_eth()?;
 
 		match eth_data.address_from_secret {

@@ -33,10 +33,10 @@ use crate::{Owner, OwnerRpcV3};
 use easy_jsonrpc_mw;
 use ed25519_dalek::PublicKey as DalekPublicKey;
 use grin_wallet_libwallet::proof::proofaddress::{self, ProvableAddress};
+use grin_wallet_util::grin_util::secp::Secp256k1;
+use std::convert::TryFrom;
 use std::sync::Arc;
 use std::time::Duration;
-use std::convert::TryFrom;
-use grin_wallet_util::grin_util::secp::Secp256k1;
 
 /// Public definition used to generate Owner jsonrpc api.
 /// * When running `mwc-wallet owner_api` with defaults, the V2 api is available at
@@ -3015,11 +3015,15 @@ where
 	}
 
 	fn post_tx(&self, tx: TransactionV3, fluff: bool) -> Result<(), ErrorKind> {
-		Owner::post_tx(self,
-					   None,
-					   &Transaction::try_from(tx).map_err(|e| ErrorKind::GenericError(format!("Unable convert V3 transaction, {}",e)))?,
-					   fluff,
-		).map_err(|e| e.kind())
+		Owner::post_tx(
+			self,
+			None,
+			&Transaction::try_from(tx).map_err(|e| {
+				ErrorKind::GenericError(format!("Unable convert V3 transaction, {}", e))
+			})?,
+			fluff,
+		)
+		.map_err(|e| e.kind())
 	}
 
 	fn verify_slate_messages(&self, slate: VersionedSlate) -> Result<(), ErrorKind> {

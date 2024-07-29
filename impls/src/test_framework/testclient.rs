@@ -260,7 +260,7 @@ where
 		m: WalletProxyMessage,
 	) -> Result<WalletProxyMessage, libwallet::Error> {
 		let height = self.chain.head().unwrap().height;
-        let hash = self.chain.head().unwrap().last_block_h.to_hex();
+		let hash = self.chain.head().unwrap().last_block_h.to_hex();
 
 		Ok(WalletProxyMessage {
 			sender_id: "node".to_owned(),
@@ -588,7 +588,7 @@ impl NodeClient for LocalWalletClient {
 	) -> Result<HashMap<pedersen::Commitment, (String, u64, u64)>, libwallet::Error> {
 		let query_params: Vec<String> = wallet_outputs
 			.iter()
-            .map(|commit| commit.as_ref().to_hex())
+			.map(|commit| commit.as_ref().to_hex())
 			.collect();
 		let query_str = query_params.join(",");
 		let m = WalletProxyMessage {
@@ -610,7 +610,7 @@ impl NodeClient for LocalWalletClient {
 		for out in outputs {
 			api_outputs.insert(
 				out.commit.commit(),
-				(out.commit.to_hex(),out.height,out.mmr_index),
+				(out.commit.to_hex(), out.height, out.mmr_index),
 			);
 		}
 		Ok(api_outputs)
@@ -622,7 +622,7 @@ impl NodeClient for LocalWalletClient {
 		min_height: Option<u64>,
 		max_height: Option<u64>,
 	) -> Result<Option<(TxKernel, u64, u64)>, libwallet::Error> {
-        let mut query = format!("{},", excess.0.as_ref().to_hex());
+		let mut query = format!("{},", excess.0.as_ref().to_hex());
 		if let Some(h) = min_height {
 			query += &format!("{},", h);
 		} else {

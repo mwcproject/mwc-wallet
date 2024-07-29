@@ -22,7 +22,10 @@ use crate::grin_util as util;
 use sha2::{Digest, Sha256};
 
 /// Build a public key for the given private key
-pub fn public_key_from_secret_key(secp: &Secp256k1, secret_key: &SecretKey) -> Result<PublicKey, Error> {
+pub fn public_key_from_secret_key(
+	secp: &Secp256k1,
+	secret_key: &SecretKey,
+) -> Result<PublicKey, Error> {
 	PublicKey::from_secret_key(&secp, secret_key).map_err(|e| Error::from(e))
 }
 
@@ -42,7 +45,11 @@ pub fn verify_signature(
 }
 
 /// Sing the challenge with a private key.
-pub fn sign_challenge(challenge: &str, secret_key: &SecretKey, secp: &Secp256k1) -> Result<Signature, Error> {
+pub fn sign_challenge(
+	challenge: &str,
+	secret_key: &SecretKey,
+	secp: &Secp256k1,
+) -> Result<Signature, Error> {
 	let mut hasher = Sha256::new();
 	hasher.update(challenge.as_bytes());
 	let message = Message::from_slice(hasher.finalize().as_slice())?;

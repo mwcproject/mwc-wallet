@@ -17,10 +17,10 @@ use crate::grin_util::secp::pedersen::Commitment;
 use crate::grin_util::secp::Signature;
 use crate::{Slate, VersionedSlate};
 use failure::Error;
-use hex::{self, FromHex};
-use serde::{Deserialize, Deserializer, Serializer};
 use grin_wallet_util::grin_util::secp::{ContextFlag, Secp256k1};
 use grin_wallet_util::grin_util::ToHex;
+use hex::{self, FromHex};
+use serde::{Deserialize, Deserializer, Serializer};
 
 /// Slate deserialization
 pub fn slate_deser<'a, D>(deserializer: D) -> Result<Slate, D::Error>
@@ -104,7 +104,7 @@ where
 fn pubkey_from_hex_string(s: String) -> Result<PublicKey, Error> {
 	let v = Vec::from_hex(&s)?;
 	let secp = Secp256k1::with_caps(ContextFlag::None);
-	let p = PublicKey::from_slice( &secp, &v[..])?;
+	let p = PublicKey::from_slice(&secp, &v[..])?;
 	Ok(p)
 }
 
@@ -218,7 +218,7 @@ where
 	use serde::de::Error;
 	let s = String::deserialize(deserializer)?;
 	let secp = Secp256k1::with_caps(ContextFlag::None);
-	sig_from_hex_string(&secp,s).map_err(D::Error::custom)
+	sig_from_hex_string(&secp, s).map_err(D::Error::custom)
 }
 
 /// Serialize Option<Signature> to HEX string

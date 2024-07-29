@@ -14,7 +14,7 @@
 //! core::libtx specific tests
 use grin_wallet_libwallet::proof::crypto::Hex;
 use grin_wallet_libwallet::Context;
-use grin_wallet_util::grin_core::core::{FeeFields, transaction};
+use grin_wallet_util::grin_core::core::{transaction, FeeFields};
 use grin_wallet_util::grin_core::libtx::{aggsig, proof};
 use grin_wallet_util::grin_keychain::{
 	BlindSum, BlindingFactor, ChildNumber, ExtKeychain, ExtKeychainPath, Keychain,
@@ -25,9 +25,11 @@ use grin_wallet_util::grin_util::secp::key::{PublicKey, SecretKey};
 use rand::thread_rng;
 
 fn kernel_sig_msg() -> secp::Message {
-	transaction::KernelFeatures::Plain { fee: FeeFields::zero() }
-		.kernel_sig_msg()
-		.unwrap()
+	transaction::KernelFeatures::Plain {
+		fee: FeeFields::zero(),
+	}
+	.kernel_sig_msg()
+	.unwrap()
 }
 
 #[test]
@@ -94,16 +96,22 @@ fn aggsig_sender_receiver_interaction() {
 		let (pub_excess, pub_nonce) = rx_cx.get_public_keys(&keychain.secp());
 		rx_cx.add_output(&key_id, &None, 0);
 
-		pub_nonce_sum = PublicKey::from_combination( keychain.secp(), vec![
-			&s_cx.get_public_keys(keychain.secp()).1,
-			&rx_cx.get_public_keys(keychain.secp()).1,
-		])
+		pub_nonce_sum = PublicKey::from_combination(
+			keychain.secp(),
+			vec![
+				&s_cx.get_public_keys(keychain.secp()).1,
+				&rx_cx.get_public_keys(keychain.secp()).1,
+			],
+		)
 		.unwrap();
 
-		pub_key_sum = PublicKey::from_combination(keychain.secp(), vec![
-			&s_cx.get_public_keys(keychain.secp()).0,
-			&rx_cx.get_public_keys(keychain.secp()).0,
-		])
+		pub_key_sum = PublicKey::from_combination(
+			keychain.secp(),
+			vec![
+				&s_cx.get_public_keys(keychain.secp()).0,
+				&rx_cx.get_public_keys(keychain.secp()).0,
+			],
+		)
 		.unwrap();
 
 		let msg = kernel_sig_msg();
@@ -191,10 +199,13 @@ fn aggsig_sender_receiver_interaction() {
 		.unwrap();
 
 		// Receiver calculates the final public key (to verify sig later)
-		let final_pubkey = PublicKey::from_combination( keychain.secp(), vec![
-			&s_cx.get_public_keys(keychain.secp()).0,
-			&rx_cx.get_public_keys(keychain.secp()).0,
-		])
+		let final_pubkey = PublicKey::from_combination(
+			keychain.secp(),
+			vec![
+				&s_cx.get_public_keys(keychain.secp()).0,
+				&rx_cx.get_public_keys(keychain.secp()).0,
+			],
+		)
 		.unwrap();
 
 		(final_sig, final_pubkey)
@@ -303,16 +314,22 @@ fn aggsig_sender_receiver_interaction_offset() {
 		let (pub_excess, pub_nonce) = rx_cx.get_public_keys(&keychain.secp());
 		rx_cx.add_output(&key_id, &None, 0);
 
-		pub_nonce_sum = PublicKey::from_combination(keychain.secp(), vec![
-			&s_cx.get_public_keys(keychain.secp()).1,
-			&rx_cx.get_public_keys(keychain.secp()).1,
-		])
+		pub_nonce_sum = PublicKey::from_combination(
+			keychain.secp(),
+			vec![
+				&s_cx.get_public_keys(keychain.secp()).1,
+				&rx_cx.get_public_keys(keychain.secp()).1,
+			],
+		)
 		.unwrap();
 
-		pub_key_sum = PublicKey::from_combination(keychain.secp(), vec![
-			&s_cx.get_public_keys(keychain.secp()).0,
-			&rx_cx.get_public_keys(keychain.secp()).0,
-		])
+		pub_key_sum = PublicKey::from_combination(
+			keychain.secp(),
+			vec![
+				&s_cx.get_public_keys(keychain.secp()).0,
+				&rx_cx.get_public_keys(keychain.secp()).0,
+			],
+		)
 		.unwrap();
 
 		let msg = kernel_sig_msg();
@@ -399,10 +416,13 @@ fn aggsig_sender_receiver_interaction_offset() {
 		.unwrap();
 
 		// Receiver calculates the final public key (to verify sig later)
-		let final_pubkey = PublicKey::from_combination(keychain.secp(), vec![
-			&s_cx.get_public_keys(keychain.secp()).0,
-			&rx_cx.get_public_keys(keychain.secp()).0,
-		])
+		let final_pubkey = PublicKey::from_combination(
+			keychain.secp(),
+			vec![
+				&s_cx.get_public_keys(keychain.secp()).0,
+				&rx_cx.get_public_keys(keychain.secp()).0,
+			],
+		)
 		.unwrap();
 
 		(final_sig, final_pubkey)

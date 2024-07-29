@@ -358,7 +358,11 @@ impl TxProof {
 						))
 					})?;
 					let key = encrypted_message
-						.key(&expected_destination.public_key().unwrap(), secret_key, secp)
+						.key(
+							&expected_destination.public_key().unwrap(),
+							secret_key,
+							secp,
+						)
 						.map_err(|e| {
 							ErrorKind::TxProofGenericError(format!(
 								"Unable to build a signature, {}",
@@ -442,7 +446,11 @@ impl TxProof {
 						))
 					})?;
 					let key = encrypted_message
-						.key(&expected_destination.public_key().unwrap(), secret_key, secp)
+						.key(
+							&expected_destination.public_key().unwrap(),
+							secret_key,
+							secp,
+						)
 						.map_err(|e| {
 							ErrorKind::TxProofGenericError(format!(
 								"Unable to build a signature, {}",

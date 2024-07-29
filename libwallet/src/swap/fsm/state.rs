@@ -16,8 +16,8 @@ use crate::swap::message::Message;
 use crate::swap::swap::SwapJournalRecord;
 use crate::swap::types::{Action, SwapTransactionsConfirmations};
 use crate::swap::{Context, ErrorKind, Swap};
-use std::fmt;
 use grin_wallet_util::grin_util::secp::Secp256k1;
+use std::fmt;
 
 /// We need to reprty post transaction we we don't see it on the blockchain
 pub const POST_MWC_RETRY_PERIOD: i64 = 300;

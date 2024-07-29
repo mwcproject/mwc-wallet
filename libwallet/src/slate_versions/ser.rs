@@ -86,7 +86,7 @@ pub mod dalek_pubkey_serde {
 	where
 		S: Serializer,
 	{
-        serializer.serialize_str(&key.to_bytes().to_hex())
+		serializer.serialize_str(&key.to_bytes().to_hex())
 	}
 
 	///
@@ -126,7 +126,7 @@ pub mod option_dalek_pubkey_serde {
 		S: Serializer,
 	{
 		match key {
-            Some(key) => serializer.serialize_str(&key.to_bytes().to_hex()),
+			Some(key) => serializer.serialize_str(&key.to_bytes().to_hex()),
 			None => serializer.serialize_none(),
 		}
 	}
@@ -169,7 +169,7 @@ pub mod dalek_sig_serde {
 	where
 		S: Serializer,
 	{
-        serializer.serialize_str(&sig.to_bytes().as_ref().to_hex())
+		serializer.serialize_str(&sig.to_bytes().as_ref().to_hex())
 	}
 
 	///
@@ -200,8 +200,8 @@ pub mod option_dalek_sig_serde {
 	where
 		S: Serializer,
 	{
-        match sig {
-            Some(s) => serializer.serialize_str(&s.to_bytes().as_ref().to_hex()),
+		match sig {
+			Some(s) => serializer.serialize_str(&s.to_bytes().as_ref().to_hex()),
 			None => serializer.serialize_none(),
 		}
 	}
@@ -245,8 +245,8 @@ mod test {
 	use serde::Deserialize;
 
 	use ed25519_dalek::Signer;
-	use serde_json;
 	use grin_wallet_util::grin_util::secp::{ContextFlag, Secp256k1};
+	use serde_json;
 
 	#[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
 	struct SerTest {

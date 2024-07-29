@@ -299,7 +299,8 @@ where
 
 		// update excess in stored transaction
 		let mut batch = wallet.batch(keychain_mask)?;
-		tx.kernel_excess = Some(slate.calc_excess(keychain.secp(), Some(&keychain), current_height)?);
+		tx.kernel_excess =
+			Some(slate.calc_excess(keychain.secp(), Some(&keychain), current_height)?);
 		batch.save_tx_log_entry(tx.clone(), &parent_key_id)?;
 		batch.commit()?;
 	}
@@ -526,7 +527,8 @@ where
 	let (current_height, _, _) = wallet.w2n_client().get_chain_tip()?;
 
 	if slate.compact_slate {
-		tx.kernel_excess = Some(slate.calc_excess(keychain.secp(), Some(&keychain), current_height)?);
+		tx.kernel_excess =
+			Some(slate.calc_excess(keychain.secp(), Some(&keychain), current_height)?);
 	} else {
 		tx.kernel_excess = Some(slate.tx_or_err()?.body.kernels[0].excess);
 	}
@@ -868,11 +870,11 @@ where
 
 #[cfg(test)]
 mod test {
-	use grin_wallet_util::grin_core::core::FeeFields;
 	use crate::grin_core::core::committed::Committed;
 	use crate::grin_core::core::KernelFeatures;
 	use crate::grin_core::libtx::{build, ProofBuilder};
 	use crate::grin_keychain::{ExtKeychain, ExtKeychainPath, Keychain};
+	use grin_wallet_util::grin_core::core::FeeFields;
 
 	#[test]
 	// demonstrate that input.commitment == referenced output.commitment
@@ -883,14 +885,18 @@ mod test {
 		let key_id1 = ExtKeychainPath::new(1, 1, 0, 0, 0).to_identifier();
 
 		let tx1 = build::transaction(
-			KernelFeatures::Plain { fee: FeeFields::zero() },
+			KernelFeatures::Plain {
+				fee: FeeFields::zero(),
+			},
 			&vec![build::output(105, key_id1.clone())],
 			&keychain,
 			&builder,
 		)
 		.unwrap();
 		let tx2 = build::transaction(
-			KernelFeatures::Plain { fee: FeeFields::zero() },
+			KernelFeatures::Plain {
+				fee: FeeFields::zero(),
+			},
 			&vec![build::input(105, key_id1.clone())],
 			&keychain,
 			&builder,

@@ -43,6 +43,7 @@ use grin_wallet_util::grin_core as core;
 use grin_wallet_util::grin_core::core::amount_to_hr_string;
 use grin_wallet_util::grin_core::global;
 use grin_wallet_util::grin_keychain as keychain;
+use grin_wallet_util::grin_util::secp::Secp256k1;
 use linefeed::terminal::Signal;
 use linefeed::{Interface, ReadResult};
 use rpassword;
@@ -52,7 +53,6 @@ use std::{
 	path::{Path, PathBuf},
 };
 use uuid::Uuid;
-use grin_wallet_util::grin_util::secp::Secp256k1;
 
 // define what to do on argument error
 macro_rules! arg_parse {
@@ -814,9 +814,11 @@ pub fn parse_process_invoice_args(
 	if prompt {
 		// Now we need to prompt the user whether they want to do this,
 		// which requires reading the slate
-		let slate = match PathToSlateGetter::build_form_path((&tx_file).into())
-			.get_tx(Some(slatepack_secret), height, secp)
-		{
+		let slate = match PathToSlateGetter::build_form_path((&tx_file).into()).get_tx(
+			Some(slatepack_secret),
+			height,
+			secp,
+		) {
 			Ok(s) => s,
 			Err(e) => return Err(ParseError::ArgumentError(format!("{}", e))),
 		};

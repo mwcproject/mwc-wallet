@@ -53,7 +53,7 @@ impl EncryptedMessage {
 		common_secret.mul_assign(&secp, secret_key).map_err(|e| {
 			ErrorKind::TxProofGenericError(format!("Unable to encrypt message, {}", e))
 		})?;
-		let common_secret_ser = common_secret.serialize_vec( secp, true);
+		let common_secret_ser = common_secret.serialize_vec(secp, true);
 		let common_secret_slice = &common_secret_ser[1..33];
 
 		let salt: [u8; 8] = thread_rng().gen();
@@ -105,7 +105,7 @@ impl EncryptedMessage {
 		common_secret.mul_assign(&secp, secret_key).map_err(|e| {
 			ErrorKind::TxProofGenericError(format!("Key manipulation error, {}", e))
 		})?;
-		let common_secret_ser = common_secret.serialize_vec(secp,true);
+		let common_secret_ser = common_secret.serialize_vec(secp, true);
 		let common_secret_slice = &common_secret_ser[1..33];
 
 		let mut key = [0; 32];

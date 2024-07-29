@@ -35,10 +35,10 @@ use crate::Context;
 use crate::{wallet_lock, WalletInst, WalletLCProvider};
 use crate::{AcctPathMapping, Error, InitTxArgs, OutputCommitMapping, OutputStatus};
 use ed25519_dalek::PublicKey as DalekPublicKey;
+use grin_wallet_util::grin_util::secp::Secp256k1;
 use std::collections::HashMap;
 use std::sync::Arc;
 use uuid::Uuid;
-use grin_wallet_util::grin_util::secp::Secp256k1;
 
 /// Identity Index for integrity account. Let's put it at the end, so we can be sure that it exist
 pub const INTEGRITY_ACCOUNT_ID: u32 = 65536;
@@ -397,8 +397,14 @@ where
 				owner::finalize_tx(&mut **w, keychain_mask, &slate, false, false)?;
 
 			// Build and store integral fee data...
-			let integrity_context =
-				IntegrityContext::build(&slate.id, slate.fee, &context0, &context1, tip_height, keychain.secp())?;
+			let integrity_context = IntegrityContext::build(
+				&slate.id,
+				slate.fee,
+				&context0,
+				&context1,
+				tip_height,
+				keychain.secp(),
+			)?;
 			{
 				let mut batch = w.batch(keychain_mask)?;
 				batch.save_integrity_context(slate.id.as_bytes(), &integrity_context)?;

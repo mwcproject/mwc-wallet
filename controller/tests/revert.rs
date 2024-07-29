@@ -30,6 +30,7 @@ use grin_wallet_util::grin_core::core::Transaction;
 use grin_wallet_util::grin_core::global;
 use grin_wallet_util::grin_keychain::ExtKeychain;
 use grin_wallet_util::grin_util::secp::key::SecretKey;
+use grin_wallet_util::grin_util::secp::Secp256k1;
 use grin_wallet_util::grin_util::Mutex;
 use log::error;
 use std::path::PathBuf;
@@ -37,7 +38,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
-use grin_wallet_util::grin_util::secp::Secp256k1;
 
 type Wallet = Arc<
 	Mutex<

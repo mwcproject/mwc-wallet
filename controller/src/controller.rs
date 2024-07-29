@@ -56,14 +56,14 @@ use grin_wallet_util::grin_core::core::TxKernel;
 use grin_wallet_util::grin_p2p;
 use grin_wallet_util::grin_p2p::libp2p_connection;
 use grin_wallet_util::grin_util::secp::pedersen::Commitment;
+use grin_wallet_util::grin_util::secp::{ContextFlag, Secp256k1};
+use grin_wallet_util::grin_util::static_secp_instance;
 use std::collections::HashMap;
 use std::net::{SocketAddr, SocketAddrV4};
 use std::pin::Pin;
 use std::sync::mpsc::Sender;
 use std::sync::{Arc, RwLock};
 use std::thread;
-use grin_wallet_util::grin_util::secp::{ContextFlag, Secp256k1};
-use grin_wallet_util::grin_util::static_secp_instance;
 
 lazy_static! {
 	pub static ref MWC_OWNER_BASIC_REALM: HeaderValue =

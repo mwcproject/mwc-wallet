@@ -280,9 +280,14 @@ fn integrity_kernel_impl(test_dir: &'static str) -> Result<(), wallet::Error> {
 	);
 
 	// Build message for p2p network
-	let libp2p_message =
-		libp2p_connection::build_integrity_message(&kernel_excess, &peer_pk, &signature, &message, &secp)
-			.unwrap();
+	let libp2p_message = libp2p_connection::build_integrity_message(
+		&kernel_excess,
+		&peer_pk,
+		&signature,
+		&message,
+		&secp,
+	)
+	.unwrap();
 
 	let output_validation_fn = |_kernel: &Commitment| {
 		Ok(Some(TxKernel::with_features(KernelFeatures::Plain {

@@ -36,9 +36,9 @@ use easy_jsonrpc_mw;
 use ed25519_dalek::PublicKey as DalekPublicKey;
 use grin_wallet_libwallet::proof::proofaddress::ProvableAddress;
 use rand::thread_rng;
+use std::convert::TryFrom;
 use std::error::Error;
 use std::time::Duration;
-use std::convert::TryFrom;
 
 /// Public definition used to generate Owner jsonrpc api.
 /// Secure version containing wallet lifecycle functions. All calls to this API must be encrypted.
@@ -3570,7 +3570,9 @@ where
 		Owner::post_tx(
 			self,
 			(&token.keychain_mask).as_ref(),
-			&Transaction::try_from(tx).map_err(|e| ErrorKind::GenericError(format!("Unable convert V3 transaction, {}",e)))?,
+			&Transaction::try_from(tx).map_err(|e| {
+				ErrorKind::GenericError(format!("Unable convert V3 transaction, {}", e))
+			})?,
 			fluff,
 		)
 		.map_err(|e| e.kind())
@@ -3623,7 +3625,7 @@ where
 			.map_err(|e| ErrorKind::Secp(format!("{}", e.description())))?;
 
 		let x_coord = shared_pubkey.serialize_vec(&secp, true);
-		let shared_key = SecretKey::from_slice( &secp, &x_coord[1..])
+		let shared_key = SecretKey::from_slice(&secp, &x_coord[1..])
 			.map_err(|e| ErrorKind::Secp(format!("{}", e.description())))?;
 		{
 			let mut s = self.shared_key.lock();

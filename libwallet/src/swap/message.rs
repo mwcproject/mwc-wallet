@@ -25,8 +25,8 @@ use crate::proof::message::EncryptedMessage;
 use crate::proof::proofaddress::ProvableAddress;
 use crate::{ParticipantData as TxParticipant, VersionedSlate};
 use chrono::{DateTime, Utc};
-use uuid::Uuid;
 use grin_wallet_util::grin_util::secp::Secp256k1;
+use uuid::Uuid;
 
 /// Swap message that is used for Seller/Buyer interaction
 #[derive(Serialize, Deserialize, Debug, Clone)]

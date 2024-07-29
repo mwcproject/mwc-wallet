@@ -111,7 +111,7 @@ where
 	let ethereum_wallet = w.get_ethereum_wallet()?.clone();
 	let keychain = w.keychain(keychain_mask)?;
 	let skey = get_swap_storage_key(&keychain)?;
-	let (height, _, _ ) = node_client.get_chain_tip()?;
+	let (height, _, _) = node_client.get_chain_tip()?;
 
 	if height == 0 {
 		return Err(ErrorKind::Generic("MWC node is syncing and not ready yet".to_string()).into());
@@ -705,7 +705,7 @@ where
 
 	let mut fsm = swap_api.get_fsm(&keychain, &swap);
 
-	let (height, _, _ ) = node_client.get_chain_tip()?;
+	let (height, _, _) = node_client.get_chain_tip()?;
 
 	match adjust_cmd {
 		"cancel" => {
@@ -718,7 +718,14 @@ where
 
 			// Cancelling the trade
 			let tx_conf = swap_api.request_tx_confirmations(&keychain, &swap)?;
-			let resp = fsm.process(Input::Cancel, &mut swap, &context, height, &tx_conf, keychain.secp())?;
+			let resp = fsm.process(
+				Input::Cancel,
+				&mut swap,
+				&context,
+				height,
+				&tx_conf,
+				keychain.secp(),
+			)?;
 			trades::store_swap_trade(&context, &swap, &skey, &*swap_lock)?;
 
 			return Ok((swap.state.clone(), resp.action.unwrap_or(Action::None)));
@@ -738,7 +745,14 @@ where
 			swap.wait_for_backup1 = true; // Don't want to go forward
 
 			let tx_conf = swap_api.request_tx_confirmations(&keychain, &swap)?;
-			let resp = fsm.process(Input::Check, &mut swap, &context, height, &tx_conf, keychain.secp())?;
+			let resp = fsm.process(
+				Input::Check,
+				&mut swap,
+				&context,
+				height,
+				&tx_conf,
+				keychain.secp(),
+			)?;
 			trades::store_swap_trade(&context, &swap, &skey, &*swap_lock)?;
 
 			return Ok((swap.state.clone(), resp.action.unwrap_or(Action::None)));
@@ -931,7 +945,7 @@ where
 	C: NodeClient + 'a,
 	K: Keychain + 'a,
 {
-	let (height, _, _ ) = node_client.get_chain_tip()?;
+	let (height, _, _) = node_client.get_chain_tip()?;
 	let swap_api = match swap.secondary_currency.is_btc_family() {
 		true => {
 			let (uri1, uri2) = trades::get_electrumx_uri(
@@ -973,7 +987,14 @@ where
 	let mut fsm = swap_api.get_fsm(keychain, swap);
 	let tx_conf = swap_api.request_tx_confirmations(keychain, swap)?;
 	let start_locked = swap.other_lock_first_done;
-	let resp = fsm.process(Input::Check, swap, &context, height, &tx_conf, keychain.secp())?;
+	let resp = fsm.process(
+		Input::Check,
+		swap,
+		&context,
+		height,
+		&tx_conf,
+		keychain.secp(),
+	)?;
 
 	let eta = fsm.get_swap_roadmap(swap, keychain.secp())?;
 
@@ -1263,7 +1284,7 @@ where
 		}
 	}
 
-	let (height, _, _ ) = node_client.get_chain_tip()?;
+	let (height, _, _) = node_client.get_chain_tip()?;
 
 	let swap_api = match swap.secondary_currency.is_btc_family() {
 		true => {
@@ -1308,7 +1329,14 @@ where
 	let tx_conf = swap_api.request_tx_confirmations(&keychain, swap)?;
 	let mut fsm = swap_api.get_fsm(&keychain, swap);
 	let other_lock_first_changed = swap.other_lock_first_done;
-	let mut process_respond = fsm.process(Input::Check, swap, &context, height, &tx_conf, keychain.secp())?;
+	let mut process_respond = fsm.process(
+		Input::Check,
+		swap,
+		&context,
+		height,
+		&tx_conf,
+		keychain.secp(),
+	)?;
 
 	let cancelled_swaps = if other_lock_first_changed != swap.other_lock_first_done {
 		cancel_trades_by_tag(&keychain, &swap)?
@@ -1330,7 +1358,14 @@ where
 				swap.communication_method.clone(),
 				swap.communication_address.clone(),
 			)?;
-			let process_respond = fsm.process(Input::Execute, swap, &context, height, &tx_conf, keychain.secp())?;
+			let process_respond = fsm.process(
+				Input::Execute,
+				swap,
+				&context,
+				height,
+				&tx_conf,
+				keychain.secp(),
+			)?;
 			swap.append_to_last_message(&format!(", {}", dest_str));
 			if has_ack {
 				match process_respond.action.clone().unwrap() {
@@ -1375,7 +1410,14 @@ where
 			)?;
 		}
 		Action::BuyerDepositToContractAccount => {
-			process_respond = fsm.process(Input::Execute, swap, &context, height, &tx_conf, keychain.secp())?;
+			process_respond = fsm.process(
+				Input::Execute,
+				swap,
+				&context,
+				height,
+				&tx_conf,
+				keychain.secp(),
+			)?;
 		}
 		Action::SellerPublishMwcLockTx => {
 			wallet_lock!(wallet_inst, w);
@@ -1410,16 +1452,37 @@ where
 				)?;
 			}
 
-			process_respond = fsm.process(Input::Execute, swap, &context, height, &tx_conf, keychain.secp())?;
+			process_respond = fsm.process(
+				Input::Execute,
+				swap,
+				&context,
+				height,
+				&tx_conf,
+				keychain.secp(),
+			)?;
 		}
 		Action::SellerPublishTxSecondaryRedeem {
 			currency: _,
 			address: _,
 		} => {
-			process_respond = fsm.process(Input::Execute, swap, &context, height, &tx_conf, keychain.secp())?;
+			process_respond = fsm.process(
+				Input::Execute,
+				swap,
+				&context,
+				height,
+				&tx_conf,
+				keychain.secp(),
+			)?;
 		}
 		Action::BuyerPublishMwcRedeemTx => {
-			process_respond = fsm.process(Input::Execute, swap, &context, height, &tx_conf, keychain.secp())?;
+			process_respond = fsm.process(
+				Input::Execute,
+				swap,
+				&context,
+				height,
+				&tx_conf,
+				keychain.secp(),
+			)?;
 
 			wallet_lock!(wallet_inst, w);
 
@@ -1442,7 +1505,14 @@ where
 			}
 		}
 		Action::SellerPublishMwcRefundTx => {
-			process_respond = fsm.process(Input::Execute, swap, &context, height, &tx_conf, keychain.secp())?;
+			process_respond = fsm.process(
+				Input::Execute,
+				swap,
+				&context,
+				height,
+				&tx_conf,
+				keychain.secp(),
+			)?;
 
 			wallet_lock!(wallet_inst, w);
 
@@ -1476,7 +1546,14 @@ where
 				.into());
 			}
 
-			process_respond = fsm.process(Input::Execute, swap, &context, height, &tx_conf, keychain.secp())?;
+			process_respond = fsm.process(
+				Input::Execute,
+				swap,
+				&context,
+				height,
+				&tx_conf,
+				keychain.secp(),
+			)?;
 		}
 		_ => (), // Nothing to do
 	}
@@ -1774,9 +1851,16 @@ where
 				let mut fsm = swap_api.get_fsm(&keychain, &swap);
 
 				if fsm.is_cancellable(&swap)? {
-					let (height, _, _ ) = node_client.get_chain_tip()?;
+					let (height, _, _) = node_client.get_chain_tip()?;
 					let tx_conf = swap_api.request_tx_confirmations(&keychain, &swap)?;
-					let _resp = fsm.process(Input::Cancel, &mut swap, &context, height, &tx_conf, keychain.secp())?;
+					let _resp = fsm.process(
+						Input::Cancel,
+						&mut swap,
+						&context,
+						height,
+						&tx_conf,
+						keychain.secp(),
+					)?;
 					trades::store_swap_trade(&context, &swap, &skey, &*swap_lock)?;
 				} else {
 					warn!(
@@ -1984,8 +2068,15 @@ where
 				_ => 2,
 			};
 			swap.wait_for_backup1 = true; // Processing message pessimistic way. We don't want to trigger any action
-			let (height, _, _ ) = node_client.get_chain_tip()?;
-			fsm.process(Input::IncomeMessage(message), &mut swap, &context, height, &tx_conf, keychain.secp())?;
+			let (height, _, _) = node_client.get_chain_tip()?;
+			fsm.process(
+				Input::IncomeMessage(message),
+				&mut swap,
+				&context,
+				height,
+				&tx_conf,
+				keychain.secp(),
+			)?;
 			trades::store_swap_trade(&context, &swap, &skey, &*lock)?;
 			println!("INFO: Processed income message for SwapId {}", swap.id);
 

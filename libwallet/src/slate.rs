@@ -27,17 +27,17 @@ use crate::grin_core::global;
 use crate::grin_core::libtx::{aggsig, build, proof::ProofBuild, secp_ser, tx_fee};
 use crate::grin_core::map_vec;
 use crate::grin_keychain::{BlindSum, BlindingFactor, Keychain, SwitchCommitmentType};
+use crate::grin_util::secp;
 use crate::grin_util::secp::key::{PublicKey, SecretKey};
 use crate::grin_util::secp::pedersen::Commitment;
 use crate::grin_util::secp::Signature;
 use crate::grin_util::ToHex;
-use crate::grin_util::secp;
 use crate::Context;
+use bitcoin_lib::secp256k1::ContextFlag;
 use serde::ser::{Serialize, Serializer};
 use serde_json;
 use std::convert::{TryFrom, TryInto};
 use std::fmt;
-use bitcoin_lib::secp256k1::ContextFlag;
 use uuid::Uuid;
 
 use crate::slate_versions::v2::SlateV2;
@@ -55,10 +55,10 @@ use crate::proof::proofaddress::ProvableAddress;
 use crate::types::CbData;
 use crate::{SlateVersion, Slatepacker, CURRENT_SLATE_VERSION};
 use ed25519_dalek::SecretKey as DalekSecretKey;
-use rand::rngs::mock::StepRng;
-use rand::thread_rng;
 use grin_wallet_util::grin_core::core::FeeFields;
 use grin_wallet_util::grin_util::secp::Secp256k1;
+use rand::rngs::mock::StepRng;
+use rand::thread_rng;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct PaymentInfo {
@@ -156,7 +156,7 @@ impl fmt::Display for ParticipantMessageData {
 		writeln!(
 			f,
 			"Public Key: {}",
-            &self.public_key.serialize_vec(&secp, true).to_hex()
+			&self.public_key.serialize_vec(&secp, true).to_hex()
 		)?;
 		let message = match self.message.clone() {
 			None => "None".to_owned(),
@@ -165,7 +165,7 @@ impl fmt::Display for ParticipantMessageData {
 		writeln!(f, "Message: {}", message)?;
 		let message_sig = match self.message_sig {
 			None => "None".to_owned(),
-            Some(m) => m.to_raw_data().as_ref().to_hex(),
+			Some(m) => m.to_raw_data().as_ref().to_hex(),
 		};
 		writeln!(f, "Message Signature: {}", message_sig)
 	}
@@ -528,7 +528,9 @@ impl Slate {
 	/// If lock_height is 0 then its a plain kernel, otherwise its a height locked kernel.
 	pub fn kernel_features(&self) -> Result<KernelFeatures, Error> {
 		match self.lock_height {
-			0 => Ok(KernelFeatures::Plain { fee: self.build_fee()? }),
+			0 => Ok(KernelFeatures::Plain {
+				fee: self.build_fee()?,
+			}),
 			_ => Ok(KernelFeatures::HeightLocked {
 				fee: self.build_fee()?,
 				lock_height: self.lock_height,
@@ -539,10 +541,9 @@ impl Slate {
 	// u64 try_into for FeeFields is build for VALID values, so 0 is not accepted.
 	// That is why we need this method
 	fn build_fee(&self) -> Result<FeeFields, Error> {
-		if self.fee==0 {
+		if self.fee == 0 {
 			Ok(FeeFields::zero())
-		}
-		else {
+		} else {
 			Ok(self.fee.try_into()?)
 		}
 	}
@@ -624,7 +625,7 @@ impl Slate {
 	}
 
 	/// Return the sum of public blinding factors
-	fn pub_blind_sum(&self, secp: &Secp256k1 ) -> Result<PublicKey, Error> {
+	fn pub_blind_sum(&self, secp: &Secp256k1) -> Result<PublicKey, Error> {
 		let pub_blinds: Vec<&PublicKey> = self
 			.participant_data
 			.iter()
@@ -753,7 +754,9 @@ impl Slate {
 		// and subtract it from the blind_sum so we create
 		// the aggsig context with the "split" key
 		self.tx_or_err_mut()?.offset = match use_test_rng {
-			false => BlindingFactor::from_secret_key(SecretKey::new( keychain.secp(), &mut thread_rng())),
+			false => {
+				BlindingFactor::from_secret_key(SecretKey::new(keychain.secp(), &mut thread_rng()))
+			}
 			true => {
 				// allow for consistent test results
 				let mut test_rng = StepRng::new(1_234_567_890_u64, 1);
@@ -810,11 +813,7 @@ impl Slate {
 		// double check the fee amount included in the partial tx
 		// we don't necessarily want to just trust the sender
 		// we could just overwrite the fee here (but we won't) due to the sig
-		let fee = tx_fee(
-			tx.inputs().len(),
-			tx.outputs().len(),
-			tx.kernels().len(),
-		);
+		let fee = tx_fee(tx.inputs().len(), tx.outputs().len(), tx.kernels().len());
 
 		if fee > tx.fee(height) {
 			return Err(
@@ -939,7 +938,12 @@ impl Slate {
 	}
 
 	/// return the final excess
-	pub fn calc_excess<K>(&self, secp: &Secp256k1, keychain: Option<&K>, height: u64) -> Result<Commitment, Error>
+	pub fn calc_excess<K>(
+		&self,
+		secp: &Secp256k1,
+		keychain: Option<&K>,
+		height: u64,
+	) -> Result<Commitment, Error>
 	where
 		K: Keychain,
 	{
@@ -956,10 +960,7 @@ impl Slate {
 			let secp = keychain.unwrap().secp();
 			// subtract the kernel_excess (built from kernel_offset)
 			let offset_excess = secp.commit(0, kernel_offset.secret_key(secp)?)?;
-			Ok(secp.commit_sum(
-				vec![tx_excess],
-				vec![offset_excess],
-			)?)
+			Ok(secp.commit_sum(vec![tx_excess], vec![offset_excess])?)
 		}
 	}
 
@@ -1404,7 +1405,7 @@ impl TryFrom<TransactionV3> for Transaction {
 
 impl TryFrom<&TransactionBodyV3> for TransactionBody {
 	type Error = Error;
-	fn try_from(body: &TransactionBodyV3) -> Result<TransactionBody,Error> {
+	fn try_from(body: &TransactionBodyV3) -> Result<TransactionBody, Error> {
 		let TransactionBodyV3 {
 			inputs,
 			outputs,
@@ -1413,11 +1414,11 @@ impl TryFrom<&TransactionBodyV3> for TransactionBody {
 
 		let inputs = map_vec!(inputs, |inp| Input::from(inp));
 		let outputs = map_vec!(outputs, |out| Output::from(out));
-		let mut kernels_tx : Vec<TxKernel> = Vec::new();
+		let mut kernels_tx: Vec<TxKernel> = Vec::new();
 		for kern in kernels {
 			kernels_tx.push(TxKernel::try_from(kern)?);
 		}
-		Ok( TransactionBody {
+		Ok(TransactionBody {
 			inputs: Inputs::FeaturesAndCommit(inputs),
 			outputs,
 			kernels: kernels_tx,
@@ -1451,10 +1452,9 @@ impl TryFrom<&TxKernelV3> for TxKernel {
 
 	fn try_from(kernel: &TxKernelV3) -> Result<TxKernel, Error> {
 		let (fee, lock_height) = (kernel.fee, kernel.lock_height);
-		let fee = if fee==0 {
+		let fee = if fee == 0 {
 			FeeFields::zero()
-		}
-		else {
+		} else {
 			fee.try_into()?
 		};
 

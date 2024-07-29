@@ -66,7 +66,7 @@ impl WalletSeed {
 	}
 
 	pub fn _to_hex(&self) -> String {
-        self.0.to_vec().to_hex()
+		self.0.to_vec().to_hex()
 	}
 
 	pub fn to_mnemonic(&self) -> Result<String, Error> {
@@ -347,9 +347,9 @@ impl EncryptedWalletSeed {
 			.map_err(|e| ErrorKind::Encryption(format!("Seal in place error, {}", e)))?;
 
 		Ok(EncryptedWalletSeed {
-            encrypted_seed: enc_bytes.to_hex(),
-            salt: salt.to_hex(),
-            nonce: nonce.to_hex(),
+			encrypted_seed: enc_bytes.to_hex(),
+			salt: salt.to_hex(),
+			nonce: nonce.to_hex(),
 		})
 	}
 
