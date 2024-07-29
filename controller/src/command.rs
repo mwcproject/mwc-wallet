@@ -108,7 +108,7 @@ where
 
 	let mut w_lock = owner_api.wallet_inst.lock();
 	let p = w_lock.lc_provider()?;
-    p.create_config(&chain_type, WALLET_CONFIG_FILE_NAME, None, None, None, None)?;
+	p.create_config(&chain_type, WALLET_CONFIG_FILE_NAME, None, None, None, None)?;
 	p.create_wallet(
 		None,
 		args.recovery_phrase,

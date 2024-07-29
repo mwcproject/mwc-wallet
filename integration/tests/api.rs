@@ -271,7 +271,8 @@ fn get_block_by_height_compact(
 		"http://{}:{}/v1/blocks/{}?no_merkle_proof&compact",
 		base_addr, api_server_port, height
 	);
-	api::client::get::<api::CompactBlockPrintable>(url.as_str(), None).map_err(|e| Error::API(url, e))
+	api::client::get::<api::CompactBlockPrintable>(url.as_str(), None)
+		.map_err(|e| Error::API(url, e))
 }
 
 fn get_block_by_hash(
@@ -295,7 +296,8 @@ fn get_block_by_hash_compact(
 		"http://{}:{}/v1/blocks/{}?no_merkle_proof&compact",
 		base_addr, api_server_port, block_hash
 	);
-	api::client::get::<api::CompactBlockPrintable>(url.as_str(), None).map_err(|e| Error::API(url, e))
+	api::client::get::<api::CompactBlockPrintable>(url.as_str(), None)
+		.map_err(|e| Error::API(url, e))
 }
 
 // Chain output handler functions
@@ -482,5 +484,5 @@ pub fn get_all_peers(
 pub enum Error {
 	/// Error originating from HTTP API calls.
 	#[fail(display = "API {} call error {}", _0, _1)]
-	API(String,api::Error),
+	API(String, api::Error),
 }

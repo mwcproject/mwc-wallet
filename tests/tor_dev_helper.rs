@@ -39,7 +39,7 @@ use common::{execute_command, initial_setup_wallet, instantiate_wallet, setup_gl
 
 fn setup_no_clean() {
 	util::init_test_logger();
-    setup_global_chain_type();
+	setup_global_chain_type();
 }
 
 #[ignore]

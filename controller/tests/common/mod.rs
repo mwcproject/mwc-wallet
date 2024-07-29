@@ -91,7 +91,7 @@ pub fn setup(test_dir: &str) {
 /// leaks across multiple tests and will likely have unintended consequences.
 #[allow(dead_code)]
 pub fn setup_global_chain_type() {
-    global::init_global_chain_type(global::ChainTypes::AutomatedTesting);
+	global::init_global_chain_type(global::ChainTypes::AutomatedTesting);
 }
 
 pub fn create_wallet_proxy(

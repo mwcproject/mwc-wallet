@@ -49,9 +49,9 @@ fn owner_v3_init_secure() -> Result<(), grin_wallet_controller::Error> {
 		return Ok(());
 	}
 
-    setup_global_chain_type();
+	setup_global_chain_type();
 
-    let test_dir = "target/test_output/owner_v3_init_secure";
+	let test_dir = "target/test_output/owner_v3_init_secure";
 	setup(test_dir);
 
 	// Create a new proxy to simulate server and wallet responses

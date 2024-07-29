@@ -580,7 +580,7 @@ macro_rules! doctest_helper_setup_doc_env_foreign {
 		use impls::{DefaultLCProvider, DefaultWalletImpl, HTTPNodeClient};
 		use libwallet::{BlockFees, IssueInvoiceTxArgs, Slate, WalletInst};
 
-				// don't run on windows CI, which gives very inconsistent results
+		// don't run on windows CI, which gives very inconsistent results
 		if cfg!(windows) {
 			return;
 		}
