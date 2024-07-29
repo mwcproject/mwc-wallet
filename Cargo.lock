@@ -2150,6 +2150,7 @@ dependencies = [
 [[package]]
 name = "grin_api"
 version = "5.3.2"
+source = "git+https://github.com/mwcproject/mwc-node?branch=master#e512bf3afc6b4d8217472dc293ab98d32c04b939"
 dependencies = [
  "bytes 0.5.6",
  "chrono",
@@ -2183,6 +2184,7 @@ dependencies = [
 [[package]]
 name = "grin_chain"
 version = "5.3.2"
+source = "git+https://github.com/mwcproject/mwc-node?branch=master#e512bf3afc6b4d8217472dc293ab98d32c04b939"
 dependencies = [
  "bit-vec",
  "bitflags 1.3.2",
@@ -2205,6 +2207,7 @@ dependencies = [
 [[package]]
 name = "grin_core"
 version = "5.3.2"
+source = "git+https://github.com/mwcproject/mwc-node?branch=master#e512bf3afc6b4d8217472dc293ab98d32c04b939"
 dependencies = [
  "blake2-rfc",
  "byteorder",
@@ -2230,6 +2233,7 @@ dependencies = [
 [[package]]
 name = "grin_keychain"
 version = "5.3.2"
+source = "git+https://github.com/mwcproject/mwc-node?branch=master#e512bf3afc6b4d8217472dc293ab98d32c04b939"
 dependencies = [
  "blake2-rfc",
  "byteorder",
@@ -2252,6 +2256,7 @@ dependencies = [
 [[package]]
 name = "grin_p2p"
 version = "5.3.2"
+source = "git+https://github.com/mwcproject/mwc-node?branch=master#e512bf3afc6b4d8217472dc293ab98d32c04b939"
 dependencies = [
  "async-std",
  "bitflags 1.3.2",
@@ -2285,6 +2290,7 @@ dependencies = [
 [[package]]
 name = "grin_pool"
 version = "5.3.2"
+source = "git+https://github.com/mwcproject/mwc-node?branch=master#e512bf3afc6b4d8217472dc293ab98d32c04b939"
 dependencies = [
  "blake2-rfc",
  "chrono",
@@ -2316,6 +2322,7 @@ dependencies = [
 [[package]]
 name = "grin_store"
 version = "5.3.2"
+source = "git+https://github.com/mwcproject/mwc-node?branch=master#e512bf3afc6b4d8217472dc293ab98d32c04b939"
 dependencies = [
  "byteorder",
  "croaring",
@@ -2334,6 +2341,7 @@ dependencies = [
 [[package]]
 name = "grin_util"
 version = "5.3.2"
+source = "git+https://github.com/mwcproject/mwc-node?branch=master#e512bf3afc6b4d8217472dc293ab98d32c04b939"
 dependencies = [
  "backtrace",
  "base64 0.12.3",
