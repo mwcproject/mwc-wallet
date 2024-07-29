@@ -137,6 +137,10 @@ where
 	/// Run the incoming message queue and respond more or less
 	/// synchronously
 	pub fn run(&mut self) -> Result<(), libwallet::Error> {
+		// We run the wallet_proxy within a spawned thread in tests.
+		// We set the local chain_type here within the thread.
+		set_local_chain_type(ChainTypes::AutomatedTesting);
+
 		self.running.store(true, Ordering::Relaxed);
 		loop {
 			thread::sleep(Duration::from_millis(10));

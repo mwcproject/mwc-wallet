@@ -41,7 +41,7 @@ mod common;
 use common::{
 	clean_output_dir, derive_ecdh_key, execute_command, execute_command_no_setup,
 	initial_setup_wallet, instantiate_wallet, send_request, send_request_enc, setup,
-	RetrieveSummaryInfoResp,
+	setup_global_chain_type, RetrieveSummaryInfoResp,
 };
 use grin_wallet_util::grin_util::secp::Secp256k1;
 
@@ -53,13 +53,11 @@ fn owner_v3_lifecycle() -> Result<(), grin_wallet_controller::Error> {
 		return Ok(());
 	}
 
-	let secp = Secp256k1::new();
+    setup_global_chain_type();
 
+    let secp = Secp256k1::new();
 	let test_dir = "target/test_output/owner_v3_lifecycle";
 	setup(test_dir);
-	// Need setup global because testing owner API that runs in a separate thread
-	global::init_global_chain_type(global::ChainTypes::AutomatedTesting);
-	global::set_local_chain_type(global::ChainTypes::AutomatedTesting);
 
 	let yml = load_yaml!("../src/bin/mwc-wallet.yml");
 	let app = App::from_yaml(yml);

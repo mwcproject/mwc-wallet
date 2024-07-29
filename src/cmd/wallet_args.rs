@@ -41,7 +41,6 @@ use grin_wallet_libwallet::{
 };
 use grin_wallet_util::grin_core as core;
 use grin_wallet_util::grin_core::core::amount_to_hr_string;
-use grin_wallet_util::grin_core::global;
 use grin_wallet_util::grin_keychain as keychain;
 use grin_wallet_util::grin_util::secp::Secp256k1;
 use linefeed::terminal::Signal;
@@ -304,15 +303,9 @@ pub fn parse_global_args(
 		}
 	};
 
-	let chain_type = match config.chain_type.clone() {
-		None => global::get_chain_type(),
-		Some(c) => c,
-	};
-
 	Ok(command::GlobalArgs {
 		account: account.to_owned(),
 		show_spent: show_spent,
-		chain_type: chain_type,
 		api_secret: api_secret,
 		node_api_secret: node_api_secret,
 		password: password,
@@ -1363,10 +1356,6 @@ where
 		>,
 	),
 {
-	if let Some(t) = wallet_config.chain_type.clone() {
-		core::global::set_local_chain_type(t);
-	}
-
 	if wallet_args.is_present("external") {
 		wallet_config.api_listen_interface = "0.0.0.0".to_string();
 	}

@@ -37,7 +37,7 @@ use serde_json;
 mod common;
 use common::{
 	clean_output_dir, derive_ecdh_key, execute_command, initial_setup_wallet, instantiate_wallet,
-	send_request, send_request_enc, setup, RetrieveSummaryInfoResp,
+	send_request, send_request_enc, setup, setup_global_chain_type, RetrieveSummaryInfoResp,
 };
 use grin_wallet_util::grin_util::secp::Secp256k1;
 
@@ -49,11 +49,10 @@ fn owner_v3_init_secure() -> Result<(), grin_wallet_controller::Error> {
 		return Ok(());
 	}
 
-	let test_dir = "target/test_output/owner_v3_init_secure";
+    setup_global_chain_type();
+
+    let test_dir = "target/test_output/owner_v3_init_secure";
 	setup(test_dir);
-	// Setup global because We are using owner API that runs in separate thread
-	global::init_global_chain_type(global::ChainTypes::AutomatedTesting);
-	global::set_local_chain_type(global::ChainTypes::AutomatedTesting);
 
 	// Create a new proxy to simulate server and wallet responses
 	setup_proxy!(test_dir, chain, wallet1, client1, mask1, wallet2, client2, _mask2);

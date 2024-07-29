@@ -86,6 +86,14 @@ pub fn setup(test_dir: &str) {
 	global::set_local_chain_type(global::ChainTypes::AutomatedTesting);
 }
 
+/// Some tests require the global chain_type to be configured due to threads being spawned internally.
+/// It is recommended to avoid relying on this if at all possible as global chain_type
+/// leaks across multiple tests and will likely have unintended consequences.
+#[allow(dead_code)]
+pub fn setup_global_chain_type() {
+    global::init_global_chain_type(global::ChainTypes::AutomatedTesting);
+}
+
 pub fn create_wallet_proxy(
 	test_dir: &str,
 ) -> WalletProxy<DefaultLCProvider<LocalWalletClient, ExtKeychain>, LocalWalletClient, ExtKeychain>
