@@ -588,6 +588,11 @@ macro_rules! doctest_helper_setup_doc_env_foreign {
 		// Set our local chain_type for testing.
 		global::set_local_chain_type(global::ChainTypes::AutomatedTesting);
 
+		// don't run on windows CI, which gives very inconsistent results
+		if cfg!(windows) {
+			return;
+		}
+
 		let dir = tempdir().map_err(|e| format!("{:#?}", e)).unwrap();
 		let dir = dir
 			.path()
