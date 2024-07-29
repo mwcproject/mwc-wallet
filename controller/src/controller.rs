@@ -50,7 +50,6 @@ use crate::keychain::Keychain;
 use chrono::Utc;
 use easy_jsonrpc_mw::{Handler, MaybeReply};
 use grin_wallet_impls::tor;
-use grin_wallet_libwallet::internal::selection;
 use grin_wallet_libwallet::proof::crypto;
 use grin_wallet_libwallet::proof::proofaddress;
 use grin_wallet_util::grin_core::core::TxKernel;
@@ -63,6 +62,8 @@ use std::pin::Pin;
 use std::sync::mpsc::Sender;
 use std::sync::{Arc, RwLock};
 use std::thread;
+use grin_wallet_util::grin_util::secp::{ContextFlag, Secp256k1};
+use grin_wallet_util::grin_util::static_secp_instance;
 
 lazy_static! {
 	pub static ref MWC_OWNER_BASIC_REALM: HeaderValue =
@@ -342,6 +343,7 @@ where
 		from: &dyn Address,
 		slate: &mut Slate,
 		dest_acct_name: Option<&str>,
+		secp: &Secp256k1,
 	) -> Result<(), Error> {
 		let owner_api = Owner::new(self.wallet.clone(), None, None);
 		let foreign_api = Foreign::new(self.wallet.clone(), None, None);
@@ -435,7 +437,7 @@ where
 				.lock()
 				.as_ref()
 				.expect("call set_publisher() method!!!")
-				.post_slate(slate, from)
+				.post_slate(slate, from, secp)
 				.map_err(|e| {
 					self.do_log_error(format!("ERROR: Unable to send slate back, {}", e));
 					e
@@ -534,7 +536,11 @@ where
 			));
 		};
 
-		let result = self.process_incoming_slate(from, slate, None);
+		let result = {
+			let secp_inst = static_secp_instance();
+			let secp = secp_inst.lock();
+			self.process_incoming_slate(from, slate, None, &secp)
+		};
 
 		//send the message back
 		match result {
@@ -640,7 +646,9 @@ where
 
 	let mwcmqs_secret_key =
 		controller_derive_address_key(wallet.clone(), keychain_mask.lock().as_ref())?;
-	let mwc_pub_key = crypto::public_key_from_secret_key(&mwcmqs_secret_key)?;
+
+	let secp = Secp256k1::with_caps(ContextFlag::Full);
+	let mwc_pub_key = crypto::public_key_from_secret_key(&secp, &mwcmqs_secret_key)?;
 
 	let mwcmqs_address = MWCMQSAddress::new(
 		proofaddress::ProvableAddress::from_pub_key(&mwc_pub_key),
@@ -674,7 +682,7 @@ where
 	let thread = thread::Builder::new()
 		.name("mwcmqs-broker".to_string())
 		.spawn(move || {
-			if let Err(e) = cloned_subscriber.start() {
+			if let Err(e) = cloned_subscriber.start(&secp) {
 				let err_str = format!("Unable to start mwcmqs controller, {}", e);
 				error!("{}", err_str);
 				panic!("{}", err_str);
@@ -899,7 +907,7 @@ where
 					tor_addr.port(),
 					&tor_secret,
 					libp2p_listen_port as u16,
-					selection::get_base_fee(),
+					global::get_accept_fee_base(),
 					validation_fn.clone(),
 					stop_mutex.clone(),
 				);
@@ -1216,7 +1224,8 @@ impl OwnerV3Helpers {
 				Ok(k) => k,
 				Err(_) => return,
 			};
-			let sk = match SecretKey::from_slice(&key_bytes) {
+			let secp = Secp256k1::with_caps(ContextFlag::None);
+			let sk = match SecretKey::from_slice(&secp, &key_bytes) {
 				Ok(s) => s,
 				Err(_) => return,
 			};

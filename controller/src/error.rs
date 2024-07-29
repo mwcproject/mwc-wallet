@@ -34,7 +34,7 @@ pub struct Error {
 pub enum ErrorKind {
 	/// LibTX Error
 	#[fail(display = "LibTx Error, {}", _0)]
-	LibTX(libtx::ErrorKind),
+	LibTX(libtx::Error),
 
 	/// Impls error
 	#[fail(display = "Impls Error, {}", _0)]
@@ -70,7 +70,7 @@ pub enum ErrorKind {
 
 	/// Error when contacting a node through its API
 	#[fail(display = "Node API error, {}", _0)]
-	Node(api::ErrorKind),
+	Node(api::Error),
 
 	/// Error originating from hyper.
 	#[fail(display = "Hyper error, {}", _0)]
@@ -209,7 +209,7 @@ impl From<Context<ErrorKind>> for Error {
 impl From<api::Error> for Error {
 	fn from(error: api::Error) -> Error {
 		Error {
-			inner: Context::new(ErrorKind::Node(error.kind().clone())),
+			inner: Context::new(ErrorKind::Node(error)),
 		}
 	}
 }
@@ -241,7 +241,7 @@ impl From<libwallet::Error> for Error {
 impl From<libtx::Error> for Error {
 	fn from(error: libtx::Error) -> Error {
 		Error {
-			inner: Context::new(ErrorKind::LibTX(error.kind())),
+			inner: Context::new(ErrorKind::LibTX(error)),
 		}
 	}
 }

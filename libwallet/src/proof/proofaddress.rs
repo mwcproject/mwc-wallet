@@ -191,7 +191,7 @@ where
 
 	match addr_type {
 		ProofAddressType::MQS => {
-			let sender_address_pub_key = crypto::public_key_from_secret_key(&secret_key)?;
+			let sender_address_pub_key = crypto::public_key_from_secret_key(keychain.secp(), &secret_key)?;
 			Ok(ProvableAddress::from_pub_key(&sender_address_pub_key))
 		}
 		ProofAddressType::Onion => {
@@ -235,7 +235,7 @@ where
 	K: Keychain,
 {
 	let sender_address_secret_key = payment_proof_address_secret(keychain, None)?;
-	crypto::public_key_from_secret_key(&sender_address_secret_key)
+	crypto::public_key_from_secret_key(keychain.secp(), &sender_address_secret_key)
 }
 
 /// Build Tor public Key from the secret

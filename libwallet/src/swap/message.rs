@@ -26,6 +26,7 @@ use crate::proof::proofaddress::ProvableAddress;
 use crate::{ParticipantData as TxParticipant, VersionedSlate};
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
+use grin_wallet_util::grin_util::secp::Secp256k1;
 
 /// Swap message that is used for Seller/Buyer interaction
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -260,6 +261,7 @@ impl SwapMessage {
 		_challenge: String,
 		_signature: String,
 		secret_key: &SecretKey,
+		secp: &Secp256k1,
 	) -> Result<Message, ErrorKind> {
 		let public_key = from.public_key().map_err(|e| {
 			ErrorKind::TradeEncDecError(format!(
@@ -276,7 +278,7 @@ impl SwapMessage {
 		})?;
 
 		let key = encrypted_message
-			.key(&public_key, secret_key)
+			.key(&public_key, secret_key, &secp)
 			.map_err(|e| {
 				ErrorKind::TradeEncDecError(format!("Unable to build the signature, {}", e))
 			})?;

@@ -33,6 +33,7 @@ use failure::_core::marker::PhantomData;
 use grin_wallet_util::grin_core::core::Committed;
 use std::sync::Arc;
 use web3::types::{Address, H256};
+use grin_wallet_util::grin_util::secp::Secp256k1;
 
 /// SwapApi trait implementaiton for ETH
 #[derive(Clone)]
@@ -635,6 +636,7 @@ where
 		&self,
 		swap: &Swap,
 		_confirmations_needed: u64,
+		_secp: &Secp256k1,
 	) -> Result<(u64, u64, u64), ErrorKind> {
 		// check eth transaction status
 		let amount = self.get_eth_initiate_tx_status(swap)?;
@@ -726,7 +728,7 @@ where
 	}
 
 	/// Get a secondary address for the lock account
-	fn get_secondary_lock_address(&self, swap: &Swap) -> Result<Vec<String>, ErrorKind> {
+	fn get_secondary_lock_address(&self, swap: &Swap, _secp: &Secp256k1) -> Result<Vec<String>, ErrorKind> {
 		let eth_data = swap.secondary_data.unwrap_eth()?;
 
 		match eth_data.address_from_secret {

@@ -19,6 +19,8 @@ use crate::{Slate, VersionedSlate};
 use failure::Error;
 use hex::{self, FromHex};
 use serde::{Deserialize, Deserializer, Serializer};
+use grin_wallet_util::grin_util::secp::{ContextFlag, Secp256k1};
+use grin_wallet_util::grin_util::ToHex;
 
 /// Slate deserialization
 pub fn slate_deser<'a, D>(deserializer: D) -> Result<Slate, D::Error>
@@ -95,12 +97,14 @@ pub fn pubkey_to_hex<S>(key: &PublicKey, serializer: S) -> Result<S::Ok, S::Erro
 where
 	S: Serializer,
 {
-	serializer.serialize_str(&hex::encode(key.serialize_vec(true)))
+	let secp = Secp256k1::with_caps(ContextFlag::None);
+	serializer.serialize_str(key.serialize_vec(&secp, true).to_hex().as_str())
 }
 
 fn pubkey_from_hex_string(s: String) -> Result<PublicKey, Error> {
 	let v = Vec::from_hex(&s)?;
-	let p = PublicKey::from_slice(&v[..])?;
+	let secp = Secp256k1::with_caps(ContextFlag::None);
+	let p = PublicKey::from_slice( &secp, &v[..])?;
 	Ok(p)
 }
 
@@ -150,7 +154,8 @@ where
 
 fn seckey_from_hex_string(s: String) -> Result<SecretKey, Error> {
 	let v = Vec::from_hex(&s)?;
-	let sk = SecretKey::from_slice(&v[..])?;
+	let secp = Secp256k1::with_caps(ContextFlag::None);
+	let sk = SecretKey::from_slice(&secp, &v[..])?;
 	Ok(sk)
 }
 
@@ -195,12 +200,13 @@ pub fn sig_to_hex<S>(sig: &Signature, serializer: S) -> Result<S::Ok, S::Error>
 where
 	S: Serializer,
 {
-	serializer.serialize_str(&hex::encode(sig.serialize_compact().to_vec()))
+	let secp = Secp256k1::with_caps(ContextFlag::None);
+	serializer.serialize_str(sig.serialize_compact(&secp).to_hex().as_str())
 }
 
-fn sig_from_hex_string(s: String) -> Result<Signature, Error> {
+fn sig_from_hex_string(secp: &Secp256k1, s: String) -> Result<Signature, Error> {
 	let v = Vec::from_hex(&s)?;
-	let sig = Signature::from_compact(&v[..])?;
+	let sig = Signature::from_compact(secp, &v[..])?;
 	Ok(sig)
 }
 
@@ -211,7 +217,8 @@ where
 {
 	use serde::de::Error;
 	let s = String::deserialize(deserializer)?;
-	sig_from_hex_string(s).map_err(D::Error::custom)
+	let secp = Secp256k1::with_caps(ContextFlag::None);
+	sig_from_hex_string(&secp,s).map_err(D::Error::custom)
 }
 
 /// Serialize Option<Signature> to HEX string
@@ -232,8 +239,9 @@ where
 {
 	use serde::de::Error;
 	let opt: Option<String> = Option::deserialize(deserializer)?;
+	let secp = Secp256k1::with_caps(ContextFlag::None);
 	match opt {
-		Some(s) => sig_from_hex_string(s)
+		Some(s) => sig_from_hex_string(&secp, s)
 			.map(|sig| Some(sig))
 			.map_err(D::Error::custom),
 		None => Ok(None),

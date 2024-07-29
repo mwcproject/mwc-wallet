@@ -29,7 +29,6 @@ use crate::proof::crypto::Hex;
 use crate::proof::proofaddress;
 use crate::proof::proofaddress::{get_address_index, ProvableAddress};
 use crate::proof::tx_proof::{push_proof_for_slate, TxProof};
-use crate::signature::Signature as otherSignature;
 use crate::slate::Slate;
 use crate::types::{Context, NodeClient, StoredProofInfo, TxLogEntryType, WalletBackend};
 use crate::InitTxArgs;
@@ -39,6 +38,7 @@ use ed25519_dalek::PublicKey as DalekPublicKey;
 use ed25519_dalek::SecretKey as DalekSecretKey;
 use ed25519_dalek::Signature as DalekSignature;
 use ed25519_dalek::{Signer, Verifier};
+use grin_wallet_util::grin_util::secp::Secp256k1;
 use grin_wallet_util::OnionV3Address;
 
 // static for incrementing test UUIDs
@@ -61,7 +61,7 @@ where
 	C: NodeClient + 'a,
 	K: Keychain + 'a,
 {
-	let current_height = wallet.w2n_client().get_chain_tip()?.0;
+	let (current_height, _, _) = wallet.w2n_client().get_chain_tip()?;
 	let mut slate = Slate::blank(num_participants, compact_slate);
 	if let Some(b) = ttl_blocks {
 		slate.ttl_cutoff_height = Some(current_height + b);
@@ -124,7 +124,7 @@ where
 	K: Keychain + 'a,
 {
 	// Get lock height
-	let current_height = wallet.w2n_client().get_chain_tip()?.0;
+	let (current_height, _, _) = wallet.w2n_client().get_chain_tip()?;
 	// ensure outputs we're selecting are up to date
 
 	// Sender selects outputs into a new slate and save our corresponding keys in
@@ -299,7 +299,7 @@ where
 
 		// update excess in stored transaction
 		let mut batch = wallet.batch(keychain_mask)?;
-		tx.kernel_excess = Some(slate.calc_excess(Some(&keychain))?);
+		tx.kernel_excess = Some(slate.calc_excess(keychain.secp(), Some(&keychain), current_height)?);
 		batch.save_tx_log_entry(tx.clone(), &parent_key_id)?;
 		batch.commit()?;
 	}
@@ -407,9 +407,11 @@ where
 	let keychain = wallet.keychain(keychain_mask)?;
 	slate.fill_round_2(keychain.secp(), sec_key, sec_nonce, participant_id)?;
 
+	let (current_height, _, _) = wallet.w2n_client().get_chain_tip()?;
+
 	// Final transaction can be built by anyone at this stage
 	trace!("Slate to finalize is: {:?}", slate);
-	slate.finalize(&keychain)?;
+	slate.finalize(&keychain, current_height)?;
 	Ok(())
 }
 
@@ -521,8 +523,10 @@ where
 
 	let keychain = wallet.keychain(keychain_mask)?;
 
+	let (current_height, _, _) = wallet.w2n_client().get_chain_tip()?;
+
 	if slate.compact_slate {
-		tx.kernel_excess = Some(slate.calc_excess(Some(&keychain))?);
+		tx.kernel_excess = Some(slate.calc_excess(keychain.secp(), Some(&keychain), current_height)?);
 	} else {
 		tx.kernel_excess = Some(slate.tx_or_err()?.body.kernels[0].excess);
 	}
@@ -532,7 +536,7 @@ where
 			Some(i) => i,
 			None => get_address_index(),
 		};
-		let excess = slate.calc_excess(Some(&keychain))?;
+		let excess = slate.calc_excess(keychain.secp(), Some(&keychain), current_height)?;
 		//sender address.
 		let sender_address_secret_key =
 			proofaddress::payment_proof_address_secret(&keychain, Some(derivation_index))?;
@@ -549,6 +553,7 @@ where
 			p.sender_address.clone(),
 			p.receiver_address.clone(),
 			sender_address_secret_key,
+			keychain.secp(),
 		)?;
 		tx.payment_proof = Some(StoredProofInfo {
 			receiver_address: p.receiver_address.clone(),
@@ -647,13 +652,14 @@ pub fn create_payment_proof_signature(
 	sender_address: ProvableAddress,
 	receiver_address: ProvableAddress,
 	sec_key: SecretKey,
+	secp: &Secp256k1,
 ) -> Result<String, Error> {
 	let message_ser = payment_proof_message(amount, kernel_commitment, sender_address.public_key)?;
 	if receiver_address.public_key.len() == 52 {
 		//this is mqs address
 		let mut challenge = String::new();
 		challenge.push_str(&message_ser);
-		let signature = crypto::sign_challenge(&challenge, &sec_key)?;
+		let signature = crypto::sign_challenge(&challenge, &sec_key, secp)?;
 		let signature = signature.to_hex();
 		Ok(signature)
 	} else {
@@ -758,10 +764,12 @@ where
 			.into());
 		}
 
+		let (current_height, _, _) = wallet.w2n_client().get_chain_tip()?;
+
 		//build the message which was used to generated receiver signature.
 		let msg = payment_proof_message(
 			slate.amount,
-			&slate.calc_excess(Some(&keychain))?,
+			&slate.calc_excess(keychain.secp(), Some(&keychain), current_height)?,
 			orig_sender_a.public_key.clone(),
 		)?;
 		let sig = match p.clone().receiver_signature {
@@ -781,7 +789,7 @@ where
 					&sig, e
 				))
 			})?;
-			let signature = Signature::from_der(&signature_ser).map_err(|e| {
+			let signature = Signature::from_der(keychain.secp(), &signature_ser).map_err(|e| {
 				ErrorKind::TxProofGenericError(format!("Unable to build signature, {}", e))
 			})?;
 			debug!(
@@ -791,7 +799,7 @@ where
 			let receiver_pubkey = p.receiver_address.public_key().map_err(|e| {
 				ErrorKind::TxProofGenericError(format!("Unable to get receiver address, {}", e))
 			})?;
-			crypto::verify_signature(&msg, &signature, &receiver_pubkey)
+			crypto::verify_signature(&msg, &signature, &receiver_pubkey, keychain.secp())
 				.map_err(|e| ErrorKind::TxProofVerifySignature(format!("{}", e)))?;
 		} else {
 			//the signature is generated using Dalek public key
@@ -846,6 +854,7 @@ where
 			&sender_address_secret_key,
 			&orig_sender_a,
 			onion_address_str,
+			keychain.secp(),
 		)
 		.map_err(|e| {
 			ErrorKind::TxProofVerifySignature(format!("Cannot create tx_proof using slate, {}", e))
@@ -859,6 +868,7 @@ where
 
 #[cfg(test)]
 mod test {
+	use grin_wallet_util::grin_core::core::FeeFields;
 	use crate::grin_core::core::committed::Committed;
 	use crate::grin_core::core::KernelFeatures;
 	use crate::grin_core::libtx::{build, ProofBuilder};
@@ -873,14 +883,14 @@ mod test {
 		let key_id1 = ExtKeychainPath::new(1, 1, 0, 0, 0).to_identifier();
 
 		let tx1 = build::transaction(
-			KernelFeatures::Plain { fee: 0 },
+			KernelFeatures::Plain { fee: FeeFields::zero() },
 			&vec![build::output(105, key_id1.clone())],
 			&keychain,
 			&builder,
 		)
 		.unwrap();
 		let tx2 = build::transaction(
-			KernelFeatures::Plain { fee: 0 },
+			KernelFeatures::Plain { fee: FeeFields::zero() },
 			&vec![build::input(105, key_id1.clone())],
 			&keychain,
 			&builder,
@@ -893,9 +903,6 @@ mod test {
 	/*
 	#[test]
 	fn payment_proof_construction() {
-		let secp_inst = static_secp_instance();
-		let secp = secp_inst.lock();
-
 		let identifier = ExtKeychainPath::new(1, 1, 0, 0, 0).to_identifier();
 		let keychain = ExtKeychain::from_random_seed(true).unwrap();
 		let sender_address_secret_key =
@@ -943,7 +950,6 @@ mod test {
 		)
 		.unwrap();
 
-		let secp = Secp256k1::new();
 		let signature = util::from_hex(&sig).unwrap();
 		let signature = Signature::from_der(&secp, &signature).unwrap();
 		assert!(crypto::verify_signature(&msg, &signature, &public_key).is_ok());

@@ -17,6 +17,7 @@ use crate::swap::swap::SwapJournalRecord;
 use crate::swap::types::{Action, SwapTransactionsConfirmations};
 use crate::swap::{Context, ErrorKind, Swap};
 use std::fmt;
+use grin_wallet_util::grin_util::secp::Secp256k1;
 
 /// We need to reprty post transaction we we don't see it on the blockchain
 pub const POST_MWC_RETRY_PERIOD: i64 = 300;
@@ -428,7 +429,7 @@ pub trait State {
 	fn get_state_id(&self) -> StateId;
 
 	/// Get a state eta. Return None for states that are never executed
-	fn get_eta(&self, swap: &Swap) -> Option<StateEtaInfo>;
+	fn get_eta(&self, swap: &Swap, secp: &Secp256k1) -> Option<StateEtaInfo>;
 
 	/// Check if it is cancellable
 	fn is_cancellable(&self) -> bool;
@@ -439,7 +440,9 @@ pub trait State {
 		input: Input,
 		swap: &mut Swap,
 		context: &Context,
+		height: u64,
 		tx_conf: &SwapTransactionsConfirmations,
+		secp: &Secp256k1,
 	) -> Result<StateProcessRespond, ErrorKind>;
 
 	/// Get the prev happy path State.

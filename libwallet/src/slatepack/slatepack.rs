@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::convert::TryInto;
 /// Slatepack Types + Serialization implementation
 use ed25519_dalek::{PublicKey as DalekPublicKey, SecretKey as DalekSecretKey, PUBLIC_KEY_LENGTH};
 
@@ -32,8 +33,7 @@ use crate::grin_keychain::{BlindingFactor, ExtKeychain};
 use crate::grin_util::secp::constants::{PEDERSEN_COMMITMENT_SIZE, SECRET_KEY_SIZE};
 use crate::grin_util::secp::pedersen::{Commitment, RangeProof};
 use crate::grin_util::secp::Signature;
-use crate::grin_util::static_secp_instance;
-use crate::grin_util::{from_hex, to_hex};
+use crate::grin_util::{from_hex, ToHex};
 use crate::proof::proofaddress;
 use crate::slate::PaymentInfo;
 use bitstream_io::{BigEndian, BitReader, BitWriter, Endianness};
@@ -42,6 +42,7 @@ use rand::{thread_rng, Rng};
 use ring::aead;
 use smaz;
 use uuid::Uuid;
+use grin_wallet_util::grin_util::secp::Secp256k1;
 
 /// Basic Slatepack definition
 #[derive(Debug, Clone)]
@@ -115,6 +116,8 @@ impl Slatepack {
 		data: &Vec<u8>,
 		encrypted: bool,
 		secret: &DalekSecretKey,
+		height: u64,
+		secp: &Secp256k1,
 	) -> Result<Self, Error> {
 		if encrypted && data.len() < SLATE_PACK_PLAIN_DATA_SIZE {
 			return Err(
@@ -207,23 +210,23 @@ impl Slatepack {
 
 		let mut slate = match content {
 			SlatePurpose::InvoiceInitial => Self::read_slate_data(
-				true, false, false, false, false, false, true, false, false, false, &mut r,
+				true, false, false, false, false, false, true, false, false, false, &mut r, secp,
 			)?,
 			SlatePurpose::InvoiceResponse => Self::read_slate_data(
-				true, true, true, true, true, true, false, true, false, false, &mut r,
+				true, true, true, true, true, true, false, true, false, false, &mut r, secp,
 			)?,
 			SlatePurpose::FullSlate => Self::read_slate_data(
-				true, true, true, true, true, true, true, true, true, true, &mut r,
+				true, true, true, true, true, true, true, true, true, true, &mut r, secp,
 			)?,
 			SlatePurpose::SendInitial => Self::read_slate_data(
-				true, true, false, false, false, false, true, false, true, false, &mut r,
+				true, true, false, false, false, false, true, false, true, false, &mut r, secp,
 			)?,
 			SlatePurpose::SendResponse => Self::read_slate_data(
-				false, false, true, false, true, true, false, true, true, true, &mut r,
+				false, false, true, false, true, true, false, true, true, true, &mut r, secp,
 			)?,
 		};
 
-		Self::update_tx_from_slate(&mut slate)?;
+		Self::update_tx_from_slate(&mut slate, height, secp)?;
 
 		Ok(Slatepack {
 			sender,
@@ -243,6 +246,7 @@ impl Slatepack {
 		slate_version: SlateVersion,
 		secret: &DalekSecretKey,
 		use_test_rng: bool,
+		secp: &Secp256k1,
 	) -> Result<(Vec<u8>, bool), Error> {
 		if !self.slate.compact_slate {
 			return Err(ErrorKind::SlatepackEncodeError(
@@ -277,6 +281,7 @@ impl Slatepack {
 					false,
 					false,
 					&mut w,
+					secp,
 				)?;
 			}
 			SlatePurpose::InvoiceResponse => {
@@ -293,6 +298,7 @@ impl Slatepack {
 					false,
 					false,
 					&mut w,
+					secp,
 				)?;
 			}
 			SlatePurpose::FullSlate => {
@@ -309,6 +315,7 @@ impl Slatepack {
 					true,
 					true,
 					&mut w,
+					secp,
 				)?;
 			}
 			SlatePurpose::SendInitial => {
@@ -325,6 +332,7 @@ impl Slatepack {
 					true,
 					false,
 					&mut w,
+					secp,
 				)?;
 			}
 			SlatePurpose::SendResponse => {
@@ -341,6 +349,7 @@ impl Slatepack {
 					true,
 					true,
 					&mut w,
+					secp,
 				)?;
 			}
 		}
@@ -456,14 +465,15 @@ impl Slatepack {
 	fn write_participant_data<W: io::Write, E: Endianness>(
 		part_data: &ParticipantData,
 		w: &mut BitWriter<W, E>,
+		secp: &Secp256k1,
 	) -> Result<(), Error> {
-		Self::write_publick_key(&part_data.public_blind_excess, w)?;
-		Self::write_publick_key(&part_data.public_nonce, w)?;
+		Self::write_publick_key(&part_data.public_blind_excess, w, secp)?;
+		Self::write_publick_key(&part_data.public_nonce, w, secp)?;
 
 		match part_data.part_sig {
 			Some(sig) => {
 				w.write(1, 1)?;
-				let sig_dt = sig.serialize_compact();
+				let sig_dt = sig.serialize_compact(secp);
 				w.write_bytes(&sig_dt)?;
 			}
 			None => {
@@ -486,7 +496,7 @@ impl Slatepack {
 
 				// Writing signature as a proof of the message, so other party will not be able to change it as well
 				if let Some(sig) = part_data.message_sig {
-					let sig_dt = sig.serialize_compact();
+					let sig_dt = sig.serialize_compact(secp);
 					w.write_bytes(&sig_dt)?;
 				} else {
 					return Err(ErrorKind::GenericError(
@@ -503,8 +513,9 @@ impl Slatepack {
 	fn write_publick_key<W: io::Write, E: Endianness>(
 		pk: &PublicKey,
 		w: &mut BitWriter<W, E>,
+		secp: &Secp256k1,
 	) -> Result<(), Error> {
-		let xs = pk.serialize_vec(true);
+		let xs = pk.serialize_vec(secp, true);
 		w.write(7, xs.len() as u32)?;
 		w.write_bytes(&xs)?;
 		Ok(())
@@ -516,12 +527,13 @@ impl Slatepack {
 	fn write_provable_address<W: io::Write, E: Endianness>(
 		address: &ProvableAddress,
 		w: &mut BitWriter<W, E>,
+		secp: &Secp256k1,
 	) -> Result<(), Error> {
 		match address.public_key() {
 			Ok(pk) => {
 				//
 				w.write(1, 1)?;
-				Self::write_publick_key(&pk, w)?;
+				Self::write_publick_key(&pk, w, secp)?;
 			}
 			Err(_) => {
 				// it must be tor address.
@@ -546,6 +558,7 @@ impl Slatepack {
 		write_proof_addresses: bool,
 		write_proof_signature: bool,
 		w: &mut BitWriter<W, E>,
+		secp: &Secp256k1,
 	) -> Result<(), Error> {
 		// stransaction Id is included in every paylod
 		// 16 bytes
@@ -645,7 +658,7 @@ impl Slatepack {
 				// Expecting only Plain kernels. It is about wallet basic operations, so nothing extra
 				match kernel.features {
 					KernelFeatures::Plain { fee } => {
-						Self::write_u64(fee, true, w)?;
+						Self::write_u64(fee.into(), true, w)?;
 					}
 					_ => {
 						return Err(ErrorKind::SlatepackEncodeError(
@@ -655,7 +668,7 @@ impl Slatepack {
 					}
 				}
 				w.write_bytes(&kernel.excess.0)?;
-				w.write_bytes(&kernel.excess_sig.serialize_compact())?;
+				w.write_bytes(&kernel.excess_sig.serialize_compact(secp))?;
 				has_data = true;
 			}
 			w.write(1, 0)?; // stop bit
@@ -667,7 +680,7 @@ impl Slatepack {
 				.ok_or(ErrorKind::SlatepackEncodeError(
 					"Not found slate participant data".to_string(),
 				))?;
-			Self::write_participant_data(&part_data, w)?;
+			Self::write_participant_data(&part_data, w, secp)?;
 		}
 		if write_participan_data_1 {
 			let part_data = slate
@@ -675,7 +688,7 @@ impl Slatepack {
 				.ok_or(ErrorKind::SlatepackEncodeError(
 					"Not found slate participant data".to_string(),
 				))?;
-			Self::write_participant_data(&part_data, w)?;
+			Self::write_participant_data(&part_data, w, secp)?;
 		}
 
 		if write_proof_addresses {
@@ -683,8 +696,8 @@ impl Slatepack {
 				Some(pp) => {
 					w.write(1, 1)?;
 					// len is 32 bytes
-					Self::write_provable_address(&pp.sender_address, w)?;
-					Self::write_provable_address(&pp.receiver_address, w)?;
+					Self::write_provable_address(&pp.sender_address, w, secp)?;
+					Self::write_provable_address(&pp.receiver_address, w, secp)?;
 					// signature is None
 				}
 				None => w.write(1, 0)?,
@@ -746,14 +759,15 @@ impl Slatepack {
 	fn read_participant_data<R: io::Read, E: Endianness>(
 		r: &mut BitReader<R, E>,
 		id: u64,
+		secp: &Secp256k1,
 	) -> Result<ParticipantData, Error> {
-		let blind_excess = Self::read_publick_key(r)?;
-		let nonce = Self::read_publick_key(r)?;
+		let blind_excess = Self::read_publick_key(r, secp)?;
+		let nonce = Self::read_publick_key(r, secp)?;
 
 		let signature = if r.read::<u8>(1)? == 1 {
 			let mut sig_dt: [u8; 64] = [0; 64];
 			r.read_bytes(&mut sig_dt)?;
-			Some(Signature::from_compact(&sig_dt)?)
+			Some(Signature::from_compact(secp, &sig_dt)?)
 		} else {
 			None
 		};
@@ -771,7 +785,7 @@ impl Slatepack {
 				Some(String::from_utf8(msg).map_err(|e| {
 					ErrorKind::SlatepackDecodeError(format!("Unable to decode message, {}", e))
 				})?),
-				Some(Signature::from_compact(&sig_dt)?),
+				Some(Signature::from_compact(secp, &sig_dt)?),
 			)
 		} else {
 			(None, None)
@@ -789,20 +803,22 @@ impl Slatepack {
 
 	fn read_publick_key<R: io::Read, E: Endianness>(
 		r: &mut BitReader<R, E>,
+		secp: &Secp256k1,
 	) -> Result<PublicKey, Error> {
 		let xs_len: u32 = r.read(7)?;
 		let mut xs: Vec<u8> = vec![0; xs_len as usize];
 		r.read_bytes(&mut xs)?;
-		let pk = PublicKey::from_slice(&xs)?;
+		let pk = PublicKey::from_slice(secp, &xs)?;
 		Ok(pk)
 	}
 
 	fn read_provable_address<R: io::Read, E: Endianness>(
 		r: &mut BitReader<R, E>,
+		secp: &Secp256k1,
 	) -> Result<ProvableAddress, Error> {
 		let pa = if r.read::<u8>(1)? == 1 {
 			// PublicKey (MQS)
-			let pk = Self::read_publick_key(r)?;
+			let pk = Self::read_publick_key(r, secp)?;
 			ProvableAddress::from_pub_key(&pk)
 		} else {
 			let mut pk: [u8; PUBLIC_KEY_LENGTH] = [0; PUBLIC_KEY_LENGTH];
@@ -829,6 +845,7 @@ impl Slatepack {
 		read_proof_addresses: bool,
 		read_proof_signature: bool,
 		r: &mut BitReader<R, E>,
+		secp: &Secp256k1,
 	) -> Result<Slate, Error> {
 		let mut slate = Slate::blank(2, true);
 		let mut slate_id: [u8; 16] = [0; 16];
@@ -940,9 +957,9 @@ impl Slatepack {
 				r.read_bytes(&mut signature)?;
 
 				slate.tx_or_err_mut()?.body.kernels.push(TxKernel {
-					features: KernelFeatures::Plain { fee },
+					features: KernelFeatures::Plain { fee: fee.try_into()? },
 					excess: Commitment(excess),
-					excess_sig: Signature::from_compact(&signature)?,
+					excess_sig: Signature::from_compact(secp, &signature)?,
 				});
 
 				if r.read::<u8>(1)? == 0 {
@@ -954,19 +971,19 @@ impl Slatepack {
 		if read_participan_data_0 {
 			slate
 				.participant_data
-				.push(Self::read_participant_data(r, 0)?);
+				.push(Self::read_participant_data(r, 0, secp)?);
 		}
 
 		if read_participan_data_1 {
 			slate
 				.participant_data
-				.push(Self::read_participant_data(r, 1)?);
+				.push(Self::read_participant_data(r, 1, secp)?);
 		}
 
 		if read_proof_addresses {
 			if r.read::<u8>(1)? == 1 {
-				let sender_address = Self::read_provable_address(r)?;
-				let receiver_address = Self::read_provable_address(r)?;
+				let sender_address = Self::read_provable_address(r, secp)?;
+				let receiver_address = Self::read_provable_address(r, secp)?;
 
 				match &mut slate.payment_proof {
 					Some(proof) => {
@@ -992,13 +1009,13 @@ impl Slatepack {
 
 				match &mut slate.payment_proof {
 					Some(proof) => {
-						proof.receiver_signature = Some(to_hex(&signature));
+						proof.receiver_signature = Some(signature.to_hex());
 					}
 					None => {
 						slate.payment_proof = Some(PaymentInfo {
 							sender_address: ProvableAddress::blank(),
 							receiver_address: ProvableAddress::blank(),
-							receiver_signature: Some(to_hex(&signature)),
+							receiver_signature: Some(signature.to_hex()),
 						});
 					}
 				}
@@ -1082,21 +1099,19 @@ impl Slatepack {
 	}
 
 	// Update a transaction form the slate data.
-	fn update_tx_from_slate(slate: &mut Slate) -> Result<(), Error> {
-		let secp = static_secp_instance();
-		let secp = secp.lock();
+	fn update_tx_from_slate(slate: &mut Slate, height: u64, secp: &Secp256k1) -> Result<(), Error> {
 		debug_assert!(slate.compact_slate);
 		// Passing None to calc_excess because it is not needed for compact_slate.
-		let excess = match slate.calc_excess::<ExtKeychain>(None) {
+		let excess = match slate.calc_excess::<ExtKeychain>(secp, None, height) {
 			Ok(e) => e,
 			Err(_) => Commitment::from_vec(vec![0]),
 		};
-		let excess_sig = match slate.finalize_signature(&secp) {
+		let excess_sig = match slate.finalize_signature(secp) {
 			Ok(s) => s,
 			Err(_) => Signature::from_raw_data(&[0; 64])?,
 		};
 		let kernel = TxKernel {
-			features: slate.kernel_features(),
+			features: slate.kernel_features()?,
 			excess,
 			excess_sig,
 		};

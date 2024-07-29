@@ -34,7 +34,7 @@ pub struct Error {
 pub enum ErrorKind {
 	/// LibTX Error
 	#[fail(display = "LibTx Error, {}", _0)]
-	LibTX(libtx::ErrorKind),
+	LibTX(libtx::Error),
 
 	/// LibWallet Error
 	#[fail(display = "LibWallet Error, {}", _0)]
@@ -239,7 +239,7 @@ impl From<libwallet::Error> for Error {
 impl From<libtx::Error> for Error {
 	fn from(error: libtx::Error) -> Error {
 		Error {
-			inner: Context::new(ErrorKind::LibTX(error.kind())),
+			inner: Context::new(ErrorKind::LibTX(error)),
 		}
 	}
 }

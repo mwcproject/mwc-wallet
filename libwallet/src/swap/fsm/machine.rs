@@ -16,6 +16,7 @@ use crate::swap::fsm::state::{Input, State, StateEtaInfo, StateId, StateProcessR
 use crate::swap::types::SwapTransactionsConfirmations;
 use crate::swap::{Context, ErrorKind, Swap};
 use std::collections::HashMap;
+use grin_wallet_util::grin_util::secp::Secp256k1;
 
 /// Swap State machine
 pub struct StateMachine<'a> {
@@ -68,7 +69,9 @@ impl<'a> StateMachine<'a> {
 		input: Input,
 		swap: &mut Swap,
 		context: &Context,
+		height: u64,
 		tx_conf: &SwapTransactionsConfirmations,
+		secp: &Secp256k1,
 	) -> Result<StateProcessRespond, ErrorKind> {
 		debug!(
 			"Swap {} processing state {:?} for Input {:?}",
@@ -82,7 +85,7 @@ impl<'a> StateMachine<'a> {
 				"Unknown state {:?}",
 				swap.state
 			)))?;
-		let mut respond = state.process(input, swap, context, tx_conf)?;
+		let mut respond = state.process(input, swap, context, height, tx_conf, secp)?;
 
 		while respond.next_state_id != swap.state {
 			debug!("New state: {:?}", swap.state);
@@ -94,7 +97,7 @@ impl<'a> StateMachine<'a> {
 						"Unknown state {:?}",
 						swap.state
 					)))?;
-			respond = state.process(Input::Check, swap, context, tx_conf)?;
+			respond = state.process(Input::Check, swap, context, height, tx_conf, secp)?;
 		}
 		respond.journal = swap.journal.clone();
 
@@ -103,7 +106,7 @@ impl<'a> StateMachine<'a> {
 	}
 
 	/// Build a roadmap for the swap process
-	pub fn get_swap_roadmap(&self, swap: &Swap) -> Result<Vec<StateEtaInfo>, ErrorKind> {
+	pub fn get_swap_roadmap(&self, swap: &Swap, secp: &Secp256k1) -> Result<Vec<StateEtaInfo>, ErrorKind> {
 		let state = self
 			.state_map
 			.get(&swap.state)
@@ -125,13 +128,13 @@ impl<'a> StateMachine<'a> {
 					"Unknown state {:?}",
 					psid
 				)))?;
-			if let Some(info) = prev_state.get_eta(swap) {
+			if let Some(info) = prev_state.get_eta(swap, secp) {
 				result.insert(0, info);
 			}
 			prev_state_id = prev_state.get_prev_swap_state();
 		}
 		// current state
-		if let Some(info) = state.get_eta(swap) {
+		if let Some(info) = state.get_eta(swap, secp) {
 			result.push(info.active());
 		}
 		// going forward
@@ -145,7 +148,7 @@ impl<'a> StateMachine<'a> {
 					"Unknown state {:?}",
 					nsid
 				)))?;
-			if let Some(info) = next_state.get_eta(swap) {
+			if let Some(info) = next_state.get_eta(swap, secp) {
 				result.push(info);
 			}
 			next_state_id = next_state.get_next_swap_state();

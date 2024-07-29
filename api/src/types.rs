@@ -20,8 +20,9 @@ use crate::libwallet::{
 };
 use crate::util::secp::key::{PublicKey, SecretKey};
 use crate::util::secp::pedersen;
-use crate::util::{from_hex, to_hex};
+use crate::util::{from_hex, ToHex};
 use grin_wallet_libwallet::slatepack::SlatePurpose;
+use grin_wallet_libwallet::types::option_duration_as_secs;
 
 use base64;
 use chrono::{DateTime, Utc};
@@ -31,6 +32,7 @@ use rand::{thread_rng, Rng};
 use ring::aead;
 use serde_json::{self, Value};
 use std::collections::HashMap;
+use std::time::Duration;
 use uuid::Uuid;
 
 /// Represents a compliant JSON RPC 2.0 id.
@@ -108,7 +110,7 @@ impl EncryptedBody {
 		}
 
 		Ok(EncryptedBody {
-			nonce: to_hex(&nonce),
+			nonce: nonce.to_hex(),
 			body_enc: base64::encode(&to_encrypt),
 		})
 	}
@@ -410,6 +412,8 @@ pub struct TxLogEntryAPI {
 	/// Output commits as Strings, defined for send & recieve
 	#[serde(default)]
 	pub output_commits: Vec<String>,
+	#[serde(with = "option_duration_as_secs", default)]
+	pub reverted_after: Option<Duration>,
 }
 
 impl TxLogEntryAPI {
@@ -437,8 +441,9 @@ impl TxLogEntryAPI {
 			kernel_offset: tle.kernel_offset.clone(),
 			kernel_lookup_min_height: tle.kernel_lookup_min_height.clone(),
 			payment_proof: tle.payment_proof.clone(),
-			input_commits: tle.input_commits.iter().map(|c| to_hex(&c.0)).collect(),
-			output_commits: tle.output_commits.iter().map(|c| to_hex(&c.0)).collect(),
+			input_commits: tle.input_commits.iter().map(|c| c.0.to_hex()).collect(),
+			output_commits: tle.output_commits.iter().map(|c| c.0.to_hex()).collect(),
+			reverted_after: tle.reverted_after.clone(),
 		}
 	}
 
@@ -468,11 +473,14 @@ pub struct SlatepackInfo {
 #[test]
 fn encrypted_request() -> Result<(), Error> {
 	use crate::util::from_hex;
+	use grin_wallet_util::grin_util::static_secp_instance;
 
 	let sec_key_str = "e00dcc4a009e3427c6b1e1a550c538179d46f3827a13ed74c759c860761caf1e";
 	let shared_key = {
 		let sec_key_bytes = from_hex(sec_key_str).unwrap();
-		SecretKey::from_slice(&sec_key_bytes)?
+		let secp_inst = static_secp_instance();
+		let secp = secp_inst.lock();
+		SecretKey::from_slice(&secp, &sec_key_bytes)?
 	};
 	let req = serde_json::json!({
 		"jsonrpc": "2.0",

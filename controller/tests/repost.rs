@@ -31,6 +31,8 @@ use std::time::Duration;
 #[macro_use]
 mod common;
 use common::{clean_output_dir, create_wallet_proxy, setup};
+use grin_wallet_util::grin_util::secp::Secp256k1;
+use libwallet::NodeClient;
 
 /// self send impl
 fn file_repost_test_impl(test_dir: &'static str) -> Result<(), wallet::Error> {
@@ -39,6 +41,7 @@ fn file_repost_test_impl(test_dir: &'static str) -> Result<(), wallet::Error> {
 	let mut wallet_proxy = create_wallet_proxy(test_dir);
 	let chain = wallet_proxy.chain.clone();
 	let stopper = wallet_proxy.running.clone();
+	let secp = Secp256k1::new();
 
 	// Create a new wallet test client, and set its queues to communicate with the
 	// proxy
@@ -122,7 +125,7 @@ fn file_repost_test_impl(test_dir: &'static str) -> Result<(), wallet::Error> {
 		};
 
 		let slate = api.init_send_tx(m, &args, 1)?;
-		PathToSlatePutter::build_plain(Some((&send_file).into())).put_tx(&slate, None, true)?;
+		PathToSlatePutter::build_plain(Some((&send_file).into())).put_tx(&slate, None, true, &secp)?;
 		api.tx_lock_outputs(m, &slate, None, 0)?;
 		Ok(())
 	})?;
@@ -136,13 +139,19 @@ fn file_repost_test_impl(test_dir: &'static str) -> Result<(), wallet::Error> {
 		w.set_parent_key_id_by_name("listener")?;
 	}
 
+	let height = {
+		wallet_inst!(wallet1, w);
+		let (height, _, _) = w.w2n_client().get_chain_tip()?;
+		height
+	};
+
 	wallet::controller::foreign_single_use(wallet1.clone(), mask1_i.clone(), |api| {
 		slate = PathToSlateGetter::build_form_path((&send_file).into())
-			.get_tx(None)?
+			.get_tx(None, height, &secp)?
 			.to_slate()?
 			.0;
 		slate = api.receive_tx(&slate, None, None, None)?;
-		PathToSlatePutter::build_plain(Some((&receive_file).into())).put_tx(&slate, None, true)?;
+		PathToSlatePutter::build_plain(Some((&receive_file).into())).put_tx(&slate, None, true, &secp)?;
 		Ok(())
 	})?;
 
@@ -155,7 +164,7 @@ fn file_repost_test_impl(test_dir: &'static str) -> Result<(), wallet::Error> {
 	// wallet 1 finalize
 	wallet::controller::owner_single_use(Some(wallet1.clone()), mask1, None, |api, m| {
 		slate = PathToSlateGetter::build_form_path((&receive_file).into())
-			.get_tx(None)?
+			.get_tx(None, height, &secp)?
 			.to_slate()?
 			.0;
 		slate = api.finalize_tx(m, &slate)?;

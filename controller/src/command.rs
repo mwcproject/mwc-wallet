@@ -37,7 +37,6 @@ use grin_wallet_impls::tor;
 use grin_wallet_impls::{libp2p_messaging, HttpDataSender};
 use grin_wallet_impls::{Address, MWCMQSAddress, Publisher};
 use grin_wallet_libwallet::api_impl::{owner, owner_eth, owner_libp2p, owner_swap};
-use grin_wallet_libwallet::internal::selection;
 use grin_wallet_libwallet::proof::proofaddress::{self, ProvableAddress};
 use grin_wallet_libwallet::proof::tx_proof::TxProof;
 use grin_wallet_libwallet::slatepack::SlatePurpose;
@@ -46,7 +45,7 @@ use grin_wallet_libwallet::swap::trades;
 use grin_wallet_libwallet::swap::types::Action;
 use grin_wallet_libwallet::swap::{message, Swap};
 use grin_wallet_libwallet::{Slate, TxLogEntry, WalletInst};
-use grin_wallet_util::grin_core::consensus::GRIN_BASE;
+use grin_wallet_util::grin_core::consensus::MWC_BASE;
 use grin_wallet_util::grin_core::core::amount_to_hr_string;
 use grin_wallet_util::grin_core::global::{FLOONET_DNS_SEEDS, MAINNET_DNS_SEEDS};
 use grin_wallet_util::grin_p2p::libp2p_connection::ReceivedMessage;
@@ -64,6 +63,8 @@ use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 use uuid::Uuid;
+use grin_wallet_util::grin_util::secp::{ContextFlag, Secp256k1};
+use grin_wallet_util::grin_util::static_secp_instance;
 
 lazy_static! {
 	/// Recieve account can be specified separately and must be allpy to ALL receive operations
@@ -474,14 +475,15 @@ where
 				recipient = Some(sp_address.tor_public_key()?);
 			}
 
-			let (slatepack_secret, slatepack_sender) = {
+			let (slatepack_secret, slatepack_sender, height, secp ) = {
 				let mut w_lock = api.wallet_inst.lock();
 				let w = w_lock.lc_provider()?.wallet_inst()?;
 				let keychain = w.keychain(keychain_mask)?;
 				let slatepack_secret =
 					proofaddress::payment_proof_address_dalek_secret(&keychain, None)?;
 				let slate_pub_key = DalekPublicKey::from(&slatepack_secret);
-				(slatepack_secret, slate_pub_key)
+				let (height, _, _) = w.w2n_client().get_chain_tip()?;
+				(slatepack_secret, slate_pub_key, height, keychain.secp().clone())
 			};
 
 			match args.method.as_str() {
@@ -505,7 +507,7 @@ where
 						recipient,
 						args.method == "slatepack",
 					)
-					.put_tx(&slate, Some(&slatepack_secret), false)
+					.put_tx(&slate, Some(&slatepack_secret), false, &secp)
 					.map_err(|e| {
 						ErrorKind::IO(format!("Unable to store the file at {}, {}", args.dest, e))
 					})?;
@@ -547,6 +549,8 @@ where
 						&slatepack_secret,
 						recipient,
 						wallet_info,
+						height,
+						&secp
 					)?;
 					// Restore back ttl, because it can be gone
 					slate.ttl_cutoff_height = original_slate.ttl_cutoff_height.clone();
@@ -604,21 +608,22 @@ where
 		Some(&m) => Some(m.to_owned()),
 	};
 	controller::foreign_single_use(owner_api.wallet_inst.clone(), km, |api| {
-		let slatepack_secret = {
+		let (slatepack_secret, height, secp) = {
 			let mut w_lock = api.wallet_inst.lock();
 			let w = w_lock.lc_provider()?.wallet_inst()?;
 			let keychain = w.keychain(keychain_mask)?;
 			let slatepack_secret =
 				proofaddress::payment_proof_address_dalek_secret(&keychain, None)?;
-			slatepack_secret
+			let (height, _,_) = w.w2n_client().get_chain_tip()?;
+			(slatepack_secret, height, keychain.secp().clone())
 		};
 
 		let slate_pkg = match &args.input_file {
 			Some(file_name) => PathToSlateGetter::build_form_path(file_name.into())
-				.get_tx(Some(&slatepack_secret))?,
+				.get_tx(Some(&slatepack_secret), height, &secp)?,
 			None => match &args.input_slatepack_message {
 				Some(message) => PathToSlateGetter::build_form_str(message.clone())
-					.get_tx(Some(&slatepack_secret))?,
+					.get_tx(Some(&slatepack_secret), height, &secp)?,
 				None => {
 					return Err(ErrorKind::ArgumentError(
 						"Please specify 'file' or 'content' argument".to_string(),
@@ -663,7 +668,7 @@ where
 			sender,
 			slatepack_format,
 		)
-		.put_tx(&slate, Some(&slatepack_secret), false)?;
+		.put_tx(&slate, Some(&slatepack_secret), false, &secp)?;
 
 		if let Some(response_file) = &response_file {
 			info!("Response file {}.response generated, and can be sent back to the transaction originator.", response_file);
@@ -691,21 +696,22 @@ where
 		Some(&m) => Some(m.to_owned()),
 	};
 	controller::foreign_single_use(owner_api.wallet_inst.clone(), km, |api| {
-		let slatepack_secret = {
+		let (slatepack_secret, height, secp) = {
 			let mut w_lock = api.wallet_inst.lock();
 			let w = w_lock.lc_provider()?.wallet_inst()?;
 			let keychain = w.keychain(keychain_mask)?;
 			let slatepack_secret =
 				proofaddress::payment_proof_address_dalek_secret(&keychain, None)?;
-			slatepack_secret
+			let (height, _, _) = w.w2n_client().get_chain_tip()?;
+			(slatepack_secret, height, keychain.secp().clone())
 		};
 
 		let slate_pkg = match &args.input_file {
 			Some(file_name) => PathToSlateGetter::build_form_path(file_name.into())
-				.get_tx(Some(&slatepack_secret))?,
+				.get_tx(Some(&slatepack_secret), height, &secp)?,
 			None => match &args.input_slatepack_message {
 				Some(message) => PathToSlateGetter::build_form_str(message.clone())
-					.get_tx(Some(&slatepack_secret))?,
+					.get_tx(Some(&slatepack_secret), height, &secp)?,
 				None => {
 					return Err(ErrorKind::ArgumentError(
 						"Please specify 'file' or 'content' argument".to_string(),
@@ -718,7 +724,7 @@ where
 		let (slate, sender, recipient, content, _slatepack_format) = slate_pkg.to_slate()?;
 
 		let slate_str =
-			PathToSlatePutter::build_plain(None).put_tx(&slate, Some(&slatepack_secret), false)?;
+			PathToSlatePutter::build_plain(None).put_tx(&slate, Some(&slatepack_secret), false, &secp)?;
 
 		println!();
 		println!("SLATEPACK CONTENTS");
@@ -774,22 +780,23 @@ where
 	let mut slatepack_format = false;
 
 	controller::owner_single_use(None, keychain_mask, Some(owner_api), |api, m| {
-		let slatepack_secret = {
+		let (slatepack_secret, height, secp) = {
 			let mut w_lock = api.wallet_inst.lock();
 			let w = w_lock.lc_provider()?.wallet_inst()?;
 			let keychain = w.keychain(m)?;
 			let slatepack_secret = proofaddress::payment_proof_address_secret(&keychain, None)?;
 			let slatepack_secret = DalekSecretKey::from_bytes(&slatepack_secret.0)
 				.map_err(|e| ErrorKind::GenericError(format!("Unable to build secret, {}", e)))?;
-			slatepack_secret
+			let (height, _, _) = w.w2n_client().get_chain_tip()?;
+			(slatepack_secret, height, keychain.secp().clone())
 		};
 
 		let slate_pkg = match &args.input_file {
 			Some(file_name) => PathToSlateGetter::build_form_path(file_name.into())
-				.get_tx(Some(&slatepack_secret))?,
+				.get_tx(Some(&slatepack_secret), height, &secp)?,
 			None => match &args.input_slatepack_message {
 				Some(message) => PathToSlateGetter::build_form_str(message.clone())
-					.get_tx(Some(&slatepack_secret))?,
+					.get_tx(Some(&slatepack_secret), height, &secp)?,
 				None => {
 					return Err(ErrorKind::ArgumentError(
 						"Please specify 'file' or 'content' argument".to_string(),
@@ -881,7 +888,7 @@ where
 
 	if args.dest.is_some() {
 		controller::owner_single_use(None, keychain_mask, Some(owner_api), |api, m| {
-			let slatepack_secret = {
+			let (slatepack_secret, secp) = {
 				let mut w_lock = api.wallet_inst.lock();
 				let w = w_lock.lc_provider()?.wallet_inst()?;
 				let keychain = w.keychain(m)?;
@@ -890,7 +897,7 @@ where
 					DalekSecretKey::from_bytes(&slatepack_secret.0).map_err(|e| {
 						ErrorKind::GenericError(format!("Unable to build secret, {}", e))
 					})?;
-				slatepack_secret
+				(slatepack_secret, keychain.secp().clone())
 			};
 
 			// save to a destination not as a slatepack
@@ -901,7 +908,7 @@ where
 				sender,
 				slatepack_format,
 			)
-			.put_tx(&slate, Some(&slatepack_secret), false)?;
+			.put_tx(&slate, Some(&slatepack_secret), false, &secp)?;
 
 			Ok(())
 		})?;
@@ -936,14 +943,14 @@ where
 
 		let slate = api.issue_invoice_tx(m, &args.issue_args)?;
 
-		let (slatepack_secret, tor_address) = {
+		let (slatepack_secret, tor_address, secp) = {
 			let mut w_lock = api.wallet_inst.lock();
 			let w = w_lock.lc_provider()?.wallet_inst()?;
 			let keychain = w.keychain(keychain_mask)?;
 			let slatepack_secret =
 				proofaddress::payment_proof_address_dalek_secret(&keychain, None)?;
 			let slatepack_pk = DalekPublicKey::from(&slatepack_secret);
-			(slatepack_secret, slatepack_pk)
+			(slatepack_secret, slatepack_pk, keychain.secp().clone())
 		};
 
 		PathToSlatePutter::build_encrypted(
@@ -953,7 +960,7 @@ where
 			recipient,
 			recipient.is_some(),
 		)
-		.put_tx(&slate, Some(&slatepack_secret), false)?;
+		.put_tx(&slate, Some(&slatepack_secret), false, &secp)?;
 		Ok(())
 	})?;
 	Ok(())
@@ -985,16 +992,17 @@ where
 	C: NodeClient + 'static,
 	K: keychain::Keychain + 'static,
 {
-	let slatepack_secret = {
+	let (slatepack_secret, height, secp) = {
 		let mut w_lock = owner_api.wallet_inst.lock();
 		let w = w_lock.lc_provider()?.wallet_inst()?;
 		let keychain = w.keychain(keychain_mask)?;
 		let slatepack_secret = proofaddress::payment_proof_address_dalek_secret(&keychain, None)?;
-		slatepack_secret
+		let (height, _, _) = w.w2n_client().get_chain_tip()?;
+		(slatepack_secret, height, keychain.secp().clone())
 	};
 
 	let slate_pkg =
-		PathToSlateGetter::build_form_path((&args.input).into()).get_tx(Some(&slatepack_secret))?;
+		PathToSlateGetter::build_form_path((&args.input).into()).get_tx(Some(&slatepack_secret), height, &secp)?;
 
 	let (slate, sender_pk, _recepient, content, _encrypted) = slate_pkg.to_slate()?;
 
@@ -1072,6 +1080,7 @@ where
 						&slate,
 						Some(&slatepack_secret),
 						false,
+						&secp,
 					)?;
 					api.tx_lock_outputs(m, &slate, Some(String::from("file")), 1)?;
 				}
@@ -1095,6 +1104,8 @@ where
 						&slatepack_secret,
 						sender_pk,
 						sender.check_other_wallet_version(&args.dest)?,
+						height,
+						&secp,
 					)?;
 					api.tx_lock_outputs(m, &slate, Some(args.dest.clone()), 1)?;
 				}
@@ -1221,9 +1232,12 @@ where
 				outputs,
 				dark_scheme,
 			)?;
+
+			let secp = Secp256k1::with_caps(ContextFlag::None);
+
 			// should only be one here, but just in case
 			for tx in txs {
-				display::tx_messages(&tx, dark_scheme)?;
+				display::tx_messages(&tx, dark_scheme, &secp)?;
 				display::payment_proof(&tx)?;
 			}
 		}
@@ -1249,17 +1263,18 @@ where
 	C: NodeClient + 'static,
 	K: keychain::Keychain + 'static,
 {
-	let slatepack_secret = {
+	let (slatepack_secret, height, secp) = {
 		let mut w_lock = owner_api.wallet_inst.lock();
 		let w = w_lock.lc_provider()?.wallet_inst()?;
 		let keychain = w.keychain(keychain_mask)?;
 		let slatepack_secret = proofaddress::payment_proof_address_dalek_secret(&keychain, None)?;
-		slatepack_secret
+		let (height, _, _) = w.w2n_client().get_chain_tip()?;
+		(slatepack_secret, height, keychain.secp().clone())
 	};
 
 	// Post expected to be internal api call, so there is no reasons to work with slatepacks.
 	let slate = PathToSlateGetter::build_form_path((&args.input).into())
-		.get_tx(Some(&slatepack_secret))?
+		.get_tx(Some(&slatepack_secret), height, &secp)?
 		.to_slate()?
 		.0;
 
@@ -1561,7 +1576,10 @@ where
 	let tx_pf: TxProof = serde_json::from_str(&proof)
 		.map_err(|e| ErrorKind::LibWallet(format!("Unable to deserialize proof data, {}", e)))?;
 
-	match grin_wallet_libwallet::proof::tx_proof::verify_tx_proof_wrapper(&tx_pf) {
+	let secp_inst = static_secp_instance();
+	let secp = secp_inst.lock();
+
+	match grin_wallet_libwallet::proof::tx_proof::verify_tx_proof_wrapper(&tx_pf, &secp) {
 		Ok((sender, receiver, amount, outputs, kernel)) => {
 			grin_wallet_libwallet::proof::tx_proof::proof_ok(
 				sender, receiver, amount, outputs, kernel,
@@ -1894,6 +1912,9 @@ where
 		None => None,
 		Some(&m) => Some(m.to_owned()),
 	};
+
+	let secp = Secp256k1::new();
+
 	match args.subcommand {
 		SwapSubcommand::List | SwapSubcommand::ListAndCheck => {
 			let result = owner_swap::swap_list(
@@ -2354,7 +2375,7 @@ where
 				}
 
 				let ack = sender
-					.send_swap_message(&swap_message)
+					.send_swap_message(&swap_message, &secp)
 					.map_err(|e| {
 						ErrorKind::LibWallet(format!(
 							"Failure in sending swap message {} by {}: {}",
@@ -2562,7 +2583,7 @@ where
 					offer_update.from_address = from_address;
 				}
 
-				let ack = sender.send_swap_message(&swap_message).map_err(|e| {
+				let ack = sender.send_swap_message(&swap_message, &secp).map_err(|e| {
 					crate::libwallet::ErrorKind::SwapError(format!(
 						"Unable to deliver the message {} by {}: {}",
 						swap_id2, method, e
@@ -3095,7 +3116,7 @@ where
 
 			let min_fee = args.fee.iter().min().unwrap_or(&0);
 			let min_integrity_fee =
-				selection::get_base_fee() * libp2p_connection::INTEGRITY_FEE_MIN_X;
+				global::get_accept_fee_base() * libp2p_connection::INTEGRITY_FEE_MIN_X;
 			if *min_fee < min_integrity_fee {
 				return Err(ErrorKind::ArgumentError(format!(
 					"The minimal accepted integrity fee is {} MWC",
@@ -3107,7 +3128,7 @@ where
 			let max_fee = args.fee.iter().max().unwrap_or(&0);
 			let reservation_amount = args
 				.reserve
-				.unwrap_or(std::cmp::max(GRIN_BASE, max_fee * 2));
+				.unwrap_or(std::cmp::max(MWC_BASE, max_fee * 2));
 
 			let res = owner_libp2p::create_integral_balance(
 				wallet_inst.clone(),
@@ -3439,7 +3460,7 @@ where
 			)
 			.into());
 		}
-		let min_fee = selection::get_base_fee() * libp2p_connection::INTEGRITY_FEE_MIN_X;
+		let min_fee = global::get_accept_fee_base() * libp2p_connection::INTEGRITY_FEE_MIN_X;
 		let fee = args.fee.unwrap_or(min_fee);
 		if fee < min_fee {
 			return Err(ErrorKind::ArgumentError(format!(

@@ -34,6 +34,7 @@ use util::ZeroingString;
 #[macro_use]
 mod common;
 use common::{clean_output_dir, create_wallet_proxy, setup};
+use grin_wallet_util::grin_util::secp::Secp256k1;
 
 macro_rules! send_to_dest {
 	($a:expr, $m: expr, $b:expr, $c:expr, $d:expr) => {
@@ -54,6 +55,7 @@ fn scan_impl(test_dir: &'static str) -> Result<(), wallet::Error> {
 	let mut wallet_proxy = create_wallet_proxy(test_dir);
 	let chain = wallet_proxy.chain.clone();
 	let stopper = wallet_proxy.running.clone();
+	let secp = Secp256k1::new();
 
 	// Create a new wallet test client, and set its queues to communicate with the
 	// proxy
@@ -194,7 +196,7 @@ fn scan_impl(test_dir: &'static str) -> Result<(), wallet::Error> {
 
 		// output tx file
 		let send_file = format!("{}/part_tx_1.tx", test_dir);
-		PathToSlatePutter::build_plain(Some(send_file.into())).put_tx(&slate, None, true)?;
+		PathToSlatePutter::build_plain(Some(send_file.into())).put_tx(&slate, None, true, &secp)?;
 		api.tx_lock_outputs(m, &slate, None, 0)?;
 		Ok(())
 	})?;
@@ -384,7 +386,7 @@ fn two_wallets_one_seed_impl(test_dir: &'static str) -> Result<(), wallet::Error
 
 	// Do some mining
 	let mut bh = 20u64;
-	let base_amount = consensus::MILLI_GRIN;
+	let base_amount = consensus::MILLI_MWC;
 	let _ = test_framework::award_blocks_to_wallet(
 		&chain,
 		miner.clone(),

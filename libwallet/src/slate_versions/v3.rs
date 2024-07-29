@@ -115,7 +115,7 @@ impl SlateV3 {
 
 		let (offset, tx) = match self.tx {
 			Some(t) => {
-				let t = Transaction::from(t);
+				let t = Transaction::try_from(t)?;
 				(t.offset.clone(), Some(t))
 			}
 			None => (BlindingFactor::zero(), None),

@@ -12,12 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::convert::TryInto;
 use super::message::*;
 use super::multisig::{Builder as MultisigBuilder, Hashed};
 use super::ser::*;
 use super::types::*;
 use super::{ErrorKind, Keychain};
-use crate::grin_core::core::verifier_cache::LruVerifierCache;
 use crate::grin_core::core::{
 	transaction as tx, CommitWrapper, Inputs, KernelFeatures, OutputIdentifier, TxKernel, Weighting,
 };
@@ -27,12 +27,13 @@ use crate::grin_keychain::{Identifier, SwitchCommitmentType};
 use crate::grin_util::secp::key::{PublicKey, SecretKey};
 use crate::grin_util::secp::pedersen::{Commitment, RangeProof};
 use crate::grin_util::secp::{Message as SecpMessage, Secp256k1, Signature};
-use crate::grin_util::RwLock;
 use crate::swap::fsm::state::StateId;
 use crate::{NodeClient, Slate};
 use chrono::{DateTime, Utc};
-use std::sync::Arc;
 use uuid::Uuid;
+
+#[cfg(test)]
+use crate::grin_util::RwLock;
 
 /// Dummy wrapper for the hex-encoded serialized transaction.
 #[derive(Serialize, Deserialize)]
@@ -292,22 +293,23 @@ impl Swap {
 	pub(super) fn redeem_tx_fields(
 		&self,
 		redeem_slate: &Slate,
+		secp: &Secp256k1,
 	) -> Result<(PublicKey, PublicKey, SecpMessage), ErrorKind> {
 		let pub_nonces = redeem_slate
 			.participant_data
 			.iter()
 			.map(|p| &p.public_nonce)
 			.collect();
-		let pub_nonce_sum = PublicKey::from_combination(pub_nonces)?;
+		let pub_nonce_sum = PublicKey::from_combination(secp, pub_nonces)?;
 		let pub_blinds = redeem_slate
 			.participant_data
 			.iter()
 			.map(|p| &p.public_blind_excess)
 			.collect();
-		let pub_blind_sum = PublicKey::from_combination(pub_blinds)?;
+		let pub_blind_sum = PublicKey::from_combination(secp, pub_blinds)?;
 
 		let features = KernelFeatures::Plain {
-			fee: redeem_slate.fee,
+			fee: redeem_slate.fee.try_into().map_err(|e| ErrorKind::Generic(format!("Invalid fee, {}", e)))?,
 		};
 		let message = features
 			.kernel_sig_msg()
@@ -343,19 +345,19 @@ impl Swap {
 	}
 
 	/// Common nonce for the BulletProof is sum_i H(C_i) where C_i is the commitment of participant i
-	pub(super) fn common_nonce(&self) -> Result<SecretKey, ErrorKind> {
+	pub(super) fn common_nonce(&self, secp: &Secp256k1,) -> Result<SecretKey, ErrorKind> {
 		let hashed_nonces: Vec<SecretKey> = self
 			.multisig
 			.participants
 			.iter()
 			.filter_map(|p| p.partial_commitment.as_ref().map(|c| c.hash()))
-			.filter_map(|h| h.ok().map(|h| h.to_secret_key()))
+			.filter_map(|h| h.ok().map(|h| h.to_secret_key(secp)))
 			.filter_map(|s| s.ok())
 			.collect();
 		if hashed_nonces.len() != 2 {
 			return Err(super::multisig::ErrorKind::MultiSigIncomplete.into());
 		}
-		let sec_key = Secp256k1::blind_sum(hashed_nonces, Vec::new())?;
+		let sec_key = secp.blind_sum(hashed_nonces, Vec::new())?;
 
 		Ok(sec_key)
 	}
@@ -571,9 +573,9 @@ pub fn tx_add_output(
 }
 
 /// Interpret the final 32 bytes of the signature as a secret key
-pub fn signature_as_secret(signature: &Signature) -> Result<SecretKey, ErrorKind> {
+pub fn signature_as_secret(secp: &Secp256k1, signature: &Signature) -> Result<SecretKey, ErrorKind> {
 	let ser = signature.to_raw_data();
-	let key = SecretKey::from_slice(&ser[32..])?;
+	let key = SecretKey::from_slice( secp, &ser[32..])?;
 	Ok(key)
 }
 
@@ -583,9 +585,10 @@ pub fn publish_transaction<C: NodeClient>(
 	tx: &tx::Transaction,
 	fluff: bool,
 ) -> Result<(), ErrorKind> {
+	let (height, _ , _ ) = node_client.get_chain_tip()?;
 	tx.validate(
 		Weighting::AsTransaction,
-		Arc::new(RwLock::new(LruVerifierCache::new())),
+		height,
 	)
 	.map_err(|e| ErrorKind::UnexpectedAction(format!("slate is not valid, {}", e)))?;
 

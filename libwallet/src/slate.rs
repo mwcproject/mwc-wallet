@@ -23,7 +23,6 @@ use crate::grin_core::core::transaction::{
 	Input, KernelFeatures, Output, OutputFeatures, Transaction, TransactionBody, TxKernel,
 	Weighting,
 };
-use crate::grin_core::core::verifier_cache::LruVerifierCache;
 use crate::grin_core::global;
 use crate::grin_core::libtx::{aggsig, build, proof::ProofBuild, secp_ser, tx_fee};
 use crate::grin_core::map_vec;
@@ -31,13 +30,14 @@ use crate::grin_keychain::{BlindSum, BlindingFactor, Keychain, SwitchCommitmentT
 use crate::grin_util::secp::key::{PublicKey, SecretKey};
 use crate::grin_util::secp::pedersen::Commitment;
 use crate::grin_util::secp::Signature;
-use crate::grin_util::{self, secp, RwLock};
+use crate::grin_util::ToHex;
+use crate::grin_util::secp;
 use crate::Context;
 use serde::ser::{Serialize, Serializer};
 use serde_json;
-use std::convert::TryFrom;
+use std::convert::{TryFrom, TryInto};
 use std::fmt;
-use std::sync::Arc;
+use bitcoin_lib::secp256k1::ContextFlag;
 use uuid::Uuid;
 
 use crate::slate_versions::v2::SlateV2;
@@ -57,6 +57,8 @@ use crate::{SlateVersion, Slatepacker, CURRENT_SLATE_VERSION};
 use ed25519_dalek::SecretKey as DalekSecretKey;
 use rand::rngs::mock::StepRng;
 use rand::thread_rng;
+use grin_wallet_util::grin_core::core::FeeFields;
+use grin_wallet_util::grin_util::secp::Secp256k1;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct PaymentInfo {
@@ -150,10 +152,11 @@ impl fmt::Display for ParticipantMessageData {
 			writeln!(f, "(Recipient)")?;
 		}
 		writeln!(f, "---------------------")?;
+		let secp = Secp256k1::with_caps(ContextFlag::None);
 		writeln!(
 			f,
 			"Public Key: {}",
-			&grin_util::to_hex(&self.public_key.serialize_vec(true))
+            &self.public_key.serialize_vec(&secp, true).to_hex()
 		)?;
 		let message = match self.message.clone() {
 			None => "None".to_owned(),
@@ -162,7 +165,7 @@ impl fmt::Display for ParticipantMessageData {
 		writeln!(f, "Message: {}", message)?;
 		let message_sig = match self.message_sig {
 			None => "None".to_owned(),
-			Some(m) => grin_util::to_hex(&m.to_raw_data()),
+            Some(m) => m.to_raw_data().as_ref().to_hex(),
 		};
 		writeln!(f, "Message Signature: {}", message_sig)
 	}
@@ -278,8 +281,10 @@ impl Slate {
 	pub fn deserialize_upgrade_slatepack(
 		slate_str: &str,
 		dec_key: &DalekSecretKey,
+		height: u64,
+		secp: &Secp256k1,
 	) -> Result<Slatepacker, Error> {
-		let sp = Slatepacker::decrypt_slatepack(slate_str.as_bytes(), dec_key)?;
+		let sp = Slatepacker::decrypt_slatepack(slate_str.as_bytes(), dec_key, height, secp)?;
 		Ok(sp)
 	}
 
@@ -481,7 +486,7 @@ impl Slate {
 		self.tx = Some(
 			self.tx_or_err()?
 				.clone()
-				.replace_kernel(TxKernel::with_features(self.kernel_features())),
+				.replace_kernel(TxKernel::with_features(self.kernel_features()?)),
 		);
 		Ok(())
 	}
@@ -521,27 +526,38 @@ impl Slate {
 
 	/// Construct the appropriate kernel features based on our fee and lock_height.
 	/// If lock_height is 0 then its a plain kernel, otherwise its a height locked kernel.
-	pub fn kernel_features(&self) -> KernelFeatures {
+	pub fn kernel_features(&self) -> Result<KernelFeatures, Error> {
 		match self.lock_height {
-			0 => KernelFeatures::Plain { fee: self.fee },
-			_ => KernelFeatures::HeightLocked {
-				fee: self.fee,
+			0 => Ok(KernelFeatures::Plain { fee: self.build_fee()? }),
+			_ => Ok(KernelFeatures::HeightLocked {
+				fee: self.build_fee()?,
 				lock_height: self.lock_height,
-			},
+			}),
+		}
+	}
+
+	// u64 try_into for FeeFields is build for VALID values, so 0 is not accepted.
+	// That is why we need this method
+	fn build_fee(&self) -> Result<FeeFields, Error> {
+		if self.fee==0 {
+			Ok(FeeFields::zero())
+		}
+		else {
+			Ok(self.fee.try_into()?)
 		}
 	}
 
 	// This is the msg that we will sign as part of the tx kernel.
 	// If lock_height is 0 then build a plain kernel, otherwise build a height locked kernel.
 	fn msg_to_sign(&self) -> Result<secp::Message, Error> {
-		let msg = self.kernel_features().kernel_sig_msg()?;
+		let msg = self.kernel_features()?.kernel_sig_msg()?;
 		Ok(msg)
 	}
 
 	/// Completes caller's part of round 2, completing signatures
 	pub fn fill_round_2(
 		&mut self,
-		secp: &secp::Secp256k1,
+		secp: &Secp256k1,
 		sec_key: &SecretKey,
 		sec_nonce: &SecretKey,
 		participant_id: usize,
@@ -556,8 +572,8 @@ impl Slate {
 			secp,
 			sec_key,
 			sec_nonce,
-			&self.pub_nonce_sum()?,
-			Some(&self.pub_blind_sum()?),
+			&self.pub_nonce_sum(secp)?,
+			Some(&self.pub_blind_sum(secp)?),
 			&self.msg_to_sign()?,
 		)?;
 		for i in 0..self.num_participants {
@@ -571,12 +587,12 @@ impl Slate {
 
 	/// Creates the final signature, callable by either the sender or recipient
 	/// (after phase 3: sender confirmation)
-	pub fn finalize<K>(&mut self, keychain: &K) -> Result<(), Error>
+	pub fn finalize<K>(&mut self, keychain: &K, height: u64) -> Result<(), Error>
 	where
 		K: Keychain,
 	{
 		let final_sig = self.finalize_signature(keychain.secp())?;
-		self.finalize_transaction(keychain, &final_sig)
+		self.finalize_transaction(keychain, &final_sig, height)
 	}
 
 	/// Return the participant with the given id
@@ -590,7 +606,7 @@ impl Slate {
 	}
 
 	/// Return the sum of public nonces
-	fn pub_nonce_sum(&self) -> Result<PublicKey, Error> {
+	fn pub_nonce_sum(&self, secp: &Secp256k1) -> Result<PublicKey, Error> {
 		let pub_nonces: Vec<&PublicKey> = self
 			.participant_data
 			.iter()
@@ -601,14 +617,14 @@ impl Slate {
 				ErrorKind::GenericError(format!("Participant nonces cannot be empty")).into(),
 			);
 		}
-		match PublicKey::from_combination(pub_nonces) {
+		match PublicKey::from_combination(&secp, pub_nonces) {
 			Ok(k) => Ok(k),
 			Err(e) => Err(Error::from(e)),
 		}
 	}
 
 	/// Return the sum of public blinding factors
-	fn pub_blind_sum(&self) -> Result<PublicKey, Error> {
+	fn pub_blind_sum(&self, secp: &Secp256k1 ) -> Result<PublicKey, Error> {
 		let pub_blinds: Vec<&PublicKey> = self
 			.participant_data
 			.iter()
@@ -619,7 +635,7 @@ impl Slate {
 				ErrorKind::GenericError(format!("Participant Blind sums cannot be empty")).into(),
 			);
 		}
-		match PublicKey::from_combination(pub_blinds) {
+		match PublicKey::from_combination(secp, pub_blinds) {
 			Ok(k) => Ok(k),
 			Err(e) => Err(Error::from(e)),
 		}
@@ -652,7 +668,7 @@ impl Slate {
 		let pub_key = PublicKey::from_secret_key(secp, &sec_key)?;
 		let pub_nonce = PublicKey::from_secret_key(secp, &sec_nonce)?;
 
-		let test_message_nonce = SecretKey::from_slice(&[1; 32])?;
+		let test_message_nonce = SecretKey::from_slice(secp, &[1; 32])?;
 		let message_nonce = match use_test_rng {
 			false => None,
 			true => Some(&test_message_nonce),
@@ -737,11 +753,11 @@ impl Slate {
 		// and subtract it from the blind_sum so we create
 		// the aggsig context with the "split" key
 		self.tx_or_err_mut()?.offset = match use_test_rng {
-			false => BlindingFactor::from_secret_key(SecretKey::new(&mut thread_rng())),
+			false => BlindingFactor::from_secret_key(SecretKey::new( keychain.secp(), &mut thread_rng())),
 			true => {
 				// allow for consistent test results
 				let mut test_rng = StepRng::new(1_234_567_890_u64, 1);
-				BlindingFactor::from_secret_key(SecretKey::new(&mut test_rng))
+				BlindingFactor::from_secret_key(SecretKey::new(keychain.secp(), &mut test_rng))
 			}
 		};
 
@@ -750,7 +766,7 @@ impl Slate {
 				.add_blinding_factor(BlindingFactor::from_secret_key(sec_key.clone()))
 				.sub_blinding_factor(self.tx_or_err()?.offset.clone()),
 		)?;
-		*sec_key = blind_offset.secret_key()?;
+		*sec_key = blind_offset.secret_key(keychain.secp())?;
 		Ok(())
 	}
 
@@ -789,7 +805,7 @@ impl Slate {
 	}
 
 	/// Checks the fees in the transaction in the given slate are valid
-	fn check_fees(&self) -> Result<(), Error> {
+	fn check_fees(&self, height: u64) -> Result<(), Error> {
 		let tx = self.tx_or_err()?;
 		// double check the fee amount included in the partial tx
 		// we don't necessarily want to just trust the sender
@@ -798,12 +814,11 @@ impl Slate {
 			tx.inputs().len(),
 			tx.outputs().len(),
 			tx.kernels().len(),
-			None,
 		);
 
-		if fee > tx.fee() {
+		if fee > tx.fee(height) {
 			return Err(
-				ErrorKind::Fee(format!("Fee Dispute Error: {}, {}", tx.fee(), fee,)).into(),
+				ErrorKind::Fee(format!("Fee Dispute Error: {}, {}", tx.fee(height), fee,)).into(),
 			);
 		}
 
@@ -821,7 +836,7 @@ impl Slate {
 	}
 
 	/// Verifies all of the partial signatures in the Slate are valid
-	fn verify_part_sigs(&self, secp: &secp::Secp256k1) -> Result<(), Error> {
+	fn verify_part_sigs(&self, secp: &Secp256k1) -> Result<(), Error> {
 		// collect public nonces
 		for p in self.participant_data.iter() {
 			if p.is_complete() {
@@ -829,9 +844,9 @@ impl Slate {
 				aggsig::verify_partial_sig(
 					secp,
 					p.part_sig.as_ref().unwrap(),
-					&self.pub_nonce_sum()?,
+					&self.pub_nonce_sum(secp)?,
 					&p.public_blind_excess,
-					Some(&self.pub_blind_sum()?),
+					Some(&self.pub_blind_sum(secp)?),
 					&self.msg_to_sign()?,
 				)?;
 			}
@@ -841,7 +856,7 @@ impl Slate {
 
 	/// Verifies any messages in the slate's participant data match their signatures
 	pub fn verify_messages(&self) -> Result<(), Error> {
-		let secp = secp::Secp256k1::with_caps(secp::ContextFlag::VerifyOnly);
+		let secp = Secp256k1::with_caps(ContextFlag::VerifyOnly);
 		for p in self.participant_data.iter() {
 			if let Some(msg) = &p.message {
 				let hashed = blake2b(secp::constants::MESSAGE_SIZE, &[], &msg.as_bytes()[..]);
@@ -900,12 +915,12 @@ impl Slate {
 	///
 	/// Returns completed transaction ready for posting to the chain
 
-	pub fn finalize_signature(&mut self, secp: &secp::Secp256k1) -> Result<Signature, Error> {
+	pub fn finalize_signature(&mut self, secp: &Secp256k1) -> Result<Signature, Error> {
 		self.verify_part_sigs(secp)?;
 
 		let part_sigs = self.part_sigs();
-		let pub_nonce_sum = self.pub_nonce_sum()?;
-		let final_pubkey = self.pub_blind_sum()?;
+		let pub_nonce_sum = self.pub_nonce_sum(secp)?;
+		let final_pubkey = self.pub_blind_sum(secp)?;
 		// get the final signature
 		let final_sig = aggsig::add_signatures(secp, part_sigs, &pub_nonce_sum)?;
 
@@ -924,26 +939,24 @@ impl Slate {
 	}
 
 	/// return the final excess
-	pub fn calc_excess<K>(&self, keychain: Option<&K>) -> Result<Commitment, Error>
+	pub fn calc_excess<K>(&self, secp: &Secp256k1, keychain: Option<&K>, height: u64) -> Result<Commitment, Error>
 	where
 		K: Keychain,
 	{
 		if self.compact_slate {
-			let sum = self.pub_blind_sum()?;
-			Ok(Commitment::from_pubkey(&sum)?)
+			let sum = self.pub_blind_sum(secp)?;
+			Ok(Commitment::from_pubkey(secp, &sum)?)
 		} else {
 			// Legacy method
 			let tx = self.tx_or_err()?.clone();
 			let kernel_offset = tx.offset.clone();
-			let overage = tx.fee() as i64;
+			let overage = tx.fee(height) as i64;
 			let tx_excess = tx.sum_commitments(overage)?;
 
+			let secp = keychain.unwrap().secp();
 			// subtract the kernel_excess (built from kernel_offset)
-			let offset_excess = keychain
-				.unwrap()
-				.secp()
-				.commit(0, kernel_offset.secret_key()?)?;
-			Ok(secp::Secp256k1::commit_sum(
+			let offset_excess = secp.commit(0, kernel_offset.secret_key(secp)?)?;
+			Ok(secp.commit_sum(
 				vec![tx_excess],
 				vec![offset_excess],
 			)?)
@@ -955,13 +968,14 @@ impl Slate {
 		&mut self,
 		keychain: &K,
 		final_sig: &secp::Signature,
+		height: u64,
 	) -> Result<(), Error>
 	where
 		K: Keychain,
 	{
-		self.check_fees()?;
+		self.check_fees(height)?;
 		// build the final excess based on final tx and offset
-		let final_excess = self.calc_excess(Some(keychain))?;
+		let final_excess = self.calc_excess(keychain.secp(), Some(keychain), height)?;
 
 		debug!("Final Tx excess: {:?}", final_excess);
 
@@ -982,8 +996,7 @@ impl Slate {
 
 		// confirm the overall transaction is valid (including the updated kernel)
 		// accounting for tx weight limits
-		let verifier_cache = Arc::new(RwLock::new(LruVerifierCache::new()));
-		final_tx.validate(Weighting::AsTransaction, verifier_cache)?;
+		final_tx.validate(Weighting::AsTransaction, height)?;
 
 		Ok(())
 	}
@@ -1297,7 +1310,7 @@ impl From<&TxKernel> for TxKernelV3 {
 	fn from(kernel: &TxKernel) -> TxKernelV3 {
 		let (features, fee, lock_height) = match kernel.features {
 			KernelFeatures::Plain { fee } => (CompatKernelFeatures::Plain, fee, 0),
-			KernelFeatures::Coinbase => (CompatKernelFeatures::Coinbase, 0, 0),
+			KernelFeatures::Coinbase => (CompatKernelFeatures::Coinbase, FeeFields::zero(), 0),
 			KernelFeatures::HeightLocked { fee, lock_height } => {
 				(CompatKernelFeatures::HeightLocked, fee, lock_height)
 			}
@@ -1311,7 +1324,7 @@ impl From<&TxKernel> for TxKernelV3 {
 		};
 		TxKernelV3 {
 			features,
-			fee,
+			fee: fee.into(),
 			lock_height,
 			excess: kernel.excess,
 			excess_sig: kernel.excess_sig,
@@ -1380,16 +1393,18 @@ impl From<&PaymentInfoV3> for PaymentInfo {
 	}
 }
 
-impl From<TransactionV3> for Transaction {
-	fn from(tx: TransactionV3) -> Transaction {
+impl TryFrom<TransactionV3> for Transaction {
+	type Error = Error;
+	fn try_from(tx: TransactionV3) -> Result<Transaction, Error> {
 		let TransactionV3 { offset, body } = tx;
-		let body = TransactionBody::from(&body);
-		Transaction { offset, body }
+		let body = TransactionBody::try_from(&body)?;
+		Ok(Transaction { offset, body })
 	}
 }
 
-impl From<&TransactionBodyV3> for TransactionBody {
-	fn from(body: &TransactionBodyV3) -> TransactionBody {
+impl TryFrom<&TransactionBodyV3> for TransactionBody {
+	type Error = Error;
+	fn try_from(body: &TransactionBodyV3) -> Result<TransactionBody,Error> {
 		let TransactionBodyV3 {
 			inputs,
 			outputs,
@@ -1398,12 +1413,15 @@ impl From<&TransactionBodyV3> for TransactionBody {
 
 		let inputs = map_vec!(inputs, |inp| Input::from(inp));
 		let outputs = map_vec!(outputs, |out| Output::from(out));
-		let kernels = map_vec!(kernels, |kern| TxKernel::from(kern));
-		TransactionBody {
+		let mut kernels_tx : Vec<TxKernel> = Vec::new();
+		for kern in kernels {
+			kernels_tx.push(TxKernel::try_from(kern)?);
+		}
+		Ok( TransactionBody {
 			inputs: Inputs::FeaturesAndCommit(inputs),
 			outputs,
-			kernels,
-		}
+			kernels: kernels_tx,
+		})
 	}
 }
 
@@ -1428,9 +1446,18 @@ impl From<&OutputV3> for Output {
 	}
 }
 
-impl From<&TxKernelV3> for TxKernel {
-	fn from(kernel: &TxKernelV3) -> TxKernel {
+impl TryFrom<&TxKernelV3> for TxKernel {
+	type Error = Error;
+
+	fn try_from(kernel: &TxKernelV3) -> Result<TxKernel, Error> {
 		let (fee, lock_height) = (kernel.fee, kernel.lock_height);
+		let fee = if fee==0 {
+			FeeFields::zero()
+		}
+		else {
+			fee.try_into()?
+		};
+
 		let features = match kernel.features {
 			CompatKernelFeatures::Plain => KernelFeatures::Plain { fee },
 			CompatKernelFeatures::Coinbase => KernelFeatures::Coinbase,
@@ -1440,11 +1467,11 @@ impl From<&TxKernelV3> for TxKernel {
 				relative_height: NRDRelativeHeight::new(lock_height).unwrap(),
 			},
 		};
-		TxKernel {
+		Ok(TxKernel {
 			features,
 			excess: kernel.excess,
 			excess_sig: kernel.excess_sig,
-		}
+		})
 	}
 }
 

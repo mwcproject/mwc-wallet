@@ -8,6 +8,7 @@ use url::Url; //only for the Address::parse
 use grin_wallet_libwallet::proof::proofaddress::ProvableAddress;
 use regex::Regex;
 use std::fmt::{self, Debug, Display};
+use grin_wallet_util::grin_util::secp::Secp256k1;
 
 const DEFAULT_MWCMQS_DOMAIN: &str = "mqs.mwc.mw";
 pub const DEFAULT_MWCMQS_PORT: u16 = 443;
@@ -20,22 +21,23 @@ pub enum CloseReason {
 }
 
 pub trait Publisher {
-	fn post_slate(&self, slate: &Slate, to: &dyn Address) -> Result<(), Error>;
-	fn encrypt_slate(&self, slate: &Slate, to: &dyn Address) -> Result<String, Error>;
+	fn post_slate(&self, slate: &Slate, to: &dyn Address, secp: &Secp256k1) -> Result<(), Error>;
+	fn encrypt_slate(&self, slate: &Slate, to: &dyn Address, secp: &Secp256k1) -> Result<String, Error>;
 	fn decrypt_slate(
 		&self,
 		from: String,
 		mapmessage: String,
 		signature: String,
 		source_address: &ProvableAddress,
+		secp: &Secp256k1,
 	) -> Result<String, Error>;
-	fn post_take(&self, message: &Message, to: &dyn Address) -> Result<(), Error>;
+	fn post_take(&self, message: &Message, to: &dyn Address, secp: &Secp256k1) -> Result<(), Error>;
 	// Address of this publisher (from address)
 	fn get_publisher_address(&self) -> Result<Box<dyn Address>, Error>;
 }
 
 pub trait Subscriber {
-	fn start(&mut self) -> Result<(), Error>;
+	fn start(&mut self, secp: &Secp256k1) -> Result<(), Error>;
 	fn stop(&mut self) -> bool;
 	fn is_running(&self) -> bool;
 

@@ -29,8 +29,7 @@ use crate::grin_util::logger::LoggingConfig;
 use crate::grin_util::secp::key::{PublicKey, SecretKey, ZERO_KEY};
 use crate::grin_util::secp::pedersen::Commitment;
 use crate::grin_util::secp::{self, pedersen, Secp256k1};
-use crate::grin_util::ToHex;
-use crate::grin_util::ZeroingString;
+use crate::grin_util::{ToHex, ZeroingString};
 use crate::proof::proofaddress::ProvableAddress;
 use crate::slate::ParticipantMessages;
 use crate::Slate;
@@ -711,7 +710,7 @@ impl Context {
 		message: Option<String>,
 	) -> Context {
 		let sec_key = match use_test_rng {
-			false => SecretKey::new(&mut thread_rng()),
+			false => SecretKey::new(secp, &mut thread_rng()),
 			true => {
 				// allow for consistent test results
 				let mut test_rng = if is_initiator {
@@ -719,7 +718,7 @@ impl Context {
 				} else {
 					StepRng::new(1_234_567_891_u64, 1)
 				};
-				SecretKey::new(&mut test_rng)
+				SecretKey::new(secp, &mut test_rng)
 			}
 		};
 		Self::with_excess(
@@ -747,7 +746,7 @@ impl Context {
 	) -> Context {
 		let sec_nonce = match use_test_rng {
 			false => aggsig::create_secnonce(secp).unwrap(),
-			true => SecretKey::from_slice(&[1; 32]).unwrap(),
+			true => SecretKey::from_slice(secp, &[1; 32]).unwrap(),
 		};
 		Context {
 			parent_key_id: parent_key_id.clone(),
@@ -1187,7 +1186,7 @@ impl TxLogEntry {
 			let time_converted = DateTime::parse_from_rfc3339(&time);
 			let time_stamp = time_converted.unwrap().timestamp();
 			let confirmed_t =
-				DateTime::<Utc>::from_utc(NaiveDateTime::from_timestamp(time_stamp, 0), Utc);
+				Utc.timestamp_opt(time_stamp, 0).unwrap();
 			self.confirmation_ts = Some(confirmed_t);
 		}
 		//query the node to get the confirmation time
@@ -1209,19 +1208,19 @@ impl TxLogEntry {
 			|| self.tx_type == TxLogEntryType::TxSentCancelled;
 	}
 
-	/// Cancel transaction
-	pub fn cancel(&mut self) {
-		self.tx_type = match &self.tx_type {
-			TxLogEntryType::TxReceived => TxLogEntryType::TxReceivedCancelled,
-			TxLogEntryType::TxSent => TxLogEntryType::TxSentCancelled,
-			any => any.clone(),
-		};
+	/// Return true if transaction cancelled or reverted ()
+	pub fn is_cancelled_reverted(&self) -> bool {
+		return self.tx_type == TxLogEntryType::TxReceivedCancelled
+			|| self.tx_type == TxLogEntryType::TxSentCancelled || self.tx_type == TxLogEntryType::TxReverted;
 	}
 
 	/// Un Cancel transaction
-	pub fn uncancel(&mut self) {
+	pub fn uncancel_unrevert(&mut self) {
 		self.tx_type = match &self.tx_type {
-			TxLogEntryType::TxReceivedCancelled => TxLogEntryType::TxReceived,
+			TxLogEntryType::TxReverted | TxLogEntryType::TxReceivedCancelled => {
+				self.reverted_after = None;
+				TxLogEntryType::TxReceived
+			},
 			TxLogEntryType::TxSentCancelled => TxLogEntryType::TxSent,
 			any => any.clone(),
 		};

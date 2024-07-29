@@ -37,6 +37,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
+use grin_wallet_util::grin_util::secp::Secp256k1;
 
 type Wallet = Arc<
 	Mutex<
@@ -74,6 +75,7 @@ fn revert(
 	let wallet_proxy2 = create_wallet_proxy(&test_dir2);
 	let chain2 = wallet_proxy2.chain.clone();
 	let stopper2 = wallet_proxy2.running.clone();
+	let secp = Secp256k1::new();
 
 	create_wallet_and_add!(
 		client1,
@@ -172,7 +174,7 @@ fn revert(
 		// output tx file
 		let send_file = format!("{}/part_tx_1.tx", test_dir);
 		PathToSlatePutter::build_plain(Some(PathBuf::from(send_file)))
-			.put_tx(&slate, None, false)?;
+			.put_tx(&slate, None, false, &secp)?;
 		api.tx_lock_outputs(m, &slate, None, 0)?;
 		let slate = client1.send_tx_slate_direct("wallet2", &slate)?;
 		let slate = api.finalize_tx(m, &slate)?;
@@ -377,7 +379,7 @@ fn revert_cancel_impl(test_dir: &'static str) -> Result<(), Error> {
 #[test]
 fn tx_revert_reconfirm() {
 	let test_dir = "test_output/revert_tx";
-	global::init_global_chain_type(global::ChainTypes::AutomatedTesting);
+	global::set_global_chain_type(global::ChainTypes::AutomatedTesting);
 	setup(test_dir);
 	if let Err(e) = revert_reconfirm_impl(test_dir) {
 		panic!("Libwallet Error: {} - {}", e, e.backtrace().unwrap());
@@ -388,7 +390,7 @@ fn tx_revert_reconfirm() {
 #[test]
 fn tx_revert_cancel() {
 	let test_dir = "test_output/revert_tx_cancel";
-	global::init_global_chain_type(global::ChainTypes::AutomatedTesting);
+	global::set_global_chain_type(global::ChainTypes::AutomatedTesting);
 	setup(test_dir);
 	if let Err(e) = revert_cancel_impl(test_dir) {
 		panic!("Libwallet Error: {} - {}", e, e.backtrace().unwrap());

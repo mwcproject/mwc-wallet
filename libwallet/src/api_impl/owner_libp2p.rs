@@ -38,6 +38,7 @@ use ed25519_dalek::PublicKey as DalekPublicKey;
 use std::collections::HashMap;
 use std::sync::Arc;
 use uuid::Uuid;
+use grin_wallet_util::grin_util::secp::Secp256k1;
 
 /// Identity Index for integrity account. Let's put it at the end, so we can be sure that it exist
 pub const INTEGRITY_ACCOUNT_ID: u32 = 65536;
@@ -72,9 +73,10 @@ impl IntegrityContext {
 		context0: &Context,
 		context1: &Context,
 		tip_height: u64,
+		secp: &Secp256k1,
 	) -> Result<Self, Error> {
 		let mut sec_key = context0.sec_key.clone();
-		sec_key.add_assign(&context1.sec_key)?;
+		sec_key.add_assign(secp, &context1.sec_key)?;
 
 		Ok(Self {
 			sender_parent_key_id: context0.parent_key_id.clone(),
@@ -119,7 +121,7 @@ impl IntegrityContext {
 			)?;
 		}
 
-		let kernel_excess = Commitment::from_pubkey(&pk)?;
+		let kernel_excess = Commitment::from_pubkey(secp, &pk)?;
 		Ok((kernel_excess, signature))
 	}
 }
@@ -228,7 +230,7 @@ where
 		};
 		if log_entry.tx_slate_id.is_none()
 			|| height < tip_height.saturating_sub(libp2p_connection::INTEGRITY_FEE_VALID_BLOCKS)
-			|| log_entry.is_cancelled()
+			|| log_entry.is_cancelled_reverted()
 		{
 			continue;
 		}
@@ -334,6 +336,8 @@ where
 		let tx_to_post = {
 			wallet_lock!(wallet_inst.clone(), w);
 
+			let keychain = w.keychain(keychain_mask)?;
+
 			if account.is_none() {
 				// Creating integrity account
 				let path = ExtKeychainPath::new(2, INTEGRITY_ACCOUNT_ID, 0, 0, 0).to_identifier();
@@ -394,7 +398,7 @@ where
 
 			// Build and store integral fee data...
 			let integrity_context =
-				IntegrityContext::build(&slate.id, slate.fee, &context0, &context1, tip_height)?;
+				IntegrityContext::build(&slate.id, slate.fee, &context0, &context1, tip_height, keychain.secp())?;
 			{
 				let mut batch = w.batch(keychain_mask)?;
 				batch.save_integrity_context(slate.id.as_bytes(), &integrity_context)?;
@@ -441,7 +445,7 @@ where
 	wallet_lock!(wallet_inst, w);
 
 	let total_amount: u64 = outputs.iter().map(|o| o.output.value).sum();
-	let fee = tx_fee(outputs.len(), 1, 1, None);
+	let fee = tx_fee(outputs.len(), 1, 1);
 	if total_amount <= fee {
 		return Err(ErrorKind::Generic("Reserved amount for Integrity fees is smaller then a transaction fee. It is impossible to move dust funds.".to_string()).into());
 	}

@@ -24,6 +24,7 @@ use crate::{Foreign, ForeignCheckMiddlewareFn};
 use easy_jsonrpc_mw;
 use ed25519_dalek::PublicKey as DalekPublicKey;
 use grin_wallet_libwallet::proof::proofaddress::{self, ProvableAddress};
+use grin_wallet_util::grin_util::secp::Secp256k1;
 use libwallet::slatepack::SlatePurpose;
 
 /// Public definition used to generate Foreign jsonrpc api.
@@ -1230,6 +1231,8 @@ pub fn run_doctest_foreign(
 	};
 	let w2_slatepack_address = ProvableAddress::from_tor_pub_key(&w2_tor_pubkey);
 
+	let secp = Secp256k1::new();
+
 	if init_invoice_tx {
 		let amount = 2_000_000_000;
 		let mut slate = {
@@ -1283,6 +1286,7 @@ pub fn run_doctest_foreign(
 				Some(w2_tor_pubkey.clone()),
 				&w1_tor_secret,
 				true,
+				&secp,
 			)
 			.unwrap();
 			println!(
@@ -1327,6 +1331,7 @@ pub fn run_doctest_foreign(
 				Some(w1_tor_pubkey.clone()),
 				&w2_tor_secret,
 				true,
+				&secp,
 			)
 			.unwrap();
 			println!(

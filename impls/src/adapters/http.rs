@@ -32,6 +32,7 @@ use ed25519_dalek::{PublicKey as DalekPublicKey, SecretKey as DalekSecretKey};
 use grin_wallet_libwallet::address;
 use grin_wallet_libwallet::proof::proofaddress::ProvableAddress;
 use grin_wallet_libwallet::slatepack::SlatePurpose;
+use grin_wallet_util::grin_util::secp::Secp256k1;
 
 const TOR_CONFIG_PATH: &str = "tor/sender";
 
@@ -394,6 +395,8 @@ impl SlateSender for HttpDataSender {
 		slatepack_secret: &DalekSecretKey,
 		recipient: Option<DalekPublicKey>,
 		other_wallet_version: Option<(SlateVersion, Option<String>)>,
+		height: u64,
+		secp: &Secp256k1,
 	) -> Result<Slate, Error> {
 		// we need to keep _tor in scope so that the process is not killed by drop.
 		let (url_str, _tor) = self.set_up_tor_send_process()?;
@@ -440,6 +443,7 @@ impl SlateSender for HttpDataSender {
 					recipient,
 					slatepack_secret,
 					false,
+					secp
 				)?
 			}
 			SlateVersion::V3B => {
@@ -569,7 +573,7 @@ impl SlateSender for HttpDataSender {
 					slate_str, e
 				))
 			})?;
-			let sp = Slate::deserialize_upgrade_slatepack(&slatepack_str, &slatepack_secret)?;
+			let sp = Slate::deserialize_upgrade_slatepack(&slatepack_str, &slatepack_secret, height, secp)?;
 			sp.to_result_slate()
 		};
 
@@ -579,7 +583,7 @@ impl SlateSender for HttpDataSender {
 
 impl SwapMessageSender for HttpDataSender {
 	/// Send a swap message. Return true is message delivery acknowledge can be set (message was delivered and processed)
-	fn send_swap_message(&self, swap_message: &Message) -> Result<bool, Error> {
+	fn send_swap_message(&self, swap_message: &Message, _secp: &Secp256k1) -> Result<bool, Error> {
 		// we need to keep _tor in scope so that the process is not killed by drop.
 		let (url_str, _tor) = self.set_up_tor_send_process()?;
 		let message_ser = &serde_json::to_string(&swap_message).map_err(|e| {

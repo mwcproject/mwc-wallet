@@ -31,7 +31,6 @@ use grin_wallet_util::grin_util as util;
 use std::env;
 use std::path::PathBuf;
 
-use grin_wallet_libwallet::internal::selection;
 use grin_wallet_config::parse_node_address_string;
 use grin_wallet_libwallet::proof::proofaddress;
 use mwc_wallet::cmd;
@@ -162,7 +161,7 @@ fn real_main() -> i32 {
 	let wallet_config = config.clone().members.unwrap().wallet;
 
 	if let Some(base_fee) = &wallet_config.base_fee {
-		selection::set_base_fee(base_fee.clone());
+		global::set_global_accept_fee_base(base_fee.clone());
 	}
 
 	// Default derive index is 1 to match what mwc713 has by default...

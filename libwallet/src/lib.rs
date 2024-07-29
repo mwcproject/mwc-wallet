@@ -64,7 +64,7 @@ pub mod slate_versions;
 pub mod slatepack;
 /// Atomic Swap library
 pub mod swap;
-mod types;
+pub mod types;
 extern crate bitcoin as bitcoin_lib;
 extern crate bitcoin_hashes;
 extern crate zcash_primitives as zcash;

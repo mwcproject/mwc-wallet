@@ -23,6 +23,7 @@ use crate::{SlateGetter, SlatePutter};
 use ed25519_dalek::{PublicKey as DalekPublicKey, SecretKey as DalekSecretKey};
 use grin_wallet_libwallet::slatepack::SlatePurpose;
 use std::path::PathBuf;
+use grin_wallet_util::grin_util::secp::Secp256k1;
 
 #[derive(Clone)]
 pub struct PathToSlatePutter {
@@ -91,6 +92,7 @@ impl SlatePutter for PathToSlatePutter {
 		slate: &Slate,
 		slatepack_secret: Option<&DalekSecretKey>,
 		use_test_rng: bool,
+		secp: &Secp256k1,
 	) -> Result<String, Error> {
 		let out_slate = {
 			if self.recipient.is_some() || self.slatepack_format {
@@ -118,6 +120,7 @@ impl SlatePutter for PathToSlatePutter {
 					self.recipient.clone(),
 					slatepack_secret.unwrap(),
 					use_test_rng,
+					secp,
 				)
 				.map_err(|e| {
 					ErrorKind::GenericError(format!("Unable to build a slatepack, {}", e))
@@ -171,7 +174,7 @@ impl SlatePutter for PathToSlatePutter {
 }
 
 impl SlateGetter for PathToSlateGetter {
-	fn get_tx(&self, slatepack_secret: Option<&DalekSecretKey>) -> Result<SlateGetData, Error> {
+	fn get_tx(&self, slatepack_secret: Option<&DalekSecretKey>, height: u64, secp: &Secp256k1) -> Result<SlateGetData, Error> {
 		let content = match &self.slate_str {
 			Some(str) => str.clone(),
 			None => {
@@ -217,7 +220,7 @@ impl SlateGetter for PathToSlateGetter {
 				)
 				.into());
 			}
-			let sp = Slate::deserialize_upgrade_slatepack(&content, slatepack_secret.unwrap())?;
+			let sp = Slate::deserialize_upgrade_slatepack(&content, slatepack_secret.unwrap(), height, secp)?;
 			Ok(SlateGetData::Slatepack(sp))
 		}
 	}

@@ -92,7 +92,6 @@ impl BuyApi {
 				lock_slate.tx_or_err()?.body.inputs.len(),
 				lock_slate.tx_or_err()?.body.outputs.len() + 1,
 				1,
-				None,
 			) {
 			return Err(ErrorKind::InvalidMessageData(
 				"Lock Slate fee doesn't match expected value".to_string(),
@@ -109,9 +108,12 @@ impl BuyApi {
 				"Lock Slate invalid kernels".to_string(),
 			));
 		}
+
+		let (current_height, _, _) = node_client.get_chain_tip()?;
+
 		match lock_slate.tx_or_err()?.body.kernels[0].features {
 			KernelFeatures::Plain { fee } => {
-				if fee != lock_slate.fee {
+				if fee.fee(current_height) != lock_slate.fee {
 					return Err(ErrorKind::InvalidMessageData(
 						"Lock Slate invalid kernel fee".to_string(),
 					));
@@ -137,8 +139,7 @@ impl BuyApi {
 				"Lock Slate inputs are not found at the chain".to_string(),
 			));
 		}
-		let height = node_client.get_chain_tip()?.0;
-		if lock_slate.height > height {
+		if lock_slate.height > current_height {
 			return Err(ErrorKind::InvalidMessageData(
 				"Lock Slate height is invalid".to_string(),
 			));
@@ -159,7 +160,7 @@ impl BuyApi {
 		}
 		match refund_slate.tx_or_err()?.body.kernels[0].features {
 			KernelFeatures::HeightLocked { fee, lock_height } => {
-				if fee != refund_slate.fee || lock_height != refund_slate.lock_height {
+				if fee.fee(current_height) != refund_slate.fee || lock_height != refund_slate.lock_height {
 					return Err(ErrorKind::InvalidMessageData(
 						"Refund Slate invalid kernel fee or height".to_string(),
 					));
@@ -181,7 +182,7 @@ impl BuyApi {
 				"Refund Slate amount doesn't match offer".to_string(),
 			));
 		}
-		if refund_slate.fee != tx_fee(1, 1, 1, None) {
+		if refund_slate.fee != tx_fee(1, 1, 1) {
 			return Err(ErrorKind::InvalidMessageData(
 				"Refund Slate fee doesn't match expected value".to_string(),
 			));
@@ -217,8 +218,8 @@ impl BuyApi {
 			redeem_slate.id = Uuid::parse_str("78aa5af1-048e-4c49-8776-a2e66d4a460c").unwrap()
 		}
 
-		redeem_slate.fee = tx_fee(1, 1, 1, None);
-		redeem_slate.height = height;
+		redeem_slate.fee = tx_fee(1, 1, 1);
+		redeem_slate.height = current_height;
 		redeem_slate.amount = offer.primary_amount.saturating_sub(redeem_slate.fee);
 
 		redeem_slate.participant_data.push(offer.redeem_participant);
@@ -367,7 +368,7 @@ impl BuyApi {
 		swap.add_journal_message("Received a swap offer".to_string());
 
 		// Minimum mwc heights
-		let expected_lock_height = height + (swap.get_time_mwc_lock() - now_ts) as u64 / 60;
+		let expected_lock_height = current_height + (swap.get_time_mwc_lock() - now_ts) as u64 / 60;
 
 		if swap.refund_slate.lock_height < expected_lock_height * 9 / 10 {
 			return Err(ErrorKind::InvalidMessageData(
@@ -458,7 +459,7 @@ impl BuyApi {
 
 		// Round 1 + round 2
 		multisig.round_1(keychain.secp(), &multisig_secret)?;
-		let common_nonce = swap.common_nonce()?;
+		let common_nonce = swap.common_nonce(keychain.secp())?;
 		let multisig = &mut swap.multisig;
 		multisig.common_nonce = Some(common_nonce);
 		multisig.round_2(keychain.secp(), &multisig_secret)?;
@@ -476,7 +477,7 @@ impl BuyApi {
 		let sum = BlindSum::new().add_blinding_factor(BlindingFactor::from_secret_key(
 			swap.multisig_secret(keychain, context)?,
 		));
-		let sec_key = keychain.blind_sum(&sum)?.secret_key()?;
+		let sec_key = keychain.blind_sum(&sum)?.secret_key(keychain.secp())?;
 
 		Ok(sec_key)
 	}
@@ -533,7 +534,7 @@ impl BuyApi {
 		let sum = BlindSum::new().sub_blinding_factor(BlindingFactor::from_secret_key(
 			swap.multisig_secret(keychain, context)?,
 		));
-		let sec_key = keychain.blind_sum(&sum)?.secret_key()?;
+		let sec_key = keychain.blind_sum(&sum)?.secret_key(keychain.secp())?;
 
 		Ok(sec_key)
 	}
@@ -589,7 +590,7 @@ impl BuyApi {
 				swap.multisig_secret(keychain, context)?,
 			))
 			.sub_blinding_factor(swap.redeem_slate.tx_or_err()?.offset.clone());
-		let sec_key = keychain.blind_sum(&sum)?.secret_key()?;
+		let sec_key = keychain.blind_sum(&sum)?.secret_key(keychain.secp())?;
 
 		Ok(sec_key)
 	}
@@ -611,7 +612,7 @@ impl BuyApi {
 		}
 
 		// Build slate
-		slate.fee = tx_fee(1, 1, 1, None);
+		slate.fee = tx_fee(1, 1, 1);
 		slate.amount = swap.primary_amount - slate.fee;
 		let mut elems = Vec::new();
 		elems.push(build::output(slate.amount, bcontext.output.clone()));
@@ -625,7 +626,7 @@ impl BuyApi {
 				)
 				.unwrap()
 			} else {
-				BlindingFactor::from_secret_key(SecretKey::new(&mut thread_rng()))
+				BlindingFactor::from_secret_key(SecretKey::new(keychain.secp(), &mut thread_rng()))
 			};
 		}
 
@@ -633,7 +634,7 @@ impl BuyApi {
 		#[cfg(not(test))]
 		{
 			slate.tx_or_err_mut()?.offset =
-				BlindingFactor::from_secret_key(SecretKey::new(&mut thread_rng()));
+				BlindingFactor::from_secret_key(SecretKey::new(keychain.secp(), &mut thread_rng()));
 		}
 
 		// Add multisig input to slate
@@ -661,6 +662,7 @@ impl BuyApi {
 		swap: &mut Swap,
 		context: &Context,
 		part: TxParticipant,
+		height: u64,
 	) -> Result<(), ErrorKind> {
 		let id = swap.participant_id;
 		let other_id = swap.other_participant_id();
@@ -693,7 +695,7 @@ impl BuyApi {
 			&context.redeem_nonce,
 			swap.participant_id,
 		)?;
-		slate.finalize(keychain)?;
+		slate.finalize(keychain, height)?;
 
 		Ok(())
 	}
@@ -711,7 +713,7 @@ impl BuyApi {
 		}
 
 		let sec_key = Self::redeem_tx_secret(keychain, swap, context)?;
-		let (pub_nonce_sum, pub_blind_sum, message) = swap.redeem_tx_fields(&swap.redeem_slate)?;
+		let (pub_nonce_sum, pub_blind_sum, message) = swap.redeem_tx_fields(&swap.redeem_slate, keychain.secp())?;
 
 		let adaptor_signature = aggsig::sign_single(
 			keychain.secp(),

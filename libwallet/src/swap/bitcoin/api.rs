@@ -35,6 +35,7 @@ use crate::{NodeClient, Slate};
 use bitcoin::{Script, Txid};
 use failure::_core::marker::PhantomData;
 use std::sync::Arc;
+use grin_wallet_util::grin_util::secp::Secp256k1;
 
 /// SwapApi trait implementation for BTC
 #[derive(Clone)]
@@ -99,7 +100,7 @@ where
 	}
 
 	/// Update swap.secondary_data with a roll back script.
-	pub(crate) fn script(&self, swap: &Swap) -> Result<Script, ErrorKind> {
+	pub(crate) fn script(&self, swap: &Swap, secp: &Secp256k1) -> Result<Script, ErrorKind> {
 		let btc_data = swap.secondary_data.unwrap_btc()?;
 		Ok(btc_data.script(
 			swap.redeem_public
@@ -109,6 +110,7 @@ where
 						.to_string(),
 				))?,
 			swap.get_time_secondary_lock_script() as u64,
+			secp,
 		)?)
 	}
 
@@ -214,6 +216,7 @@ where
 				input_script,
 				&mut secp.sign(msg, &cosign_secret)?,
 				&mut secp.sign(msg, &redeem_secret)?,
+				secp,
 			)
 		};
 
@@ -263,6 +266,7 @@ where
 				&secondary_currency,
 				&mut secp.sign(msg, &refund_key)?,
 				input_script,
+				secp,
 			)
 		};
 
@@ -534,7 +538,7 @@ where
 	) -> Result<(), ErrorKind> {
 		assert!(swap.is_seller());
 
-		let input_script = self.script(swap)?;
+		let input_script = self.script(swap, keychain.secp())?;
 
 		let btc_tx = self.seller_build_redeem_tx(keychain, swap, context, &input_script)?;
 
@@ -553,7 +557,7 @@ where
 	/// Request confirmation numberss for all transactions that are known and in the in the swap
 	fn request_tx_confirmations(
 		&self,
-		_keychain: &K, // keychain is kept for Type. Compiler need to understand all types
+		keychain: &K, // keychain is kept for Type. Compiler need to understand all types
 		swap: &Swap,
 	) -> Result<SwapTransactionsConfirmations, ErrorKind> {
 		let mwc_tip = self.node_client.get_chain_tip()?.0;
@@ -586,7 +590,7 @@ where
 		let mut secondary_lock_amount = 0;
 		let mut least_confirmations = None;
 
-		if let Ok(input_script) = self.script(swap) {
+		if let Ok(input_script) = self.script(swap, keychain.secp()) {
 			if let Ok(address) =
 				btc_data.address(swap.secondary_currency, &input_script, swap.network)
 			{
@@ -637,8 +641,9 @@ where
 		&self,
 		swap: &Swap,
 		confirmations_needed: u64,
+		secp: &Secp256k1,
 	) -> Result<(u64, u64, u64), ErrorKind> {
-		let input_script = self.script(swap)?;
+		let input_script = self.script(swap, secp)?;
 
 		let (pending_amount, confirmed_amount, least_confirmations, _outputs) =
 			self.btc_balance(swap, &input_script, confirmations_needed)?;
@@ -732,8 +737,8 @@ where
 
 	/// Get a secondary addresses for the lock account
 	/// We can have several addresses because of different formats
-	fn get_secondary_lock_address(&self, swap: &Swap) -> Result<Vec<String>, ErrorKind> {
-		let input_script = self.script(swap)?;
+	fn get_secondary_lock_address(&self, swap: &Swap, secp: &Secp256k1) -> Result<Vec<String>, ErrorKind> {
+		let input_script = self.script(swap, secp)?;
 		let address = swap.secondary_data.unwrap_btc()?.address(
 			swap.secondary_currency,
 			&input_script,
@@ -765,7 +770,7 @@ where
 		swap.secondary_currency
 			.validate_address(&refund_address_str)?;
 
-		let input_script = self.script(swap)?;
+		let input_script = self.script(swap, keychain.secp())?;
 		self.buyer_refund(
 			keychain,
 			context,

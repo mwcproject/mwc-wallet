@@ -17,6 +17,7 @@ use crate::{Slate, SlateVersion, Slatepack, SlatepackArmor};
 
 use ed25519_dalek::PublicKey as DalekPublicKey;
 use ed25519_dalek::SecretKey as DalekSecretKey;
+use grin_wallet_util::grin_util::secp::Secp256k1;
 
 use crate::slatepack::slatepack::SlatePurpose;
 
@@ -53,6 +54,7 @@ impl Slatepacker {
 		recipient: Option<DalekPublicKey>, // Encrypted only if recipient is some
 		secret: &DalekSecretKey,
 		use_test_rng: bool,
+		secp: &Secp256k1,
 	) -> Result<String, Error> {
 		let pack = Slatepack {
 			sender: Some(sender),
@@ -61,16 +63,16 @@ impl Slatepacker {
 			slate: slate,
 		};
 
-		let (slate_bin, encrypted) = pack.to_binary(slate_version, secret, use_test_rng)?;
+		let (slate_bin, encrypted) = pack.to_binary(slate_version, secret, use_test_rng, secp)?;
 
 		SlatepackArmor::encode(&slate_bin, encrypted)
 	}
 
 	/// return slatepack
-	pub fn decrypt_slatepack(data: &[u8], dec_key: &DalekSecretKey) -> Result<Self, Error> {
+	pub fn decrypt_slatepack(data: &[u8], dec_key: &DalekSecretKey, height: u64, secp: &Secp256k1 ) -> Result<Self, Error> {
 		let (slate_bytes, encrypted) = SlatepackArmor::decode(data)?;
 
-		let slatepack = Slatepack::from_binary(&slate_bytes, encrypted, dec_key)?;
+		let slatepack = Slatepack::from_binary(&slate_bytes, encrypted, dec_key, height, secp)?;
 
 		let Slatepack {
 			sender,
@@ -119,13 +121,14 @@ fn slatepack_io_test() {
 	use crate::grin_util as util;
 	use crate::grin_util::secp::pedersen::{Commitment, RangeProof};
 	use crate::grin_util::secp::Signature;
-	use crate::grin_util::secp::{PublicKey, Secp256k1, SecretKey};
+	use crate::grin_util::secp::{PublicKey, SecretKey};
 	use crate::proof::proofaddress;
 	use crate::proof::proofaddress::ProvableAddress;
 	use crate::slate::{PaymentInfo, VersionCompatInfo};
 	use crate::ParticipantData;
 	use uuid::Uuid;
 	use x25519_dalek::PublicKey as xDalekPublicKey;
+	use grin_wallet_util::grin_util::secp::Secp256k1;
 
 	global::set_local_chain_type(global::ChainTypes::AutomatedTesting);
 
@@ -148,8 +151,8 @@ fn slatepack_io_test() {
 		19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32,
 	];
 
-	let sk = SecretKey::from_slice(&bytes_32).unwrap();
 	let secp = Secp256k1::new();
+	let sk = SecretKey::from_slice(&secp, &bytes_32).unwrap();
 
 	let dalek_sk = DalekSecretKey::from_bytes(&bytes_32).unwrap();
 	let dalek_pk = DalekPublicKey::from(&dalek_sk);
@@ -184,7 +187,7 @@ fn slatepack_io_test() {
 			.with_offset(BlindingFactor::from_slice(&bytes_32) )
 			.with_input( Input::new( OutputFeatures::Plain, Commitment(bytes_33)) )
 			.with_output( Output::new(OutputFeatures::Plain, Commitment(bytes_33), RangeProof::zero()))
-			.with_kernel( TxKernel::with_features(KernelFeatures::Plain { fee: 321 }) )),
+			.with_kernel( TxKernel::with_features(KernelFeatures::Plain { fee: 321.into() }) )),
 		offset: BlindingFactor::from_slice(&bytes_32),
 		amount: 30000000000000000,
 		fee: 321,
@@ -198,15 +201,15 @@ fn slatepack_io_test() {
 				public_nonce:  PublicKey::from_secret_key( &secp, &sk).unwrap(),
 				part_sig: None,
 				message: Some("message 1 to send".to_string()),
-				message_sig: Some(Signature::from_compact(&util::from_hex("89cc3c1480fea655f29d300fcf68d0cfbf53f96a1d6b1219486b64385ed7ed89acf96f1532b31ac8309e611583b1ecf37090e79700fae3683cf682c0043b3029").unwrap()).unwrap()),
+				message_sig: Some(Signature::from_compact(&secp, &util::from_hex("89cc3c1480fea655f29d300fcf68d0cfbf53f96a1d6b1219486b64385ed7ed89acf96f1532b31ac8309e611583b1ecf37090e79700fae3683cf682c0043b3029").unwrap()).unwrap()),
 			},
 			ParticipantData {
 				id: 1,
 				public_blind_excess: PublicKey::from_secret_key( &secp, &sk).unwrap(),
 				public_nonce:  PublicKey::from_secret_key( &secp, &sk).unwrap(),
-				part_sig: Some(Signature::from_compact(&util::from_hex("89cc3c1480fea655f29d300fcf68d0cfbf53f96a1d6b1219486b64385ed7ed89acf96f1532b31ac8309e611583b1ecf37090e79700fae3683cf682c0043b3029").unwrap()).unwrap()),
+				part_sig: Some(Signature::from_compact(&secp, &util::from_hex("89cc3c1480fea655f29d300fcf68d0cfbf53f96a1d6b1219486b64385ed7ed89acf96f1532b31ac8309e611583b1ecf37090e79700fae3683cf682c0043b3029").unwrap()).unwrap()),
 				message: Some("message 2 to send".to_string()),
-				message_sig: Some(Signature::from_compact(&util::from_hex("89cc3c1480fea655f29d300fcf68d0cfbf53f96a1d6b1219486b64385ed7ed89acf96f1532b31ac8309e611583b1ecf37090e79700fae3683cf682c0043b3029").unwrap()).unwrap()),
+				message_sig: Some(Signature::from_compact(&secp, &util::from_hex("89cc3c1480fea655f29d300fcf68d0cfbf53f96a1d6b1219486b64385ed7ed89acf96f1532b31ac8309e611583b1ecf37090e79700fae3683cf682c0043b3029").unwrap()).unwrap()),
 			}
 		],
 		version_info: VersionCompatInfo {
@@ -219,9 +222,12 @@ fn slatepack_io_test() {
 				receiver_signature: Some( util::to_hex(&bytes_64) ),
 		}),
 	};
+
+	let height = 67;
+
 	// updating kernel excess
 	slate_enc.tx_or_err_mut().unwrap().body.kernels[0].excess =
-		slate_enc.calc_excess::<ExtKeychain>(None).unwrap();
+		slate_enc.calc_excess::<ExtKeychain>(&secp, None, height ).unwrap();
 
 	let slate_enc_str = format!("{:?}", slate_enc);
 	println!("start encrypted slate = {}", slate_enc_str);
@@ -235,6 +241,7 @@ fn slatepack_io_test() {
 		Some(dalek_pk2.clone()), // sending to self, should be fine...
 		&dalek_sk,
 		true,
+		&secp,
 	)
 	.unwrap();
 	println!("slatepack encrypted = {}", slatepack_string_encrypted);
@@ -248,6 +255,7 @@ fn slatepack_io_test() {
 		None, // No recipient, should trigger non encrypted mode.
 		&dalek_sk,
 		true,
+		&secp,
 	)
 	.unwrap();
 	println!("slatepack binary = {}", slatepack_string_binary);
@@ -256,7 +264,7 @@ fn slatepack_io_test() {
 
 	// Testing if can open from a backup
 	let slatepack =
-		Slatepacker::decrypt_slatepack(slatepack_string_encrypted.as_bytes(), &dalek_sk).unwrap();
+		Slatepacker::decrypt_slatepack(slatepack_string_encrypted.as_bytes(), &dalek_sk, height, &secp).unwrap();
 	let res_slate = slatepack.to_result_slate();
 	let slate2_str = format!("{:?}", res_slate);
 	println!("res_slate = {:?}", slate2_str);
@@ -265,7 +273,7 @@ fn slatepack_io_test() {
 
 	// Testing if another party can open it
 	let slatepack =
-		Slatepacker::decrypt_slatepack(slatepack_string_encrypted.as_bytes(), &dalek_sk2).unwrap();
+		Slatepacker::decrypt_slatepack(slatepack_string_encrypted.as_bytes(), &dalek_sk2, height, &secp).unwrap();
 	let res_slate = slatepack.to_result_slate();
 	let slate2_str = format!("{:?}", res_slate);
 	println!("res_slate2 = {:?}", slate2_str);
@@ -276,6 +284,8 @@ fn slatepack_io_test() {
 	let slatepack = Slatepacker::decrypt_slatepack(
 		slatepack_string_binary.as_bytes(),
 		&DalekSecretKey::from_bytes(&[1; 32]).unwrap(),
+		height,
+		&secp,
 	)
 	.unwrap();
 	let res_slate = slatepack.to_result_slate();

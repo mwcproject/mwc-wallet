@@ -18,6 +18,7 @@ extern crate grin_wallet_controller as wallet;
 extern crate grin_wallet_impls as impls;
 extern crate grin_wallet_libwallet as libwallet;
 
+use std::convert::TryInto;
 use grin_wallet_util::grin_core as core;
 
 use self::core::core::transaction;
@@ -130,7 +131,7 @@ fn basic_transaction_api(test_dir: &'static str) -> Result<(), wallet::Error> {
 				.first()
 				.map(|k| k.features)
 				.unwrap(),
-			transaction::KernelFeatures::Plain { fee: 2000000 }
+			transaction::KernelFeatures::Plain { fee: (2000000 as u64).try_into().unwrap() }
 		);
 
 		Ok(())
@@ -145,7 +146,6 @@ fn basic_transaction_api(test_dir: &'static str) -> Result<(), wallet::Error> {
 			wallet1_info.last_confirmed_height as usize - cm as usize,
 			2,
 			1,
-			None,
 		);
 		// we should have a transaction entry for this slate
 		let tx = txs.iter().find(|t| t.tx_slate_id == Some(slate.id));
@@ -192,7 +192,6 @@ fn basic_transaction_api(test_dir: &'static str) -> Result<(), wallet::Error> {
 			wallet1_info.last_confirmed_height as usize - 1 - cm as usize,
 			2,
 			1,
-			None,
 		);
 		assert!(wallet1_refreshed);
 		// wallet 1 received fees, so amount should be the same

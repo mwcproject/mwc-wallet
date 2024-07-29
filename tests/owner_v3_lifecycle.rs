@@ -43,6 +43,7 @@ use common::{
 	initial_setup_wallet, instantiate_wallet, send_request, send_request_enc, setup,
 	RetrieveSummaryInfoResp,
 };
+use grin_wallet_util::grin_util::secp::Secp256k1;
 
 #[test]
 fn owner_v3_lifecycle() -> Result<(), grin_wallet_controller::Error> {
@@ -51,6 +52,8 @@ fn owner_v3_lifecycle() -> Result<(), grin_wallet_controller::Error> {
 	if true {
 		return Ok(());
 	}
+
+	let secp = Secp256k1::new();
 
 	let test_dir = "target/test_output/owner_v3_lifecycle";
 	setup(test_dir);
@@ -155,7 +158,7 @@ fn owner_v3_lifecycle() -> Result<(), grin_wallet_controller::Error> {
 
 	assert!(res.is_ok());
 	let value: ECDHPubkey = res.unwrap();
-	let shared_key = derive_ecdh_key(sec_key_str, &value.ecdh_pubkey);
+	let shared_key = derive_ecdh_key(sec_key_str, &value.ecdh_pubkey, &secp);
 
 	// 2) get the top level directory, should default to ~/.grin/auto
 	let req = include_str!("data/v3_reqs/get_top_level.req.json");

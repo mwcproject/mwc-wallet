@@ -16,14 +16,13 @@ extern crate colored;
 use crate::grin_util as util;
 use crate::grin_util::secp::key::{PublicKey, SecretKey};
 use crate::grin_util::secp::pedersen::Commitment;
-use crate::grin_util::secp::{pedersen, ContextFlag, Secp256k1, Signature};
+use crate::grin_util::secp::{pedersen, Secp256k1, Signature};
 use crate::proof::crypto::Hex;
 
 use super::crypto;
 use super::message::EncryptedMessage;
 use super::proofaddress::ProvableAddress;
 use crate::error::{Error, ErrorKind};
-use crate::signature::Signature as otherSignature;
 use crate::slate_versions::VersionedSlate;
 use crate::Slate;
 use ed25519_dalek::Verifier;
@@ -98,6 +97,7 @@ impl TxProof {
 	/// Verify this Proof
 	pub fn verify_extract(
 		&self,
+		secp: &Secp256k1,
 		expected_destination: Option<&ProvableAddress>,
 	) -> Result<(ProvableAddress, Slate), ErrorKind> {
 		let mut challenge = String::new();
@@ -148,7 +148,7 @@ impl TxProof {
 				))
 			})?;
 			if let Some(signature) = &self.signature {
-				crypto::verify_signature(&challenge, &signature, &public_key)
+				crypto::verify_signature(&challenge, &signature, &public_key, secp)
 					.map_err(|e| ErrorKind::TxProofVerifySignature(format!("{}", e)))?;
 			} else {
 				return Err(ErrorKind::TxProofVerifySignature(format!(
@@ -239,6 +239,7 @@ impl TxProof {
 		signature: String,
 		secret_key: &SecretKey,
 		expected_destination: &ProvableAddress,
+		secp: &Secp256k1,
 	) -> Result<(Slate, TxProof), ErrorKind> {
 		let address = from;
 
@@ -248,7 +249,7 @@ impl TxProof {
 				signature, e
 			))
 		})?;
-		let signature = Signature::from_der(&signature).map_err(|e| {
+		let signature = Signature::from_der(secp, &signature).map_err(|e| {
 			ErrorKind::TxProofGenericError(format!("Unable to build signature, {}", e))
 		})?;
 
@@ -266,7 +267,7 @@ impl TxProof {
 			))
 		})?;
 		let key = encrypted_message
-			.key(&public_key, secret_key)
+			.key(&public_key, secret_key, secp)
 			.map_err(|e| {
 				ErrorKind::TxProofGenericError(format!("Unable to build a signature, {}", e))
 			})?;
@@ -287,7 +288,7 @@ impl TxProof {
 			tor_sender_address: None,
 		};
 
-		let (_, slate) = proof.verify_extract(Some(expected_destination))?;
+		let (_, slate) = proof.verify_extract(secp, Some(expected_destination))?;
 
 		Ok((slate, proof))
 	}
@@ -299,6 +300,7 @@ impl TxProof {
 		secret_key: &SecretKey,
 		expected_destination: &ProvableAddress, //sender address
 		tor_destination: Option<String>,        //tor onion address
+		secp: &Secp256k1,
 	) -> Result<TxProof, ErrorKind> {
 		if let Some(p) = slate.payment_proof.clone() {
 			if let Some(signature) = p.receiver_signature {
@@ -345,6 +347,7 @@ impl TxProof {
 							))
 						})?,
 						&secret_key,
+						secp,
 					)
 					.map_err(|e| ErrorKind::GenericError(format!("Unable encrypt slate, {}", e)))?;
 
@@ -355,7 +358,7 @@ impl TxProof {
 						))
 					})?;
 					let key = encrypted_message
-						.key(&expected_destination.public_key().unwrap(), secret_key)
+						.key(&expected_destination.public_key().unwrap(), secret_key, secp)
 						.map_err(|e| {
 							ErrorKind::TxProofGenericError(format!(
 								"Unable to build a signature, {}",
@@ -380,7 +383,7 @@ impl TxProof {
 						tor_proof_signature: Some(signature),
 						tor_sender_address: tor_destination,
 					};
-					proof.verify_extract(Some(expected_destination))?;
+					proof.verify_extract(secp, Some(expected_destination))?;
 					Ok(proof)
 				} else {
 					let address = p.receiver_address;
@@ -390,7 +393,7 @@ impl TxProof {
 							signature, e
 						))
 					})?;
-					let signature = Signature::from_der(&signature).map_err(|e| {
+					let signature = Signature::from_der(secp, &signature).map_err(|e| {
 						ErrorKind::TxProofGenericError(format!("Unable to build signature, {}", e))
 					})?;
 
@@ -428,6 +431,7 @@ impl TxProof {
 							))
 						})?,
 						&secret_key,
+						secp,
 					)
 					.map_err(|e| ErrorKind::GenericError(format!("Unable encrypt slate, {}", e)))?;
 
@@ -438,7 +442,7 @@ impl TxProof {
 						))
 					})?;
 					let key = encrypted_message
-						.key(&expected_destination.public_key().unwrap(), secret_key)
+						.key(&expected_destination.public_key().unwrap(), secret_key, secp)
 						.map_err(|e| {
 							ErrorKind::TxProofGenericError(format!(
 								"Unable to build a signature, {}",
@@ -461,7 +465,7 @@ impl TxProof {
 						tor_proof_signature: None,
 						tor_sender_address: None,
 					};
-					proof.verify_extract(Some(expected_destination))?;
+					proof.verify_extract(secp, Some(expected_destination))?;
 					Ok(proof)
 				}
 			} else {
@@ -622,6 +626,7 @@ pub fn proof_ok(
 //to support mwc713 payment proof verification
 fn verify_tx_proof(
 	tx_proof: &TxProof,
+	secp: &Secp256k1,
 ) -> Result<
 	(
 		Option<ProvableAddress>,
@@ -632,9 +637,7 @@ fn verify_tx_proof(
 	),
 	Error,
 > {
-	let secp = &Secp256k1::with_caps(ContextFlag::Commit);
-
-	let (destination, slate) = tx_proof.verify_extract(None).map_err(|e| {
+	let (destination, slate) = tx_proof.verify_extract(secp, None).map_err(|e| {
 		ErrorKind::TxProofGenericError(format!("Unable to extract destination and slate, {}", e))
 	})?;
 
@@ -663,7 +666,7 @@ fn verify_tx_proof(
 		.iter()
 		.map(|p| &p.public_blind_excess)
 		.collect();
-	let excess_sum = PublicKey::from_combination(excess_parts).map_err(|e| {
+	let excess_sum = PublicKey::from_combination(secp, excess_parts).map_err(|e| {
 		ErrorKind::TxProofGenericError(format!("Unable to combine public keys, {}", e))
 	})?;
 
@@ -673,13 +676,13 @@ fn verify_tx_proof(
 	let mut input_com: Vec<pedersen::Commitment> = slate.tx_or_err()?.inputs_committed();
 	let mut output_com: Vec<pedersen::Commitment> = slate.tx_or_err()?.outputs_committed();
 
-	input_com.push(secp.commit(0, slate.tx_or_err()?.offset.secret_key()?)?);
+	input_com.push(secp.commit(0, slate.tx_or_err()?.offset.secret_key(secp)?)?);
 
 	output_com.push(secp.commit_value(slate.fee)?);
 
-	let excess_sum_com = Secp256k1::commit_sum(output_com, input_com)?;
+	let excess_sum_com = Secp256k1::commit_sum(secp, output_com, input_com)?;
 
-	if excess_sum_com.to_pubkey()? != excess_sum {
+	if excess_sum_com.to_pubkey(secp)? != excess_sum {
 		return Err(ErrorKind::TxProofGenericError("Excess sum mismatch".to_string()).into());
 	}
 
@@ -695,8 +698,9 @@ fn verify_tx_proof(
 ///to support mwc713 payment proof verification
 pub fn verify_tx_proof_wrapper(
 	tx_proof: &TxProof,
+	secp: &Secp256k1,
 ) -> Result<(Option<String>, String, u64, Vec<String>, String), Error> {
-	let (sender, receiver, amount, outputs, excess_sum) = verify_tx_proof(tx_proof)?;
+	let (sender, receiver, amount, outputs, excess_sum) = verify_tx_proof(tx_proof, secp)?;
 
 	let outputs = outputs
 		.iter()

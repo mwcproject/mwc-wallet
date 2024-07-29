@@ -18,7 +18,7 @@ use crate::chain;
 use crate::chain::Chain;
 use crate::core;
 use crate::core::core::hash::Hashed;
-use crate::core::core::{Output, OutputFeatures, OutputIdentifier, Transaction, TxKernel};
+use crate::core::core::{Output, Transaction, TxKernel};
 use crate::core::{consensus, global, pow};
 use crate::keychain;
 use crate::libwallet;
@@ -38,20 +38,14 @@ mod testclient;
 pub use self::{testclient::LocalWalletClient, testclient::WalletProxy};
 
 /// Get an output from the chain locally and present it back as an API output
-fn get_output_local(chain: &chain::Chain, commit: &pedersen::Commitment) -> Option<api::Output> {
-	let outputs = [
-		OutputIdentifier::new(OutputFeatures::Plain, commit),
-		OutputIdentifier::new(OutputFeatures::Coinbase, commit),
-	];
-
-	for x in outputs.iter() {
-		if chain.get_unspent(x.commit).is_ok() {
-			let block_height = chain.get_header_for_output(x.commit).unwrap().height;
-			let output_pos = chain.get_output_pos(&x.commit).unwrap_or(0);
-			return Some(api::Output::new(&commit, block_height, output_pos));
-		}
+fn get_output_local(chain: &chain::Chain, commit: pedersen::Commitment) -> Option<api::Output> {
+	if chain.get_unspent(commit).unwrap().is_some() {
+		let block_height = chain.get_header_for_output(commit).unwrap().height;
+		let output_pos = chain.get_output_pos(&commit).unwrap_or(0);
+		Some(api::Output::new(&commit, block_height, output_pos))
+	} else {
+		None
 	}
-	None
 }
 
 /// Get a kernel from the chain locally
@@ -180,7 +174,7 @@ where
 	K: keychain::Keychain + 'a,
 {
 	// build block fees
-	let fee_amt = txs.iter().map(|tx| tx.fee()).sum();
+	let fee_amt = txs.iter().map(|tx| tx.fee(prev.height)).sum();
 	let block_fees = BlockFees {
 		fees: fee_amt,
 		key_id: None,

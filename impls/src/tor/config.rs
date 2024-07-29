@@ -333,6 +333,7 @@ mod tests {
 	use super::*;
 
 	use rand::rngs::mock::StepRng;
+	use grin_wallet_util::grin_util::static_secp_instance;
 
 	use crate::util::{self, secp};
 
@@ -350,7 +351,9 @@ mod tests {
 		let test_dir = "target/test_output/onion_service";
 		setup(test_dir);
 		let mut test_rng = StepRng::new(1_234_567_890_u64, 1);
-		let sec_key = secp::key::SecretKey::new(&mut test_rng);
+		let secp_inst = static_secp_instance();
+		let secp = secp_inst.lock();
+		let sec_key = secp::key::SecretKey::new(&secp, &mut test_rng);
 		output_onion_service_config(test_dir, &sec_key)?;
 		clean_output_dir(test_dir);
 		Ok(())
@@ -361,7 +364,9 @@ mod tests {
 		let test_dir = "./target/test_output/tor";
 		setup(test_dir);
 		let mut test_rng = StepRng::new(1_234_567_890_u64, 1);
-		let sec_key = secp::key::SecretKey::new(&mut test_rng);
+		let secp_inst = static_secp_instance();
+		let secp = secp_inst.lock();
+		let sec_key = secp::key::SecretKey::new(&secp, &mut test_rng);
 		output_tor_listener_config(test_dir, "0", "127.0.0.1:3415", &None, &[sec_key], &None)?;
 		clean_output_dir(test_dir);
 		Ok(())

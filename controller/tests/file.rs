@@ -25,7 +25,7 @@ use std::sync::atomic::Ordering;
 use std::thread;
 use std::time::Duration;
 
-use grin_wallet_libwallet::InitTxArgs;
+use grin_wallet_libwallet::{InitTxArgs, NodeClient};
 
 use grin_wallet_util::grin_core::global;
 
@@ -34,6 +34,7 @@ use serde_json;
 #[macro_use]
 mod common;
 use common::{clean_output_dir, create_wallet_proxy, setup};
+use grin_wallet_util::grin_util::secp::Secp256k1;
 
 /// self send impl
 fn file_exchange_test_impl(test_dir: &'static str) -> Result<(), wallet::Error> {
@@ -42,6 +43,7 @@ fn file_exchange_test_impl(test_dir: &'static str) -> Result<(), wallet::Error> 
 	let mut wallet_proxy = create_wallet_proxy(test_dir);
 	let chain = wallet_proxy.chain.clone();
 	let stopper = wallet_proxy.running.clone();
+	let secp = Secp256k1::new();
 
 	// Create a new wallet test client, and set its queues to communicate with the
 	// proxy
@@ -128,7 +130,7 @@ fn file_exchange_test_impl(test_dir: &'static str) -> Result<(), wallet::Error> 
 		let slate = api.init_send_tx(m, &args, 1)?;
 
 		// output tx file
-		PathToSlatePutter::build_plain(Some((&send_file).into())).put_tx(&slate, None, true)?;
+		PathToSlatePutter::build_plain(Some((&send_file).into())).put_tx(&slate, None, true, &secp)?;
 		api.tx_lock_outputs(m, &slate, None, 0)?;
 		Ok(())
 	})?;
@@ -139,8 +141,14 @@ fn file_exchange_test_impl(test_dir: &'static str) -> Result<(), wallet::Error> 
 		w.set_parent_key_id_by_name("account1")?;
 	}
 
+	let height = {
+		wallet_inst!(wallet2, w);
+		let (height,_,_) = w.w2n_client().get_chain_tip().unwrap();
+		height
+	};
+
 	let mut slate = PathToSlateGetter::build_form_path((&send_file).into())
-		.get_tx(None)?
+		.get_tx(None, height, &secp)?
 		.to_slate()?
 		.0;
 	let mut naughty_slate = slate.clone();
@@ -158,14 +166,14 @@ fn file_exchange_test_impl(test_dir: &'static str) -> Result<(), wallet::Error> 
 	// wallet 2 receives file, completes, sends file back
 	wallet::controller::foreign_single_use(wallet2.clone(), mask2_i.clone(), |api| {
 		slate = api.receive_tx(&slate, None, None, Some(sender2_message.clone()))?;
-		PathToSlatePutter::build_plain(Some((&receive_file).into())).put_tx(&slate, None, true)?;
+		PathToSlatePutter::build_plain(Some((&receive_file).into())).put_tx(&slate, None, true, &secp)?;
 		Ok(())
 	})?;
 
 	// wallet 1 finalises and posts
 	wallet::controller::owner_single_use(Some(wallet1.clone()), mask1, None, |api, m| {
 		let mut slate = PathToSlateGetter::build_form_path(receive_file.into())
-			.get_tx(None)?
+			.get_tx(None, height, &secp)?
 			.to_slate()?
 			.0;
 		api.verify_slate_messages(m, &slate)?;

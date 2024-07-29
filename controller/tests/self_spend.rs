@@ -125,7 +125,7 @@ fn self_spend_impl(test_dir: &'static str) -> Result<(), wallet::Error> {
 		true,
 	)?;
 
-	let _fee = core::libtx::tx_fee(1, 1, 1, None); //there is only one input and one output and one kernel
+	let _fee = core::libtx::tx_fee(1, 1, 1); //there is only one input and one output and one kernel
 
 	//after the self spend, make sure the scan is done to update the status.
 	wallet::controller::owner_single_use(Some(wallet1.clone()), mask1, None, |api, m| {

@@ -27,8 +27,6 @@ use crate::grin_keychain::{ChildNumber, Identifier, Keychain, SwitchCommitmentTy
 use crate::grin_util as util;
 use crate::grin_util::secp::key::SecretKey;
 use crate::grin_util::secp::pedersen;
-use crate::grin_util::secp::Secp256k1;
-use crate::grin_util::static_secp_instance;
 use crate::grin_util::Mutex;
 use crate::internal::tx;
 use crate::internal::{keys, updater};
@@ -480,7 +478,7 @@ impl WalletTxInfo {
 		// As a result, if this issues happen, user cancel tx, it will not be uncancelled. We accept that because failure is not very
 		// critical and user not expected to destroy it's own data.
 		if self.tx_log.kernel_excess.is_none()
-			|| (!self.tx_log.confirmed && !self.tx_log.is_cancelled())
+			|| (!self.tx_log.confirmed && !self.tx_log.is_cancelled_reverted())
 		{
 			if let Some(kernel) = tx.body.kernels.get(0) {
 				if kernel.excess != pedersen::Commitment::from_vec(vec![0; 33]) {
@@ -670,7 +668,7 @@ where
 			}
 
 			let client = w.w2n_client().clone();
-			let keychain = w.keychain(keychain_mask)?.clone();
+			let keychain = w.keychain(keychain_mask)?;
 
 			let mut blocks: Vec<crate::grin_api::BlockPrintable> = Vec::new();
 
@@ -839,7 +837,7 @@ where
 			debug!("get_wallet_and_chain_data using check whatever needed strategy");
 			// Full data update.
 			let client = w.w2n_client().clone();
-			let keychain = w.keychain(keychain_mask)?.clone();
+			let keychain = w.keychain(keychain_mask)?;
 
 			// Retrieve the actual PMMR index range we're looking for
 			let pmmr_range = client.height_range_to_pmmr_indices(start_height, Some(end_height))?;
@@ -879,7 +877,7 @@ where
 			// Validate kernels from transaction. Kernel are a source of truth
 			let client = w.w2n_client().clone();
 			for tx in transactions.values_mut() {
-				if !(tx.tx_log.confirmed || tx.tx_log.is_cancelled())
+				if !(tx.tx_log.confirmed || tx.tx_log.is_cancelled_reverted())
 					|| tx.tx_log.output_height >= start_height
 					|| start_height < 2
 				{
@@ -1227,7 +1225,7 @@ where
 			updater::retrieve_txs(&mut **w, keychain_mask, None, None, None, false, None, None)?;
 
 		for tx_log in &transactions {
-			if tx_log.confirmed || tx_log.is_cancelled() {
+			if tx_log.confirmed || tx_log.is_cancelled_reverted() {
 				continue;
 			}
 
@@ -1405,7 +1403,7 @@ where
 						)));
 					}
 					w_out.updated = true;
-					w_out.output.status = OutputStatus::Unconfirmed;
+					w_out.output.status = OutputStatus::Reverted;
 				}
 				OutputStatus::Locked => {
 					// Locked is not on the chain is expected, It is mean that our send transaction was confirmed.
@@ -1446,8 +1444,8 @@ where
 		if tx_info.kernel_validation.is_some() {
 			if tx_info.kernel_validation.clone().unwrap() {
 				// transaction is valid
-				if tx_info.tx_log.is_cancelled() {
-					tx_info.tx_log.uncancel();
+				if tx_info.tx_log.is_cancelled_reverted() {
+					tx_info.tx_log.uncancel_unrevert();
 					tx_info.updated = true;
 
 					if let Some(ref s) = status_send_channel {
@@ -1478,10 +1476,20 @@ where
 					}
 				}
 			} else {
-				if !tx_info.tx_log.is_cancelled() {
+				if !tx_info.tx_log.is_cancelled_reverted() {
 					if tx_info.tx_log.confirmed {
 						tx_info.tx_log.confirmed = false;
 						tx_info.updated = true;
+						tx_info.tx_log.tx_type = match &tx_info.tx_log.tx_type {
+							TxLogEntryType::TxReceived => {
+								tx_info.tx_log.reverted_after = tx_info.tx_log.confirmation_ts.clone().and_then(|t| {
+									let now = chrono::Utc::now();
+									(now - t).to_std().ok()
+								});
+								TxLogEntryType::TxReverted
+							},
+							t => t.clone(),
+						};
 						if let Some(ref s) = status_send_channel {
 							let _ = s.send(StatusMessage::Info(format!(
 								"Changing transaction {} state to NOT confirmed",
@@ -1496,7 +1504,7 @@ where
 		let _update_result = update_non_kernel_transaction(&mut **w, tx_info, outputs);
 
 		// Update confirmation flag fr the cancelled.
-		if tx_info.tx_log.is_cancelled() {
+		if tx_info.tx_log.is_cancelled_reverted() {
 			if tx_info.tx_log.confirmed {
 				tx_info.tx_log.confirmed = false;
 				tx_info.updated = true;
@@ -1531,7 +1539,7 @@ fn validate_outputs_ownership<'a, L, C, K>(
 			.filter(|tx_uuid| {
 				transactions
 					.get(*tx_uuid)
-					.map(|tx| tx.tx_log.is_cancelled())
+					.map(|tx| tx.tx_log.is_cancelled_reverted())
 					.unwrap_or(false)
 			})
 			.map(|tx_uuid| format!("{}", tx_uuid.split('/').next().unwrap_or("????")))
@@ -1551,7 +1559,7 @@ fn validate_outputs_ownership<'a, L, C, K>(
 			.filter(|tx_uuid| {
 				transactions
 					.get(*tx_uuid)
-					.map(|tx| tx.tx_log.is_cancelled())
+					.map(|tx| tx.tx_log.is_cancelled_reverted())
 					.unwrap_or(false)
 			})
 			.map(|tx_uuid| format!("{}", tx_uuid.split('/').next().unwrap_or("????")))
@@ -1704,14 +1712,18 @@ fn delete_unconfirmed(
 
 	for tx_uuid in &transaction2cancel {
 		if let Some(tx) = transactions.get_mut(tx_uuid) {
-			if !tx.tx_log.is_cancelled() {
+			if !tx.tx_log.is_cancelled_reverted() {
 				// let's cancell transaction
 				match tx.tx_log.tx_type {
 					TxLogEntryType::TxSent => {
 						tx.tx_log.tx_type = TxLogEntryType::TxSentCancelled;
 					}
 					TxLogEntryType::TxReceived => {
-						tx.tx_log.tx_type = TxLogEntryType::TxReceivedCancelled;
+						tx.tx_log.reverted_after = tx.tx_log.confirmation_ts.clone().and_then(|t| {
+							let now = chrono::Utc::now();
+							(now - t).to_std().ok()
+						});
+						tx.tx_log.tx_type = TxLogEntryType::TxReverted;
 					}
 					TxLogEntryType::ConfirmedCoinbase => {
 						// coinbased not confirmed are filtered out. That is why there no needs to change the status
@@ -1738,7 +1750,7 @@ fn validate_consistancy(
 	transactions: &mut HashMap<String, WalletTxInfo>,
 ) {
 	for tx_info in transactions.values_mut() {
-		if tx_info.tx_log.is_cancelled() {
+		if tx_info.tx_log.is_cancelled_reverted() {
 			continue;
 		}
 
@@ -1864,8 +1876,7 @@ where
 			t.num_outputs = 1;
 			// calculate kernel excess for coinbase
 			if w_out.output.commit.is_some() {
-				let secp = static_secp_instance();
-				let secp = secp.lock();
+				let secp = batch.keychain().secp();
 				let over_commit = secp.commit_value(w_out.output.value)?;
 				let commit = pedersen::Commitment::from_vec(
 					util::from_hex(w_out.output.commit.as_ref().unwrap()).map_err(|e| {
@@ -1873,7 +1884,7 @@ where
 					})?,
 				);
 				t.output_commits = vec![commit.clone()];
-				let excess = Secp256k1::commit_sum(vec![commit], vec![over_commit])?;
+				let excess = secp.commit_sum(vec![commit], vec![over_commit])?;
 				t.kernel_excess = Some(excess);
 				t.kernel_lookup_min_height = Some(w_out.output.height);
 			}
@@ -1920,8 +1931,8 @@ where
 			&& !outputs_state.contains(&OutputStatus::Unconfirmed)
 			&& !outputs_state.contains(&OutputStatus::Reverted)
 		{
-			if tx_info.tx_log.is_cancelled() {
-				tx_info.tx_log.uncancel();
+			if tx_info.tx_log.is_cancelled_reverted() {
+				tx_info.tx_log.uncancel_unrevert();
 				tx_info.updated = true;
 			}
 			if !tx_info.tx_log.confirmed {
@@ -2028,7 +2039,7 @@ fn report_transaction_collision(
 		tx_uuid
 			.iter()
 			.map(|tx_uuid| transactions.get(tx_uuid))
-			.filter(|wtx| wtx.map(|tx| !tx.tx_log.is_cancelled()).unwrap_or(false))
+			.filter(|wtx| wtx.map(|tx| !tx.tx_log.is_cancelled_reverted()).unwrap_or(false))
 			.for_each(|wtx| {
 				if cancelled_tx.len() > 0 {
 					cancelled_tx.push_str(", ");
@@ -2067,10 +2078,13 @@ where
 	// let's revert first non cancelled
 	for uuid in tx_uuid {
 		if let Some(wtx) = transactions.get_mut(uuid) {
-			if wtx.tx_log.is_cancelled() {
+			if wtx.tx_log.is_cancelled_reverted() {
 				let prev_tx_state = wtx.tx_log.tx_type.clone();
 				wtx.tx_log.tx_type = match wtx.tx_log.tx_type {
-					TxLogEntryType::TxReceivedCancelled => TxLogEntryType::TxReceived,
+					TxLogEntryType::TxReceivedCancelled | TxLogEntryType::TxReverted => {
+						wtx.tx_log.reverted_after = None;
+						TxLogEntryType::TxReceived
+					},
 					TxLogEntryType::TxSentCancelled => TxLogEntryType::TxSent,
 					_ => panic!(
 						"Internal error. Expected cancelled transaction, but get different value"
@@ -2116,7 +2130,7 @@ where
 	K: Keychain + 'a,
 {
 	//spend this output to the account itself.
-	let fee = tx_fee(1, 1, 1, None); //there is only one input and one output and one kernel
+	let fee = tx_fee(1, 1, 1); //there is only one input and one output and one kernel
 								 //let amount = output.eligible_to_spend(current_height, minimum_confirmations);
 
 	let mut output_vec = Vec::new();

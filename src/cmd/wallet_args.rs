@@ -52,6 +52,7 @@ use std::{
 	path::{Path, PathBuf},
 };
 use uuid::Uuid;
+use grin_wallet_util::grin_util::secp::Secp256k1;
 
 // define what to do on argument error
 macro_rules! arg_parse {
@@ -751,6 +752,8 @@ pub fn parse_process_invoice_args(
 	args: &ArgMatches,
 	prompt: bool,
 	slatepack_secret: &DalekSecretKey,
+	height: u64,
+	secp: &Secp256k1,
 ) -> Result<command::ProcessInvoiceArgs, ParseError> {
 	// TODO: display and prompt for confirmation of what we're doing
 	// message
@@ -812,7 +815,7 @@ pub fn parse_process_invoice_args(
 		// Now we need to prompt the user whether they want to do this,
 		// which requires reading the slate
 		let slate = match PathToSlateGetter::build_form_path((&tx_file).into())
-			.get_tx(Some(slatepack_secret))
+			.get_tx(Some(slatepack_secret), height, secp)
 		{
 			Ok(s) => s,
 			Err(e) => return Err(ParseError::ArgumentError(format!("{}", e))),
@@ -1630,19 +1633,22 @@ where
 			command::issue_invoice_tx(owner_api, km, a)
 		}
 		("pay", Some(args)) => {
-			let slatepack_secret = {
+			let (slatepack_secret, height, secp) = {
 				let mut w_lock = owner_api.wallet_inst.lock();
 				let w = w_lock.lc_provider()?.wallet_inst()?;
 				let keychain = w.keychain(km)?;
 				let slatepack_secret =
 					proofaddress::payment_proof_address_dalek_secret(&keychain, None)?;
-				slatepack_secret
+				let (height, _, _) = w.w2n_client().get_chain_tip()?;
+				(slatepack_secret, height, keychain.secp().clone())
 			};
 
 			let a = arg_parse!(parse_process_invoice_args(
 				&args,
 				!test_mode,
-				&slatepack_secret
+				&slatepack_secret,
+				height,
+				&secp,
 			));
 			command::process_invoice(
 				owner_api,

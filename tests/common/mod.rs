@@ -30,7 +30,7 @@ use grin_wallet_impls::{DefaultLCProvider, DefaultWalletImpl};
 use grin_wallet_libwallet::{NodeClient, WalletInfo, WalletInst};
 use grin_wallet_util::grin_core::global::{self, ChainTypes};
 use grin_wallet_util::grin_keychain::ExtKeychain;
-use grin_wallet_util::grin_util::{from_hex, static_secp_instance};
+use grin_wallet_util::grin_util::from_hex;
 use util::secp::key::{PublicKey, SecretKey};
 
 use grin_wallet_util::grin_api as api;
@@ -42,6 +42,7 @@ use serde_json::{json, Value};
 use std::thread;
 use std::time::Duration;
 use url::Url;
+use grin_wallet_util::grin_util::secp::Secp256k1;
 
 // Set up 2 wallets and launch the test proxy behind them
 #[macro_export]
@@ -464,18 +465,15 @@ where
 }
 
 #[allow(dead_code)]
-pub fn derive_ecdh_key(sec_key_str: &str, other_pubkey: &PublicKey) -> SecretKey {
+pub fn derive_ecdh_key(sec_key_str: &str, other_pubkey: &PublicKey, secp: &Secp256k1) -> SecretKey {
 	let sec_key_bytes = from_hex(sec_key_str).unwrap();
-	let sec_key = { SecretKey::from_slice(&sec_key_bytes).unwrap() };
-
-	let secp_inst = static_secp_instance();
-	let secp = secp_inst.lock();
+	let sec_key = { SecretKey::from_slice(secp, &sec_key_bytes).unwrap() };
 
 	let mut shared_pubkey = other_pubkey.clone();
-	shared_pubkey.mul_assign(&secp, &sec_key).unwrap();
+	shared_pubkey.mul_assign(secp, &sec_key).unwrap();
 
-	let x_coord = shared_pubkey.serialize_vec(true);
-	SecretKey::from_slice(&x_coord[1..]).unwrap()
+	let x_coord = shared_pubkey.serialize_vec(secp, true);
+	SecretKey::from_slice(secp, &x_coord[1..]).unwrap()
 }
 
 // Types to make working with json responses easier

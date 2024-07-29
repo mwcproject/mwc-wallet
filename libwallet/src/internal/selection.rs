@@ -30,28 +30,6 @@ use crate::slate::Slate;
 use crate::types::*;
 use grin_wallet_util::grin_util as util;
 use std::collections::HashMap;
-use std::sync::RwLock;
-
-lazy_static! {
-	/// Base fee units for all transaction. We want to be able to regulate them if in future
-	/// MWC price will go up, the base fee better to be adjustedable. Normally miners are
-	/// dictating the fees.
-	static ref BASE_FEE: RwLock<Option<u64>> = RwLock::new(None);
-}
-
-/// Set from config base fee units for all transaction.
-pub fn set_base_fee(base_fee: u64) {
-	let mut fee = BASE_FEE.write().unwrap();
-	(*fee).replace(base_fee);
-}
-
-/// Read base fee units
-pub fn get_base_fee() -> u64 {
-	BASE_FEE
-		.read()
-		.unwrap()
-		.unwrap_or(crate::grin_core::libtx::DEFAULT_BASE_FEE)
-}
 
 /// Initialize a transaction on the sender side, returns a corresponding
 /// libwallet transaction slate with the appropriate inputs selected,
@@ -123,7 +101,7 @@ where
 		// Legacy part
 		Context::with_excess(
 			keychain.secp(),
-			blinding.secret_key()?,
+			blinding.secret_key(keychain.secp())?,
 			&parent_key_id,
 			use_test_nonce,
 			participant_id,
@@ -228,7 +206,7 @@ where
 
 		t.address = address;
 
-		if let Ok(e) = slate.calc_excess(Some(&keychain)) {
+		if let Ok(e) = slate.calc_excess(keychain.secp(), Some(&keychain), current_height) {
 			t.kernel_excess = Some(e)
 		}
 		if let Some(e) = excess_override {
@@ -428,7 +406,7 @@ where
 		// Legacy model
 		Context::with_excess(
 			keychain.secp(),
-			blinding.secret_key()?,
+			blinding.secret_key(keychain.secp())?,
 			&parent_key_id,
 			use_test_rng,
 			participant_id,
@@ -467,7 +445,7 @@ where
 	t.messages = messages;
 	t.ttl_cutoff_height = slate.ttl_cutoff_height;
 	//add the offset to the database tx record.
-	let offset_skey = slate.tx_or_err()?.offset.secret_key()?;
+	let offset_skey = slate.tx_or_err()?.offset.secret_key(keychain.secp())?;
 	let offset_commit = keychain.secp().commit(0, offset_skey)?;
 	t.kernel_offset = Some(offset_commit);
 
@@ -476,7 +454,7 @@ where
 	}
 
 	// when invoicing, this will be invalid
-	if let Ok(e) = slate.calc_excess(Some(&keychain)) {
+	if let Ok(e) = slate.calc_excess(keychain.secp(), Some(&keychain), current_height) {
 		t.kernel_excess = Some(e)
 	}
 	t.kernel_lookup_min_height = Some(current_height);
@@ -629,7 +607,7 @@ where
 	// First attempt to spend without change
 	assert!(routputs >= 1); // Normally it is 1
 
-	let mut fee = tx_fee(coins.len(), routputs, 1, Some(get_base_fee()));
+	let mut fee = tx_fee(coins.len(), routputs, 1);
 	if let Some(min_fee) = min_fee {
 		fee = std::cmp::max(*min_fee, fee);
 	}
@@ -643,7 +621,7 @@ where
 
 	// We need to add a change address or amount with fee is more than total
 	if total != amount_with_fee {
-		fee = tx_fee(coins.len(), num_outputs, 1, Some(get_base_fee()));
+		fee = tx_fee(coins.len(), num_outputs, 1);
 		if let Some(min_fee) = min_fee {
 			fee = std::cmp::max(*min_fee, fee);
 		}
@@ -670,7 +648,7 @@ where
 				change_output_minimum_confirmations,
 			)
 			.1;
-			fee = tx_fee(coins.len(), num_outputs, 1, Some(get_base_fee()));
+			fee = tx_fee(coins.len(), num_outputs, 1);
 			if let Some(min_fee) = min_fee {
 				fee = std::cmp::max(*min_fee, fee);
 			}

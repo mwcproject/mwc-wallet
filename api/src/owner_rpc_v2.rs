@@ -35,6 +35,8 @@ use ed25519_dalek::PublicKey as DalekPublicKey;
 use grin_wallet_libwallet::proof::proofaddress::{self, ProvableAddress};
 use std::sync::Arc;
 use std::time::Duration;
+use std::convert::TryFrom;
+use grin_wallet_util::grin_util::secp::Secp256k1;
 
 /// Public definition used to generate Owner jsonrpc api.
 /// * When running `mwc-wallet owner_api` with defaults, the V2 api is available at
@@ -267,6 +269,7 @@ pub trait OwnerRpcV2: Sync + Send {
 				  "output_height": 1,
 				  "parent_key_id": "0200000000000000000000000000000000",
 				  "payment_proof": null,
+				  "reverted_after": null,
 				  "stored_tx": null,
 				  "ttl_cutoff_height": null,
 				  "tx_slate_id": null,
@@ -294,6 +297,7 @@ pub trait OwnerRpcV2: Sync + Send {
 				  "output_height": 2,
 				  "parent_key_id": "0200000000000000000000000000000000",
 				  "payment_proof": null,
+				  "reverted_after": null,
 				  "stored_tx": null,
 				  "ttl_cutoff_height": null,
 				  "tx_slate_id": null,
@@ -345,6 +349,7 @@ pub trait OwnerRpcV2: Sync + Send {
 			"amount_currently_spendable": "2380952380",
 			"amount_immature": "7142857140",
 			"amount_locked": "0",
+			"amount_reverted": "0",
 			"last_confirmed_height": "4",
 			"minimum_confirmations": "1",
 			"total": "9523809520"
@@ -3010,7 +3015,11 @@ where
 	}
 
 	fn post_tx(&self, tx: TransactionV3, fluff: bool) -> Result<(), ErrorKind> {
-		Owner::post_tx(self, None, &Transaction::from(tx), fluff).map_err(|e| e.kind())
+		Owner::post_tx(self,
+					   None,
+					   &Transaction::try_from(tx).map_err(|e| ErrorKind::GenericError(format!("Unable convert V3 transaction, {}",e)))?,
+					   fluff,
+		).map_err(|e| e.kind())
 	}
 
 	fn verify_slate_messages(&self, slate: VersionedSlate) -> Result<(), ErrorKind> {
@@ -3351,6 +3360,9 @@ pub fn run_doctest_owner(
 			api_impl::owner::init_send_tx(&mut **w, (&mask1).as_ref(), &args, true, 1).unwrap();
 		println!("INITIAL SLATE");
 		println!("{}", serde_json::to_string_pretty(&slate).unwrap());
+
+		let secp = Secp256k1::new();
+
 		if compact_slate {
 			let vslate = VersionedSlate::into_version(
 				slate.clone(),
@@ -3360,6 +3372,7 @@ pub fn run_doctest_owner(
 				Some(w2_tor_pubkey.clone()),
 				&w1_tor_secret,
 				true,
+				&secp,
 			)
 			.unwrap();
 			println!(
@@ -3410,6 +3423,7 @@ pub fn run_doctest_owner(
 				Some(w1_tor_pubkey.clone()),
 				&w2_tor_secret,
 				true,
+				&secp,
 			)
 			.unwrap();
 			println!(
@@ -3435,6 +3449,7 @@ pub fn run_doctest_owner(
 					Some(w1_tor_pubkey.clone()),
 					&w2_tor_secret,
 					true,
+					&secp,
 				)
 				.unwrap();
 				println!(

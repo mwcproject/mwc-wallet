@@ -190,8 +190,8 @@ where
 			return Err(ErrorKind::TransactionAlreadyReceived(ret_slate.id.to_string()).into());
 		}
 		if let Some(offset) = t.kernel_offset {
-			let offset_skey = slate.tx_or_err()?.offset.secret_key()?;
 			let keychain = w.keychain(keychain_mask)?;
+			let offset_skey = slate.tx_or_err()?.offset.secret_key(keychain.secp())?;
 			let offset_commit = keychain.secp().commit(0, offset_skey)?;
 			if offset == offset_commit {
 				return Err(ErrorKind::TransactionWithSameOffsetAlreadyReceived(
@@ -243,7 +243,7 @@ where
 
 	tx::update_message(&mut *w, keychain_mask, &ret_slate)?;
 
-	let excess = ret_slate.calc_excess(Some(&keychain))?;
+	let excess = ret_slate.calc_excess(keychain.secp(), Some(&keychain), height)?;
 
 	if let Some(ref mut p) = ret_slate.payment_proof {
 		if p.sender_address
@@ -262,6 +262,7 @@ where
 			p.sender_address.clone(),
 			p.receiver_address.clone(),
 			proofaddress::payment_proof_address_secret(&keychain, None)?,
+			keychain.secp(),
 		)?;
 
 		p.receiver_signature = Some(sig);
@@ -388,7 +389,8 @@ where
 		.map_err(|e| {
 			ErrorKind::SlatepackDecodeError(format!("Unable to build key to decrypt, {}", e))
 		})?;
-	let sp = encrypted_slate.into_slatepack(&sec_key)?;
+	let (current_height, _, _) = w.w2n_client().get_chain_tip()?;
+	let sp = encrypted_slate.into_slatepack(&sec_key,current_height, keychain.secp())?;
 	let sender = sp.get_sender();
 	let recipient = sp.get_recipient();
 	let content = sp.get_content();
@@ -424,6 +426,8 @@ where
 			(slatepack_secret, slatepack_pk)
 		};
 
+		let keychain = w.keychain(keychain_mask)?;
+
 		Ok(VersionedSlate::into_version(
 			slate.clone(),
 			version.unwrap_or(SlateVersion::SP),
@@ -432,6 +436,7 @@ where
 			slatepack_recipient,
 			&slatepack_secret,
 			use_test_rng,
+			keychain.secp(),
 		)?)
 	} else {
 		// Plain slate format

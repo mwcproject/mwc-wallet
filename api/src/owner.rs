@@ -46,6 +46,7 @@ use std::sync::Arc;
 use std::thread;
 use std::thread::JoinHandle;
 use std::time::Duration;
+use grin_wallet_util::grin_util::static_secp_instance;
 
 /// Main interface into all wallet API functions.
 /// Wallet APIs are split into two seperate blocks of functionality
@@ -535,8 +536,8 @@ where
 				.1
 				.into_iter()
 				.map(|mut t| {
-					t.confirmation_ts = Some(Utc.ymd(2019, 1, 15).and_hms(16, 1, 26));
-					t.creation_ts = Utc.ymd(2019, 1, 15).and_hms(16, 1, 26);
+					t.confirmation_ts = Some(Utc.with_ymd_and_hms(2019, 1, 15, 16, 1, 26).unwrap());
+					t.creation_ts = Utc.with_ymd_and_hms(2019, 1, 15, 16, 1, 26).unwrap();
 					t
 				})
 				.collect();
@@ -768,13 +769,14 @@ where
 
 				match sender_info {
 					Some((sender, other_wallet_info)) => {
-						let slatepack_secret = {
+						let (slatepack_secret, height, secp) = {
 							let mut w_lock = self.wallet_inst.lock();
 							let w = w_lock.lc_provider()?.wallet_inst()?;
 							let keychain = w.keychain(keychain_mask)?;
+							let (height, _, _) = w.w2n_client().get_chain_tip()?;
 							let slatepack_secret =
 								proofaddress::payment_proof_address_dalek_secret(&keychain, None)?;
-							slatepack_secret
+							(slatepack_secret, height, keychain.secp().clone())
 						};
 
 						slate = sender
@@ -784,6 +786,8 @@ where
 								&slatepack_secret,
 								recipient,
 								other_wallet_info,
+								height,
+								&secp,
 							)
 							.map_err(|e| {
 								ErrorKind::ClientCallback(format!(
@@ -1805,7 +1809,10 @@ where
 	) -> Result<Option<SecretKey>, Error> {
 		// just return a representative string for doctest mode
 		if self.doctest_mode {
+			let secp_inst = static_secp_instance();
+			let secp = secp_inst.lock();
 			return Ok(Some(SecretKey::from_slice(
+				&secp,
 				&from_hex("d096b3cb75986b3b13f80b8f5243a9edf0af4c74ac37578c5a12cfb5b59b1868")
 					.unwrap(),
 			)?));

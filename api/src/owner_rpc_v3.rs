@@ -38,6 +38,7 @@ use grin_wallet_libwallet::proof::proofaddress::ProvableAddress;
 use rand::thread_rng;
 use std::error::Error;
 use std::time::Duration;
+use std::convert::TryFrom;
 
 /// Public definition used to generate Owner jsonrpc api.
 /// Secure version containing wallet lifecycle functions. All calls to this API must be encrypted.
@@ -277,6 +278,7 @@ pub trait OwnerRpcV3 {
 				  "output_height": 1,
 				  "parent_key_id": "0200000000000000000000000000000000",
 				  "payment_proof": null,
+				  "reverted_after": null,
 				  "stored_tx": null,
 				  "ttl_cutoff_height": null,
 				  "tx_slate_id": null,
@@ -305,6 +307,7 @@ pub trait OwnerRpcV3 {
 				  "output_height": 2,
 				  "parent_key_id": "0200000000000000000000000000000000",
 				  "payment_proof": null,
+				  "reverted_after": null,
 				  "stored_tx": null,
 				  "ttl_cutoff_height": null,
 				  "reverted_after": null,
@@ -3567,7 +3570,7 @@ where
 		Owner::post_tx(
 			self,
 			(&token.keychain_mask).as_ref(),
-			&Transaction::from(tx),
+			&Transaction::try_from(tx).map_err(|e| ErrorKind::GenericError(format!("Unable convert V3 transaction, {}",e)))?,
 			fluff,
 		)
 		.map_err(|e| e.kind())
@@ -3612,15 +3615,15 @@ where
 	fn init_secure_api(&self, ecdh_pubkey: ECDHPubkey) -> Result<ECDHPubkey, ErrorKind> {
 		let secp_inst = static_secp_instance();
 		let secp = secp_inst.lock();
-		let sec_key = SecretKey::new(&mut thread_rng());
+		let sec_key = SecretKey::new(&secp, &mut thread_rng());
 
 		let mut shared_pubkey = ecdh_pubkey.ecdh_pubkey;
 		shared_pubkey
 			.mul_assign(&secp, &sec_key)
 			.map_err(|e| ErrorKind::Secp(format!("{}", e.description())))?;
 
-		let x_coord = shared_pubkey.serialize_vec(true);
-		let shared_key = SecretKey::from_slice(&x_coord[1..])
+		let x_coord = shared_pubkey.serialize_vec(&secp, true);
+		let shared_key = SecretKey::from_slice( &secp, &x_coord[1..])
 			.map_err(|e| ErrorKind::Secp(format!("{}", e.description())))?;
 		{
 			let mut s = self.shared_key.lock();

@@ -30,6 +30,7 @@ use crate::util::ZeroingString;
 use ed25519_dalek::{PublicKey as DalekPublicKey, SecretKey as DalekSecretKey};
 use grin_wallet_libwallet::slatepack::SlatePurpose;
 use grin_wallet_libwallet::{SlateVersion, Slatepacker};
+use grin_wallet_util::grin_util::secp::Secp256k1;
 pub use mwcmq::{
 	get_mwcmqs_brocker, init_mwcmqs_access_data, MWCMQPublisher, MWCMQSubscriber, MwcMqsChannel,
 };
@@ -56,6 +57,8 @@ pub trait SlateSender {
 		slatepack_secret: &DalekSecretKey,
 		recipient: Option<DalekPublicKey>,
 		other_wallet_version: Option<(SlateVersion, Option<String>)>,
+		height: u64,
+		secp: &Secp256k1,
 	) -> Result<Slate, Error>;
 }
 
@@ -80,6 +83,7 @@ pub trait SlatePutter {
 		slate: &Slate,
 		slatepack_secret: Option<&DalekSecretKey>,
 		use_test_rng: bool,
+		secp: &Secp256k1,
 	) -> Result<String, Error>;
 }
 
@@ -94,13 +98,13 @@ pub enum SlateGetData {
 /// Checks for a transaction from a corresponding SlatePutter, returns the transaction if it exists
 pub trait SlateGetter {
 	/// Receive a transaction sync. Just read it from wherever and return the slate.
-	fn get_tx(&self, slatepack_secret: Option<&DalekSecretKey>) -> Result<SlateGetData, Error>;
+	fn get_tx(&self, slatepack_secret: Option<&DalekSecretKey>, height: u64, secp: &Secp256k1) -> Result<SlateGetData, Error>;
 }
 
 /// Swap Message Sender
 pub trait SwapMessageSender {
 	/// Send a swap message. Return true is message delivery acknowledge can be set (message was delivered and procesed)
-	fn send_swap_message(&self, swap_message: &Message) -> Result<bool, Error>;
+	fn send_swap_message(&self, swap_message: &Message, secp: &Secp256k1) -> Result<bool, Error>;
 }
 
 /// Swap Message Sender

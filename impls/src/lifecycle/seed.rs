@@ -25,7 +25,7 @@ use serde_json;
 use util::ZeroingString;
 
 use crate::keychain::{mnemonic, Keychain};
-use crate::util;
+use crate::util::{self, ToHex};
 use crate::{Error, ErrorKind};
 use std::num::NonZeroU32;
 
@@ -66,7 +66,7 @@ impl WalletSeed {
 	}
 
 	pub fn _to_hex(&self) -> String {
-		util::to_hex(&self.0)
+        self.0.to_vec().to_hex()
 	}
 
 	pub fn to_mnemonic(&self) -> Result<String, Error> {
@@ -347,9 +347,9 @@ impl EncryptedWalletSeed {
 			.map_err(|e| ErrorKind::Encryption(format!("Seal in place error, {}", e)))?;
 
 		Ok(EncryptedWalletSeed {
-			encrypted_seed: util::to_hex(&enc_bytes),
-			salt: util::to_hex(&salt),
-			nonce: util::to_hex(&nonce),
+            encrypted_seed: enc_bytes.to_hex(),
+            salt: salt.to_hex(),
+            nonce: nonce.to_hex(),
 		})
 	}
 

@@ -665,7 +665,8 @@ where
 	};
 
 	// update slate current height
-	ret_slate.height = w.w2n_client().get_chain_tip()?.0;
+	let (height, _,_) = w.w2n_client().get_chain_tip()?;
+	ret_slate.height = height;
 
 	// update ttl if desired
 	if let Some(b) = &args.ttl_blocks {
@@ -712,7 +713,7 @@ where
 
 		// needs to be stored as we're removing sig data for return trip. this needs to be present
 		// when locking transaction context and updating tx log with excess later
-		context.calculated_excess = Some(ret_slate.calc_excess(Some(&keychain))?);
+		context.calculated_excess = Some(ret_slate.calc_excess(keychain.secp(), Some(&keychain), height)?);
 
 		// if self-sending, merge contexts
 		if let Ok(c) = context_res {
@@ -1429,8 +1430,9 @@ where
 	//	std::str::from_utf8(&msg).unwrap(),
 	crypto::verify_signature(
 		&msg,
-		&crypto::signature_from_string(&proof.recipient_sig).unwrap(),
+		&crypto::signature_from_string(&proof.recipient_sig, keychain.secp()).unwrap(),
 		&recipient_pubkey,
+		keychain.secp(),
 	)
 	.map_err(|e| ErrorKind::TxProofVerifySignature(format!("{}", e)))?;
 
@@ -1438,8 +1440,9 @@ where
 
 	crypto::verify_signature(
 		&msg,
-		&crypto::signature_from_string(&proof.sender_sig).unwrap(),
+		&crypto::signature_from_string(&proof.sender_sig, keychain.secp()).unwrap(),
 		&sender_pubkey,
+		keychain.secp(),
 	)
 	.map_err(|e| ErrorKind::TxProofVerifySignature(format!("{}", e)))?;
 

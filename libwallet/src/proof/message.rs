@@ -47,13 +47,13 @@ impl EncryptedMessage {
 		destination: &proofaddress::ProvableAddress,
 		receiver_public_key: &PublicKey,
 		secret_key: &SecretKey,
+		secp: &Secp256k1,
 	) -> Result<EncryptedMessage, Error> {
-		let secp = Secp256k1::new();
 		let mut common_secret = receiver_public_key.clone();
 		common_secret.mul_assign(&secp, secret_key).map_err(|e| {
 			ErrorKind::TxProofGenericError(format!("Unable to encrypt message, {}", e))
 		})?;
-		let common_secret_ser = common_secret.serialize_vec(true);
+		let common_secret_ser = common_secret.serialize_vec( secp, true);
 		let common_secret_slice = &common_secret_ser[1..33];
 
 		let salt: [u8; 8] = thread_rng().gen();
@@ -92,6 +92,7 @@ impl EncryptedMessage {
 		&self,
 		sender_public_key: &PublicKey,
 		secret_key: &SecretKey,
+		secp: &Secp256k1,
 	) -> Result<[u8; 32], Error> {
 		let salt = util::from_hex(&self.salt).map_err(|e| {
 			ErrorKind::TxProofGenericError(format!(
@@ -100,12 +101,11 @@ impl EncryptedMessage {
 			))
 		})?;
 
-		let secp = Secp256k1::new();
 		let mut common_secret = sender_public_key.clone();
 		common_secret.mul_assign(&secp, secret_key).map_err(|e| {
 			ErrorKind::TxProofGenericError(format!("Key manipulation error, {}", e))
 		})?;
-		let common_secret_ser = common_secret.serialize_vec(true);
+		let common_secret_ser = common_secret.serialize_vec(secp,true);
 		let common_secret_slice = &common_secret_ser[1..33];
 
 		let mut key = [0; 32];

@@ -26,6 +26,7 @@ use crate::swap::message::SecondaryUpdate;
 use crate::swap::types::SwapTransactionsConfirmations;
 use crate::NodeClient;
 use std::sync::Arc;
+use grin_wallet_util::grin_util::secp::Secp256k1;
 
 /// Swap API trait that is used by both Buyer and Seller.
 /// Every currency that Swap want to support, need to implement
@@ -97,6 +98,7 @@ pub trait SwapApi<K: Keychain>: Sync + Send {
 		&self,
 		swap: &Swap,
 		confirmations_needed: u64,
+		secp: &Secp256k1,
 	) -> Result<(u64, u64, u64), ErrorKind>;
 
 	/// Build secondary update part of the offer message
@@ -125,7 +127,7 @@ pub trait SwapApi<K: Keychain>: Sync + Send {
 
 	/// Get a secondary addresses for the lock account
 	/// We can have several addresses because of different formats
-	fn get_secondary_lock_address(&self, swap: &Swap) -> Result<Vec<String>, ErrorKind>;
+	fn get_secondary_lock_address(&self, swap: &Swap, secp: &Secp256k1) -> Result<Vec<String>, ErrorKind>;
 
 	/// Check if tx fee for the secondary is different from the posted. compare swap.secondary_fee with
 	/// posted BTC secondary_fee

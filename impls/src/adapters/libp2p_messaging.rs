@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use crate::grin_p2p::libp2p_connection;
-use crate::util::secp;
 use crate::util::RwLock;
 use crate::{Error, ErrorKind};
 use chrono::Utc;
@@ -21,6 +20,7 @@ use grin_wallet_libwallet::IntegrityContext;
 use libp2p::gossipsub::IdentTopic as Topic;
 use std::thread;
 use uuid::Uuid;
+use grin_wallet_util::grin_util::secp::Secp256k1;
 
 /// Publishing message
 #[derive(Clone, Debug)]
@@ -108,10 +108,10 @@ pub fn add_broadcasting_messages(
 			let _thread = thread::Builder::new()
 				.name("broadcasting_messages".to_string())
 				.spawn(|| {
+					let secp = Secp256k1::new();
 					loop {
 						thread::sleep(core::time::Duration::from_secs(1));
 						let cur_time = Utc::now().timestamp();
-						let secp = secp::Secp256k1::new();
 						{
 							let mut messages = MESSAGING_BROADCASTING.write();
 							if messages.is_empty() {
@@ -136,6 +136,7 @@ pub fn add_broadcasting_messages(
 												&tor_pk,
 												&signature,
 												msg.message.as_bytes(),
+												&secp,
 											) {
 												Ok(enc_data) => {
 													if libp2p_connection::publish_message(

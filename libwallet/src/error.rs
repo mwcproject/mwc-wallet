@@ -65,7 +65,7 @@ pub enum ErrorKind {
 
 	/// LibTX Error
 	#[fail(display = "LibTx Error, {}", _0)]
-	LibTX(crate::grin_core::libtx::ErrorKind),
+	LibTX(crate::grin_core::libtx::Error),
 
 	/// Keychain error
 	#[fail(display = "Keychain error, {}", _0)]
@@ -433,7 +433,7 @@ impl From<grin_keychain::Error> for Error {
 impl From<libtx::Error> for Error {
 	fn from(error: crate::grin_core::libtx::Error) -> Error {
 		Error {
-			inner: Context::new(ErrorKind::LibTX(error.kind())),
+			inner: Context::new(ErrorKind::LibTX(error)),
 		}
 	}
 }

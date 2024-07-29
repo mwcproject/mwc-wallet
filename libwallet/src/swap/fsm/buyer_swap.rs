@@ -18,10 +18,8 @@ use super::state::{
 	JOURNAL_CANCELLED_BYER_LOCK_TOO_MUCH_FUNDS, JOURNAL_CANCELLED_BY_TIMEOUT,
 	JOURNAL_CANCELLED_BY_USER, JOURNAL_NOT_LOCKED,
 };
-use crate::grin_core::core::verifier_cache::LruVerifierCache;
 use crate::grin_core::core::Weighting;
 use crate::grin_keychain::Keychain;
-use crate::grin_util::RwLock;
 use crate::swap::fsm::state::{Input, State, StateEtaInfo, StateId, StateProcessRespond};
 use crate::swap::message::Message;
 use crate::swap::swap;
@@ -31,6 +29,7 @@ use crate::NodeClient;
 use chrono::{Local, TimeZone};
 use failure::_core::marker::PhantomData;
 use std::sync::Arc;
+use grin_wallet_util::grin_util::secp::Secp256k1;
 
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -46,8 +45,8 @@ impl State for BuyerOfferCreated {
 	fn get_state_id(&self) -> StateId {
 		StateId::BuyerOfferCreated
 	}
-	fn get_eta(&self, swap: &Swap) -> Option<StateEtaInfo> {
-		let dt = Local.timestamp(swap.started.timestamp(), 0);
+	fn get_eta(&self, swap: &Swap, _secp: &Secp256k1) -> Option<StateEtaInfo> {
+		let dt = Local.timestamp_opt(swap.started.timestamp(), 0).unwrap();
 		let time_str = dt.format("%B %e %H:%M:%S").to_string();
 		Some(StateEtaInfo::new(&format!("Get an Offer at {}", time_str)))
 	}
@@ -61,7 +60,9 @@ impl State for BuyerOfferCreated {
 		input: Input,
 		swap: &mut Swap,
 		_context: &Context,
+		_height: u64,
 		_tx_conf: &SwapTransactionsConfirmations,
+		_secp: &Secp256k1,
 	) -> Result<StateProcessRespond, ErrorKind> {
 		match input {
 			Input::Cancel => {
@@ -119,7 +120,7 @@ where
 	fn get_state_id(&self) -> StateId {
 		StateId::BuyerSendingAcceptOfferMessage
 	}
-	fn get_eta(&self, swap: &Swap) -> Option<StateEtaInfo> {
+	fn get_eta(&self, swap: &Swap, _secp: &Secp256k1) -> Option<StateEtaInfo> {
 		Some(
 			StateEtaInfo::new("Send Accept Offer Message").end_time(swap.get_time_message_offers()),
 		)
@@ -134,7 +135,9 @@ where
 		input: Input,
 		swap: &mut Swap,
 		_context: &Context,
+		_height: u64,
 		tx_conf: &SwapTransactionsConfirmations,
+		_secp: &Secp256k1,
 	) -> Result<StateProcessRespond, ErrorKind> {
 		match input {
 			Input::Cancel => {
@@ -220,7 +223,7 @@ impl State for BuyerWaitingForSellerToLock {
 	fn get_state_id(&self) -> StateId {
 		StateId::BuyerWaitingForSellerToLock
 	}
-	fn get_eta(&self, swap: &Swap) -> Option<StateEtaInfo> {
+	fn get_eta(&self, swap: &Swap, _secp: &Secp256k1) -> Option<StateEtaInfo> {
 		if swap.seller_lock_first {
 			Some(
 				StateEtaInfo::new("Wait for seller to start locking MWC")
@@ -240,7 +243,9 @@ impl State for BuyerWaitingForSellerToLock {
 		input: Input,
 		swap: &mut Swap,
 		_context: &Context,
+		_height: u64,
 		tx_conf: &SwapTransactionsConfirmations,
+		_secp: &Secp256k1,
 	) -> Result<StateProcessRespond, ErrorKind> {
 		match input {
 			Input::Cancel => {
@@ -356,8 +361,8 @@ where
 	fn get_state_id(&self) -> StateId {
 		StateId::BuyerPostingSecondaryToMultisigAccount
 	}
-	fn get_eta(&self, swap: &Swap) -> Option<StateEtaInfo> {
-		let name = match self.swap_api.get_secondary_lock_address(swap) {
+	fn get_eta(&self, swap: &Swap, secp: &Secp256k1) -> Option<StateEtaInfo> {
+		let name = match self.swap_api.get_secondary_lock_address(swap, secp) {
 			Ok(address) => {
 				debug_assert!(address.len() > 0);
 				debug_assert!(address.len() <= 2);
@@ -381,7 +386,9 @@ where
 		input: Input,
 		swap: &mut Swap,
 		_context: &Context,
+		_height: u64,
 		tx_conf: &SwapTransactionsConfirmations,
+		secp: &Secp256k1,
 	) -> Result<StateProcessRespond, ErrorKind> {
 		match input {
 			Input::Cancel => {
@@ -407,7 +414,7 @@ where
 				// Check if btc/eth lock is already done
 				let (pending_amount, confirmed_amount, _least_confirmations) = self
 					.swap_api
-					.request_secondary_lock_balance(swap, swap.secondary_confirmations)?;
+					.request_secondary_lock_balance(swap, swap.secondary_confirmations, secp)?;
 				let chain_amount = pending_amount + confirmed_amount;
 				let time_limit = swap.get_time_start_lock();
 
@@ -434,7 +441,7 @@ where
 						.action(Action::DepositSecondary {
 							currency: swap.secondary_currency,
 							amount: swap.secondary_amount - chain_amount,
-							address: self.swap_api.get_secondary_lock_address(swap)?,
+							address: self.swap_api.get_secondary_lock_address(swap, secp)?,
 						})
 						.time_limit(time_limit));
 					} else {
@@ -446,7 +453,7 @@ where
 					}
 				}
 
-				let lock_address = self.swap_api.get_secondary_lock_address(swap)?;
+				let lock_address = self.swap_api.get_secondary_lock_address(swap, secp)?;
 				debug_assert!(lock_address.len() > 0);
 				debug_assert!(lock_address.len() <= 2);
 
@@ -531,7 +538,7 @@ where
 	fn get_state_id(&self) -> StateId {
 		StateId::BuyerWaitingForLockConfirmations
 	}
-	fn get_eta(&self, swap: &Swap) -> Option<StateEtaInfo> {
+	fn get_eta(&self, swap: &Swap, _secp: &Secp256k1) -> Option<StateEtaInfo> {
 		Some(
 			StateEtaInfo::new("Wait for Locking funds confirmations")
 				.end_time(swap.get_time_message_redeem()),
@@ -547,7 +554,9 @@ where
 		input: Input,
 		swap: &mut Swap,
 		context: &Context,
+		_height: u64,
 		tx_conf: &SwapTransactionsConfirmations,
+		secp: &Secp256k1,
 	) -> Result<StateProcessRespond, ErrorKind> {
 		match input {
 			Input::Cancel => {
@@ -570,7 +579,7 @@ where
 				let secondary_lock = tx_conf.secondary_lock_conf.unwrap_or(0);
 
 				if tx_conf.secondary_lock_amount < swap.secondary_amount {
-					let lock_address = self.swap_api.get_secondary_lock_address(swap)?;
+					let lock_address = self.swap_api.get_secondary_lock_address(swap, secp)?;
 					debug_assert!(lock_address.len() > 0);
 					debug_assert!(lock_address.len() <= 2);
 					swap.add_journal_message(format!(
@@ -624,7 +633,7 @@ where
 								mwc_required: swap.mwc_confirmations,
 								mwc_actual: mwc_lock,
 								currency: swap.secondary_currency,
-								address: self.swap_api.get_secondary_lock_address(swap)?,
+								address: self.swap_api.get_secondary_lock_address(swap, secp)?,
 								sec_expected_to_be_posted: 0,
 								sec_required: swap.secondary_confirmations,
 								sec_actual: tx_conf.secondary_lock_conf,
@@ -678,7 +687,7 @@ impl State for BuyerSendingInitRedeemMessage {
 	fn get_state_id(&self) -> StateId {
 		StateId::BuyerSendingInitRedeemMessage
 	}
-	fn get_eta(&self, swap: &Swap) -> Option<StateEtaInfo> {
+	fn get_eta(&self, swap: &Swap, _secp: &Secp256k1) -> Option<StateEtaInfo> {
 		Some(StateEtaInfo::new("Send Init Redeem Message").end_time(swap.get_time_message_redeem()))
 	}
 	fn is_cancellable(&self) -> bool {
@@ -690,7 +699,9 @@ impl State for BuyerSendingInitRedeemMessage {
 		input: Input,
 		swap: &mut Swap,
 		_context: &Context,
+		_height: u64,
 		tx_conf: &SwapTransactionsConfirmations,
+		_secp: &Secp256k1,
 	) -> Result<StateProcessRespond, ErrorKind> {
 		match input {
 			Input::Cancel => {
@@ -783,7 +794,7 @@ impl<K: Keychain> State for BuyerWaitingForRespondRedeemMessage<K> {
 	fn get_state_id(&self) -> StateId {
 		StateId::BuyerWaitingForRespondRedeemMessage
 	}
-	fn get_eta(&self, swap: &Swap) -> Option<StateEtaInfo> {
+	fn get_eta(&self, swap: &Swap, _secp: &Secp256k1) -> Option<StateEtaInfo> {
 		Some(
 			StateEtaInfo::new("Wait For Redeem response message")
 				.end_time(swap.get_time_message_redeem()),
@@ -799,7 +810,9 @@ impl<K: Keychain> State for BuyerWaitingForRespondRedeemMessage<K> {
 		input: Input,
 		swap: &mut Swap,
 		context: &Context,
+		height: u64,
 		tx_conf: &SwapTransactionsConfirmations,
+		_secp: &Secp256k1,
 	) -> Result<StateProcessRespond, ErrorKind> {
 		match input {
 			Input::Cancel => {
@@ -827,7 +840,7 @@ impl<K: Keychain> State for BuyerWaitingForRespondRedeemMessage<K> {
 					.tx_or_err()?
 					.validate(
 						Weighting::AsTransaction,
-						Arc::new(RwLock::new(LruVerifierCache::new())),
+						height
 					)
 					.is_ok()
 				{
@@ -862,7 +875,7 @@ impl<K: Keychain> State for BuyerWaitingForRespondRedeemMessage<K> {
 					.tx_or_err()?
 					.validate(
 						Weighting::AsTransaction,
-						Arc::new(RwLock::new(LruVerifierCache::new())),
+						height,
 					)
 					.is_err()
 				{
@@ -872,6 +885,7 @@ impl<K: Keychain> State for BuyerWaitingForRespondRedeemMessage<K> {
 						swap,
 						context,
 						redeem.redeem_participant,
+						height,
 					)?;
 					swap.ack_msg2();
 					swap.add_journal_message("Process Redeem response message".to_string());
@@ -881,7 +895,7 @@ impl<K: Keychain> State for BuyerWaitingForRespondRedeemMessage<K> {
 					.tx_or_err()?
 					.validate(
 						Weighting::AsTransaction,
-						Arc::new(RwLock::new(LruVerifierCache::new()))
+						height,
 					)
 					.is_ok());
 				Ok(StateProcessRespond::new(StateId::BuyerRedeemMwc))
@@ -931,7 +945,7 @@ where
 	fn get_state_id(&self) -> StateId {
 		StateId::BuyerRedeemMwc
 	}
-	fn get_eta(&self, swap: &Swap) -> Option<StateEtaInfo> {
+	fn get_eta(&self, swap: &Swap, _secp: &Secp256k1) -> Option<StateEtaInfo> {
 		Some(StateEtaInfo::new("Redeem MWC").end_time(swap.get_time_mwc_redeem()))
 	}
 	fn is_cancellable(&self) -> bool {
@@ -944,7 +958,9 @@ where
 		input: Input,
 		swap: &mut Swap,
 		_context: &Context,
+		_height: u64,
 		tx_conf: &SwapTransactionsConfirmations,
+		_secp: &Secp256k1,
 	) -> Result<StateProcessRespond, ErrorKind> {
 		let time_limit = swap.get_time_mwc_redeem();
 		match input {
@@ -1052,7 +1068,7 @@ impl State for BuyerWaitForRedeemMwcConfirmations {
 	fn get_state_id(&self) -> StateId {
 		StateId::BuyerWaitForRedeemMwcConfirmations
 	}
-	fn get_eta(&self, _swap: &Swap) -> Option<StateEtaInfo> {
+	fn get_eta(&self, _swap: &Swap, _secp: &Secp256k1) -> Option<StateEtaInfo> {
 		Some(StateEtaInfo::new("Wait For MWC Redeem Tx Confirmations"))
 	}
 	fn is_cancellable(&self) -> bool {
@@ -1065,7 +1081,9 @@ impl State for BuyerWaitForRedeemMwcConfirmations {
 		input: Input,
 		swap: &mut Swap,
 		_context: &Context,
+		_height: u64,
 		tx_conf: &SwapTransactionsConfirmations,
+		_secp: &Secp256k1,
 	) -> Result<StateProcessRespond, ErrorKind> {
 		match input {
 			Input::Check => {
@@ -1138,7 +1156,7 @@ impl State for BuyerSwapComplete {
 	fn get_state_id(&self) -> StateId {
 		StateId::BuyerSwapComplete
 	}
-	fn get_eta(&self, _swap: &Swap) -> Option<StateEtaInfo> {
+	fn get_eta(&self, _swap: &Swap, _secp: &Secp256k1) -> Option<StateEtaInfo> {
 		Some(StateEtaInfo::new("Swap is completed"))
 	}
 	fn is_cancellable(&self) -> bool {
@@ -1151,7 +1169,9 @@ impl State for BuyerSwapComplete {
 		input: Input,
 		_swap: &mut Swap,
 		_context: &Context,
+		_height: u64,
 		_tx_conf: &SwapTransactionsConfirmations,
+		_secp: &Secp256k1,
 	) -> Result<StateProcessRespond, ErrorKind> {
 		match input {
 			Input::Check => Ok(StateProcessRespond::new(StateId::BuyerSwapComplete)),
@@ -1184,7 +1204,7 @@ impl State for BuyerCancelled {
 	fn get_state_id(&self) -> StateId {
 		StateId::BuyerCancelled
 	}
-	fn get_eta(&self, _swap: &Swap) -> Option<StateEtaInfo> {
+	fn get_eta(&self, _swap: &Swap, _secp: &Secp256k1) -> Option<StateEtaInfo> {
 		Some(StateEtaInfo::new(
 			"Swap is cancelled, no funds was locked, no refund was needed",
 		))
@@ -1199,7 +1219,9 @@ impl State for BuyerCancelled {
 		input: Input,
 		_swap: &mut Swap,
 		_context: &Context,
+		_height: u64,
 		_tx_conf: &SwapTransactionsConfirmations,
+		_secp: &Secp256k1,
 	) -> Result<StateProcessRespond, ErrorKind> {
 		match input {
 			Input::Check => Ok(StateProcessRespond::new(StateId::BuyerCancelled)),
@@ -1236,7 +1258,7 @@ impl State for BuyerWaitingForRefundTime {
 	fn get_state_id(&self) -> StateId {
 		StateId::BuyerWaitingForRefundTime
 	}
-	fn get_eta(&self, swap: &Swap) -> Option<StateEtaInfo> {
+	fn get_eta(&self, swap: &Swap, _secp: &Secp256k1) -> Option<StateEtaInfo> {
 		Some(
 			StateEtaInfo::new(&format!(
 				"Waiting for {} to unlock",
@@ -1255,7 +1277,9 @@ impl State for BuyerWaitingForRefundTime {
 		input: Input,
 		swap: &mut Swap,
 		_context: &Context,
+		_height: u64,
 		tx_conf: &SwapTransactionsConfirmations,
+		_secp: &Secp256k1,
 	) -> Result<StateProcessRespond, ErrorKind> {
 		match input {
 			Input::Check => {
@@ -1333,7 +1357,7 @@ where
 	fn get_state_id(&self) -> StateId {
 		StateId::BuyerPostingRefundForSecondary
 	}
-	fn get_eta(&self, swap: &Swap) -> Option<StateEtaInfo> {
+	fn get_eta(&self, swap: &Swap, _secp: &Secp256k1) -> Option<StateEtaInfo> {
 		Some(
 			StateEtaInfo::new(&format!(
 				"Post {} Refund to address {}",
@@ -1355,7 +1379,9 @@ where
 		input: Input,
 		swap: &mut Swap,
 		context: &Context,
+		_height: u64,
 		tx_conf: &SwapTransactionsConfirmations,
+		_secp: &Secp256k1,
 	) -> Result<StateProcessRespond, ErrorKind> {
 		match input {
 			Input::Check => {
@@ -1447,7 +1473,7 @@ where
 	fn get_state_id(&self) -> StateId {
 		StateId::BuyerWaitingForRefundConfirmations
 	}
-	fn get_eta(&self, swap: &Swap) -> Option<StateEtaInfo> {
+	fn get_eta(&self, swap: &Swap, _secp: &Secp256k1) -> Option<StateEtaInfo> {
 		Some(StateEtaInfo::new(&format!(
 			"Wait for {} Refund confirmations, address {}",
 			swap.secondary_currency,
@@ -1466,7 +1492,9 @@ where
 		input: Input,
 		swap: &mut Swap,
 		_context: &Context,
+		_height: u64,
 		tx_conf: &SwapTransactionsConfirmations,
+		_secp: &Secp256k1,
 	) -> Result<StateProcessRespond, ErrorKind> {
 		match input {
 			Input::Check => {
@@ -1546,7 +1574,7 @@ impl State for BuyerCancelledRefunded {
 	fn get_state_id(&self) -> StateId {
 		StateId::BuyerCancelledRefunded
 	}
-	fn get_eta(&self, swap: &Swap) -> Option<StateEtaInfo> {
+	fn get_eta(&self, swap: &Swap, _secp: &Secp256k1) -> Option<StateEtaInfo> {
 		Some(StateEtaInfo::new(&format!(
 			"Swap is cancelled, {} refund is redeemed to address {}",
 			swap.secondary_currency,
@@ -1562,7 +1590,9 @@ impl State for BuyerCancelledRefunded {
 		input: Input,
 		_swap: &mut Swap,
 		_context: &Context,
+		_height: u64,
 		_tx_conf: &SwapTransactionsConfirmations,
+		_secp: &Secp256k1,
 	) -> Result<StateProcessRespond, ErrorKind> {
 		match input {
 			Input::Check => Ok(StateProcessRespond::new(StateId::BuyerCancelledRefunded)),
