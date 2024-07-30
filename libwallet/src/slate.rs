@@ -43,6 +43,7 @@ use uuid::Uuid;
 use crate::slate_versions::v2::SlateV2;
 use crate::slate_versions::v2::SlateV2ParseTTL;
 
+use crate::grin_core::consensus::WEEK_HEIGHT;
 use crate::slate_versions::v3::{
 	CoinbaseV3, InputV3, OutputV3, ParticipantDataV3, PaymentInfoV3, SlateV3, TransactionBodyV3,
 	TransactionV3, TxKernelV3, VersionCompatInfoV3,
@@ -176,7 +177,7 @@ impl fmt::Display for ParticipantMessageData {
 /// the slate around by whatever means they choose, (but we can provide some
 /// binary or JSON serialization helpers here).
 
-#[derive(Deserialize, Debug, Clone)]
+#[derive(Debug, Clone)]
 pub struct Slate {
 	/// True is created from slatepack data.
 	pub compact_slate: bool,
@@ -192,41 +193,33 @@ pub struct Slate {
 	/// transaction initiation
 	pub tx: Option<Transaction>,
 	/// base amount (excluding fee)
-	#[serde(with = "secp_ser::string_or_u64")]
 	pub amount: u64,
 	/// fee amount
-	#[serde(with = "secp_ser::string_or_u64")]
 	pub fee: u64,
 	/// Block height for the transaction
-	#[serde(with = "secp_ser::string_or_u64")]
 	pub height: u64,
-	/// Lock height
-	#[serde(with = "secp_ser::string_or_u64")]
-	pub lock_height: u64,
+	/// Lock height (private because it is related to kernel_features)
+	lock_height: u64,
 	/// TTL, the block height at which wallets
 	/// should refuse to process the transaction and unlock all
 	/// associated outputs
-	#[serde(with = "secp_ser::opt_string_or_u64")]
 	pub ttl_cutoff_height: Option<u64>,
 	/// Participant data, each participant in the transaction will
 	/// insert their public data here. For now, 0 is sender and 1
 	/// is receiver, though this will change for multi-party
 	pub participant_data: Vec<ParticipantData>,
 	/// Payment Proof
-	#[serde(default = "default_payment_none")]
 	pub payment_proof: Option<PaymentInfo>,
 	/// Offset, needed when posting of transaction is deferred.
-	#[serde(default = "zero_bf")]
 	pub offset: BlindingFactor,
+	/// Kernel Features flag -
+	/// 	0: plain
+	/// 	1: coinbase (invalid)
+	/// 	2: height_locked
+	/// 	3: NRD
+	kernel_features: u8,
 }
 
-fn zero_bf() -> BlindingFactor {
-	BlindingFactor::zero()
-}
-
-fn default_payment_none() -> Option<PaymentInfo> {
-	None
-}
 /// Versioning and compatibility info about this slate
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct VersionCompatInfo {
@@ -244,6 +237,44 @@ pub struct ParticipantMessages {
 }
 
 impl Slate {
+	/// Create new instance. Data will be validated
+	pub fn new(
+		compact_slate: bool,
+		version_info: VersionCompatInfo,
+		num_participants: usize,
+		id: Uuid,
+		tx: Option<Transaction>,
+		amount: u64,
+		fee: u64,
+		height: u64,
+		lock_height: u64,
+		kernel_features: u8,
+		ttl_cutoff_height: Option<u64>,
+		participant_data: Vec<ParticipantData>,
+		payment_proof: Option<PaymentInfo>,
+		offset: BlindingFactor,
+	) -> Result<Self, Error> {
+		let res = Slate {
+			compact_slate,
+			version_info,
+			num_participants,
+			id,
+			tx,
+			amount,
+			fee,
+			height,
+			lock_height,
+			ttl_cutoff_height,
+			participant_data,
+			payment_proof,
+			offset,
+			kernel_features,
+		};
+		// let's validate the kernal params first
+		let _ = res.kernel_features()?;
+		Ok(res)
+	}
+
 	/// Return the transaction, throwing an error if it doesn't exist
 	/// to be used at points in the code where the existence of a transaction
 	/// is assumed
@@ -261,6 +292,84 @@ impl Slate {
 			None => Err(ErrorKind::SlateTransactionRequired.into()),
 		}
 	}
+
+	/// Get kernel feature code
+	pub fn get_kernel_features(&self) -> u8 {
+		self.kernel_features
+	}
+
+	/// Get lock height pure value, caller must take care about kernel_features as well
+	pub fn get_lock_height(&self) -> u64 {
+		self.lock_height
+	}
+
+	/// Get lock height for current kernel feature. Note, for NRD it might be not accurate value
+	pub fn calc_lock_height(&self) -> u64 {
+		match self.kernel_features {
+			3 => self.height + self.lock_height, // nrd
+			_ => self.lock_height,               // others must have height in sync
+		}
+	}
+
+	/// Locking height value with kernel feature consistency checking
+	pub fn get_lock_height_check(&self) -> Result<u64, Error> {
+		match self.kernel_features {
+			2 => Ok(self.lock_height),
+			_ => Err(ErrorKind::InvalidKernelFeatures(format!(
+				"Expected legit Lock kernel, but get kernel {} and lock_height {}",
+				self.kernel_features, self.lock_height
+			))
+			.into()),
+		}
+	}
+
+	/// Reset to plain kernel
+	pub fn reset_lock_height(&mut self) {
+		self.lock_height = 0;
+		self.kernel_features = 0;
+	}
+
+	/// For debug only!!!
+	pub fn set_lock_height_no_check(&mut self, lock_height: u64) {
+		self.lock_height = lock_height;
+		self.kernel_features = 2;
+	}
+
+	/// Set lock height and LockHeight Kernel type
+	pub fn set_lock_height(&mut self, lock_height: u64) -> Result<(), Error> {
+		if lock_height == 0 {
+			return Err(
+				ErrorKind::InvalidKernelFeatures(format!("Setting zero lock height")).into(),
+			);
+		}
+		if lock_height <= self.height {
+			return Err(ErrorKind::InvalidKernelFeatures(format!(
+				"Lock height {} is lower then slate height {}",
+				lock_height, self.height
+			))
+			.into());
+		}
+		self.lock_height = lock_height;
+		self.kernel_features = 2;
+		Ok(())
+	}
+
+	/// Set NRD LockHeight Kernel type
+	/// Note, currently NRD is not active, so node will reject it until the hardfork
+	/// Currently nobody expectign to call it
+	pub fn set_related_height(&mut self, lock_height: u64) -> Result<(), Error> {
+		if lock_height == 0 || lock_height >= WEEK_HEIGHT {
+			return Err(ErrorKind::InvalidKernelFeatures(format!(
+				"Setting wrong related height {}",
+				lock_height
+			))
+			.into());
+		}
+		self.lock_height = lock_height;
+		self.kernel_features = 3;
+		Ok(())
+	}
+
 	/// Attempt to find slate version
 	pub fn parse_slate_version(slate_json: &str) -> Result<u16, Error> {
 		let probe: SlateVersionProbe = serde_json::from_str(slate_json).map_err(|e| {
@@ -326,12 +435,12 @@ impl Slate {
 			}
 			_ => return Err(ErrorKind::SlateVersion(version).into()),
 		};
-		Ok(v3.to_slate()?)
+		Ok(v3.to_slate(true)?)
 	}
 
 	/// Create a new slate
 	/// slatepack also mean 'compact slate'. Please note the slates are build different way, so for the compact
-	/// slates we have defferent method of building it.
+	/// slates we have different method of building it.
 	pub fn blank(num_participants: usize, compact_slate: bool) -> Slate {
 		let np = match num_participants {
 			0 => 2,
@@ -357,6 +466,7 @@ impl Slate {
 			},
 			payment_proof: None,
 			offset: BlindingFactor::zero(),
+			kernel_features: 0,
 		};
 		slate
 	}
@@ -400,6 +510,9 @@ impl Slate {
 			if send_slate.tx_or_err()?.body.kernels != respond_slate.tx_or_err()?.body.kernels {
 				return Err(ErrorKind::SlateValidation("kernels mismatch".to_string()).into());
 			}
+		}
+		if send_slate.kernel_features != respond_slate.kernel_features {
+			return Err(ErrorKind::SlateValidation("kernel_features mismatch".to_string()).into());
 		}
 		if send_slate.lock_height != respond_slate.lock_height {
 			return Err(ErrorKind::SlateValidation("lock_height mismatch".to_string()).into());
@@ -524,17 +637,52 @@ impl Slate {
 		Ok(())
 	}
 
-	/// Construct the appropriate kernel features based on our fee and lock_height.
-	/// If lock_height is 0 then its a plain kernel, otherwise its a height locked kernel.
+	/// Build kernel features based on variant and associated data.
+	/// kernel_features values:
+	/// 0: plain
+	/// 1: coinbase (invalid)
+	/// 2: height_locked (with associated lock_height)
+	/// 3: NRD (with associated relative_height)
+	/// Any other value is invalid.
 	pub fn kernel_features(&self) -> Result<KernelFeatures, Error> {
-		match self.lock_height {
-			0 => Ok(KernelFeatures::Plain {
+		match self.kernel_features {
+			0 => {
+				if self.lock_height != 0 {
+					return Err(ErrorKind::SlateValidation(format!("Invalid lock_height for Plain kernel feature. lock_height expected to be zero, but has {}", self.lock_height)).into());
+				}
+				Ok(KernelFeatures::Plain {
+					fee: self.build_fee()?,
+				})
+			}
+			1 => Err(ErrorKind::InvalidKernelFeatures(
+				"Coinbase feature is not expected at Slate".into(),
+			)
+			.into()),
+			2 => Ok(KernelFeatures::HeightLocked {
 				fee: self.build_fee()?,
+				lock_height: if self.lock_height > self.height && self.height > 0 {
+					self.lock_height
+				} else {
+					return Err(ErrorKind::SlateValidation(format!(
+						"Invalid lock_height, height value is {}, but lock_height is {}",
+						self.height, self.lock_height
+					))
+					.into());
+				},
 			}),
-			_ => Ok(KernelFeatures::HeightLocked {
+			3 => Ok(KernelFeatures::NoRecentDuplicate {
 				fee: self.build_fee()?,
-				lock_height: self.lock_height,
+				relative_height: if self.lock_height < WEEK_HEIGHT {
+					NRDRelativeHeight::new(self.lock_height)?
+				} else {
+					return Err(ErrorKind::SlateValidation(format!(
+						"Invalid NRD relative_height, height value is {}, limit is {}",
+						self.lock_height, WEEK_HEIGHT
+					))
+					.into());
+				},
 			}),
+			n => Err(ErrorKind::UnknownKernelFeatures(n).into()),
 		}
 	}
 
@@ -1076,6 +1224,7 @@ impl From<Slate> for SlateV3 {
 			version_info,
 			payment_proof,
 			offset: tx_offset,
+			kernel_features,
 		} = slate;
 		let participant_data = map_vec!(participant_data, |data| ParticipantDataV3::from(data));
 		let version_info = VersionCompatInfoV3::from(&version_info);
@@ -1109,6 +1258,7 @@ impl From<Slate> for SlateV3 {
 			version_info,
 			payment_proof,
 			compact_slate: if compact_slate { Some(true) } else { None },
+			kernel_features,
 		}
 	}
 }
@@ -1129,6 +1279,7 @@ impl From<&Slate> for SlateV3 {
 			version_info,
 			payment_proof,
 			offset: tx_offset,
+			kernel_features,
 		} = slate;
 		let num_participants = *num_participants;
 		let id = *id;
@@ -1170,6 +1321,7 @@ impl From<&Slate> for SlateV3 {
 			version_info,
 			payment_proof,
 			compact_slate: if *compact_slate { Some(true) } else { None },
+			kernel_features: *kernel_features,
 		}
 	}
 }

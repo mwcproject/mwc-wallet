@@ -166,24 +166,24 @@ impl VersionedSlate {
 				)?;
 				Ok(packer)
 			}
-			VersionedSlate::V3(s) => Ok(Slatepacker::wrap_slate(s.clone().to_slate()?)),
+			VersionedSlate::V3(s) => Ok(Slatepacker::wrap_slate(s.clone().to_slate(false)?)),
 			VersionedSlate::V2(s) => {
 				let s = SlateV3::from(s.clone());
-				Ok(Slatepacker::wrap_slate(s.to_slate()?))
+				Ok(Slatepacker::wrap_slate(s.to_slate(false)?))
 			}
 		}
 	}
 
 	/// Non encrypted slate conversion
-	pub fn into_slate_plain(&self) -> Result<Slate, Error> {
+	pub fn into_slate_plain(&self, fix_kernel: bool) -> Result<Slate, Error> {
 		match self {
 			VersionedSlate::SP(_) => {
 				return Err(ErrorKind::GenericError("Slate is encrypted".to_string()).into())
 			}
-			VersionedSlate::V3(s) => Ok(s.clone().to_slate()?),
+			VersionedSlate::V3(s) => Ok(s.clone().to_slate(fix_kernel)?),
 			VersionedSlate::V2(s) => {
 				let s = SlateV3::from(s.clone());
-				Ok(s.to_slate()?)
+				Ok(s.to_slate(false)?)
 			}
 		}
 	}

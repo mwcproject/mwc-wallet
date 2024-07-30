@@ -1685,7 +1685,7 @@ where
 		value: slate.amount,
 		status: OutputStatus::Unconfirmed,
 		height: slate.height,
-		lock_height: slate.lock_height,
+		lock_height: slate.calc_lock_height(),
 		is_coinbase: false,
 		tx_log_entry: Some(log_id),
 	})?;

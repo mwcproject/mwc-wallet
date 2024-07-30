@@ -184,22 +184,26 @@ fn slatepack_io_test() {
 	assert_eq!(shared_secret1.as_bytes(), shared_secret2.as_bytes());
 
 	// Note, Slate Data is fake. Just some randome numbers, it will not pass validation of any type
-	let mut slate_enc = Slate {
-		compact_slate: true, // Slatepack works only for compact models.
-		num_participants: 2,
-		id: Uuid::from_bytes(bytes_16),
-		tx: Some(Transaction::empty()
+	let mut slate_enc = Slate::new(
+		true,
+		VersionCompatInfo {
+			version: 3,
+			block_header_version: 1,
+		},
+		2,
+		Uuid::from_bytes(bytes_16),
+		Some(Transaction::empty()
 			.with_offset(BlindingFactor::from_slice(&bytes_32) )
 			.with_input( Input::new( OutputFeatures::Plain, Commitment(bytes_33)) )
 			.with_output( Output::new(OutputFeatures::Plain, Commitment(bytes_33), RangeProof::zero()))
 			.with_kernel( TxKernel::with_features(KernelFeatures::Plain { fee: 321.into() }) )),
-		offset: BlindingFactor::from_slice(&bytes_32),
-		amount: 30000000000000000,
-		fee: 321,
-		height: 67,
-		lock_height: 0,
-		ttl_cutoff_height: Some(54),
-		participant_data: vec![
+		30000000000000000,
+		321,
+		67,
+		0,
+		0,
+		Some(54),
+		vec![
 			ParticipantData {
 				id: 0,
 				public_blind_excess: PublicKey::from_secret_key( &secp, &sk).unwrap(),
@@ -217,16 +221,12 @@ fn slatepack_io_test() {
 				message_sig: Some(Signature::from_compact(&secp, &util::from_hex("89cc3c1480fea655f29d300fcf68d0cfbf53f96a1d6b1219486b64385ed7ed89acf96f1532b31ac8309e611583b1ecf37090e79700fae3683cf682c0043b3029").unwrap()).unwrap()),
 			}
 		],
-		version_info: VersionCompatInfo {
-			version: 3,
-			block_header_version: 1,
-		},
-		payment_proof: Some(PaymentInfo {
-				sender_address: ProvableAddress::from_str("a5ib4b2l5snzdgxzpdzouwxwvn4c3setpp5t5j2tr37n3uy3665qwnqd").unwrap(),
-				receiver_address: ProvableAddress::from_str("a5ib4b2l5snzdgxzpdzouwxwvn4c3setpp5t5j2tr37n3uy3665qwnqd").unwrap(),
-				receiver_signature: Some( util::to_hex(&bytes_64) ),
+		Some(PaymentInfo {
+			sender_address: ProvableAddress::from_str("a5ib4b2l5snzdgxzpdzouwxwvn4c3setpp5t5j2tr37n3uy3665qwnqd").unwrap(),
+			receiver_address: ProvableAddress::from_str("a5ib4b2l5snzdgxzpdzouwxwvn4c3setpp5t5j2tr37n3uy3665qwnqd").unwrap(),
+			receiver_signature: Some( util::to_hex(&bytes_64) ),
 		}),
-	};
+		BlindingFactor::from_slice(&bytes_32)).unwrap();
 
 	let height = 67;
 
@@ -309,4 +309,114 @@ fn slatepack_io_test() {
 	println!("slate3_str = {:?}", slate3_str);
 
 	assert_eq!(slate_enc_str, slate3_str);
+
+	// Now let's validate if kernel features processed correctly
+	// Build kernel features based on variant and associated data.
+	// 0: plain
+	// 1: coinbase (invalid)
+	// 2: height_locked (with associated lock_height)
+	// 3: NRD (with associated relative_height)
+
+	slate_enc.reset_lock_height();
+	slate_enc.height = 1234567;
+
+	let slatepack_string_encrypted = Slatepacker::encrypt_to_send(
+		slate_enc.clone(),
+		SlateVersion::SP,
+		SlatePurpose::FullSlate,
+		dalek_pk.clone(),
+		Some(dalek_pk2.clone()), // sending to self, should be fine...
+		&dalek_sk,
+		true,
+		&secp,
+	)
+	.unwrap();
+
+	let slatepack = Slatepacker::decrypt_slatepack(
+		slatepack_string_encrypted.as_bytes(),
+		&dalek_sk,
+		height,
+		&secp,
+	)
+	.unwrap();
+
+	assert_eq!(
+		slate_enc.get_lock_height(),
+		slatepack.slate.get_lock_height()
+	);
+	assert_eq!(slate_enc.height, slatepack.slate.height);
+	assert_eq!(
+		slate_enc.get_kernel_features(),
+		slatepack.slate.get_kernel_features()
+	);
+
+	slate_enc.set_lock_height(1234567 + 123).unwrap();
+	slate_enc.height = 1234567;
+
+	assert!(slate_enc.set_lock_height(1234567 - 123).is_err());
+
+	let slatepack_string_encrypted = Slatepacker::encrypt_to_send(
+		slate_enc.clone(),
+		SlateVersion::SP,
+		SlatePurpose::FullSlate,
+		dalek_pk.clone(),
+		Some(dalek_pk2.clone()), // sending to self, should be fine...
+		&dalek_sk,
+		true,
+		&secp,
+	)
+	.unwrap();
+
+	let slatepack = Slatepacker::decrypt_slatepack(
+		slatepack_string_encrypted.as_bytes(),
+		&dalek_sk,
+		height,
+		&secp,
+	)
+	.unwrap();
+
+	assert_eq!(
+		slate_enc.get_lock_height(),
+		slatepack.slate.get_lock_height()
+	);
+	assert_eq!(slate_enc.height, slatepack.slate.height);
+	assert_eq!(
+		slate_enc.get_kernel_features(),
+		slatepack.slate.get_kernel_features()
+	);
+
+	assert!(slate_enc.set_related_height(123999).is_err());
+
+	slate_enc.set_related_height(123).unwrap();
+	slate_enc.height = 1234567;
+
+	let slatepack_string_encrypted = Slatepacker::encrypt_to_send(
+		slate_enc.clone(),
+		SlateVersion::SP,
+		SlatePurpose::FullSlate,
+		dalek_pk.clone(),
+		Some(dalek_pk2.clone()), // sending to self, should be fine...
+		&dalek_sk,
+		true,
+		&secp,
+	)
+	.unwrap();
+
+	let slatepack = Slatepacker::decrypt_slatepack(
+		slatepack_string_encrypted.as_bytes(),
+		&dalek_sk,
+		height,
+		&secp,
+	)
+	.unwrap();
+
+	assert_eq!(
+		slate_enc.get_lock_height(),
+		slatepack.slate.get_lock_height()
+	);
+	assert_eq!(slate_enc.height, slatepack.slate.height);
+	assert_eq!(
+		slate_enc.get_kernel_features(),
+		slatepack.slate.get_kernel_features()
+	);
 }

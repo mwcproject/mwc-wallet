@@ -1114,7 +1114,7 @@ where
 }
 
 fn calc_mwc_unlock_time(swap: &Swap, tip: &u64) -> i64 {
-	swap::get_cur_time() + (swap.refund_slate.lock_height.saturating_sub(*tip) * 60) as i64
+	swap::get_cur_time() + (swap.refund_slate.calc_lock_height().saturating_sub(*tip) * 60) as i64
 }
 
 impl<'a, C> State for SellerWaitingForBuyerToRedeemMwc<'a, C>
@@ -1172,7 +1172,7 @@ where
 				// Check the deadline for locking
 				//
 				let (height, _, _) = self.node_client.get_chain_tip()?;
-				if height > swap.refund_slate.lock_height {
+				if height > swap.refund_slate.get_lock_height_check()? {
 					swap.add_journal_message(
 						"Buyer didn't redeem, time to get a refund".to_string(),
 					);
@@ -1196,7 +1196,7 @@ where
 					StateProcessRespond::new(StateId::SellerWaitingForBuyerToRedeemMwc)
 						.action(Action::SellerWaitForBuyerRedeemPublish {
 							mwc_tip: height,
-							lock_height: swap.refund_slate.lock_height,
+							lock_height: swap.refund_slate.get_lock_height_check()?,
 						})
 						.time_limit(calc_mwc_unlock_time(swap, &height)),
 				)
@@ -1226,7 +1226,8 @@ fn post_refund_if_possible<C: NodeClient>(
 	tx_conf: &SwapTransactionsConfirmations,
 ) -> Result<(), ErrorKind> {
 	let (height, _, _) = node_client.get_chain_tip()?;
-	if height > swap.refund_slate.lock_height
+	// intentionally no checking at refund step, no failure here
+	if height > swap.refund_slate.get_lock_height()
 		&& tx_conf.mwc_redeem_conf.is_none()
 		&& tx_conf.mwc_refund_conf.is_none()
 	{
@@ -1700,7 +1701,7 @@ where
 				// Check the deadline for locking
 				//
 				let (height, _, _) = self.node_client.get_chain_tip()?;
-				if height > swap.refund_slate.lock_height {
+				if height > swap.refund_slate.get_lock_height() {
 					swap.add_journal_message("MWC funds are unlocked".to_string());
 					return Ok(StateProcessRespond::new(StateId::SellerPostingRefundSlate));
 				}
@@ -1710,7 +1711,7 @@ where
 					StateProcessRespond::new(StateId::SellerWaitingForRefundHeight)
 						.action(Action::WaitForMwcRefundUnlock {
 							mwc_tip: height,
-							lock_height: swap.refund_slate.lock_height,
+							lock_height: swap.refund_slate.get_lock_height(),
 						})
 						.time_limit(calc_mwc_unlock_time(swap, &height)),
 				)

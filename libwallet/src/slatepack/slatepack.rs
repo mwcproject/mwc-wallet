@@ -38,6 +38,7 @@ use crate::proof::proofaddress;
 use crate::slate::PaymentInfo;
 use bitstream_io::{BigEndian, BitReader, BitWriter, Endianness};
 use crc::{crc32, Hasher32};
+use grin_wallet_util::grin_core::consensus::WEEK_HEIGHT;
 use grin_wallet_util::grin_util::secp::Secp256k1;
 use rand::{thread_rng, Rng};
 use ring::aead;
@@ -578,7 +579,9 @@ impl Slatepack {
 		}
 
 		Self::write_u64(slate.height, false, w)?;
-		Self::write_u64(slate.lock_height, false, w)?;
+		Self::write_u64(slate.get_lock_height(), false, w)?;
+
+		// Note, kernel features are never written, they are calculated from lock_height
 
 		match slate.ttl_cutoff_height {
 			Some(h) => {
@@ -870,7 +873,19 @@ impl Slatepack {
 		}
 
 		slate.height = Self::read_u64(r, false)?;
-		slate.lock_height = Self::read_u64(r, false)?;
+		let lock_height = Self::read_u64(r, false)?;
+
+		// Note, so far kernel_features is not stored, it can be calculated from the lock_height
+		// We want to eliminate storing because that will break backward compatibility
+
+		slate.reset_lock_height();
+		if lock_height != 0 {
+			if lock_height < WEEK_HEIGHT {
+				slate.set_related_height(lock_height)?;
+			} else {
+				slate.set_lock_height(lock_height)?;
+			}
+		}
 
 		if r.read::<u8>(1)? == 1 {
 			slate.ttl_cutoff_height = Some(Self::read_u64(r, false)?);

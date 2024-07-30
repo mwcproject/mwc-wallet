@@ -2569,7 +2569,7 @@ where
 				})?;
 			(slate_from, Some(content), sender)
 		} else {
-			let slate_from = in_slate.into_slate_plain().map_err(|e| e.kind())?;
+			let slate_from = in_slate.into_slate_plain(false).map_err(|e| e.kind())?;
 			(slate_from, None, None)
 		};
 		Ok((slate_from, content, sender))

@@ -214,6 +214,14 @@ pub enum ErrorKind {
 	#[fail(display = "Can't parse slate version, {}", _0)]
 	SlateVersionParse(String),
 
+	/// Unknown Kernel Feature
+	#[fail(display = "Unknown Kernel Feature: {}", _0)]
+	UnknownKernelFeatures(u8),
+
+	/// Invalid Kernel Feature
+	#[fail(display = "Invalid Kernel Feature: {}", _0)]
+	InvalidKernelFeatures(String),
+
 	/// Can't serialize slate
 	#[fail(display = "Can't Serialize slate, {}", _0)]
 	SlateSer(String),

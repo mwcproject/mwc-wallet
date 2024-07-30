@@ -181,13 +181,13 @@ impl SellApi {
 
 		refund_slate.height = height;
 		// Calculating lock height from locking time. For MWC the mining speed is about 1 minute
-		refund_slate.lock_height = height + (mwc_lock_time - start_time) as u64 / 60 + 1;
+		refund_slate.set_lock_height(height + (mwc_lock_time - start_time) as u64 / 60 + 1)?;
 		refund_slate.amount = primary_amount.saturating_sub(refund_slate.fee);
 
 		// Don't lock for more than 30 days.
 		let max_lock_time = 1440 * 30;
 
-		if refund_slate.lock_height - refund_slate.height > max_lock_time {
+		if refund_slate.get_lock_height_check()? - refund_slate.height > max_lock_time {
 			return Err(ErrorKind::Generic(
 				"MWC locking time interval exceed 4 weeks. Is it a scam or mistake?".to_string(),
 			));
@@ -298,7 +298,7 @@ impl SellApi {
 			.into());
 		}
 
-		let mut redeem_slate: Slate = init_redeem.redeem_slate.into_slate_plain()?;
+		let mut redeem_slate: Slate = init_redeem.redeem_slate.into_slate_plain(true)?;
 
 		// Validate adaptor signature
 		let (pub_nonce_sum, _, message) = swap.redeem_tx_fields(&redeem_slate, keychain.secp())?;

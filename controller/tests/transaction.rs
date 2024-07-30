@@ -116,7 +116,11 @@ fn basic_transaction_api(test_dir: &'static str) -> Result<(), wallet::Error> {
 
 		// Check we are creating a tx with the expected lock_height of 0.
 		// We will check this produces a Plain kernel later.
-		assert_eq!(0, slate_i.lock_height);
+		assert_eq!(0, slate.get_kernel_features());
+
+		// Check we are creating a tx with the expected lock_height of 0.
+		// We will check this produces a Plain kernel later.
+		assert_eq!(0, slate_i.get_lock_height());
 
 		slate = client1.send_tx_slate_direct("wallet2", &slate_i)?;
 		sender_api.tx_lock_outputs(m, &slate, None, 0)?;

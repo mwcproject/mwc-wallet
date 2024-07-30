@@ -78,8 +78,8 @@ impl BuyApi {
 		}
 
 		// Multisig tx needs to be unlocked and valid. Let's take a look at what we get.
-		let lock_slate: Slate = offer.lock_slate.into_slate_plain()?;
-		if lock_slate.lock_height > 0 {
+		let lock_slate: Slate = offer.lock_slate.into_slate_plain(true)?;
+		if lock_slate.get_lock_height() > 0 {
 			return Err(ErrorKind::InvalidLockHeightLockTx);
 		}
 		if lock_slate.amount != offer.primary_amount {
@@ -149,7 +149,7 @@ impl BuyApi {
 		// Refund tx needs to be locked until exactly as offer specify. For MWC we are expecting one block every 1 minute.
 		// So numbers should match with accuracy of few blocks.
 		// Note!!! We can't verify exact number because we don't know what height seller get when he created the offer
-		let refund_slate: Slate = offer.refund_slate.into_slate_plain()?;
+		let refund_slate: Slate = offer.refund_slate.into_slate_plain(true)?;
 		// expecting at least half of the interval
 
 		// Lock_height will be verified later
@@ -161,7 +161,7 @@ impl BuyApi {
 		match refund_slate.tx_or_err()?.body.kernels[0].features {
 			KernelFeatures::HeightLocked { fee, lock_height } => {
 				if fee.fee(current_height) != refund_slate.fee
-					|| lock_height != refund_slate.lock_height
+					|| lock_height != refund_slate.get_lock_height_check()?
 				{
 					return Err(ErrorKind::InvalidMessageData(
 						"Refund Slate invalid kernel fee or height".to_string(),
@@ -372,7 +372,7 @@ impl BuyApi {
 		// Minimum mwc heights
 		let expected_lock_height = current_height + (swap.get_time_mwc_lock() - now_ts) as u64 / 60;
 
-		if swap.refund_slate.lock_height < expected_lock_height * 9 / 10 {
+		if swap.refund_slate.get_lock_height_check()? < expected_lock_height * 9 / 10 {
 			return Err(ErrorKind::InvalidMessageData(
 				"Refund lock slate doesn't meet required number of confirmations".to_string(),
 			));

@@ -711,14 +711,18 @@ pub fn swap_trade(
 	};
 	println!("    Locking order: {}", lock_str.bold().yellow());
 
-	if tx_conf.mwc_tip < swap.refund_slate.lock_height {
-		let mwc_lock_sec = (swap.refund_slate.lock_height - tx_conf.mwc_tip) * 60;
+	if tx_conf.mwc_tip < swap.refund_slate.get_lock_height_check()? {
+		let mwc_lock_sec = (swap.refund_slate.get_lock_height_check()? - tx_conf.mwc_tip) * 60;
 		let sel_lock_h = mwc_lock_sec / 3600;
 		let sel_lock_m = (mwc_lock_sec % 3600) / 60;
 		let est_time_str = format!("{} hours and {} minutes", sel_lock_h, sel_lock_m);
 		println!(
 			"    MWC funds will be locked until block {}, and are expected to be mined in {}",
-			swap.refund_slate.lock_height.to_string().bold().yellow(),
+			swap.refund_slate
+				.get_lock_height()
+				.to_string()
+				.bold()
+				.yellow(),
 			est_time_str.bold().yellow(),
 		);
 	} else {

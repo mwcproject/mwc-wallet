@@ -2140,7 +2140,7 @@ where
 									"messageExchangeTimeLimit" : swap.message_exchange_time_sec,
 									"redeemTimeLimit" : swap.redeem_time_sec,
 									"sellerLockingFirst" : swap.seller_lock_first,
-									"mwcLockHeight" : swap.refund_slate.lock_height,
+									"mwcLockHeight" : swap.refund_slate.get_lock_height(),
 									"mwcLockTime" : "0".to_string(),
 									"secondaryLockTime" : swap.get_time_secondary_lock_publish().to_string(),
 									"communicationMethod" : swap.communication_method,
@@ -2191,12 +2191,14 @@ where
 						cancelled_swaps,
 					);
 
-					let mwc_lock_time = if conf_status.mwc_tip < swap.refund_slate.lock_height {
-						Utc::now().timestamp() as u64
-							+ (swap.refund_slate.lock_height - conf_status.mwc_tip) * 60
-					} else {
-						0
-					};
+					let mwc_lock_time =
+						if conf_status.mwc_tip < swap.refund_slate.get_lock_height_check()? {
+							Utc::now().timestamp() as u64
+								+ (swap.refund_slate.get_lock_height_check()? - conf_status.mwc_tip)
+									* 60
+						} else {
+							0
+						};
 
 					// RoadMap
 					let road_map_to_print: Vec<StateEtaInfoString> = roadmap
@@ -2231,7 +2233,7 @@ where
 							"messageExchangeTimeLimit" : swap.message_exchange_time_sec,
 							"redeemTimeLimit" : swap.redeem_time_sec,
 							"sellerLockingFirst" : swap.seller_lock_first,
-							"mwcLockHeight" : swap.refund_slate.lock_height,
+							"mwcLockHeight" : swap.refund_slate.get_lock_height(),
 							"mwcLockTime" : mwc_lock_time.to_string(),
 							"secondaryLockTime" : swap.get_time_secondary_lock_publish().to_string(),
 							"communicationMethod" : swap.communication_method,

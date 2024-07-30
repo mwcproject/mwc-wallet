@@ -229,7 +229,7 @@ where
 			match foreign::receive_tx(
 				&mut **w,
 				(&mask).as_ref(),
-				&slate.to_slate()?,
+				&slate.to_slate(false)?,
 				Some(String::from(m.dest.clone())),
 				None,
 				None,
@@ -469,7 +469,7 @@ impl LocalWalletClient {
 		let slate: SlateV3 = serde_json::from_str(&m.body).map_err(|e| {
 			libwallet::ErrorKind::ClientCallback(format!("Parsing send_tx_slate response, {}", e))
 		})?;
-		Ok(slate.to_slate()?)
+		Ok(slate.to_slate(false)?)
 	}
 }
 

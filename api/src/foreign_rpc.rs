@@ -945,7 +945,7 @@ where
 	fn verify_slate_messages(&self, slate: VersionedSlate) -> Result<(), ErrorKind> {
 		Foreign::verify_slate_messages(
 			self,
-			&slate.into_slate_plain().map_err(|e| {
+			&slate.into_slate_plain(true).map_err(|e| {
 				ErrorKind::Compatibility(format!("Expected non ecrypted slate only, {}", e))
 			})?,
 		)
@@ -973,7 +973,7 @@ where
 			}
 			(slate_from, sender)
 		} else {
-			let slate_from = in_slate.into_slate_plain().map_err(|e| e.kind())?;
+			let slate_from = in_slate.into_slate_plain(false).map_err(|e| e.kind())?;
 			(slate_from, None)
 		};
 		let out_slate = Foreign::receive_tx(
@@ -1018,7 +1018,7 @@ where
 
 			(slate_from, sender)
 		} else {
-			let slate_from = in_slate.into_slate_plain().map_err(|e| e.kind())?;
+			let slate_from = in_slate.into_slate_plain(false).map_err(|e| e.kind())?;
 			(slate_from, None)
 		};
 

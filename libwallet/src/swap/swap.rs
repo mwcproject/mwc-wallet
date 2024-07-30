@@ -21,7 +21,6 @@ use crate::grin_core::core::{
 	transaction as tx, CommitWrapper, Inputs, KernelFeatures, OutputIdentifier, TxKernel, Weighting,
 };
 use crate::grin_core::libtx::secp_ser;
-use crate::grin_core::ser;
 use crate::grin_keychain::{Identifier, SwitchCommitmentType};
 use crate::grin_util::secp::key::{PublicKey, SecretKey};
 use crate::grin_util::secp::pedersen::{Commitment, RangeProof};
@@ -513,7 +512,7 @@ impl Swap {
 	}
 }
 
-impl ser::Writeable for Swap {
+/*impl ser::Writeable for Swap {
 	fn write<W: ser::Writer>(&self, writer: &mut W) -> Result<(), ser::Error> {
 		writer.write_bytes(&serde_json::to_vec(self).map_err(|e| {
 			ser::Error::CorruptedData(format!("OutputData to json conversion failed, {}", e))
@@ -528,7 +527,7 @@ impl ser::Readable for Swap {
 			ser::Error::CorruptedData(format!("Json to outputData conversion failed, {}", e))
 		})
 	}
-}
+}*/
 
 /// Add an input to a tx at the appropriate position
 pub fn tx_add_input(slate: &mut Slate, commit: Commitment) -> Result<(), ErrorKind> {

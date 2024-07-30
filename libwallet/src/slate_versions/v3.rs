@@ -85,10 +85,26 @@ pub struct SlateV3 {
 	/// Support for compact slates.
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub compact_slate: Option<bool>,
+	/// Kernel Features flag -
+	/// 	0: plain
+	/// 	1: coinbase (invalid)
+	/// 	2: height_locked
+	/// 	3: NRD
+	#[serde(skip_serializing_if = "u8_is_blank")]
+	#[serde(default = "default_u8_0")]
+	pub kernel_features: u8,
+}
+
+fn default_u8_0() -> u8 {
+	0
+}
+
+fn u8_is_blank(u: &u8) -> bool {
+	*u == 0
 }
 
 impl SlateV3 {
-	pub fn to_slate(self) -> Result<Slate, Error> {
+	pub fn to_slate(self, fix_kernel: bool) -> Result<Slate, Error> {
 		if self.coin_type.unwrap_or("mwc".to_string()) != "mwc" {
 			return Err(
 				ErrorKind::SlateDeser("slate doesn't belong to MWC network".to_string()).into(),
@@ -121,21 +137,36 @@ impl SlateV3 {
 			None => (BlindingFactor::zero(), None),
 		};
 
-		Ok(Slate {
-			compact_slate: self.compact_slate.unwrap_or(false),
-			offset,
-			num_participants: self.num_participants,
-			id: self.id,
-			tx,
-			amount: self.amount,
-			fee: self.fee,
-			height: self.height,
-			lock_height: self.lock_height,
-			ttl_cutoff_height: self.ttl_cutoff_height,
-			participant_data,
+		let mut kernel_features = self.kernel_features;
+		let mut lock_height = self.lock_height;
+
+		if fix_kernel && kernel_features == 0 {
+			kernel_features = if self.lock_height > self.lock_height {
+				2
+			}
+			// NRD is not expect to be here, that is why it can be lock height or plain
+			else {
+				lock_height = 0;
+				0 // it is error, let's keep it plain. There will be error at conversion sarge
+			}
+		}
+
+		Ok(Slate::new(
+			self.compact_slate.unwrap_or(false),
 			version_info,
+			self.num_participants,
+			self.id,
+			tx,
+			self.amount,
+			self.fee,
+			self.height,
+			lock_height,
+			kernel_features,
+			self.ttl_cutoff_height,
+			participant_data,
 			payment_proof,
-		})
+			offset,
+		)?)
 	}
 }
 
@@ -295,6 +326,17 @@ impl From<SlateV2> for SlateV3 {
 		let participant_data = map_vec!(participant_data, |data| ParticipantDataV3::from(data));
 		let version_info = VersionCompatInfoV3::from(&version_info);
 		let tx = TransactionV3::from(tx);
+		// Build kernel features based on variant and associated data.
+		// 0: plain
+		// 1: coinbase (invalid)
+		// 2: height_locked (with associated lock_height)
+		// 3: NRD (with associated relative_height)
+		// Any other value is invalid.
+		let kernel_features = match lock_height {
+			0 => 0,
+			_ => 2,
+		};
+
 		SlateV3 {
 			num_participants,
 			id,
@@ -310,6 +352,7 @@ impl From<SlateV2> for SlateV3 {
 			version_info,
 			payment_proof: None,
 			compact_slate: None,
+			kernel_features,
 		}
 	}
 }
@@ -433,10 +476,19 @@ impl TryFrom<&SlateV3> for SlateV2 {
 			version_info,
 			payment_proof,
 			compact_slate,
+			kernel_features,
 		} = slate;
 		if compact_slate.unwrap_or(false) {
 			panic!("Slate V3 to V2 conversion error. V2 doesn't support compact model");
 		}
+		if !(*kernel_features == 0 || *kernel_features == 2) {
+			return Err(ErrorKind::SlateInvalidDowngrade(format!(
+				"Only plain or height lock kernel features are supported, get {}",
+				*kernel_features
+			))
+			.into());
+		}
+
 		let num_participants = *num_participants;
 		let id = *id;
 		let amount = *amount;

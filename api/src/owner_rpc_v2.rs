@@ -3033,7 +3033,7 @@ where
 			));
 		}
 		let slate = slate
-			.into_slate_plain()
+			.into_slate_plain(true)
 			.map_err(|e| ErrorKind::SlatepackDecodeError(format!("{}", e)))?;
 
 		Owner::verify_slate_messages(self, None, &slate).map_err(|e| e.kind())
@@ -3096,7 +3096,7 @@ where
 		address_index: Option<u32>,
 	) -> Result<String, ErrorKind> {
 		// Expected Slate in Json (plain) format
-		let slate = slate.into_slate_plain().map_err(|e| {
+		let slate = slate.into_slate_plain(false).map_err(|e| {
 			ErrorKind::SlatepackDecodeError(format!("Expected to get slate in Json format, {}", e))
 		})?;
 

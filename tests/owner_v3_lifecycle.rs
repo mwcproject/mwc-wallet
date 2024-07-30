@@ -389,7 +389,7 @@ fn owner_v3_lifecycle() -> Result<(), grin_wallet_controller::Error> {
 	)?;
 	println!("RES 15: {:?}", res);
 	assert!(res.is_ok());
-	let mut slate: Slate = res.unwrap().into_slate_plain()?;
+	let mut slate: Slate = res.unwrap().into_slate_plain(false)?;
 
 	// give this slate over to wallet 2 manually
 	grin_wallet_controller::controller::owner_single_use(

@@ -176,7 +176,8 @@
         "message_sig": null
       }
     ],
-    "payment_proof": null
+    "payment_proof": null,
+    "kernel_features": 2
   },
   "redeem_slate": {
     "version_info": {

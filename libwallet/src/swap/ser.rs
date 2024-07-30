@@ -30,7 +30,7 @@ where
 	use serde::de::Error;
 	let s = VersionedSlate::deserialize(deserializer)?;
 	// Swaps are not using the slatepacks.
-	s.into_slate_plain()
+	s.into_slate_plain(true)
 		.map_err(|e| D::Error::custom(format!("{}", e)))
 }
 

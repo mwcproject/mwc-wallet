@@ -554,6 +554,8 @@ mod tests {
 			.request_tx_confirmations(&kc_sell, &mut swap)
 			.unwrap();
 
+		test_swap_ser(&swap);
+
 		let message = match fsm_sell
 			.process(
 				Input::Check,
@@ -2133,8 +2135,8 @@ mod tests {
 		{
 			// Offer lock slate has height (not important)...
 			let (id, mut offer, secondary_update) = message1.clone().unwrap_offer().unwrap();
-			let mut lock_slate: Slate = offer.lock_slate.into_slate_plain().unwrap();
-			lock_slate.lock_height = 10;
+			let mut lock_slate: Slate = offer.lock_slate.into_slate_plain(false).unwrap();
+			lock_slate.set_lock_height_no_check(10);
 			offer.lock_slate =
 				VersionedSlate::into_version_plain(lock_slate, SlateVersion::V3).unwrap();
 			assert_eq!(
@@ -2154,7 +2156,7 @@ mod tests {
 		{
 			// Offer lock slate has height (kernel value - attack)
 			let (id, mut offer, secondary_update) = message1.clone().unwrap_offer().unwrap();
-			let mut lock_slate: Slate = offer.lock_slate.into_slate_plain().unwrap();
+			let mut lock_slate: Slate = offer.lock_slate.into_slate_plain(false).unwrap();
 			lock_slate.tx_or_err_mut().unwrap().body.kernels[0].features =
 				KernelFeatures::HeightLocked {
 					fee: lock_slate.fee.try_into().unwrap(),
@@ -2179,8 +2181,8 @@ mod tests {
 		{
 			// Offer lock slate has height (kernel value - attack)
 			let (id, mut offer, secondary_update) = message1.clone().unwrap_offer().unwrap();
-			let mut lock_slate: Slate = offer.lock_slate.into_slate_plain().unwrap();
-			lock_slate.lock_height = 10;
+			let mut lock_slate: Slate = offer.lock_slate.into_slate_plain(false).unwrap();
+			lock_slate.set_lock_height_no_check(10);
 			lock_slate.tx_or_err_mut().unwrap().body.kernels[0].features =
 				KernelFeatures::HeightLocked {
 					fee: lock_slate.fee.try_into().unwrap(),
@@ -2207,7 +2209,7 @@ mod tests {
 		{
 			// Offer lock slate has height
 			let (id, mut offer, secondary_update) = message1.clone().unwrap_offer().unwrap();
-			let mut lock_slate: Slate = offer.lock_slate.into_slate_plain().unwrap();
+			let mut lock_slate: Slate = offer.lock_slate.into_slate_plain(false).unwrap();
 			lock_slate.fee += 2;
 			offer.lock_slate =
 				VersionedSlate::into_version_plain(lock_slate, SlateVersion::V3).unwrap();
@@ -2228,7 +2230,7 @@ mod tests {
 		{
 			// Offer lock slate has height
 			let (id, mut offer, secondary_update) = message1.clone().unwrap_offer().unwrap();
-			let mut lock_slate: Slate = offer.lock_slate.into_slate_plain().unwrap();
+			let mut lock_slate: Slate = offer.lock_slate.into_slate_plain(false).unwrap();
 			lock_slate.tx_or_err_mut().unwrap().body.kernels[0].features = KernelFeatures::Plain {
 				fee: (lock_slate.fee + 1).try_into().unwrap(),
 			};
@@ -2251,7 +2253,7 @@ mod tests {
 		{
 			// Offer lock slate has height
 			let (id, mut offer, secondary_update) = message1.clone().unwrap_offer().unwrap();
-			let mut lock_slate: Slate = offer.lock_slate.into_slate_plain().unwrap();
+			let mut lock_slate: Slate = offer.lock_slate.into_slate_plain(false).unwrap();
 			lock_slate.tx_or_err_mut().unwrap().body.kernels[0].features = KernelFeatures::Plain {
 				fee: (lock_slate.fee - 1).try_into().unwrap(),
 			};
@@ -2274,7 +2276,7 @@ mod tests {
 		{
 			// Offer lock slate has height
 			let (id, mut offer, secondary_update) = message1.clone().unwrap_offer().unwrap();
-			let mut lock_slate: Slate = offer.lock_slate.into_slate_plain().unwrap();
+			let mut lock_slate: Slate = offer.lock_slate.into_slate_plain(false).unwrap();
 			lock_slate.fee += 2;
 			lock_slate.tx_or_err_mut().unwrap().body.kernels[0].features = KernelFeatures::Plain {
 				fee: lock_slate.fee.try_into().unwrap(),
@@ -2299,7 +2301,7 @@ mod tests {
 		{
 			// No inputs at lock
 			let (id, mut offer, secondary_update) = message1.clone().unwrap_offer().unwrap();
-			let mut lock_slate: Slate = offer.lock_slate.into_slate_plain().unwrap();
+			let mut lock_slate: Slate = offer.lock_slate.into_slate_plain(false).unwrap();
 			lock_slate.tx_or_err_mut().unwrap().body.inputs = Inputs::CommitOnly(vec![]);
 			offer.lock_slate =
 				VersionedSlate::into_version_plain(lock_slate, SlateVersion::V3).unwrap();
@@ -2320,7 +2322,7 @@ mod tests {
 		{
 			// Amounts at lock
 			let (id, mut offer, secondary_update) = message1.clone().unwrap_offer().unwrap();
-			let mut lock_slate: Slate = offer.lock_slate.into_slate_plain().unwrap();
+			let mut lock_slate: Slate = offer.lock_slate.into_slate_plain(false).unwrap();
 			lock_slate.amount += 1;
 			offer.lock_slate =
 				VersionedSlate::into_version_plain(lock_slate, SlateVersion::V3).unwrap();
@@ -2342,8 +2344,8 @@ mod tests {
 		{
 			// Refund slate must have expected lock value
 			let (id, mut offer, secondary_update) = message1.clone().unwrap_offer().unwrap();
-			let mut refund_slate: Slate = offer.refund_slate.into_slate_plain().unwrap();
-			refund_slate.lock_height -= 1;
+			let mut refund_slate: Slate = offer.refund_slate.into_slate_plain(false).unwrap();
+			refund_slate.set_lock_height(u64::MAX - 3).unwrap();
 			offer.refund_slate =
 				VersionedSlate::into_version_plain(refund_slate, SlateVersion::V3).unwrap();
 			assert_eq!(
@@ -2360,11 +2362,34 @@ mod tests {
 				true
 			);
 		}
+
 		{
 			// Refund slate must have expected lock value
 			let (id, mut offer, secondary_update) = message1.clone().unwrap_offer().unwrap();
-			let mut refund_slate: Slate = offer.refund_slate.into_slate_plain().unwrap();
-			refund_slate.lock_height = 0;
+			let mut refund_slate: Slate = offer.refund_slate.into_slate_plain(false).unwrap();
+			refund_slate.set_related_height(3200).unwrap();
+			offer.refund_slate =
+				VersionedSlate::into_version_plain(refund_slate, SlateVersion::V3).unwrap();
+			assert_eq!(
+				BuyApi::accept_swap_offer(
+					None,
+					&kc_buy,
+					&ctx_buy,
+					id,
+					offer.clone(),
+					secondary_update.clone(),
+					&nc
+				)
+				.is_err(),
+				true
+			);
+		}
+
+		{
+			// Refund slate must have expected lock value
+			let (id, mut offer, secondary_update) = message1.clone().unwrap_offer().unwrap();
+			let mut refund_slate: Slate = offer.refund_slate.into_slate_plain(false).unwrap();
+			refund_slate.reset_lock_height();
 			offer.refund_slate =
 				VersionedSlate::into_version_plain(refund_slate, SlateVersion::V3).unwrap();
 			assert_eq!(
@@ -2384,7 +2409,7 @@ mod tests {
 		{
 			// Refund slate must have expected lock value, tweaking kernel, adding one more plain one
 			let (id, mut offer, secondary_update) = message1.clone().unwrap_offer().unwrap();
-			let mut refund_slate: Slate = offer.refund_slate.into_slate_plain().unwrap();
+			let mut refund_slate: Slate = offer.refund_slate.into_slate_plain(false).unwrap();
 			refund_slate
 				.tx_or_err_mut()
 				.unwrap()
@@ -2410,7 +2435,7 @@ mod tests {
 		{
 			// Refund slate must have expected lock value, tweaking kernel to plain
 			let (id, mut offer, secondary_update) = message1.clone().unwrap_offer().unwrap();
-			let mut refund_slate: Slate = offer.refund_slate.into_slate_plain().unwrap();
+			let mut refund_slate: Slate = offer.refund_slate.into_slate_plain(false).unwrap();
 			refund_slate.tx_or_err_mut().unwrap().body.kernels[0].features =
 				KernelFeatures::Plain {
 					fee: refund_slate.fee.try_into().unwrap(),
@@ -2434,11 +2459,11 @@ mod tests {
 		{
 			// Refund slate must have expected lock value, tweaking kernel's height to plain
 			let (id, mut offer, secondary_update) = message1.clone().unwrap_offer().unwrap();
-			let mut refund_slate: Slate = offer.refund_slate.into_slate_plain().unwrap();
+			let mut refund_slate: Slate = offer.refund_slate.into_slate_plain(false).unwrap();
 			refund_slate.tx_or_err_mut().unwrap().body.kernels[0].features =
 				KernelFeatures::HeightLocked {
 					fee: refund_slate.fee.try_into().unwrap(),
-					lock_height: refund_slate.lock_height - 1,
+					lock_height: refund_slate.get_lock_height() - 1,
 				};
 			offer.refund_slate =
 				VersionedSlate::into_version_plain(refund_slate, SlateVersion::V3).unwrap();
@@ -2459,7 +2484,7 @@ mod tests {
 		{
 			// Refund slate must have expected lock value, tweaking kernel's height to plain
 			let (id, mut offer, secondary_update) = message1.clone().unwrap_offer().unwrap();
-			let mut refund_slate: Slate = offer.refund_slate.into_slate_plain().unwrap();
+			let mut refund_slate: Slate = offer.refund_slate.into_slate_plain(false).unwrap();
 			refund_slate.tx_or_err_mut().unwrap().body.kernels[0].features =
 				KernelFeatures::HeightLocked {
 					fee: refund_slate.fee.try_into().unwrap(),
@@ -2484,7 +2509,7 @@ mod tests {
 		{
 			// Refund slate must have expected lock value, tweaking kernel's height to plain
 			let (id, mut offer, secondary_update) = message1.clone().unwrap_offer().unwrap();
-			let mut refund_slate: Slate = offer.refund_slate.into_slate_plain().unwrap();
+			let mut refund_slate: Slate = offer.refund_slate.into_slate_plain(false).unwrap();
 			refund_slate.tx_or_err_mut().unwrap().body.kernels[0].features =
 				KernelFeatures::HeightLocked {
 					fee: refund_slate.fee.try_into().unwrap(),
@@ -2509,7 +2534,7 @@ mod tests {
 		{
 			// Refund fees
 			let (id, mut offer, secondary_update) = message1.clone().unwrap_offer().unwrap();
-			let mut refund_slate: Slate = offer.refund_slate.into_slate_plain().unwrap();
+			let mut refund_slate: Slate = offer.refund_slate.into_slate_plain(false).unwrap();
 			refund_slate.fee += 1;
 			offer.refund_slate =
 				VersionedSlate::into_version_plain(refund_slate, SlateVersion::V3).unwrap();
@@ -2530,11 +2555,11 @@ mod tests {
 		{
 			// Refund fees
 			let (id, mut offer, secondary_update) = message1.clone().unwrap_offer().unwrap();
-			let mut refund_slate: Slate = offer.refund_slate.into_slate_plain().unwrap();
+			let mut refund_slate: Slate = offer.refund_slate.into_slate_plain(false).unwrap();
 			refund_slate.tx_or_err_mut().unwrap().body.kernels[0].features =
 				KernelFeatures::HeightLocked {
 					fee: (refund_slate.fee + 1).try_into().unwrap(),
-					lock_height: refund_slate.lock_height,
+					lock_height: refund_slate.get_lock_height(),
 				};
 			offer.refund_slate =
 				VersionedSlate::into_version_plain(refund_slate, SlateVersion::V3).unwrap();
@@ -2555,7 +2580,7 @@ mod tests {
 		{
 			// Amounts at refund
 			let (id, mut offer, secondary_update) = message1.clone().unwrap_offer().unwrap();
-			let mut refund_slate: Slate = offer.refund_slate.into_slate_plain().unwrap();
+			let mut refund_slate: Slate = offer.refund_slate.into_slate_plain(false).unwrap();
 			refund_slate.amount -= 1;
 			offer.refund_slate =
 				VersionedSlate::into_version_plain(refund_slate, SlateVersion::V3).unwrap();
@@ -3681,7 +3706,7 @@ mod tests {
 			assert_eq!(res.action.unwrap().get_id_str(), "WaitingForBtcRefund");
 			assert_eq!(res.time_limit.unwrap(), btc_lock_time_limit + 600 * 5); // waiting for 5 extra blocks before refund
 
-			let lock_height = seller.swap.refund_slate.lock_height;
+			let lock_height = seller.swap.refund_slate.get_lock_height_check().unwrap();
 			let need_blocks = lock_height - nc.state.lock().height;
 
 			let res = seller
@@ -4517,6 +4542,9 @@ mod tests {
 			StateId::BuyerWaitingForRespondRedeemMessage
 		);
 
+		test_swap_ser(&seller.swap);
+		test_swap_ser(&buyer.swap);
+
 		assert_eq!(
 			seller
 				.process(
@@ -4653,6 +4681,9 @@ mod tests {
 			seller.pops();
 			buyer.pops();
 		}
+
+		test_swap_ser(&seller.swap);
+		test_swap_ser(&buyer.swap);
 
 		{
 			// BRANCH - what happens if chain will loose it's data
@@ -4818,7 +4849,8 @@ mod tests {
 				+ (seller
 					.swap
 					.refund_slate
-					.lock_height
+					.get_lock_height_check()
+					.unwrap()
 					.saturating_sub(nc.state.lock().height)
 					* 60) as i64
 		); // Time is related to refund, not to a real time...
@@ -4934,13 +4966,16 @@ mod tests {
 			kc_sell.secp(),
 		);
 
+		test_swap_ser(&seller.swap);
+		test_swap_ser(&buyer.swap);
+
 		{
 			// BRANCH - testing how seller can defend an attack. In worst case Buyer can manipulate with
 			// seller  refund and buyer redeem transaction. Only one of them can be active, so we are chekcing if byer can switch from one to another
 			buyer.pushs();
 			seller.pushs();
 
-			let lock_height = seller.swap.refund_slate.lock_height;
+			let lock_height = seller.swap.refund_slate.get_lock_height_check().unwrap();
 
 			let need_blocks = lock_height - nc.state.lock().height - 1;
 			nc.mine_blocks(need_blocks);
@@ -5115,6 +5150,9 @@ mod tests {
 				);
 				buyer.pops();
 			}
+
+			test_swap_ser(&seller.swap);
+			test_swap_ser(&buyer.swap);
 
 			{
 				seller.pushs();
@@ -5384,6 +5422,9 @@ mod tests {
 				seller.pops();
 				buyer.pops();
 			}
+
+			test_swap_ser(&seller.swap);
+			test_swap_ser(&buyer.swap);
 
 			{
 				// Scenario. Seller publishing Refund, rollback and Buyer publishing redeem.
@@ -5716,6 +5757,9 @@ mod tests {
 			// END of branch
 		}
 
+		test_swap_ser(&seller.swap);
+		test_swap_ser(&buyer.swap);
+
 		// Now let's finish with happy path
 		// At this point Buyer Can reed, seller is waiting for this moment
 
@@ -5890,6 +5934,9 @@ mod tests {
 			seller.pops();
 		}
 
+		test_swap_ser(&seller.swap);
+		test_swap_ser(&buyer.swap);
+
 		{
 			// BRANCH - check if seller's fee will be updated if Tx in mem pool for 5+ blocks
 			// Checking if resubmit works
@@ -5988,7 +6035,10 @@ mod tests {
 			seller.pops();
 		}
 
-		// Bith party waiting for confirmations
+		test_swap_ser(&seller.swap);
+		test_swap_ser(&buyer.swap);
+
+		// Both party waiting for confirmations
 		nc.mine_blocks(MWC_CONFIRMATION / 2);
 		btc_nc.mine_blocks(BTC_CONFIRMATION / 2);
 		test_responds(
@@ -6099,6 +6149,9 @@ mod tests {
 			kc_sell.secp(),
 		);
 
+		test_swap_ser(&seller.swap);
+		test_swap_ser(&buyer.swap);
+
 		// Final step
 		let res = seller
 			.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp())
@@ -6156,6 +6209,9 @@ mod tests {
 			nc.get_chain_tip().unwrap().0,
 			kc_sell.secp(),
 		);
+
+		test_swap_ser(&seller.swap);
+		test_swap_ser(&buyer.swap);
 	}
 
 	// Address parsing and generation adopted at bitcoin library. Here are the tests
@@ -6624,6 +6680,15 @@ mod tests {
 		swap_api
 			.publish_secondary_transaction(&kc_sell, &mut swap_sell, &ctx_sell, true)
 			.unwrap();
+	}
+
+	fn test_swap_ser(swap: &Swap) {
+		let serialized = serde_json::to_vec(&swap).unwrap();
+		let deserialized: Swap = serde_json::from_slice(&serialized).unwrap();
+
+		let serialized2 = serde_json::to_vec(&deserialized).unwrap();
+
+		assert_eq!(serialized, serialized2);
 	}
 
 	const ETH_MNEMONIC: &str = "square social wall upgrade owner flat razor across enable idea mirror autumn rescue pottery total seat confirm dizzy fabric couple reveal relief lucky session";
