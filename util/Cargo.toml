@@ -47,4 +47,4 @@ grin_p2p = { git = "https://github.com/mwcproject/mwc-node", branch = "master" }
 #grin_p2p = { path = "../../mwc-node/p2p"}
 
 [dev-dependencies]
-pretty_assertions = "0.5.1"
+pretty_assertions = "0.6"
