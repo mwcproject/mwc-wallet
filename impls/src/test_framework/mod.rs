@@ -121,15 +121,14 @@ fn get_blocks_by_height_local(
 fn create_block_with_reward(
 	chain: &Chain,
 	prev: core::core::BlockHeader,
-	txs: Vec<&Transaction>,
+	txs: &[Transaction],
 	reward_output: Output,
 	reward_kernel: TxKernel,
 ) -> core::core::Block {
 	let next_header_info = consensus::next_difficulty(1, chain.difficulty_iter().unwrap());
-	let txs_cloned: Vec<Transaction> = txs.into_iter().cloned().collect();
 	let mut b = core::core::Block::new(
 		&prev,
-		&txs_cloned,
+		txs,
 		next_header_info.clone().difficulty,
 		(reward_output, reward_kernel),
 	)
@@ -150,7 +149,7 @@ fn create_block_with_reward(
 /// Adds a block with a given reward to the chain and mines it
 pub fn add_block_with_reward(
 	chain: &Chain,
-	txs: Vec<&Transaction>,
+	txs: &[Transaction],
 	reward_output: Output,
 	reward_kernel: TxKernel,
 ) {
@@ -164,7 +163,7 @@ pub fn add_block_with_reward(
 pub fn create_block_for_wallet<'a, L, C, K>(
 	chain: &Chain,
 	prev: core::core::BlockHeader,
-	txs: Vec<&Transaction>,
+	txs: &[Transaction],
 	wallet: Arc<Mutex<Box<dyn WalletInst<'a, L, C, K> + 'a>>>,
 	keychain_mask: Option<&SecretKey>,
 ) -> Result<core::core::Block, libwallet::Error>
@@ -195,7 +194,7 @@ where
 /// Helpful for building up precise wallet balances for testing.
 pub fn award_block_to_wallet<'a, L, C, K>(
 	chain: &Chain,
-	txs: Vec<&Transaction>,
+	txs: &[Transaction],
 	wallet: Arc<Mutex<Box<dyn WalletInst<'a, L, C, K> + 'a>>>,
 	keychain_mask: Option<&SecretKey>,
 ) -> Result<(), libwallet::Error>
@@ -229,7 +228,7 @@ where
 	K: keychain::Keychain + 'a,
 {
 	for _ in 0..number {
-		award_block_to_wallet(chain, vec![], wallet.clone(), keychain_mask)?;
+		award_block_to_wallet(chain, &[], wallet.clone(), keychain_mask)?;
 		if pause_between {
 			thread::sleep(std::time::Duration::from_millis(100));
 		}

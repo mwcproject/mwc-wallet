@@ -871,7 +871,6 @@ where
 
 #[cfg(test)]
 mod test {
-	use crate::grin_core::core::committed::Committed;
 	use crate::grin_core::core::KernelFeatures;
 	use crate::grin_core::libtx::{build, ProofBuilder};
 	use crate::grin_keychain::{ExtKeychain, ExtKeychainPath, Keychain};
@@ -889,7 +888,7 @@ mod test {
 			KernelFeatures::Plain {
 				fee: FeeFields::zero(),
 			},
-			&vec![build::output(105, key_id1.clone())],
+			&[build::output(105, key_id1.clone())],
 			&keychain,
 			&builder,
 		)
@@ -898,13 +897,14 @@ mod test {
 			KernelFeatures::Plain {
 				fee: FeeFields::zero(),
 			},
-			&vec![build::input(105, key_id1.clone())],
+			&[build::input(105, key_id1.clone())],
 			&keychain,
 			&builder,
 		)
 		.unwrap();
 
-		assert_eq!(tx1.outputs_committed()[0], tx2.inputs_committed()[0]);
+		let inputs: Vec<_> = tx2.inputs().into();
+		assert_eq!(tx1.outputs()[0].commitment(), inputs[0].commitment());
 	}
 
 	/*

@@ -1128,12 +1128,16 @@ impl Slate {
 
 		debug!("Final Tx excess: {:?}", final_excess);
 
-		let final_tx = self.tx_or_err_mut()?;
+		let final_tx = self.tx_or_err()?;
 
 		// update the tx kernel to reflect the offset excess and sig
 		assert_eq!(final_tx.kernels().len(), 1);
-		final_tx.body.kernels[0].excess = final_excess.clone();
-		final_tx.body.kernels[0].excess_sig = final_sig.clone();
+
+		let mut kernel = final_tx.kernels()[0];
+		kernel.excess = final_excess;
+		kernel.excess_sig = final_sig.clone();
+
+		let final_tx = final_tx.clone().replace_kernel(kernel);
 
 		// confirm the kernel verifies successfully before proceeding
 		debug!("Validating final transaction");
@@ -1146,6 +1150,9 @@ impl Slate {
 		// confirm the overall transaction is valid (including the updated kernel)
 		// accounting for tx weight limits
 		final_tx.validate(Weighting::AsTransaction, height)?;
+
+		// replace our slate tx with the new one with updated kernel
+		self.tx = Some(final_tx);
 
 		Ok(())
 	}
