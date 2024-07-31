@@ -571,11 +571,8 @@ impl NodeClient for HTTPNodeClient {
 			&params,
 			NODE_CALL_RETRY,
 		)?;
-		for out in res.outputs {
-			if out.spent {
-				continue;
-			}
-
+        // We asked for unspent outputs via the api but defensively filter out spent outputs just in case.
+        for out in res.outputs.into_iter().filter(|out| out.spent == false) {
 			let is_coinbase = match out.output_type {
 				api::OutputType::Coinbase => true,
 				api::OutputType::Transaction => false,
