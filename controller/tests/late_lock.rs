@@ -108,6 +108,7 @@ fn late_lock_test_impl(test_dir: &'static str) -> Result<(), libwallet::Error> {
 			max_outputs: 500,
 			num_change_outputs: 1,
 			selection_strategy_is_use_all: false,
+			target_slate_version: Some(4),
 			late_lock: Some(true),
 			..Default::default()
 		};
@@ -158,7 +159,6 @@ fn late_lock_test_impl(test_dir: &'static str) -> Result<(), libwallet::Error> {
 }
 
 #[test]
-#[ignore]
 fn late_lock() {
 	let test_dir = "test_output/late_lock";
 	setup(test_dir);
