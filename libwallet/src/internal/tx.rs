@@ -40,6 +40,7 @@ use ed25519_dalek::Signature as DalekSignature;
 use ed25519_dalek::{Signer, Verifier};
 use grin_wallet_util::grin_util::secp::Secp256k1;
 use grin_wallet_util::OnionV3Address;
+use std::convert::TryFrom;
 
 // static for incrementing test UUIDs
 lazy_static! {
@@ -814,7 +815,8 @@ where
 				))
 			})?;
 
-			let dalek_sig = DalekSignature::from_bytes(dalek_sig_vec.as_ref()).map_err(|e| {
+			let dalek_sig_vec: &[u8] = &dalek_sig_vec;
+			let dalek_sig = DalekSignature::try_from(dalek_sig_vec).map_err(|e| {
 				ErrorKind::TxProofGenericError(format!(
 					"Unable to deserialize tor payment proof receiver signature, {}",
 					e
