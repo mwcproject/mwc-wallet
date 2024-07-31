@@ -21,10 +21,10 @@
 // Finally add armor framing and space/newline formatting as desired
 
 use crate::{Error, ErrorKind};
+use grin_wallet_util::grin_core::global::max_tx_weight;
 use regex::Regex;
 use sha2::{Digest, Sha256};
 use std::str;
-use grin_wallet_util::grin_core::global::max_tx_weight;
 
 // Framing and formatting for slate armor. Headers and footers better to be the same size, otherwise formatting makes it ugly
 pub static HEADER_ENC: &str = "BEGINSLATEPACK.";

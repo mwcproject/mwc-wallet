@@ -13,7 +13,7 @@
 // limitations under the License.
 
 /// File Output 'plugin' implementation
-use std::fs::{File, metadata};
+use std::fs::{metadata, File};
 use std::io::{Read, Write};
 
 use crate::adapters::SlateGetData;
@@ -21,10 +21,10 @@ use crate::error::{Error, ErrorKind};
 use crate::libwallet::{Slate, SlateVersion, VersionedSlate};
 use crate::{SlateGetter, SlatePutter};
 use ed25519_dalek::{PublicKey as DalekPublicKey, SecretKey as DalekSecretKey};
+use grin_wallet_libwallet::slatepack;
 use grin_wallet_libwallet::slatepack::SlatePurpose;
 use grin_wallet_util::grin_util::secp::Secp256k1;
 use std::path::PathBuf;
-use grin_wallet_libwallet::slatepack;
 
 #[derive(Clone)]
 pub struct PathToSlatePutter {
@@ -187,14 +187,24 @@ impl SlateGetter for PathToSlateGetter {
 				let max_len = slatepack::max_size();
 				let len = str.len() as u64;
 				if len < min_len || len > max_len {
-					return Err(ErrorKind::IO(format!("Slate data had invalid length: {} | min: {}, max: {} |", len, min_len, max_len)).into());
+					return Err(ErrorKind::IO(format!(
+						"Slate data had invalid length: {} | min: {}, max: {} |",
+						len, min_len, max_len
+					))
+					.into());
 				}
 				str.clone()
-			},
+			}
 			None => {
 				// Reading from the file
 				if let Some(path_buf) = &self.path_buf {
-					let metadata = metadata(path_buf.as_path())?;
+					let metadata = metadata(path_buf.as_path()).map_err(|e| {
+						ErrorKind::IO(format!(
+							"Unable to access file {}, {}",
+							path_buf.display(),
+							e
+						))
+					})?;
 					let len = metadata.len();
 					let min_len = slatepack::min_size();
 					let max_len = slatepack::max_size();
@@ -202,7 +212,11 @@ impl SlateGetter for PathToSlateGetter {
 					let file_name = path_buf.to_str().unwrap_or("INVALID PATH");
 
 					if len < min_len || len > max_len {
-						return Err(ErrorKind::IO(format!("Data at {} is invalid length: {} | min: {}, max: {} |",file_name, len, min_len, max_len)).into());
+						return Err(ErrorKind::IO(format!(
+							"Data at {} is invalid length: {} | min: {}, max: {} |",
+							file_name, len, min_len, max_len
+						))
+						.into());
 					}
 
 					let mut pub_tx_f = File::open(&path_buf).map_err(|e| {
