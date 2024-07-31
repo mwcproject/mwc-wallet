@@ -18,6 +18,6 @@ mod armor;
 mod packer;
 mod slatepack;
 
-pub use self::armor::{generate_check, SlatepackArmor};
+pub use self::armor::{max_size, min_size, generate_check, SlatepackArmor};
 pub use self::packer::Slatepacker;
 pub use self::slatepack::{SlatePurpose, Slatepack};

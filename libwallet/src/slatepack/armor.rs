@@ -24,6 +24,7 @@ use crate::{Error, ErrorKind};
 use regex::Regex;
 use sha2::{Digest, Sha256};
 use std::str;
+use grin_wallet_util::grin_core::global::max_tx_weight;
 
 // Framing and formatting for slate armor. Headers and footers better to be the same size, otherwise formatting makes it ugly
 pub static HEADER_ENC: &str = "BEGINSLATEPACK.";
@@ -32,6 +33,20 @@ pub static HEADER_BIN: &str = "BEGINSLATE_BIN.";
 static FOOTER_BIN: &str = ". ENDSLATE_BIN.";
 const WORD_LENGTH: usize = 15;
 const WORDS_PER_LINE: usize = 200;
+const WEIGHT_RATIO: u64 = 32;
+
+/// Maximum size for an armored Slatepack file
+pub fn max_size() -> u64 {
+	max_tx_weight()
+		.saturating_mul(WEIGHT_RATIO)
+		.saturating_add(HEADER_ENC.len() as u64)
+		.saturating_add(FOOTER_ENC.len() as u64)
+}
+
+/// Minimum size for an armored Slatepack file or stream
+pub fn min_size() -> u64 {
+	HEADER_ENC.len() as u64
+}
 
 lazy_static! {
 	static ref HEADER_REGEX_ENC: Regex =
