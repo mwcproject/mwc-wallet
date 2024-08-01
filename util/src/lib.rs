@@ -24,8 +24,11 @@
 extern crate serde_derive;
 
 mod ov3;
+mod tokio_runtime;
+
 pub use ov3::OnionV3Address;
 pub use ov3::OnionV3Error as OnionV3AddressError;
+pub use tokio_runtime::RUNTIME;
 
 pub use grin_api;
 pub use grin_chain;

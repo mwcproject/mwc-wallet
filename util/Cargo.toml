@@ -18,6 +18,8 @@ data-encoding = "2"
 sha3 = "0.8"
 failure = "0.1"
 failure_derive = "0.1"
+lazy_static = "1.4"
+tokio = { version = "0.2", features = ["full"] }
 
 # For Release
 #grin_core = { git = "https://github.com/mwcproject/mwc-node", tag = "4.4.4" }

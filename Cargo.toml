@@ -29,7 +29,7 @@ log = "0.4"
 linefeed = "0.6"
 semver = "0.10"
 rustyline = "6"
-lazy_static = "1"
+lazy_static = "1.4"
 ed25519-dalek = "1.0.0-pre.4"
 x25519-dalek = "0.6"
 # Fixing issue with bitvec

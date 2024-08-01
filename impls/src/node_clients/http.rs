@@ -18,7 +18,6 @@ use crate::api::{self, LocatedTxKernel, OutputListing, OutputPrintable};
 use crate::core::core::{Transaction, TxKernel};
 use crate::libwallet::HeaderInfo;
 use crate::libwallet::{NodeClient, NodeVersionInfo};
-use crossbeam_utils::thread::scope;
 use futures::stream::FuturesUnordered;
 use futures::TryStreamExt;
 use std::collections::HashMap;
@@ -34,6 +33,7 @@ use super::resp_types::*;
 use crate::client_utils::json_rpc::*;
 use failure::_core::sync::atomic::{AtomicU8, Ordering};
 use grin_wallet_util::grin_api::{Libp2pMessages, Libp2pPeers};
+use grin_wallet_util::RUNTIME;
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
 
@@ -317,64 +317,38 @@ impl HTTPNodeClient {
 			task.try_collect().await
 		};
 
-		let res = scope(|s| {
-			let handle = s.spawn(|_| {
-				let mut rt = Builder::new()
-					.basic_scheduler()
-					.enable_all()
-					.build()
-					.unwrap();
-				let res: Result<Vec<Response>, _> = rt.block_on(task);
-				res
-			});
-			handle.join()
-		});
+		let res: Result<Vec<Response>, _> = RUNTIME.lock().unwrap().block_on(task);
 
 		let results: Vec<OutputPrintable> = match res {
-			Ok(res) => match res {
-				Ok(res) => match res {
-					Ok(resps) => {
-						let mut results = vec![];
-						for r in resps {
-							match r.into_result::<Vec<OutputPrintable>>() {
-								Ok(mut r) => results.append(&mut r),
-								Err(e) => {
-									if counter > 0 {
-										debug!("Retry to call API get_outputs, {}", e);
-										self.increase_index();
-										return self.get_outputs_from_node_impl(
-											wallet_outputs,
-											counter - 1,
-										);
-									}
+			Ok(resps) => {
+				let mut results = vec![];
+				for r in resps {
+					match r.into_result::<Vec<OutputPrintable>>() {
+						Ok(mut r) => results.append(&mut r),
+						Err(e) => {
+							if counter > 0 {
+								debug!("Retry to call API get_outputs, {}", e);
+								self.increase_index();
+								return self
+									.get_outputs_from_node_impl(wallet_outputs, counter - 1);
+							}
 
-									let report =
-										format!("Unable to parse response for get_outputs: {}", e);
-									error!("{}", report);
-									return Err(libwallet::ErrorKind::ClientCallback(report).into());
-								}
-							};
+							let report = format!("Unable to parse response for get_outputs: {}", e);
+							error!("{}", report);
+							return Err(libwallet::ErrorKind::ClientCallback(report).into());
 						}
-						results
-					}
-					Err(e) => {
-						if counter > 0 {
-							debug!("Retry to call API get_outputs, {}", e);
-							self.increase_index();
-							return self.get_outputs_from_node_impl(wallet_outputs, counter - 1);
-						}
-						let report = format!("Outputs by id failed: {}", e);
-						error!("{}", report);
-						return Err(libwallet::ErrorKind::ClientCallback(report).into());
-					}
-				},
-				_ => {
-					let report = format!("Get Outputs Failed!");
-					return Err(libwallet::ErrorKind::ClientCallback(report).into());
+					};
 				}
-			},
-			_ => {
-				let report = format!("Get Outputs Failed!");
+				results
+			}
+			Err(e) => {
+				if counter > 0 {
+					debug!("Retry to call API get_outputs, {}", e);
+					self.increase_index();
+					return self.get_outputs_from_node_impl(wallet_outputs, counter - 1);
+				}
+				let report = format!("Outputs by id failed: {}", e);
+				error!("{}", report);
 				return Err(libwallet::ErrorKind::ClientCallback(report).into());
 			}
 		};

@@ -16,8 +16,8 @@
 
 use crate::core::global;
 use crate::util::to_base64;
-use crossbeam_utils::thread::scope;
 use failure::{Backtrace, Context, Fail};
+use grin_wallet_util::RUNTIME;
 use hyper::body;
 use hyper::client::HttpConnector;
 use hyper::header::{ACCEPT, AUTHORIZATION, CONNECTION, CONTENT_TYPE, USER_AGENT};
@@ -30,7 +30,6 @@ use std::fmt::{self, Display};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::runtime::Builder;
 
 /// Errors that can be returned by an ApiEndpoint implementation.
 #[derive(Debug)]
@@ -424,32 +423,9 @@ impl Client {
 	}
 
 	pub fn send_request(&self, req: Request<Body>) -> Result<String, Error> {
-		let task = self.send_request_async(req);
-		scope(|s| {
-			let handle = s.spawn(|_| {
-				let mut rt = Builder::new()
-					.basic_scheduler()
-					.enable_all()
-					.build()
-					.map_err(|e| {
-						ErrorKind::Internal(format!("can't create Tokio runtime, {}", e))
-					})?;
-				rt.block_on(task)
-			});
-			/*match handle.join() {
-				Ok(_) => Ok("Request successfully sent".to_string()),
-				Err(e) => {
-					println!("Error sending client request: {:?}", e);
-					//Err(Error::from(ErrorKind::Internal(format!(
-					//	"Error sending client request"
-					//))))
-					panic!(e)
-				}
-			}*/
-			handle
-				.join()
-				.unwrap_or(Ok("Error in client sending request".to_string()))
-		})
-		.unwrap()
+		RUNTIME
+			.lock()
+			.unwrap()
+			.block_on(self.send_request_async(req))
 	}
 }
