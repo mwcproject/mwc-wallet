@@ -78,6 +78,9 @@ pub struct WalletConfig {
 	/// Key: <coin>_[main|test]_[1|2]
 	/// Value: url
 	pub swap_electrumx_addr: Option<BTreeMap<String, String>>,
+	/// Scaling factor from transaction weight to transaction fee
+	/// should match accept_fee_base parameter in grin-server
+	pub accept_fee_base: Option<u64>,
 }
 
 impl Default for WalletConfig {
@@ -138,6 +141,7 @@ impl Default for WalletConfig {
 				.map(|i| (i.0.to_string(), i.1.to_string()))
 				.collect::<BTreeMap<String, String>>(),
 			),
+			accept_fee_base: None,
 		}
 	}
 }
@@ -151,6 +155,11 @@ impl WalletConfig {
 	/// Default listener port
 	pub fn default_owner_api_listen_port() -> u16 {
 		3420
+	}
+
+	/// Default TX base fee, same that we have now (1 milli MWC)
+	pub fn default_accept_fee_base() -> u64 {
+		1_000_000
 	}
 
 	/// Use value from config file, defaulting to sensible value if missing.
@@ -169,6 +178,12 @@ impl WalletConfig {
 		self.wallet_data_dir
 			.clone()
 			.unwrap_or(GRIN_WALLET_DIR.to_string())
+	}
+
+	/// Accept fee base
+	pub fn accept_fee_base(&self) -> u64 {
+		self.accept_fee_base
+			.unwrap_or_else(|| WalletConfig::default_accept_fee_base())
 	}
 }
 
