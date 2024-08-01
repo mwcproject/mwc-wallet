@@ -27,6 +27,7 @@ use std::time::Duration;
 #[macro_use]
 mod common;
 use common::{clean_output_dir, create_wallet_proxy, setup};
+use grin_wallet_util::grin_core::consensus::calc_mwc_block_reward;
 
 /// self send impl
 fn late_lock_test_impl(test_dir: &'static str) -> Result<(), libwallet::Error> {
@@ -39,7 +40,7 @@ fn late_lock_test_impl(test_dir: &'static str) -> Result<(), libwallet::Error> {
 	// proxy
 	create_wallet_and_add!(
 		client1,
-		wallet1,
+		wallet_mining,
 		mask1_i,
 		test_dir,
 		"wallet1",
@@ -50,7 +51,7 @@ fn late_lock_test_impl(test_dir: &'static str) -> Result<(), libwallet::Error> {
 	let mask1 = (&mask1_i).as_ref();
 	create_wallet_and_add!(
 		client2,
-		wallet2,
+		wallet_acc1,
 		mask2_i,
 		test_dir,
 		"wallet2",
@@ -68,86 +69,137 @@ fn late_lock_test_impl(test_dir: &'static str) -> Result<(), libwallet::Error> {
 	});
 
 	// add some accounts
-	wallet::controller::owner_single_use(Some(wallet1.clone()), mask1, None, |api, m| {
+	wallet::controller::owner_single_use(Some(wallet_mining.clone()), mask1, None, |api, m| {
 		api.create_account_path(m, "mining")?;
-		api.create_account_path(m, "listener")?;
 		Ok(())
 	})
 	.unwrap();
 
 	// add some accounts
-	wallet::controller::owner_single_use(Some(wallet2.clone()), mask2, None, |api, m| {
+	wallet::controller::owner_single_use(Some(wallet_acc1.clone()), mask2, None, |api, m| {
 		api.create_account_path(m, "account1")?;
-		api.create_account_path(m, "account2")?;
 		Ok(())
 	})
 	.unwrap();
 
 	// Get some mining done
 	{
-		wallet_inst!(wallet1, w);
+		wallet_inst!(wallet_mining, w);
 		w.set_parent_key_id_by_name("mining")?;
 	}
 	{
-		wallet_inst!(wallet2, w);
+		wallet_inst!(wallet_acc1, w);
 		w.set_parent_key_id_by_name("account1")?;
 	}
 
-	let bh = 10u64;
-	let _ =
-		test_framework::award_blocks_to_wallet(&chain, wallet1.clone(), mask1, bh as usize, false);
+	test_framework::award_blocks_to_wallet(&chain, wallet_mining.clone(), mask1, 10, false)?;
+
+	// update/test contents of both accounts
+	wallet::controller::owner_single_use(Some(wallet_mining.clone()), mask1, None, |api, m| {
+		let (wallet1_refreshed, wallet_info) = api.retrieve_summary_info(m, true, 1)?;
+		assert!(wallet1_refreshed);
+		// Reward from mining 11 blocks, minus the amount sent.
+		// Note: We mined the block containing the tx, so fees are effectively refunded.
+		let expected_amount = calc_mwc_block_reward(1) * (10 - 3);
+		assert_eq!(expected_amount, wallet_info.amount_currently_spendable);
+		//reward is 2_380_952_380
+		Ok(())
+	})
+	.unwrap();
 
 	let mut slate = Slate::blank(2, false);
 	let amount = 1_000_000_000;
 
-	wallet::controller::owner_single_use(Some(wallet1.clone()), mask1, None, |sender_api, m| {
-		let args = InitTxArgs {
-			src_acct_name: Some("mining".to_owned()),
-			amount,
-			minimum_confirmations: 2,
-			max_outputs: 500,
-			num_change_outputs: 1,
-			selection_strategy_is_use_all: false,
-			target_slate_version: Some(4),
-			late_lock: Some(true),
-			..Default::default()
-		};
-		let slate_i = sender_api.init_send_tx(m, &args, 1)?;
-		println!("S1 SLATE: {:?}", slate_i);
-		slate = client1.send_tx_slate_direct("wallet2", &slate_i)?;
-		println!("S2 SLATE: {:?}", slate);
+	wallet::controller::owner_single_use(
+		Some(wallet_mining.clone()),
+		mask1,
+		None,
+		|sender_api, m| {
+			let args = InitTxArgs {
+				src_acct_name: Some("mining".to_owned()),
+				amount,
+				minimum_confirmations: 2,
+				max_outputs: 500,
+				num_change_outputs: 1,
+				selection_strategy_is_use_all: false,
+				target_slate_version: Some(4),
+				late_lock: Some(true),
+				..Default::default()
+			};
+			let slate_i = sender_api.init_send_tx(m, &args, 1)?;
+			println!("S1 SLATE: {:?}", slate_i);
+			slate = client1.send_tx_slate_direct("wallet2", &slate_i)?;
+			println!("S2 SLATE: {:?}", slate);
 
-		// Note we don't call `tx_lock_outputs` on the sender side here,
-		// as the outputs will only be locked during finalization
+			// Still all amount is spendable the same way
+			wallet::controller::owner_single_use(
+				Some(wallet_mining.clone()),
+				mask1,
+				None,
+				|api, m| {
+					let (wallet1_refreshed, wallet_info) = api.retrieve_summary_info(m, true, 1)?;
+					assert!(wallet1_refreshed);
+					// Reward from mining 11 blocks, minus the amount sent.
+					// Note: We mined the block containing the tx, so fees are effectively refunded.
+					let expected_amount = calc_mwc_block_reward(1) * (10 - 3);
+					assert_eq!(expected_amount, wallet_info.amount_currently_spendable);
+					//reward is 2_380_952_380
+					Ok(())
+				},
+			)
+			.unwrap();
 
-		slate = sender_api.finalize_tx(m, &slate)?;
-		println!("S3 SLATE: {:?}", slate);
+			// Note we don't call `tx_lock_outputs` on the sender side here,
+			// as the outputs will only be locked during finalization
 
-		Ok(())
-	})
+			slate = sender_api.finalize_tx(m, &slate)?;
+			println!("S3 SLATE: {:?}", slate);
+
+			// Now one input should be locked
+			wallet::controller::owner_single_use(
+				Some(wallet_mining.clone()),
+				mask1,
+				None,
+				|api, m| {
+					let (wallet1_refreshed, wallet_info) = api.retrieve_summary_info(m, true, 1)?;
+					assert!(wallet1_refreshed);
+					// Reward from mining 11 blocks, minus the amount sent.
+					// Note: We mined the block containing the tx, so fees are effectively refunded.
+					let expected_amount = calc_mwc_block_reward(1) * (10 - 3 - 1);
+					assert_eq!(expected_amount, wallet_info.amount_currently_spendable);
+					//reward is 2_380_952_380
+					Ok(())
+				},
+			)
+			.unwrap();
+
+			// Now post tx to our node for inclusion in the next block.
+			sender_api.post_tx(m, slate.tx_or_err().unwrap(), true)?;
+
+			Ok(())
+		},
+	)
 	.unwrap();
 
-	let _ = test_framework::award_blocks_to_wallet(&chain, wallet1.clone(), mask1, 3, false);
+	test_framework::award_blocks_to_wallet(&chain, wallet_mining.clone(), mask1, 3, false)?;
 
 	// update/test contents of both accounts
-	wallet::controller::owner_single_use(Some(wallet1.clone()), mask1, None, |api, m| {
+	wallet::controller::owner_single_use(Some(wallet_mining.clone()), mask1, None, |api, m| {
 		let (wallet1_refreshed, wallet_info) = api.retrieve_summary_info(m, true, 1)?;
 		assert!(wallet1_refreshed);
-		print!(
-			"Wallet 1 amount: {}",
-			wallet_info.amount_currently_spendable
-		);
+		// Reward from mining 11 blocks, minus the amount sent.
+		// Note: We mined the block containing the tx, so fees are effectively refunded.
+		let expected_amount = calc_mwc_block_reward(1) * (14 - 3) - amount; // fee should be mined back,
+		assert_eq!(expected_amount, wallet_info.amount_currently_spendable);
+		// expected is 25190476180
 		Ok(())
 	})
 	.unwrap();
 
-	wallet::controller::owner_single_use(Some(wallet2.clone()), mask2, None, |api, m| {
+	wallet::controller::owner_single_use(Some(wallet_acc1.clone()), mask2, None, |api, m| {
 		let (wallet2_refreshed, wallet_info) = api.retrieve_summary_info(m, true, 1)?;
 		assert!(wallet2_refreshed);
-		println!(
-			"Wallet 2 amount: {}",
-			wallet_info.amount_currently_spendable
-		);
+		assert_eq!(amount, wallet_info.amount_currently_spendable);
 		Ok(())
 	})
 	.unwrap();
