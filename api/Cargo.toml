@@ -1,6 +1,6 @@
 [package]
 name = "grin_wallet_api"
-version = "4.4.0"
+version = "5.1.0"
 authors = ["Grin Developers <mimblewimble@lists.launchpad.net>"]
 description = "Grin Wallet API"
 license = "Apache-2.0"
@@ -26,10 +26,10 @@ ed25519-dalek = "1.0.0-pre.4"
 colored = "1.6"
 x25519-dalek = "0.6"
 
-grin_wallet_libwallet = { path = "../libwallet", version = "4.4.0" }
-grin_wallet_config = { path = "../config", version = "4.4.0" }
-grin_wallet_impls = { path = "../impls", version = "4.4.0" }
-grin_wallet_util = { path = "../util", version = "4.4.0" }
+grin_wallet_libwallet = { path = "../libwallet", version = "5.1.0" }
+grin_wallet_config = { path = "../config", version = "5.1.0" }
+grin_wallet_impls = { path = "../impls", version = "5.1.0" }
+grin_wallet_util = { path = "../util", version = "5.1.0" }
 
 [dev-dependencies]
 serde_json = "1"
