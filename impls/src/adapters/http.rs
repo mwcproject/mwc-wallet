@@ -13,7 +13,7 @@
 // limitations under the License.
 
 /// HTTP Wallet 'plugin' implementation
-use crate::client_utils::{Client, ClientError};
+use crate::client_utils::{Client, ClientError, ClientErrorKind};
 use crate::error::{Error, ErrorKind};
 use crate::libwallet::slate_versions::{SlateVersion, VersionedSlate};
 use crate::libwallet::swap::message::Message;
@@ -314,7 +314,18 @@ impl HttpDataSender {
 		IN: Serialize,
 	{
 		// For state sender we want send and disconnect
-		let client = Client::new(self.use_socks, self.socks_proxy_addr)?;
+		let client =
+			if self.use_socks {
+				Client::new()
+			} else {
+				Client::with_socks_proxy(self.socks_proxy_addr.ok_or_else(|| {
+					ClientErrorKind::Internal("No socks proxy address set".into())
+				})?)
+			}
+			.map_err(|err| {
+				ClientErrorKind::Internal(format!("Unable to create http client, {}", err))
+			})?;
+
 		let req = client.create_post_request(url, Some("mwc".to_string()), api_secret, &input)?;
 		let res = client.send_request(req)?;
 		Ok(res)

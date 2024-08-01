@@ -18,17 +18,14 @@ use crate::core::global;
 use crate::util::to_base64;
 use failure::{Backtrace, Context, Fail};
 use grin_wallet_util::RUNTIME;
-use hyper::body;
-use hyper::client::HttpConnector;
-use hyper::header::{ACCEPT, AUTHORIZATION, CONNECTION, CONTENT_TYPE, USER_AGENT};
-use hyper::{self, Body, Client as HyperClient, Request, Uri};
-use hyper_rustls;
-use hyper_timeout::TimeoutConnector;
+use reqwest::header::{
+	HeaderMap, HeaderValue, ACCEPT, AUTHORIZATION, CONNECTION, CONTENT_TYPE, USER_AGENT,
+};
+use reqwest::{ClientBuilder, Method, Proxy, RequestBuilder};
 use serde::{Deserialize, Serialize};
 use serde_json;
 use std::fmt::{self, Display};
 use std::net::SocketAddr;
-use std::sync::Arc;
 use std::time::Duration;
 use tokio::runtime::Handle;
 
@@ -42,8 +39,6 @@ pub struct Error {
 pub enum ErrorKind {
 	#[fail(display = "Internal error: {}", _0)]
 	Internal(String),
-	#[fail(display = "Bad arguments: {}", _0)]
-	Argument(String),
 	#[fail(display = "Request error: {}", _0)]
 	RequestError(String),
 	#[fail(display = "ResponseError error: {}", _0)]
@@ -88,102 +83,65 @@ impl From<Context<ErrorKind>> for Error {
 
 #[derive(Clone)]
 pub struct Client {
-	// At the same time only one client can exist. Probably it is a better way to write that, but we don't want
-	// to change signature.
-	/// Normal http(s) client.
-	https_client:
-		Arc<Option<hyper::Client<TimeoutConnector<hyper_rustls::HttpsConnector<HttpConnector>>>>>,
-	/// Socks proxy client
-	socks_client: Arc<
-		Option<
-			hyper::Client<
-				TimeoutConnector<
-					hyper_socks2_mw::SocksConnector<hyper_rustls::HttpsConnector<HttpConnector>>,
-				>,
-			>,
-		>,
-	>,
+	client: reqwest::Client,
 }
 
 impl Client {
 	/// New client
-	pub fn new(use_socks: bool, socks_proxy_addr: Option<SocketAddr>) -> Result<Self, Error> {
-		let (https_client, socks_client) = Self::construct_client(use_socks, socks_proxy_addr)?;
-		Ok(Client {
-			https_client: Arc::new(https_client),
-			socks_client: Arc::new(socks_client),
-		})
+	pub fn new() -> Result<Self, Error> {
+		Self::build(None)
 	}
 
-	fn construct_client(
-		use_socks: bool,
-		socks_proxy_addr: Option<SocketAddr>,
-	) -> Result<
-		(
-			Option<hyper::Client<TimeoutConnector<hyper_rustls::HttpsConnector<HttpConnector>>>>,
-			Option<
-				hyper::Client<
-					TimeoutConnector<
-						hyper_socks2_mw::SocksConnector<
-							hyper_rustls::HttpsConnector<HttpConnector>,
-						>,
-					>,
-				>,
-			>,
-		),
-		Error,
-	> {
-		if !use_socks {
-			let https = hyper_rustls::HttpsConnector::new();
-			let mut connector = TimeoutConnector::new(https);
+	pub fn with_socks_proxy(socks_proxy_addr: SocketAddr) -> Result<Self, Error> {
+		Self::build(Some(socks_proxy_addr))
+	}
 
+	fn build(socks_proxy_addr: Option<SocketAddr>) -> Result<Self, Error> {
+		let mut headers = HeaderMap::new();
+		headers.insert(USER_AGENT, HeaderValue::from_static("mwc-client"));
+		headers.insert(ACCEPT, HeaderValue::from_static("application/json"));
+		headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+
+		headers.insert(CONNECTION, HeaderValue::from_static("keep-alive"));
+
+		let timeout;
+		let connect_timeout;
+
+		if socks_proxy_addr.is_none() {
 			#[cfg(not(target_os = "android"))]
 			{
-				connector.set_connect_timeout(Some(Duration::from_secs(10)));
-				connector.set_read_timeout(Some(Duration::from_secs(20)));
-				connector.set_write_timeout(Some(Duration::from_secs(20)));
+				connect_timeout = 10;
+				timeout = 20;
 			}
 
 			#[cfg(target_os = "android")]
 			{
 				// For android timeouts need to be longer because we already experiencing some connection issues.
-				connector.set_connect_timeout(Some(Duration::from_secs(30)));
-				connector.set_read_timeout(Some(Duration::from_secs(30)));
-				connector.set_write_timeout(Some(Duration::from_secs(30)));
+				connect_timeout = 30;
+				timeout = 30;
 			}
-
-			let client = HyperClient::builder()
-				.pool_idle_timeout(Duration::from_secs(300))
-				.build::<_, Body>(connector);
-			Ok((Some(client), None))
 		} else {
-			let addr = socks_proxy_addr.ok_or_else(|| {
-				ErrorKind::RequestError("Missing Socks proxy address".to_string())
-			})?;
-			let auth = format!("{}:{}", addr.ip(), addr.port());
-
-			let https = hyper_rustls::HttpsConnector::new();
-			let socks = hyper_socks2_mw::SocksConnector {
-				proxy_addr: hyper::Uri::builder()
-					.scheme("socks5")
-					.authority(auth.as_str())
-					.path_and_query("/")
-					.build()
-					.map_err(|_| {
-						ErrorKind::RequestError("Can't parse Socks proxy address".to_string())
-					})?,
-				auth: None,
-				connector: https,
-			};
-			let mut connector = TimeoutConnector::new(socks);
-			connector.set_connect_timeout(Some(Duration::from_secs(10)));
-			connector.set_read_timeout(Some(Duration::from_secs(120))); // For TOR the timeout need to be pretty long. It takes time to builkd a route
-			connector.set_write_timeout(Some(Duration::from_secs(120)));
-			let client = HyperClient::builder()
-				.pool_idle_timeout(Duration::from_secs(300))
-				.build::<_, Body>(connector);
-			Ok((None, Some(client)))
+			connect_timeout = 10;
+			timeout = 120;
 		}
+
+		let mut builder = ClientBuilder::new()
+			.connect_timeout(Duration::from_secs(connect_timeout))
+			.timeout(Duration::from_secs(timeout))
+			.use_rustls_tls()
+			.default_headers(headers);
+
+		if let Some(s) = socks_proxy_addr {
+			let proxy = Proxy::all(&format!("socks5://{}:{}", s.ip(), s.port()))
+				.map_err(|e| ErrorKind::Internal(format!("Unable to create proxy: {}", e)))?;
+			builder = builder.proxy(proxy);
+		}
+
+		let client = builder
+			.build()
+			.map_err(|e| ErrorKind::Internal(format!("Unable to build client: {}", e)))?;
+
+		Ok(Client { client })
 	}
 
 	/// Helper function to easily issue a HTTP GET request against a given URL that
@@ -193,7 +151,7 @@ impl Client {
 	where
 		for<'de> T: Deserialize<'de>,
 	{
-		self.handle_request(self.build_request(url, "GET", None, api_secret, None)?)
+		self.handle_request(self.build_request(url, Method::GET, None, api_secret, None)?)
 	}
 
 	/// Helper function to easily issue an async HTTP GET request against a given
@@ -207,7 +165,7 @@ impl Client {
 	where
 		for<'de> T: Deserialize<'de> + Send + 'static,
 	{
-		self.handle_request_async(self.build_request(url, "GET", None, api_secret, None)?)
+		self.handle_request_async(self.build_request(url, Method::GET, None, api_secret, None)?)
 			.await
 	}
 
@@ -215,7 +173,7 @@ impl Client {
 	/// on a given URL that returns nothing. Handles request
 	/// building and response code checking.
 	pub fn _get_no_ret(&self, url: &str, api_secret: Option<String>) -> Result<(), Error> {
-		let req = self.build_request(url, "GET", None, api_secret, None)?;
+		let req = self.build_request(url, Method::GET, None, api_secret, None)?;
 		self.send_request(req)?;
 		Ok(())
 	}
@@ -296,11 +254,11 @@ impl Client {
 	fn build_request(
 		&self,
 		url: &str,
-		method: &str,
+		method: Method,
 		basic_auth_key: Option<String>, // In Node will be generated. Specify None if talk to the Node. Another wallet wants 'mwc'
 		api_secret: Option<String>,
 		body: Option<String>,
-	) -> Result<Request<Body>, Error> {
+	) -> Result<RequestBuilder, Error> {
 		let basic_auth_key = basic_auth_key.unwrap_or(if global::is_mainnet() {
 			"mwcmain".to_string()
 		} else if global::is_floonet() {
@@ -321,15 +279,13 @@ impl Client {
 	fn build_request_ex(
 		&self,
 		url: &str,
-		method: &str,
+		method: Method,
 		api_secret: Option<String>,
 		basic_auth_key: Option<String>,
 		body: Option<String>,
-	) -> Result<Request<Body>, Error> {
-		let uri: Uri = url
-			.parse()
-			.map_err(|e| ErrorKind::Argument(format!("Invalid url {}, {}", url, e)))?;
-		let mut builder = Request::builder();
+	) -> Result<RequestBuilder, Error> {
+		let mut builder = self.client.request(method, url);
+
 		if basic_auth_key.is_some() && api_secret.is_some() {
 			let auth_key = format!("{}:{}", basic_auth_key.unwrap(), api_secret.unwrap());
 			let base64_key = to_base64(&auth_key);
@@ -337,20 +293,10 @@ impl Client {
 			builder = builder.header(AUTHORIZATION, basic_auth);
 		}
 
-		builder
-			.method(method)
-			.uri(uri)
-			.header(USER_AGENT, "mwc-client")
-			.header(ACCEPT, "application/json")
-			.header(CONTENT_TYPE, "application/json")
-			.header(CONNECTION, "keep-alive")
-			.body(match body {
-				None => Body::empty(),
-				Some(json) => json.into(),
-			})
-			.map_err(|e| {
-				ErrorKind::RequestError(format!("Bad request {} {}: {}", method, url, e)).into()
-			})
+		if let Some(body) = body {
+			builder = builder.body(body);
+		}
+		Ok(builder)
 	}
 
 	pub fn create_post_request<IN>(
@@ -359,13 +305,13 @@ impl Client {
 		basic_auth_key: Option<String>, // Specify None if talk to the Node. Another wallet wants 'mwc'
 		api_secret: Option<String>,
 		input: &IN,
-	) -> Result<Request<Body>, Error>
+	) -> Result<RequestBuilder, Error>
 	where
 		IN: Serialize,
 	{
 		let json = serde_json::to_string(input)
 			.map_err(|e| ErrorKind::Internal(format!("Could not serialize data to JSON, {}", e)))?;
-		self.build_request(url, "POST", basic_auth_key, api_secret, Some(json))
+		self.build_request(url, Method::POST, basic_auth_key, api_secret, Some(json))
 	}
 
 	pub fn _create_post_request_ex<IN>(
@@ -374,16 +320,16 @@ impl Client {
 		api_secret: Option<String>,
 		basic_auth_key: Option<String>,
 		input: &IN,
-	) -> Result<Request<Body>, Error>
+	) -> Result<RequestBuilder, Error>
 	where
 		IN: Serialize,
 	{
 		let json = serde_json::to_string(input)
 			.map_err(|e| ErrorKind::Internal(format!("Could not serialize data to JSON, {}", e)))?;
-		self.build_request_ex(url, "POST", api_secret, basic_auth_key, Some(json))
+		self.build_request_ex(url, Method::POST, api_secret, basic_auth_key, Some(json))
 	}
 
-	fn handle_request<T>(&self, req: Request<Body>) -> Result<T, Error>
+	fn handle_request<T>(&self, req: RequestBuilder) -> Result<T, Error>
 	where
 		for<'de> T: Deserialize<'de>,
 	{
@@ -393,7 +339,7 @@ impl Client {
 		})
 	}
 
-	async fn handle_request_async<T>(&self, req: Request<Body>) -> Result<T, Error>
+	async fn handle_request_async<T>(&self, req: RequestBuilder) -> Result<T, Error>
 	where
 		for<'de> T: Deserialize<'de> + Send + 'static,
 	{
@@ -404,26 +350,19 @@ impl Client {
 		Ok(ser)
 	}
 
-	async fn send_request_async(&self, req: Request<Body>) -> Result<String, Error> {
-		let resp = if self.https_client.is_some() {
-			let client = self.https_client.iter().next().unwrap();
-			client.request(req).await
-		} else {
-			debug_assert!(self.socks_client.is_some());
-			self.socks_client.iter().next().unwrap().request(req).await
-		};
-
-		let resp =
-			resp.map_err(|e| ErrorKind::RequestError(format!("Cannot make request: {}", e)))?;
-
-		let raw = body::to_bytes(resp)
+	async fn send_request_async(&self, req: RequestBuilder) -> Result<String, Error> {
+		let resp = req
+			.send()
 			.await
-			.map_err(|e| ErrorKind::RequestError(format!("Cannot read response body: {}", e)))?;
-
-		Ok(String::from_utf8_lossy(&raw).to_string())
+			.map_err(|e| ErrorKind::RequestError(format!("Cannot make request: {}", e)))?;
+		let text = resp
+			.text()
+			.await
+			.map_err(|e| ErrorKind::ResponseError(format!("Cannot parse response: {}", e)))?;
+		Ok(text)
 	}
 
-	pub fn send_request(&self, req: Request<Body>) -> Result<String, Error> {
+	pub fn send_request(&self, req: RequestBuilder) -> Result<String, Error> {
 		// This client is currently used both outside and inside of a tokio runtime
 		// context. In the latter case we are not allowed to do a blocking call to
 		// our global runtime, which unfortunately means we have to spawn a new thread

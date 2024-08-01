@@ -319,7 +319,7 @@ impl Subscriber for MWCMQSubscriber {
 	}
 
 	fn stop(&mut self) -> bool {
-		if let Ok(client) = reqwest::Client::builder()
+		if let Ok(client) = reqwest::blocking::Client::builder()
 			.timeout(Duration::from_secs(60))
 			.build()
 		{
@@ -469,7 +469,7 @@ impl MWCMQSBroker {
 		let signature = crypto::sign_challenge(&challenge, secret_key, secp)?;
 		let signature = signature.to_hex();
 
-		let client = reqwest::Client::builder()
+		let client = reqwest::blocking::Client::builder()
 			.timeout(Duration::from_secs(120))
 			.build()
 			.map_err(|e| ErrorKind::GenericError(format!("Failed to build a client, {}", e)))?;
@@ -559,7 +559,7 @@ impl MWCMQSBroker {
 		let signature = crypto::sign_challenge(&challenge, secret_key, secp);
 		let signature = signature.unwrap().to_hex();
 
-		let client = reqwest::Client::builder()
+		let client = reqwest::blocking::Client::builder()
 			.timeout(Duration::from_secs(60))
 			.build()
 			.map_err(|e| {
@@ -680,7 +680,7 @@ impl MWCMQSBroker {
 		let mut time_now = "";
 		let mut is_error = false;
 		let secs = 30;
-		let cl = reqwest::Client::builder()
+		let cl = reqwest::blocking::Client::builder()
 			.timeout(Duration::from_secs(secs))
 			.build();
 		if cl.is_ok() {
@@ -764,7 +764,7 @@ impl MWCMQSBroker {
 				}
 
 				let secs = if !connected { 2 } else { 120 };
-				let cl = reqwest::Client::builder()
+				let cl = reqwest::blocking::Client::builder()
 					.timeout(Duration::from_secs(secs))
 					.build();
 				let client = if cl.is_ok() {

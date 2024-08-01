@@ -15,7 +15,6 @@
 
 //! JSON RPC Client functionality
 use failure::Fail;
-use hyper;
 use serde_json;
 
 /// Builds a request
@@ -104,9 +103,6 @@ pub enum Error {
 	/// Json error
 	#[fail(display = "Unable to parse json, {}", _0)]
 	Json(String),
-	/// Client error
-	#[fail(display = "Connection error, {}", _0)]
-	Hyper(String),
 	/// Error response
 	#[fail(display = "RPC error: {:?}", _0)]
 	Rpc(RpcError),
@@ -118,12 +114,6 @@ pub enum Error {
 impl From<serde_json::Error> for Error {
 	fn from(e: serde_json::Error) -> Error {
 		Error::Json(format!("{}", e))
-	}
-}
-
-impl From<hyper::error::Error> for Error {
-	fn from(e: hyper::error::Error) -> Error {
-		Error::Hyper(format!("{}", e))
 	}
 }
 

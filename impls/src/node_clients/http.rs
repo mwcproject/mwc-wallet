@@ -23,7 +23,6 @@ use futures::TryStreamExt;
 use std::collections::HashMap;
 use std::env;
 use tokio::runtime::Builder;
-use tokio::runtime::Handle;
 
 use crate::client_utils::Client;
 use crate::libwallet;
@@ -106,7 +105,7 @@ impl HTTPNodeClient {
 		node_url_list: Vec<String>,
 		node_api_secret: Option<String>,
 	) -> Result<HTTPNodeClient, Error> {
-		let client = match Client::new(false, None) {
+		let client = match Client::new() {
 			Ok(client) => client,
 			Err(e) => {
 				return Err(Error::GenericError(format!(
@@ -319,14 +318,7 @@ impl HTTPNodeClient {
 			task.try_collect().await
 		};
 
-		let res: Result<Vec<Response>, _> = if Handle::try_current().is_ok() {
-			let rt = RUNTIME.clone();
-			std::thread::spawn(move || rt.lock().unwrap().block_on(task))
-				.join()
-				.unwrap()
-		} else {
-			RUNTIME.lock().unwrap().block_on(task)
-		};
+		let res: Result<Vec<_>, _> = RUNTIME.lock().unwrap().block_on(task);
 
 		let results: Vec<OutputPrintable> = match res {
 			Ok(resps) => {
