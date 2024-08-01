@@ -21,12 +21,13 @@ use crate::swap::is_test_mode;
 use crate::swap::set_test_mode;
 use crate::swap::types::Currency;
 use crate::swap::ErrorKind;
-use grin_wallet_util::RUNTIME;
+use crossbeam_utils::thread::scope;
 use rand::thread_rng;
 use secp256k1::SecretKey;
 #[cfg(test)]
 use std::sync::RwLock;
 use std::u64;
+use tokio::runtime::Builder;
 use web3::{
 	api::{Accounts, Namespace},
 	contract::{Contract, Options},
@@ -102,14 +103,33 @@ impl InfuraNodeClient {
 			}
 		};
 
-		let res = RUNTIME.lock().unwrap().block_on(task);
+		let res = scope(|s| {
+			let handle = s.spawn(|_| {
+				let rt = Builder::new().basic_scheduler().enable_all().build();
+				match rt {
+					Ok(mut rt) => rt.block_on(task),
+					_ => Err(web3::Error::Internal),
+				}
+			});
+			handle.join()
+		});
 
 		match res {
-			Ok(balance) => {
-				let balance_gwei = balance / U256::exp10(9);
-				let balance = to_norm(balance_gwei.to_string().as_str(), "9");
-				Ok((format!("{}", balance.with_scale(6)), balance_gwei.as_u64()))
-			}
+			Ok(res) => match res {
+				Ok(res) => match res {
+					Ok(balance) => {
+						let balance_gwei = balance / U256::exp10(9);
+						let balance = to_norm(balance_gwei.to_string().as_str(), "9");
+						Ok((format!("{}", balance.with_scale(6)), balance_gwei.as_u64()))
+					}
+					_ => Err(ErrorKind::EthContractCallError(
+						"Get Ether Balance Failed!".to_string(),
+					)),
+				},
+				_ => Err(ErrorKind::EthContractCallError(
+					"Get Ether Balance Failed!".to_string(),
+				)),
+			},
 			_ => Err(ErrorKind::EthContractCallError(
 				"Get Ether Balance Failed!".to_string(),
 			)),
@@ -150,24 +170,44 @@ impl InfuraNodeClient {
 			}
 		};
 
-		let res = RUNTIME.lock().unwrap().block_on(task);
+		let res = scope(|s| {
+			let handle = s.spawn(|_| {
+				let rt = Builder::new().basic_scheduler().enable_all().build();
+				match rt {
+					Ok(mut rt) => rt.block_on(task),
+					_ => Err(web3::contract::Error::InvalidOutputType(
+						"erc20_balance error".to_string(),
+					)),
+				}
+			});
+			handle.join()
+		});
 
 		match res {
-			Ok(balance) => {
-				let balance: U256 = match currency.is_expo_shrinked18to9() {
-					true => balance / U256::exp10(9),
-					false => balance,
-				};
-				let balance_norm = to_norm(
-					balance.to_string().as_str(),
-					currency.exponent().to_string().as_str(),
-				);
-				Ok((format!("{}", balance_norm), balance.as_u64()))
-			}
-			Err(e) => Err(ErrorKind::EthContractCallError(format!(
-				"Get ERC20 Token Balance Of Failed!, {}",
-				e
-			))),
+			Ok(res) => match res {
+				Ok(res) => match res {
+					Ok(balance) => {
+						let balance: U256 = match currency.is_expo_shrinked18to9() {
+							true => balance / U256::exp10(9),
+							false => balance,
+						};
+						let balance_norm = to_norm(
+							balance.to_string().as_str(),
+							currency.exponent().to_string().as_str(),
+						);
+						Ok((format!("{}", balance_norm), balance.as_u64()))
+					}
+					_ => Err(ErrorKind::EthContractCallError(
+						"Get ERC20 Token Balance Of Failed!".to_string(),
+					)),
+				},
+				_ => Err(ErrorKind::EthContractCallError(
+					"Get ERC20 Token Balance Of Failed!".to_string(),
+				)),
+			},
+			_ => Err(ErrorKind::EthContractCallError(
+				"Get ERC20 Token Balance Of Failed!".to_string(),
+			)),
 		}
 	}
 
@@ -212,10 +252,37 @@ impl InfuraNodeClient {
 			}
 		};
 
-		let res = RUNTIME.lock().unwrap().block_on(task);
+		let res = scope(|s| {
+			let handle = s.spawn(|_| {
+				let rt = Builder::new().basic_scheduler().enable_all().build();
+				match rt {
+					Ok(mut rt) => Ok(rt.block_on(task)),
+					_ => Err(Box::new("ether_transfer -- failed")),
+				}
+			});
+			handle.join()
+		});
 
 		match res {
-			Ok(tx_hash) => Ok(tx_hash),
+			Ok(res) => match res {
+				Ok(res) => match res {
+					Ok(res) => match res {
+						Ok(tx_hash) => Ok(tx_hash),
+						_ => Err(ErrorKind::EthContractCallError(
+							"eth transfer failure!".to_string(),
+						)),
+					},
+					_ => Err(ErrorKind::EthContractCallError(
+						"eth transfer failure!".to_string(),
+					)),
+				},
+				Err(e) => {
+					warn!("transfer error: --- {:?}", e);
+					Err(ErrorKind::EthContractCallError(
+						"eth transfer failure!".to_string(),
+					))
+				}
+			},
 			_ => Err(ErrorKind::EthContractCallError(
 				"eth transfer failure!".to_string(),
 			)),
@@ -271,16 +338,35 @@ impl InfuraNodeClient {
 			}
 		};
 
-		let res = RUNTIME.lock().unwrap().block_on(task);
+		let res = scope(|s| {
+			let handle = s.spawn(|_| {
+				let rt = Builder::new().basic_scheduler().enable_all().build();
+				match rt {
+					Ok(mut rt) => rt.block_on(task),
+					_ => Err(web3::Error::Internal),
+				}
+			});
+			handle.join()
+		});
 
 		match res {
-			Ok(tx_hash) => Ok(tx_hash),
-			Err(e) => {
-				warn!("erc20_transfer error: --- {:?}", e);
-				Err(ErrorKind::EthContractCallError(
+			Ok(res) => match res {
+				Ok(res) => match res {
+					Ok(tx_hash) => Ok(tx_hash),
+					Err(e) => {
+						warn!("erc20_transfer error: --- {:?}", e);
+						Err(ErrorKind::EthContractCallError(
+							"ERC20 Transfer Failed!".to_string(),
+						))
+					}
+				},
+				_ => Err(ErrorKind::EthContractCallError(
 					"ERC20 Transfer Failed!".to_string(),
-				))
-			}
+				)),
+			},
+			_ => Err(ErrorKind::EthContractCallError(
+				"ERC20 Transfer Failed!".to_string(),
+			)),
 		}
 	}
 
@@ -340,16 +426,35 @@ impl InfuraNodeClient {
 			}
 		};
 
-		let res = RUNTIME.lock().unwrap().block_on(task);
+		let res = scope(|s| {
+			let handle = s.spawn(|_| {
+				let rt = Builder::new().basic_scheduler().enable_all().build();
+				match rt {
+					Ok(mut rt) => rt.block_on(task),
+					_ => Err(web3::Error::Internal),
+				}
+			});
+			handle.join()
+		});
 
 		match res {
-			Ok(tx_hash) => Ok(tx_hash),
-			Err(e) => {
-				warn!("ether initiate error: --- {:?}", e);
-				Err(ErrorKind::EthContractCallError(
+			Ok(res) => match res {
+				Ok(res) => match res {
+					Ok(tx_hash) => Ok(tx_hash),
+					Err(e) => {
+						warn!("ether initiate error: --- {:?}", e);
+						Err(ErrorKind::EthContractCallError(
+							"Buyer Initiate Ether Swap Trade Failed!".to_string(),
+						))
+					}
+				},
+				_ => Err(ErrorKind::EthContractCallError(
 					"Buyer Initiate Ether Swap Trade Failed!".to_string(),
-				))
-			}
+				)),
+			},
+			_ => Err(ErrorKind::EthContractCallError(
+				"Buyer Initiate Ether Swap Trade Failed!".to_string(),
+			)),
 		}
 	}
 
@@ -417,17 +522,38 @@ impl InfuraNodeClient {
 			}
 		};
 
-		let res = RUNTIME.lock().unwrap().block_on(task);
+		let res = scope(|s| {
+			let handle = s.spawn(|_| {
+				let rt = Builder::new().basic_scheduler().enable_all().build();
+				match rt {
+					Ok(mut rt) => rt.block_on(task),
+					_ => Err(web3::Error::Internal),
+				}
+			});
+			handle.join()
+		});
 
 		match res {
-			Ok(tx_hash) => Ok(tx_hash),
-			Err(e) => {
-				warn!("erc20 initiate error: --- {:?}", e);
-				Err(ErrorKind::EthContractCallError(format!(
+			Ok(res) => match res {
+				Ok(res) => match res {
+					Ok(tx_hash) => Ok(tx_hash),
+					Err(e) => {
+						warn!("erc20 initiate error: --- {:?}", e);
+						Err(ErrorKind::EthContractCallError(format!(
+							"Buyer Initiate {} Swap Trade Failed!",
+							Currency::Btc
+						)))
+					}
+				},
+				_ => Err(ErrorKind::EthContractCallError(format!(
 					"Buyer Initiate {} Swap Trade Failed!",
-					Currency::Btc
-				)))
-			}
+					Currency::Ether
+				))),
+			},
+			_ => Err(ErrorKind::EthContractCallError(format!(
+				"Buyer Initiate {} Swap Trade Failed!",
+				Currency::Usdc
+			))),
 		}
 	}
 
@@ -539,16 +665,35 @@ impl InfuraNodeClient {
 			}
 		};
 
-		let res = RUNTIME.lock().unwrap().block_on(task);
+		let res = scope(|s| {
+			let handle = s.spawn(|_| {
+				let rt = Builder::new().basic_scheduler().enable_all().build();
+				match rt {
+					Ok(mut rt) => rt.block_on(task),
+					_ => Err(web3::Error::Internal),
+				}
+			});
+			handle.join()
+		});
 
 		match res {
-			Ok(tx_hash) => Ok(tx_hash),
-			Err(e) => {
-				warn!("redeem error: --- {:?}", e);
-				Err(ErrorKind::EthContractCallError(
+			Ok(res) => match res {
+				Ok(res) => match res {
+					Ok(tx_hash) => Ok(tx_hash),
+					Err(e) => {
+						warn!("redeem error: --- {:?}", e);
+						Err(ErrorKind::EthContractCallError(
+							"Seller Redeem Ether Failed!".to_string(),
+						))
+					}
+				},
+				_ => Err(ErrorKind::EthContractCallError(
 					"Seller Redeem Ether Failed!".to_string(),
-				))
-			}
+				)),
+			},
+			_ => Err(ErrorKind::EthContractCallError(
+				"Seller Redeem Ether Failed!".to_string(),
+			)),
 		}
 	}
 
@@ -661,16 +806,35 @@ impl InfuraNodeClient {
 			}
 		};
 
-		let res = RUNTIME.lock().unwrap().block_on(task);
+		let res = scope(|s| {
+			let handle = s.spawn(|_| {
+				let rt = Builder::new().basic_scheduler().enable_all().build();
+				match rt {
+					Ok(mut rt) => rt.block_on(task),
+					_ => Err(web3::Error::Internal),
+				}
+			});
+			handle.join()
+		});
 
 		match res {
-			Ok(tx_hash) => Ok(tx_hash),
-			Err(e) => {
-				warn!("redeem error: --- {:?}", e);
-				Err(ErrorKind::EthContractCallError(
+			Ok(res) => match res {
+				Ok(res) => match res {
+					Ok(tx_hash) => Ok(tx_hash),
+					Err(e) => {
+						warn!("redeem error: --- {:?}", e);
+						Err(ErrorKind::EthContractCallError(
+							"Seller Redeem ERC20-Token Failed!".to_string(),
+						))
+					}
+				},
+				_ => Err(ErrorKind::EthContractCallError(
 					"Seller Redeem ERC20-Token Failed!".to_string(),
-				))
-			}
+				)),
+			},
+			_ => Err(ErrorKind::EthContractCallError(
+				"Seller Redeem ERC20-Token Failed!".to_string(),
+			)),
 		}
 	}
 }
@@ -695,10 +859,29 @@ impl EthNodeClient for InfuraNodeClient {
 			}
 		};
 
-		let res = RUNTIME.lock().unwrap().block_on(task);
+		let res = scope(|s| {
+			let handle = s.spawn(|_| {
+				let rt = Builder::new().basic_scheduler().enable_all().build();
+				match rt {
+					Ok(mut rt) => rt.block_on(task),
+					_ => Err(web3::Error::Internal),
+				}
+			});
+			handle.join()
+		});
 
 		match res {
-			Ok(block_number) => Ok(block_number.as_u64()),
+			Ok(res) => match res {
+				Ok(res) => match res {
+					Ok(block_number) => Ok(block_number.as_u64()),
+					_ => Err(ErrorKind::EthContractCallError(
+						"Get Ethereum Height Failed!".to_string(),
+					)),
+				},
+				_ => Err(ErrorKind::EthContractCallError(
+					"Get Ethereum Height Failed!".to_string(),
+				)),
+			},
 			_ => Err(ErrorKind::EthContractCallError(
 				"Get Ethereum Height Failed!".to_string(),
 			)),
@@ -728,11 +911,29 @@ impl EthNodeClient for InfuraNodeClient {
 			}
 		};
 
-		let res = RUNTIME.lock().unwrap().block_on(task);
+		let res = scope(|s| {
+			let handle = s.spawn(|_| {
+				let rt = Builder::new().basic_scheduler().enable_all().build();
+				match rt {
+					Ok(mut rt) => Some(rt.block_on(task)),
+					_ => None,
+				}
+			});
+			handle.join()
+		});
 
 		match res {
 			Ok(res) => match res {
-				Some(receipt) => Ok(receipt),
+				Ok(res) => match res {
+					Some(res) => match res {
+						Ok(res) => match res {
+							Some(receipt) => Ok(receipt),
+							_ => Err(ErrorKind::EthRetrieveTransReciptError),
+						},
+						_ => Err(ErrorKind::EthRetrieveTransReciptError),
+					},
+					_ => Err(ErrorKind::EthRetrieveTransReciptError),
+				},
 				_ => Err(ErrorKind::EthRetrieveTransReciptError),
 			},
 			_ => Err(ErrorKind::EthRetrieveTransReciptError),
@@ -855,17 +1056,38 @@ impl EthNodeClient for InfuraNodeClient {
 			}
 		};
 
-		let res = RUNTIME.lock().unwrap().block_on(task);
+		let res = scope(|s| {
+			let handle = s.spawn(|_| {
+				let rt = Builder::new().basic_scheduler().enable_all().build();
+				match rt {
+					Ok(mut rt) => rt.block_on(task),
+					_ => Err(web3::Error::Internal),
+				}
+			});
+			handle.join()
+		});
 
 		match res {
-			Ok(tx_hash) => Ok(tx_hash),
-			Err(e) => {
-				warn!("erc20 approve error: --- {:?}", e);
-				Err(ErrorKind::EthContractCallError(format!(
+			Ok(res) => match res {
+				Ok(res) => match res {
+					Ok(tx_hash) => Ok(tx_hash),
+					Err(e) => {
+						warn!("erc20 approve error: --- {:?}", e);
+						Err(ErrorKind::EthContractCallError(format!(
+							"{}:  ERC20 ApproveFailed!",
+							currency
+						)))
+					}
+				},
+				_ => Err(ErrorKind::EthContractCallError(format!(
 					"{}:  ERC20 ApproveFailed!",
 					currency
-				)))
-			}
+				))),
+			},
+			_ => Err(ErrorKind::EthContractCallError(format!(
+				"{}:  ERC20 ApproveFailed!",
+				currency
+			))),
 		}
 	}
 
@@ -1023,17 +1245,38 @@ impl EthNodeClient for InfuraNodeClient {
 			}
 		};
 
-		let res = RUNTIME.lock().unwrap().block_on(task);
+		let res = scope(|s| {
+			let handle = s.spawn(|_| {
+				let rt = Builder::new().basic_scheduler().enable_all().build();
+				match rt {
+					Ok(mut rt) => rt.block_on(task),
+					_ => Err(web3::Error::Internal),
+				}
+			});
+			handle.join()
+		});
 
 		match res {
-			Ok(tx_hash) => Ok(tx_hash),
-			Err(e) => {
-				warn!("refund error: --- {:?}", e);
-				Err(ErrorKind::EthContractCallError(format!(
+			Ok(res) => match res {
+				Ok(res) => match res {
+					Ok(tx_hash) => Ok(tx_hash),
+					Err(e) => {
+						warn!("refund error: --- {:?}", e);
+						Err(ErrorKind::EthContractCallError(format!(
+							"Buyer Refund {} Failed!",
+							currency
+						)))
+					}
+				},
+				_ => Err(ErrorKind::EthContractCallError(format!(
 					"Buyer Refund {} Failed!",
 					currency
-				)))
-			}
+				))),
+			},
+			_ => Err(ErrorKind::EthContractCallError(format!(
+				"Buyer Refund {} Failed!",
+				currency
+			))),
 		}
 	}
 
@@ -1100,23 +1343,50 @@ impl EthNodeClient for InfuraNodeClient {
 			}
 		};
 
-		let res = RUNTIME.lock().unwrap().block_on(task);
+		let res = scope(|s| {
+			let handle = s.spawn(|_| {
+				let rt = Builder::new().basic_scheduler().enable_all().build();
+				match rt {
+					Ok(mut rt) => Ok(rt.block_on(task)),
+					_ => Err(web3::Error::Internal),
+				}
+			});
+			handle.join()
+		});
 
 		match res {
-			Ok(result) => {
-				let balance: U256 = match currency.is_expo_shrinked18to9() {
-					true => result.4 / U256::exp10(9),
-					false => result.4,
-				};
+			Ok(res) => match res {
+				Ok(result) => match result {
+					Ok(result) => match result {
+						Ok(result) => {
+							let balance: U256 = match currency.is_expo_shrinked18to9() {
+								true => result.4 / U256::exp10(9),
+								false => result.4,
+							};
 
-				Ok((
-					result.0.as_u64(),
-					result.1,
-					result.2,
-					result.3,
-					balance.as_u64(),
-				))
-			}
+							Ok((
+								result.0.as_u64(),
+								result.1,
+								result.2,
+								result.3,
+								balance.as_u64(),
+							))
+						}
+						_ => Err(ErrorKind::InfuraNodeClient(format!(
+							"Get Swap Details {} Failed!",
+							currency
+						))),
+					},
+					_ => Err(ErrorKind::InfuraNodeClient(format!(
+						"Get Swap Details {} Failed!",
+						currency
+					))),
+				},
+				_ => Err(ErrorKind::InfuraNodeClient(format!(
+					"Get Swap Details {} Failed!",
+					currency
+				))),
+			},
 			_ => Err(ErrorKind::InfuraNodeClient(format!(
 				"Get Swap Details {} Failed!",
 				currency

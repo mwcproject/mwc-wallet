@@ -49,6 +49,7 @@ crypto_box = "0.5"
 crc = "1.8"
 maplit = "1.0"
 num-bigint = "0.2"
+crossbeam-utils = "0.7"
 
 libp2p = { git = "https://github.com/mwcproject/rust-libp2p", branch = "master", default-features = false, features = [ "noise", "yamux", "mplex", "dns", "tcp-tokio", "ping", "gossipsub"] }
 #libp2p = { path = "../../rust-libp2p", default-features = false, features = [ "noise", "yamux", "mplex", "dns", "tcp-tokio", "ping", "gossipsub"] }
