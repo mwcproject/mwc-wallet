@@ -529,7 +529,6 @@ pub fn parse_send_args(args: &ArgMatches) -> Result<command::SendArgs, ParseErro
 			true => {
 				// if the destination address is a TOR address, we don't need the address
 				// separately
-
 				let proof_dest = proofaddress::address_to_pubkey(dest.to_string());
 				match ProvableAddress::from_str(&proof_dest) {
 					Ok(a) => Some(a),
@@ -540,6 +539,9 @@ pub fn parse_send_args(args: &ArgMatches) -> Result<command::SendArgs, ParseErro
 						)) {
 							Ok(a) => Some(a),
 							Err(e) => {
+                                if !estimate_selection_strategies {
+                                    println!("No recipient Slatepack address or provided address invalid. No payment proof will be requested.");
+                                }
 								let msg = format!("Invalid proof address: {:?}", e);
 								return Err(ParseError::ArgumentError(msg));
 							}
