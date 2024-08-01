@@ -55,3 +55,7 @@ hyper-rustls = { version = "0.21", default-features = false}
 
 [target.'cfg(target_os = "android")'.dependencies]
 hyper-rustls = { version = "0.21", default-features = false,  features = ["webpki-tokio"] }
+
+
+[dev-dependencies]
+"remove_dir_all" = "0.7"

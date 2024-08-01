@@ -2431,6 +2431,7 @@ dependencies = [
  "log",
  "prettytable-rs",
  "rand 0.7.3",
+ "remove_dir_all",
  "ring 0.16.20",
  "serde",
  "serde_derive",
@@ -2469,6 +2470,7 @@ dependencies = [
  "nanoid",
  "rand 0.6.5",
  "regex",
+ "remove_dir_all",
  "reqwest",
  "ring 0.16.20",
  "serde",
@@ -3884,6 +3886,7 @@ dependencies = [
  "linefeed",
  "log",
  "prettytable-rs",
+ "remove_dir_all",
  "rpassword",
  "rustyline",
  "semver 0.10.0",
@@ -5087,6 +5090,19 @@ name = "regex-syntax"
 version = "0.8.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7a66a03ae7c801facd77a29370b4faec201768915ac14a721ba36f20bc9c209b"
+
+[[package]]
+name = "remove_dir_all"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "882f368737489ea543bc5c340e6f3d34a28c39980bd9a979e47322b26f60ac40"
+dependencies = [
+ "libc",
+ "log",
+ "num_cpus",
+ "rayon",
+ "winapi 0.3.9",
+]
 
 [[package]]
 name = "reqwest"
