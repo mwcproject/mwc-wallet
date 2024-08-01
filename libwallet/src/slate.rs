@@ -696,9 +696,9 @@ impl Slate {
 		}
 	}
 
-	// This is the msg that we will sign as part of the tx kernel.
-	// If lock_height is 0 then build a plain kernel, otherwise build a height locked kernel.
-	fn msg_to_sign(&self) -> Result<secp::Message, Error> {
+	/// This is the msg that we will sign as part of the tx kernel.
+	/// If lock_height is 0 then build a plain kernel, otherwise build a height locked kernel.
+	pub fn msg_to_sign(&self) -> Result<secp::Message, Error> {
 		let msg = self.kernel_features()?.kernel_sig_msg()?;
 		Ok(msg)
 	}
@@ -755,7 +755,7 @@ impl Slate {
 	}
 
 	/// Return the sum of public nonces
-	fn pub_nonce_sum(&self, secp: &Secp256k1) -> Result<PublicKey, Error> {
+	pub fn pub_nonce_sum(&self, secp: &Secp256k1) -> Result<PublicKey, Error> {
 		let pub_nonces: Vec<&PublicKey> = self
 			.participant_data
 			.iter()
