@@ -539,9 +539,9 @@ pub fn parse_send_args(args: &ArgMatches) -> Result<command::SendArgs, ParseErro
 						)) {
 							Ok(a) => Some(a),
 							Err(e) => {
-                                if !estimate_selection_strategies {
-                                    println!("No recipient Slatepack address or provided address invalid. No payment proof will be requested.");
-                                }
+								if !estimate_selection_strategies {
+									println!("No recipient Slatepack address or provided address invalid. No payment proof will be requested.");
+								}
 								let msg = format!("Invalid proof address: {:?}", e);
 								return Err(ParseError::ArgumentError(msg));
 							}
