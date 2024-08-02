@@ -954,7 +954,7 @@ pub trait OwnerRpcV3 {
 		}
 	}
 	# "#
-	# , 0, false, false, false, false);
+	# ,true, 0, false, false, false, false, false);
 	```
 	 */
 	fn get_rewind_hash(&self, token: Token) -> Result<String, ErrorKind>;
@@ -982,55 +982,55 @@ pub trait OwnerRpcV3 {
 		"result":{
 			"Ok":{
 				"last_pmmr_index":8,
-				"output_result":[
-					   {
-						   "commit":"08e1da9e6dc4d6e808a718b2f110a991dd775d65ce5ae408a4e1f002a4961aa9e7",
-						   "height":1,
-						   "is_coinbase":true,
-						   "lock_height":4,
-						   "mmr_index":1,
-						   "value":60000000000
-					   },
-					   {
-						   "commit":"087df32304c5d4ae8b2af0bc31e700019d722910ef87dd4eec3197b80b207e3045",
-						   "height":2,
-						   "is_coinbase":true,
-						   "lock_height":5,
-						   "mmr_index":2,
-						   "value":60000000000
-					   },
-					   {
-						   "commit":"084219d64014223a205431acfa8f8cc3e8cb8c6d04df80b26713314becf83861c7",
-						   "height":3,
-						   "is_coinbase":true,
-						   "lock_height":6,
-						   "mmr_index":4,
-						   "value":60000000000
-					   },
-					   {
-						   "commit":"09c5efc4dab05d7d16fc90168c484c13f15a142ea4e1bf93c3fad12f5e8a402598",
-						   "height":4,
-						   "is_coinbase":true,
-						   "lock_height":7,
-						   "mmr_index":5,
-						   "value":60000000000
-					   },
-					   {
-						   "commit":"08fe198e525a5937d0c5d01fa354394d2679be6df5d42064a0f7550c332fce3d9d",
-						   "height":5,
-						   "is_coinbase":true,
-						   "lock_height":8,
-						   "mmr_index":8,
-						   "value":60000000000
-					   }
-				],
-				"rewind_hash":"c820c52a492b7db511c752035483d0e50e8fd3ec62544f1b99638e220a4682de",
-				"total_balance":300000000000
+				"output_result": [
+				  {
+					"commit": "0910c1752100733bae49e877286835aab76d5856ef8139b6c6e3f51798aa461b03",
+					"height": 1,
+					"is_coinbase": true,
+					"lock_height": 4,
+					"mmr_index": 1,
+					"value": 2380952380
+				 },
+			   {
+				 "commit": "098778ce2243fa34e5876c8cb7f6dbbbd6a5649c1561973a807a6811941c12363c",
+				 "height": 2,
+				 "is_coinbase": true,
+				 "lock_height": 5,
+				 "mmr_index": 2,
+				 "value": 2380952380
+			   },
+			   {
+				 "commit": "09c22771c700c9ccc1feea8fb151b4e496607bb442f1e1e7bb93992f6422886954",
+				 "height": 3,
+				 "is_coinbase": true,
+				 "lock_height": 6,
+				 "mmr_index": 4,
+				 "value": 2380952380
+			   },
+			   {
+				 "commit": "0834ced7ae2dbf08f2008ff99fe0f447863405c0622233ece68d39e2ae02f7bf0c",
+				 "height": 4,
+				 "is_coinbase": true,
+				 "lock_height": 7,
+				 "mmr_index": 5,
+				 "value": 2380952380
+			   },
+			   {
+				 "commit": "08e0404fe044830d8f5be9953be5c70b5b7d525e4ecd3973437d9d6005ea5cd2bc",
+				 "height": 5,
+				 "is_coinbase": true,
+				 "lock_height": 8,
+				 "mmr_index": 8,
+				 "value": 2380952380
+			   }
+			 ],
+			 "rewind_hash": "c820c52a492b7db511c752035483d0e50e8fd3ec62544f1b99638e220a4682de",
+			 "total_balance": 11904761900
 			}
 		}
 	 }
 	# "#
-	# , 5, false, false, false, false);
+	# ,true, 5, false, false, false, false, false);
 	```
 	 */
 	fn scan_rewind_hash(

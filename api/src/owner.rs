@@ -1399,7 +1399,7 @@ where
 	/// ```
 	/// # grin_wallet_api::doctest_helper_setup_doc_env!(wallet, wallet_config);
 	///
-	/// let mut api_owner = Owner::new(wallet.clone(), None);
+	/// let mut api_owner = Owner::new(wallet.clone(), None, None);
 	/// let result = api_owner.scan(
 	///     None,
 	///     Some(20000),
@@ -1439,7 +1439,7 @@ where
 	/// ```
 	/// # grin_wallet_api::doctest_helper_setup_doc_env!(wallet, wallet_config);
 	///
-	/// let mut api_owner = Owner::new(wallet.clone(), None);
+	/// let mut api_owner = Owner::new(wallet.clone(), None, None);
 	/// let result = api_owner.scan(
 	///     None,
 	///     Some(20000),
