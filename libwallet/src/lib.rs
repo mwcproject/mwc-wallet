@@ -97,7 +97,7 @@ pub use slate_versions::ser as dalek_ser;
 pub use types::{
 	AcctPathMapping, BlockIdentifier, CbData, Context, HeaderInfo, NodeClient, NodeVersionInfo,
 	OutputData, OutputStatus, ScannedBlockInfo, StoredProofInfo, TxLogEntry, TxLogEntryType,
-	WalletBackend, WalletInfo, WalletInst, WalletLCProvider, WalletOutputBatch,
+	ViewWallet, WalletBackend, WalletInfo, WalletInst, WalletLCProvider, WalletOutputBatch,
 };
 
 pub use api_impl::foreign::{get_receive_account, set_receive_account};

@@ -18,8 +18,10 @@ use uuid::Uuid;
 
 use crate::grin_core::core::hash::Hashed;
 use crate::grin_core::core::Transaction;
+use crate::grin_keychain::ViewKey;
 use crate::grin_util::secp::key::SecretKey;
 use crate::grin_util::Mutex;
+use crate::grin_util::ToHex;
 
 use crate::api_impl::owner_updater::StatusMessage;
 use crate::grin_keychain::{Identifier, Keychain};
@@ -32,7 +34,7 @@ use crate::types::{
 };
 use crate::{
 	wallet_lock, InitTxArgs, IssueInvoiceTxArgs, NodeHeightResult, OutputCommitMapping,
-	PaymentProof, ScannedBlockInfo, TxLogEntryType, WalletInst, WalletLCProvider,
+	PaymentProof, ScannedBlockInfo, TxLogEntryType, ViewWallet, WalletInst, WalletLCProvider,
 };
 use crate::{Error, ErrorKind};
 
@@ -81,6 +83,23 @@ where
 	K: Keychain + 'a,
 {
 	w.set_parent_key_id_by_name(label)
+}
+
+/// Hash of the wallet root public key
+pub fn get_rewind_hash<'a, L, C, K>(
+	wallet_inst: Arc<Mutex<Box<dyn WalletInst<'a, L, C, K>>>>,
+	keychain_mask: Option<&SecretKey>,
+) -> Result<String, Error>
+where
+	L: WalletLCProvider<'a, C, K>,
+	C: NodeClient + 'a,
+	K: Keychain + 'a,
+{
+	wallet_lock!(wallet_inst, w);
+	let keychain = w.keychain(keychain_mask)?;
+	let root_public_key = keychain.public_root_key();
+	let rewind_hash = ViewKey::rewind_hash(keychain.secp(), root_public_key).to_hex();
+	Ok(rewind_hash)
 }
 
 /// Retrieve the MQS address for the wallet
@@ -979,6 +998,46 @@ where
 /// verify slate messages
 pub fn verify_slate_messages(slate: &Slate) -> Result<(), Error> {
 	slate.verify_messages()
+}
+
+/// Scan outputs with the rewind hash of a third-party wallet.
+/// Help to retrieve outputs information that belongs it
+pub fn scan_rewind_hash<'a, L, C, K>(
+	wallet_inst: Arc<Mutex<Box<dyn WalletInst<'a, L, C, K>>>>,
+	rewind_hash: String,
+	start_height: Option<u64>,
+	status_send_channel: &Option<Sender<StatusMessage>>,
+) -> Result<ViewWallet, Error>
+where
+	L: WalletLCProvider<'a, C, K>,
+	C: NodeClient + 'a,
+	K: Keychain + 'a,
+{
+	let is_hex = rewind_hash.chars().all(|c| c.is_ascii_hexdigit());
+	let rewind_hash = rewind_hash.to_lowercase();
+	if !(is_hex && rewind_hash.len() == 64) {
+		let msg = format!("Invalid Rewind Hash");
+		return Err(ErrorKind::RewindHash(msg).into());
+	}
+
+	let tip = {
+		wallet_lock!(wallet_inst, w);
+		w.w2n_client().get_chain_tip()?
+	};
+
+	let start_height = match start_height {
+		Some(h) => h,
+		None => 1,
+	};
+
+	let info = scan::scan_rewind_hash(
+		wallet_inst,
+		rewind_hash,
+		start_height,
+		tip.0,
+		status_send_channel,
+	)?;
+	Ok(info)
 }
 
 /// check repair

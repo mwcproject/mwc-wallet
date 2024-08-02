@@ -371,6 +371,14 @@ pub enum ErrorKind {
 	/// Ethereum Wallet Error
 	#[fail(display = "Ethereum wallet error, {}", _0)]
 	EthereumWalletError(String),
+
+	/// Rewind Hash parsing error
+	#[fail(display = "Rewind Hash error: {}", _0)]
+	RewindHash(String),
+
+	/// Nonce creation error
+	#[fail(display = "Nonce error: {}", _0)]
+	Nonce(String),
 }
 
 impl Display for Error {
