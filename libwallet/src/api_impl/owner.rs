@@ -17,14 +17,15 @@
 use uuid::Uuid;
 
 use crate::grin_core::core::hash::Hashed;
-use crate::grin_core::core::Transaction;
+use crate::grin_core::core::{Output, OutputFeatures, Transaction};
+use crate::grin_core::libtx::proof;
 use crate::grin_keychain::ViewKey;
 use crate::grin_util::secp::key::SecretKey;
 use crate::grin_util::Mutex;
 use crate::grin_util::ToHex;
 
 use crate::api_impl::owner_updater::StatusMessage;
-use crate::grin_keychain::{Identifier, Keychain};
+use crate::grin_keychain::{BlindingFactor, Identifier, Keychain, SwitchCommitmentType};
 use crate::grin_util::secp::key::PublicKey;
 
 use crate::internal::{keys, scan, selection, tx, updater};
@@ -33,8 +34,9 @@ use crate::types::{
 	AcctPathMapping, Context, NodeClient, OutputData, TxLogEntry, WalletBackend, WalletInfo,
 };
 use crate::{
-	wallet_lock, InitTxArgs, IssueInvoiceTxArgs, NodeHeightResult, OutputCommitMapping,
-	PaymentProof, ScannedBlockInfo, TxLogEntryType, ViewWallet, WalletInst, WalletLCProvider,
+	wallet_lock, BuiltOutput, InitTxArgs, IssueInvoiceTxArgs, NodeHeightResult,
+	OutputCommitMapping, PaymentProof, ScannedBlockInfo, TxLogEntryType, ViewWallet, WalletInst,
+	WalletLCProvider,
 };
 use crate::{Error, ErrorKind};
 
@@ -1538,4 +1540,43 @@ where
 		_minimum_confirmations,
 	)?;
 	Ok(())
+}
+
+/// Builds an output for the wallet's next available key
+pub fn build_output<'a, T: ?Sized, C, K>(
+	w: &mut T,
+	keychain_mask: Option<&SecretKey>,
+	features: OutputFeatures,
+	amount: u64,
+) -> Result<BuiltOutput, Error>
+where
+	T: WalletBackend<'a, C, K>,
+	C: NodeClient + 'a,
+	K: Keychain + 'a,
+{
+	let k = w.keychain(keychain_mask)?;
+
+	let key_id = keys::next_available_key(&mut *w, keychain_mask)?;
+
+	let blind = k.derive_key(amount, &key_id, SwitchCommitmentType::Regular)?;
+	let commit = k.secp().commit(amount, blind.clone())?;
+
+	let proof_builder = proof::ProofBuilder::new(&k);
+	let proof = proof::create(
+		&k,
+		&proof_builder,
+		amount,
+		&key_id,
+		SwitchCommitmentType::Regular,
+		commit,
+		None,
+	)?;
+
+	let output = Output::new(features, commit, proof);
+
+	Ok(BuiltOutput {
+		blind: BlindingFactor::from_secret_key(blind),
+		key_id: key_id,
+		output: output,
+	})
 }

@@ -19,6 +19,7 @@ use ed25519_dalek::PublicKey as DalekPublicKey;
 use uuid::Uuid;
 
 use crate::config::{MQSConfig, TorConfig, WalletConfig};
+use crate::core::core::OutputFeatures;
 use crate::core::core::Transaction;
 use crate::core::global;
 use crate::impls::create_sender;
@@ -32,7 +33,7 @@ use crate::libwallet::swap::fsm::state::{StateEtaInfo, StateId, StateProcessResp
 use crate::libwallet::swap::types::{Action, Currency, SwapTransactionsConfirmations};
 use crate::libwallet::swap::{message::Message, swap::Swap, swap::SwapJournalRecord};
 use crate::libwallet::{
-	AcctPathMapping, Error, ErrorKind, InitTxArgs, IssueInvoiceTxArgs, NodeClient,
+	AcctPathMapping, BuiltOutput, Error, ErrorKind, InitTxArgs, IssueInvoiceTxArgs, NodeClient,
 	NodeHeightResult, OutputCommitMapping, PaymentProof, Slate, SlatePurpose, SlateVersion,
 	SwapStartArgs, TxLogEntry, VersionedSlate, ViewWallet, WalletInfo, WalletInst,
 	WalletLCProvider,
@@ -2701,6 +2702,18 @@ where
 			address_index,
 			use_test_rng,
 		)
+	}
+
+	/// Builds an output
+	pub fn build_output(
+		&self,
+		keychain_mask: Option<&SecretKey>,
+		features: OutputFeatures,
+		amount: u64,
+	) -> Result<BuiltOutput, Error> {
+		let mut w_lock = self.wallet_inst.lock();
+		let w = w_lock.lc_provider()?.wallet_inst()?;
+		owner::build_output(&mut **w, keychain_mask, features, amount)
 	}
 }
 

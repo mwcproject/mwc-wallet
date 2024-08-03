@@ -86,9 +86,9 @@ pub use api_impl::owner_libp2p;
 pub use api_impl::owner_swap;
 pub use api_impl::owner_updater::StatusMessage;
 pub use api_impl::types::{
-	BlockFees, InitTxArgs, InitTxSendArgs, IssueInvoiceTxArgs, NodeHeightResult,
-	OutputCommitMapping, PaymentProof, ReplayMitigationConfig, SendTXArgs, SwapStartArgs,
-	VersionInfo,
+	Amount, BlockFees, BuiltOutput, InitTxArgs, InitTxSendArgs, IssueInvoiceTxArgs,
+	NodeHeightResult, OutputCommitMapping, PaymentProof, ReplayMitigationConfig, SendTXArgs,
+	SwapStartArgs, VersionInfo,
 };
 pub use internal::scan::{scan, set_replay_config};
 pub use proof::tx_proof::TxProof;

@@ -14,8 +14,9 @@
 
 //! Types specific to the wallet api, mostly argument serialization
 
+use crate::grin_core::core::Output;
 use crate::grin_core::libtx::secp_ser;
-use crate::grin_keychain::Identifier;
+use crate::grin_keychain::{BlindingFactor, Identifier};
 use crate::grin_util::secp::pedersen;
 use crate::proof::proofaddress;
 use crate::proof::proofaddress::ProvableAddress;
@@ -46,6 +47,11 @@ pub struct SendTXArgs {
 	/// Optional slate version to target when sending
 	pub target_slate_version: Option<u16>,
 }
+
+/// Type for storing amounts (in nanogrins).
+/// Serializes as a string but can deserialize from a string or u64.
+#[derive(Serialize, Deserialize)]
+pub struct Amount(#[serde(with = "secp_ser::string_or_u64")] pub u64);
 
 /// V2 Init / Send TX API Args
 #[derive(Clone, Serialize, Deserialize, Debug)]
@@ -404,4 +410,19 @@ pub struct SwapStartArgs {
 	pub dry_run: bool,
 	/// Tag for this offer. Needed for swap marketplace related offers management
 	pub tag: Option<String>,
+}
+
+/// Build output result
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct BuiltOutput {
+	/// Blinding Factor
+	#[serde(
+		serialize_with = "secp_ser::as_hex",
+		deserialize_with = "secp_ser::blind_from_hex"
+	)]
+	pub blind: BlindingFactor,
+	/// Key Identifier
+	pub key_id: Identifier,
+	/// Output
+	pub output: Output,
 }
