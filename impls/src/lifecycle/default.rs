@@ -23,6 +23,7 @@ use crate::keychain::Keychain;
 use crate::libwallet::swap::ethereum::generate_ethereum_wallet;
 use crate::libwallet::{Error, ErrorKind, NodeClient, WalletBackend, WalletLCProvider};
 use crate::lifecycle::seed::WalletSeed;
+use crate::lifecycle::{root_public_key, WalletRootPublicKey};
 use crate::util::secp::key::SecretKey;
 use crate::util::ZeroingString;
 use crate::LMDBBackend;
@@ -191,6 +192,7 @@ where
 		password: ZeroingString,
 		test_mode: bool,
 		wallet_data_dir: Option<&str>,
+		root_public_key: Option<ZeroingString>,
 	) -> Result<(), Error> {
 		let mut data_dir_name = PathBuf::from(self.data_dir.clone());
 		data_dir_name.push(wallet_data_dir.unwrap_or(GRIN_WALLET_DIR));
@@ -206,8 +208,8 @@ where
 			&data_dir_name,
 			mnemonic_length,
 			mnemonic.clone(),
-			password,
-			test_mode,
+			password.clone(),
+			test_mode
 		)
 		.map_err(|e| {
 			ErrorKind::Lifecycle(format!(
@@ -216,9 +218,29 @@ where
 			))
 		})?;
 
+		if let Some(rkp) = root_public_key.clone() {
+			WalletRootPublicKey::init_file(
+				&data_dir_name,
+				password,
+				test_mode,
+				rkp
+			)
+			.map_err(|e| {
+				ErrorKind::Lifecycle(format!(
+					"Error creating wallet seed (is mnemonic valid?), {}",
+					e
+				))
+			})?;
+		}
+		
+		let rpk = match root_public_key {
+			Some(rpk) => Some(rpk.as_bytes().to_vec()),
+			None => None,
+		};
 		info!("Wallet seed file created");
+		println!("Storing the pub key before {:?}", rpk.clone());
 		let mut wallet: LMDBBackend<'a, C, K> =
-			match LMDBBackend::new(&data_dir_name, self.node_client.clone()) {
+			match LMDBBackend::new(&data_dir_name, self.node_client.clone(),rpk) {
 				Err(e) => {
 					let msg = format!("Error creating wallet: {}, Data Dir: {}", e, &data_dir_name);
 					error!("{}", msg);
@@ -245,7 +267,7 @@ where
 		data_dir_name.push(wallet_data_dir.unwrap_or(GRIN_WALLET_DIR));
 		let data_dir_name = data_dir_name.to_str().unwrap();
 		let mut wallet: LMDBBackend<'a, C, K> =
-			match LMDBBackend::new(&data_dir_name, self.node_client.clone()) {
+			match LMDBBackend::new(&data_dir_name, self.node_client.clone(), None) {
 				Err(e) => {
 					let msg = format!("Error opening wallet: {}, Data Dir: {}", e, &data_dir_name);
 					return Err(ErrorKind::Lifecycle(msg).into());
@@ -397,7 +419,7 @@ where
 			0,
 			Some(ZeroingString::from(orig_mnemonic)),
 			new.clone(),
-			false,
+			false
 		);
 		info!("Wallet seed file created");
 

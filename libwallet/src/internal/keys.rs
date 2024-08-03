@@ -60,6 +60,17 @@ where
 	Ok(wallet.acct_path_iter().collect())
 }
 
+/// Returns a list of account to BIP32 path mappings
+pub fn get_root_public_key<'a, T: ?Sized, C, K>(wallet: &mut T, label: String) -> Result<Option<AcctPathMapping>, Error>
+where
+	T: WalletBackend<'a, C, K>,
+	C: NodeClient + 'a,
+	K: Keychain + 'a,
+{
+	let rpk  = wallet.get_acct_path(label)?;
+	Ok(rpk)
+}
+
 /// Renames an account path with a new label
 pub fn rename_acct_path<'a, T: ?Sized, C, K>(
 	wallet: &mut T,
@@ -143,6 +154,7 @@ where
 	let save_path = AcctPathMapping {
 		label: label,
 		path: return_id.clone(),
+		root_public_key: None
 	};
 
 	let mut batch = wallet.batch(keychain_mask)?;
@@ -167,6 +179,7 @@ where
 	let save_path = AcctPathMapping {
 		label: label,
 		path: path.clone(),
+		root_public_key: None
 	};
 
 	let mut batch = wallet.batch(keychain_mask)?;

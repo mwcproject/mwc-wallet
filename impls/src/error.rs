@@ -72,6 +72,14 @@ pub enum ErrorKind {
 	#[fail(display = "Wallet doesn't exist at {}. {}", _0, _1)]
 	WalletDoesntExist(String, String),
 
+	/// Wallet seed already exists
+	#[fail(display = "Wallet root public key file exists: {}", _0)]
+	WalletRootPublicKeyExists(String),
+
+	/// Wallet seed doesn't exist
+	#[fail(display = "Wallet root public key doesn't exist error")]
+	WalletRootPublicKeyDoesntExist,
+
 	/// Enc/Decryption Error
 	#[fail(display = "Enc/Decryption error (check password?), {}", _0)]
 	Encryption(String),

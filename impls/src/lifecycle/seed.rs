@@ -30,9 +30,18 @@ use crate::{Error, ErrorKind};
 use std::num::NonZeroU32;
 
 pub const SEED_FILE: &str = "wallet.seed";
+pub const ROOT_PK_FILE: &str = "wallet.rpk";
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct WalletSeed(Vec<u8>);
+
+pub fn show_root_public_key(phrase: ZeroingString) {
+	println!("Your root public key is:");
+	println!();
+	println!("{}", &*phrase);
+	println!();
+}
+
 
 pub fn show_recovery_phrase(phrase: ZeroingString) {
 	println!("Your recovery phrase is:");

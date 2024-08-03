@@ -73,6 +73,20 @@ where
 	keys::new_acct_path(&mut *w, keychain_mask, label)
 }
 
+
+/// get account public key 
+pub fn get_root_public_key<'a, T: ?Sized, C, K>(
+	w: &mut T,
+	label: &str,
+) -> Result<Option<AcctPathMapping>, Error>
+where
+	T: WalletBackend<'a, C, K>,
+	C: NodeClient + 'a,
+	K: Keychain + 'a,
+{
+	keys::get_root_public_key(&mut *w, label.to_string())
+}
+
 /// set active account
 pub fn set_active_account<'a, T: ?Sized, C, K>(w: &mut T, label: &str) -> Result<(), Error>
 where
@@ -553,6 +567,7 @@ pub fn issue_invoice_tx<'a, T: ?Sized, C, K>(
 	args: &IssueInvoiceTxArgs,
 	use_test_rng: bool,
 	num_outputs: usize, // Number of outputs for this transaction. Normally it is 1
+	hardware: bool
 ) -> Result<Slate, Error>
 where
 	T: WalletBackend<'a, C, K>,
@@ -596,6 +611,7 @@ where
 		true,
 		use_test_rng,
 		num_outputs,
+		hardware
 	)?;
 
 	// Save the aggsig context in our DB for when we

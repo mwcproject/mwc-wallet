@@ -403,6 +403,7 @@ where
 
 	let mut out_vec = Vec::new();
 	for kva in &key_vec_amounts {
+		out_vec.push();
 		out_vec.push(build::output(kva.1, kva.0.clone()));
 	}
 

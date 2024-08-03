@@ -121,7 +121,7 @@ pub fn create_local_wallet(
 		>;
 	let lc = wallet.lc_provider().unwrap();
 	let _ = lc.set_top_level_directory(&format!("{}/{}", test_dir, name));
-	lc.create_wallet(None, mnemonic, 32, ZeroingString::from(""), false, None)
+	lc.create_wallet(None, mnemonic, 32, ZeroingString::from(""), false, None, None)
 		.unwrap();
 	let mask = lc
 		.open_wallet(None, ZeroingString::from(""), create_mask, false, None)

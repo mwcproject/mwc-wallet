@@ -14,8 +14,13 @@
 
 mod default;
 mod seed;
+mod root_public_key;
 
 pub use self::default::DefaultLCProvider;
 pub use seed::show_recovery_phrase;
 pub use seed::EncryptedWalletSeed;
 pub use seed::WalletSeed;
+
+pub use root_public_key::show_root_public_key;
+pub use root_public_key::EncryptedWalletRootPublicKey;
+pub use root_public_key::WalletRootPublicKey;

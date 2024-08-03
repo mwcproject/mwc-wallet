@@ -29,8 +29,8 @@ use grin_wallet_util::grin_keychain;
 use grin_wallet_util::grin_p2p;
 use grin_wallet_util::grin_store;
 use grin_wallet_util::grin_util;
-
 use grin_wallet_util as util;
+use grin_wallet_util::secp256k1zkp as sec15;
 
 use blake2_rfc as blake2;
 
@@ -58,12 +58,14 @@ pub mod api_impl;
 /// Ring prev version internals that are needed for our internal encription functionality
 mod error;
 pub mod internal;
+pub mod device;
 pub mod proof;
 mod slate;
 pub mod slate_versions;
 pub mod slatepack;
 /// Atomic Swap library
 pub mod swap;
+
 mod types;
 extern crate bitcoin as bitcoin_lib;
 extern crate bitcoin_hashes;

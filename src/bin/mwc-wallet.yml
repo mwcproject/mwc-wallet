@@ -250,6 +250,11 @@ subcommands:
             short: o
             long: outfile
             takes_value: true
+        - hardware:
+            help: Initialize new wallet using a recovery phrase
+            short: w
+            long: hardware
+            takes_value: false
   - finalize:
       about: Processes a receiver's transaction file to finalize a transfer.
       args:
@@ -470,6 +475,11 @@ subcommands:
             short: r
             long: recover
             takes_value: false
+        - hardware:
+            help: Initialize new wallet using a recovery phrase
+            short: w
+            long: hardware
+            takes_value: false
   - open:
       about: Opens a wallet (interactive mode only)
   - close:
@@ -478,6 +488,14 @@ subcommands:
       about: Displays a recovery phrase for the wallet. (use `init -r` to perform recovery)
   - address:
       about: Display the wallet's payment proof address
+  - get_public_key:
+      about: Display public key
+      args:
+        - label:
+            help: Label of the account
+            short: l
+            long: label
+            takes_value: true
   - scan:
       about: Checks a wallet's outputs against a live node, repairing and restoring missing outputs if required
       args:

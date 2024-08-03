@@ -401,6 +401,7 @@ where
 		address: Option<String>,
 		dest_acct_name: Option<&str>,
 		message: Option<String>,
+		hardware: bool
 	) -> Result<Slate, Error> {
 		let mut w_lock = self.wallet_inst.lock();
 		let w = w_lock.lc_provider()?.wallet_inst()?;
@@ -423,6 +424,7 @@ where
 			message,
 			self.doctest_mode,
 			true,
+			hardware
 		)?;
 		Ok(slate)
 	}

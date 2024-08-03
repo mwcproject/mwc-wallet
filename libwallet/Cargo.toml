@@ -50,6 +50,15 @@ crc = "1.8"
 maplit = "1.0"
 num-bigint = "0.2"
 
+parking_lot = "0.10"
+grin_secp256k1zkp = { path ="../../rust-secp256k1-zkp" }
+ledger-transport = { git = "https://github.com/mwcproject/ledger-rs", package = "ledger-transport" }
+ledger-transport-hid = { git = "https://github.com/mwcproject/ledger-rs", package = "ledger-transport-hid" }
+ledger-zondax-generic = { git = "https://github.com/mwcproject/ledger-rs", package = "ledger-zondax-generic" }
+hidapi = "2.6.1"
+thiserror = "1.0"
+
+
 libp2p = { git = "https://github.com/mwcproject/rust-libp2p", branch = "master", default-features = false, features = [ "noise", "yamux", "mplex", "dns", "tcp-tokio", "ping", "gossipsub"] }
 #libp2p = { path = "../../rust-libp2p", default-features = false, features = [ "noise", "yamux", "mplex", "dns", "tcp-tokio", "ping", "gossipsub"] }
 tokio = { version = "0.2.1", features = ["full"] }
@@ -69,6 +78,8 @@ wagyu-ethereum = { git = "https://github.com/mwcproject/wagyu-ethereum", branch 
 wagyu-model = { git = "https://github.com/mwcproject/wagyu-model", branch = "master" }
 zcash_primitives = { version = "0.4.0", git = "https://github.com/mwcproject/librustzcash", branch = "master", features = ["transparent-inputs"] }
 #zcash_primitives = { path = "../../librustzcash/zcash_primitives", features = ["transparent-inputs"] }
+
+
 
 
 grin_wallet_util = { path = "../util", version = "4.4.0" }

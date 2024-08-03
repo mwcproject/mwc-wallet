@@ -156,7 +156,7 @@ fn file_repost_test_impl(test_dir: &'static str) -> Result<(), wallet::Error> {
 			.get_tx(&sec_key)?
 			.to_slate()?
 			.0;
-		slate = api.receive_tx(&slate, None, None, None)?;
+		slate = api.receive_tx(&slate, None, None, None, false)?;
 		PathToSlatePutter::build_plain(Some((&receive_file).into()))
 			.put_tx(&slate, &sec_key, true)?;
 		Ok(())

@@ -90,6 +90,7 @@ pub struct InitArgs {
 	pub config: WalletConfig,
 	pub recovery_phrase: Option<ZeroingString>,
 	pub restore: bool,
+	pub root_public_key: Option<ZeroingString>,
 }
 
 pub fn init<L, C, K>(
@@ -120,6 +121,7 @@ where
 		args.password.clone(),
 		false,
 		wallet_data_dir.clone(),
+		args.root_public_key.clone()
 	)?;
 
 	let m = p.get_mnemonic(None, args.password, wallet_data_dir)?;
@@ -310,6 +312,33 @@ where
 			return Err(ErrorKind::LibWallet(err_str).into());
 		}
 	}
+	Ok(())
+}
+
+pub struct GetRootPublicKeyArgs {
+	pub account_label: String
+}
+
+pub fn get_root_public_key<L, C, K>(
+	owner_api: &mut Owner<L, C, K>,
+	keychain_mask: Option<&SecretKey>,
+	args: GetRootPublicKeyArgs
+) -> Result<(), Error>
+where
+	L: WalletLCProvider<'static, C, K> + 'static,
+	C: NodeClient + 'static,
+	K: keychain::Keychain + 'static,
+{
+	info!("Searching");
+	let label = args.account_label;
+	let _res = controller::owner_single_use(None, keychain_mask, Some(owner_api), |api, _m| {
+		let rpk = api.get_root_public_key(&label)?;
+		match rpk {
+			Some(s) => println!("Root public of account '{}': {}", label, s),
+			None => println!("No root public of account")
+		}
+		Ok(())
+	});
 	Ok(())
 }
 
@@ -527,6 +556,7 @@ where
 							Some(String::from("self")),
 							Some(&args.dest),
 							None,
+							true
 						)?;
 						Ok(())
 					})?;
@@ -586,6 +616,7 @@ pub struct ReceiveArgs {
 	pub input_slatepack_message: Option<String>,
 	pub message: Option<String>,
 	pub outfile: Option<String>,
+	pub hardware: bool
 }
 
 pub fn receive<L, C, K>(
@@ -650,6 +681,7 @@ where
 			Some(String::from("file")),
 			Some(&g_args.account),
 			args.message.clone(),
+			args.hardware.clone(),
 		)?;
 
 		let mut response_file = args.outfile.clone();

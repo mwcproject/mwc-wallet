@@ -20,6 +20,7 @@ use crate::util::file::get_first_line;
 use crate::util::secp::key::SecretKey;
 use crate::util::{Mutex, ZeroingString};
 
+use adpu::APDUCommands;
 /// Argument parsing and error handling for wallet commands
 use clap::ArgMatches;
 use ed25519_dalek::SecretKey as DalekSecretKey;
@@ -32,6 +33,7 @@ use grin_wallet_controller::{Error, ErrorKind};
 use grin_wallet_impls::tor::config::is_tor_address;
 use grin_wallet_impls::{DefaultLCProvider, DefaultWalletImpl};
 use grin_wallet_impls::{PathToSlateGetter, SlateGetter};
+use grin_wallet_libwallet::device::*;
 use grin_wallet_libwallet::proof::proofaddress;
 use grin_wallet_libwallet::proof::proofaddress::ProvableAddress;
 use grin_wallet_libwallet::Slate;
@@ -39,12 +41,15 @@ use grin_wallet_libwallet::{
 	swap::types::Currency, IssueInvoiceTxArgs, NodeClient, SwapStartArgs, WalletInst,
 	WalletLCProvider,
 };
+use grin_wallet_libwallet::device::types::ParseError;
 use grin_wallet_util::grin_core as core;
 use grin_wallet_util::grin_core::core::amount_to_hr_string;
 use grin_wallet_util::grin_core::global;
 use grin_wallet_util::grin_keychain as keychain;
+use ledger::prompt_pk;
 use linefeed::terminal::Signal;
 use linefeed::{Interface, ReadResult};
+use log::info;
 use rpassword;
 use std::sync::Arc;
 use std::{
@@ -63,26 +68,6 @@ macro_rules! arg_parse {
 			}
 		}
 	};
-}
-/// Simple error definition, just so we can return errors from all commands
-/// and let the caller figure out what to do
-#[derive(Clone, Eq, PartialEq, Debug, Fail)]
-
-pub enum ParseError {
-	#[fail(display = "Invalid Arguments: {}", _0)]
-	ArgumentError(String),
-	#[fail(display = "Parsing IO error: {}", _0)]
-	IOError(String),
-	#[fail(display = "Wallet configuration already exists: {}", _0)]
-	WalletExists(String),
-	#[fail(display = "User Cancelled")]
-	CancelledError,
-}
-
-impl From<std::io::Error> for ParseError {
-	fn from(e: std::io::Error) -> ParseError {
-		ParseError::IOError(format!("{}", e))
-	}
 }
 
 fn prompt_password_stdout(prompt: &str) -> ZeroingString {
@@ -355,11 +340,22 @@ where
 		false => None,
 	};
 
+	let root_pk = match args.is_present("hardware") {
+		true => {
+			println!("Please export the Root Public Key of your Harware wallet");
+			Some(prompt_pk(0)?)
+		},
+		false => None,
+	};
+
+	// println!("Your root public key: {}", &*root_pk.unwrap());
+
 	if recovery_phrase.is_some() {
 		println!("Please provide a new password for the recovered wallet");
 	} else {
 		println!("Please enter a password for your new wallet");
 	}
+
 
 	let password = match g_args.password.clone() {
 		Some(p) => p,
@@ -372,6 +368,7 @@ where
 		config: config.clone(),
 		recovery_phrase: recovery_phrase,
 		restore: false,
+		root_public_key: root_pk
 	})
 }
 
@@ -383,6 +380,17 @@ where
 	let passphrase = prompt_password(&g_args.password);
 	Ok(command::RecoverArgs {
 		passphrase: passphrase,
+	})
+}
+
+pub fn parse_get_root_public_key_args(
+	args: &ArgMatches,
+) -> Result<command::GetRootPublicKeyArgs, ParseError>
+where
+{
+	let account_label= args.value_of("label").unwrap();
+	Ok(command::GetRootPublicKeyArgs {
+    	account_label: account_label.to_owned(),
 	})
 }
 
@@ -657,6 +665,7 @@ pub fn parse_receive_unpack_args(args: &ArgMatches) -> Result<command::ReceiveAr
 		input_slatepack_message: args.value_of("content").map(|s| s.to_string()),
 		message: args.value_of("message").map(|s| s.to_string()),
 		outfile: args.value_of("outfile").map(|s| s.to_string()),
+		hardware: args.is_present("hardware")
 	})
 }
 
@@ -1558,6 +1567,10 @@ where
 		("recover", Some(_)) => {
 			let a = arg_parse!(parse_recover_args(&global_wallet_args,));
 			command::recover(owner_api, a, wallet_config.wallet_data_dir.as_deref())
+		}
+		("get_public_key", Some(args)) => {
+			let a = arg_parse!(parse_get_root_public_key_args(args,));
+			command::get_root_public_key(owner_api, keychain_mask.as_ref(), a)
 		}
 		("listen", Some(args)) => {
 			let mut c = wallet_config.clone();

@@ -420,7 +420,7 @@ where
 				)?;
 			} else {
 				let s = foreign_api
-					.receive_tx(slate, Some(from.get_full_name()), dest_acct_name, None)
+					.receive_tx(slate, Some(from.get_full_name()), dest_acct_name, None, true)
 					.map_err(|e| {
 						ErrorKind::LibWallet(format!(
 							"Unable to process incoming slate, receive_tx failed, {}",

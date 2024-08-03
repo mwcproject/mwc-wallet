@@ -34,3 +34,4 @@ pub use grin_keychain;
 pub use grin_p2p;
 pub use grin_store;
 pub use grin_util;
+pub use secp256k1zkp;

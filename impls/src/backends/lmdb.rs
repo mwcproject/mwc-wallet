@@ -53,6 +53,7 @@ const ACCOUNT_PATH_MAPPING_PREFIX: u8 = b'a';
 const LAST_SCANNED_BLOCK: u8 = b'm'; // pre v3.0 was l
 const LAST_WORKING_NODE_INDEX: u8 = b'n';
 const INTEGRITY_CONTEXT_PREFIX: u8 = b'g';
+const ROOT_PUBLIC_KEY_PREFIX: u8 = b'r';
 
 /// test to see if database files exist in the current directory. If so,
 /// use a DB backend for all operations
@@ -120,36 +121,45 @@ where
 	C: NodeClient + 'ck,
 	K: Keychain + 'ck,
 {
-	pub fn new(data_file_dir: &str, n_client: C) -> Result<Self, Error> {
+	pub fn new(data_file_dir: &str, n_client: C, root_public_key: Option<Vec<u8>>) -> Result<Self, Error> {
 		let db_path = path::Path::new(data_file_dir).join(DB_DIR);
 		fs::create_dir_all(&db_path).expect("Couldn't create wallet backend directory!");
-
+	
 		let stored_tx_path = path::Path::new(data_file_dir).join(TX_SAVE_DIR);
 		fs::create_dir_all(&stored_tx_path)
 			.expect("Couldn't create wallet backend tx storage directory!");
-
+	
 		let store = store::Store::new(db_path.to_str().unwrap(), None, Some(DB_DIR), None)?;
-
+	
 		// Make sure default wallet derivation path always exists
 		// as well as path (so it can be retrieved by batches to know where to store
 		// completed transactions, for reference
 		let default_account = AcctPathMapping {
 			label: "default".to_owned(),
 			path: LMDBBackend::<C, K>::default_path(),
+			root_public_key: root_public_key.clone(),
 		};
+	
 		let acct_key = to_key(
 			ACCOUNT_PATH_MAPPING_PREFIX,
 			&mut default_account.label.as_bytes().to_vec(),
 		);
 
-		{
+		let is_exist = store.get_ser::<AcctPathMapping>(&acct_key)?.is_none();
+		println!("Does it exist? {:?}", is_exist);
+	
+		// Check if the default account already exists
+		if is_exist {
+			println!("Storing pub key {:?}", root_public_key.clone());
 			let batch = store.batch()?;
 			batch.put_ser(&acct_key, &default_account)?;
 			batch.commit()?;
+		} else {
+			println!("Default account already exists.");
 		}
-
+	
 		TxProof::init_proof_backend(data_file_dir)?;
-
+	
 		let res = LMDBBackend {
 			db: store,
 			data_file_dir: data_file_dir.to_owned(),
@@ -300,6 +310,19 @@ where
 	fn parent_key_id(&mut self) -> Identifier {
 		self.parent_key_id.clone()
 	}
+
+	fn set_root_public_key(&mut self, root_public_key: &secp::key::PublicKey, index: u32) -> Result<(), Error> {
+        let key = to_key(ROOT_PUBLIC_KEY_PREFIX, &mut vec![index as u8]);
+        let batch = self.db.batch()?;
+        batch.put_ser(&key, &root_public_key)?;
+        batch.commit()?;
+        Ok(())
+    }
+
+    fn get_root_public_key(&self, index: u32) -> Result<secp::key::PublicKey, Error> {
+        let key = to_key(ROOT_PUBLIC_KEY_PREFIX, &mut vec![index as u8]);
+        option_to_not_found(self.db.get_ser(&key), || format!("Index: {}", index)).map_err(|e| e.into())
+    }
 
 	fn get(&self, id: &Identifier, mmr_index: &Option<u64>) -> Result<OutputData, Error> {
 		let key = match mmr_index {

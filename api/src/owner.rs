@@ -16,6 +16,7 @@
 
 use chrono::prelude::*;
 use ed25519_dalek::PublicKey as DalekPublicKey;
+use grin_wallet_util::grin_util::ToHex;
 use uuid::Uuid;
 
 use crate::config::{MQSConfig, TorConfig, WalletConfig};
@@ -38,7 +39,7 @@ use crate::libwallet::{
 };
 use crate::util::logger::LoggingConfig;
 use crate::util::secp::key::SecretKey;
-use crate::util::{from_hex, Mutex, ZeroingString};
+use crate::util::{from_hex, to_hex, Mutex, ZeroingString};
 use grin_wallet_util::grin_util::secp::key::PublicKey;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, Sender};
@@ -340,6 +341,27 @@ where
 		let mut w_lock = self.wallet_inst.lock();
 		let w = w_lock.lc_provider()?.wallet_inst()?;
 		owner::create_account_path(&mut **w, keychain_mask, label)
+	}
+
+
+	pub fn get_root_public_key(
+		&self,
+		label: &str,
+	) -> Result<Option<String>, Error> {
+		let mut w_lock = self.wallet_inst.lock();
+		let w = w_lock.lc_provider()?.wallet_inst()?;
+		let rpk = owner::get_root_public_key(&mut **w, label)?;
+		match rpk {
+			Some(r) => {
+				let root_public_key = r.root_public_key;
+				println!("{:?}", root_public_key);
+				match root_public_key {
+					Some(rp) => Ok(Some(to_hex(&rp))),
+					None => Ok(None)
+				}
+			},
+			None => Ok(None)
+		}
 	}
 
 	/// Sets the wallet's currently active account. This sets the
@@ -880,7 +902,7 @@ where
 	) -> Result<Slate, Error> {
 		let mut w_lock = self.wallet_inst.lock();
 		let w = w_lock.lc_provider()?.wallet_inst()?;
-		owner::issue_invoice_tx(&mut **w, keychain_mask, args, self.doctest_mode, 1)
+		owner::issue_invoice_tx(&mut **w, keychain_mask, args, self.doctest_mode, 1, false)
 	}
 
 	/// Processes an invoice tranaction created by another party, essentially
@@ -1741,6 +1763,7 @@ where
 			password,
 			self.doctest_mode,
 			wallet_data_dir,
+			None
 		)
 	}
 

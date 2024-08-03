@@ -25,6 +25,7 @@ base64 = "0.9"
 ed25519-dalek = "1.0.0-pre.4"
 colored = "1.6"
 x25519-dalek = "0.6"
+hex = "0.3"
 
 grin_wallet_libwallet = { path = "../libwallet", version = "4.4.0" }
 grin_wallet_config = { path = "../config", version = "4.4.0" }
