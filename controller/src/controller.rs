@@ -23,6 +23,7 @@ use crate::util::{from_hex, to_base64, Mutex};
 use crate::{Error, ErrorKind};
 use futures::channel::oneshot;
 use grin_wallet_api::JsonId;
+use grin_wallet_config::types::{TorBridgeConfig, TorProxyConfig};
 use grin_wallet_util::OnionV3Address;
 use hyper::body;
 use hyper::header::HeaderValue;
@@ -46,6 +47,7 @@ use crate::config::{MQSConfig, TorConfig};
 use crate::core::global;
 use crate::impls::tor::config as tor_config;
 use crate::impls::tor::process as tor_process;
+use crate::impls::tor::{bridge as tor_bridge, proxy as tor_proxy};
 use crate::keychain::Keychain;
 use chrono::Utc;
 use easy_jsonrpc_mw::{Handler, MaybeReply};
@@ -59,6 +61,7 @@ use grin_wallet_util::grin_util::secp::pedersen::Commitment;
 use grin_wallet_util::grin_util::secp::{ContextFlag, Secp256k1};
 use grin_wallet_util::grin_util::static_secp_instance;
 use std::collections::HashMap;
+use std::convert::TryFrom;
 use std::net::{SocketAddr, SocketAddrV4};
 use std::pin::Pin;
 use std::sync::mpsc::Sender;
@@ -141,6 +144,8 @@ pub fn init_tor_listener<L, C, K>(
 	libp2p_listener_port: &Option<u16>,
 	tor_base: Option<&str>,
 	tor_log_file: &Option<String>,
+	bridge: TorBridgeConfig,
+	tor_proxy: TorProxyConfig,
 ) -> Result<(tor_process::TorProcess, SecretKey), Error>
 where
 	L: WalletLCProvider<'static, C, K> + 'static,
@@ -165,6 +170,27 @@ where
 	})?;
 	let onion_address = OnionV3Address::from_private(&sec_key.0)
 		.map_err(|e| ErrorKind::TorConfig(format!("Unable to build onion address, {}", e)))?;
+
+	let mut hm_tor_bridge: HashMap<String, String> = HashMap::new();
+	let mut tor_timeout = 200;
+	if bridge.bridge_line.is_some() {
+		tor_timeout = 300;
+		let bridge_config = tor_bridge::TorBridge::try_from(bridge)
+			.map_err(|e| ErrorKind::TorConfig(format!("{}", e).into()))?;
+		hm_tor_bridge = bridge_config
+			.to_hashmap()
+			.map_err(|e| ErrorKind::TorConfig(format!("{}", e).into()))?;
+	}
+
+	let mut hm_tor_poxy: HashMap<String, String> = HashMap::new();
+	if tor_proxy.transport.is_some() || tor_proxy.allowed_port.is_some() {
+		let proxy_config = tor_proxy::TorProxy::try_from(tor_proxy)
+			.map_err(|e| ErrorKind::TorConfig(format!("{}", e).into()))?;
+		hm_tor_poxy = proxy_config
+			.to_hashmap()
+			.map_err(|e| ErrorKind::TorConfig(format!("{}", e.kind()).into()))?;
+	}
+
 	warn!(
 		"Starting TOR Hidden Service for API listener at address {}, binding to {}",
 		onion_address, addr
@@ -177,6 +203,8 @@ where
 		libp2p_listener_port,
 		&vec![sec_key.clone()],
 		tor_log_file,
+		hm_tor_bridge,
+		hm_tor_poxy,
 	)
 	.map_err(|e| ErrorKind::TorConfig(format!("Failed to configure tor, {}", e).into()))?;
 	// Start TOR process
@@ -184,7 +212,7 @@ where
 	process
 		.torrc_path(&tor_path)
 		.working_dir(&tor_dir)
-		.timeout(200)
+		.timeout(tor_timeout)
 		.completion_percent(100)
 		.launch()
 		.map_err(|e| {
@@ -945,6 +973,8 @@ pub fn foreign_listener<L, C, K>(
 	socks_proxy_addr: &str,
 	libp2p_listen_port: &Option<u16>,
 	tor_log_file: &Option<String>,
+	tor_bridge: TorBridgeConfig,
+	tor_proxy: TorProxyConfig,
 ) -> Result<(), Error>
 where
 	L: WalletLCProvider<'static, C, K> + 'static,
@@ -963,6 +993,7 @@ where
 		let lc = w_lock.lc_provider()?;
 		let _ = lc.wallet_inst()?;
 	}
+
 	// need to keep in scope while the main listener is running
 	let tor_info = match use_tor {
 		true => match init_tor_listener(
@@ -973,11 +1004,13 @@ where
 			libp2p_listen_port,
 			None,
 			tor_log_file,
+			tor_bridge,
+			tor_proxy,
 		) {
 			Ok((tp, tor_secret)) => Some((tp, tor_secret)),
 			Err(e) => {
 				warn!("Unable to start TOR listener; Check that TOR executable is installed and on your path");
-				warn!("Tor Error: {}", e);
+				error!("Tor Error: {}", e);
 				warn!("Listener will be available via HTTP only");
 				None
 			}

@@ -99,6 +99,10 @@ subcommands:
             short: n
             long: no_tor
             takes_value: false
+        - bridge:
+            help: Enable bridge relay with TOR listener
+            long: bridge
+            takes_value: true
   - owner_api:
       about: Runs the wallet's local web API
       args:
@@ -227,6 +231,10 @@ subcommands:
             help: use specific slate version for the output. Put version 4 if you are using slatepacks.
             long: slate_version
             takes_value: true
+        - bridge:
+            help: Enable tor bridge relay when sending via Slatepack workflow
+            long: bridge
+            takes_value: true
   - unpack:
       about: Unpack and display an armored Slatepack Message, decrypting if possible
       args:
@@ -267,6 +275,10 @@ subcommands:
             help: If present, overrides the filename and location of the output file.
             short: o
             long: outfile
+            takes_value: true
+        - bridge:
+            help: Enable tor bridge relay when receiving via Slatepack workflow
+            long: bridge
             takes_value: true
   - finalize:
       about: Processes a receiver's transaction file to finalize a transfer.
@@ -391,6 +403,10 @@ subcommands:
             help: If present, the number of blocks from the current after which wallets should refuse to process transactions further
             short: b
             long: ttl_blocks
+            takes_value: true
+        - bridge:
+            help: Enable tor bridge relay when receiving via Slatepack workflow
+            long: bridge
             takes_value: true
   - outputs:
       about: Raw wallet output info (list of outputs)

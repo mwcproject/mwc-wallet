@@ -15,6 +15,7 @@
 //! Public types for config modules
 
 use failure::Fail;
+use std::fmt;
 use std::io;
 use std::path::PathBuf;
 
@@ -229,8 +230,14 @@ pub struct TorConfig {
 	pub send_config_dir: String,
 	/// Whether or not the socks5 proxy is already running
 	pub socks_running: bool,
-	/// Optional log file for tor. Default is
+	/// Optional log file for tor. Default is None
 	pub tor_log_file: Option<String>,
+	/// tor bridge config
+	#[serde(default)]
+	pub bridge: TorBridgeConfig,
+	/// tor proxy config
+	#[serde(default)]
+	pub proxy: TorProxyConfig,
 }
 
 impl Default for TorConfig {
@@ -241,7 +248,66 @@ impl Default for TorConfig {
 			send_config_dir: ".".into(),
 			socks_running: false,
 			tor_log_file: None,
+			bridge: TorBridgeConfig::default(),
+			proxy: TorProxyConfig::default(),
 		}
+	}
+}
+
+/// Tor Bridge Config
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct TorBridgeConfig {
+	/// Bridge Line
+	pub bridge_line: Option<String>,
+	/// Client Option
+	pub client_option: Option<String>,
+}
+
+impl Default for TorBridgeConfig {
+	fn default() -> TorBridgeConfig {
+		TorBridgeConfig {
+			bridge_line: None,
+			client_option: None,
+		}
+	}
+}
+
+impl fmt::Display for TorBridgeConfig {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		write!(f, "{:?}", self)
+	}
+}
+
+/// Tor Proxy configuration (useful for protocols such as shadowsocks)
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct TorProxyConfig {
+	/// socks4 |socks5 | http(s)
+	pub transport: Option<String>,
+	/// ip or dns
+	pub address: Option<String>,
+	/// user for auth - socks5|https(s)
+	pub username: Option<String>,
+	/// pass for auth - socks5|https(s)
+	pub password: Option<String>,
+	/// allowed port - proxy
+	pub allowed_port: Option<Vec<u16>>,
+}
+
+impl Default for TorProxyConfig {
+	fn default() -> TorProxyConfig {
+		TorProxyConfig {
+			transport: None,
+			address: None,
+			username: None,
+			password: None,
+			allowed_port: None,
+		}
+	}
+}
+
+impl fmt::Display for TorProxyConfig {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		write!(f, "{:?}", self)
 	}
 }
 
@@ -275,6 +341,9 @@ pub struct GlobalWalletConfig {
 /// Wallet internal members
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct GlobalWalletConfigMembers {
+	/// Config file version (None == version 1)
+	#[serde(default)]
+	pub config_file_version: Option<u32>,
 	/// Wallet configuration
 	#[serde(default)]
 	pub wallet: WalletConfig,

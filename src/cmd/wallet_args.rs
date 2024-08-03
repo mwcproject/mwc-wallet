@@ -237,6 +237,21 @@ fn parse_required<'a>(args: &'a ArgMatches, name: &str) -> Result<&'a str, Parse
 	}
 }
 
+// parses an optional value, throws error if value isn't provided
+fn parse_optional(args: &ArgMatches, name: &str) -> Result<Option<String>, ParseError> {
+	if !args.is_present(name) {
+		return Ok(None);
+	}
+	let arg = args.value_of(name);
+	match arg {
+		Some(ar) => Ok(Some(ar.into())),
+		None => {
+			let msg = format!("Value for argument '{}' is required in this context", name,);
+			Err(ParseError::ArgumentError(msg))
+		}
+	}
+}
+
 // parses a number, or throws error with message otherwise
 fn parse_u64(arg: &str, name: &str) -> Result<u64, ParseError> {
 	let val = arg.parse::<u64>();
@@ -390,6 +405,9 @@ pub fn parse_listen_args(
 	}
 	if let Some(port) = args.value_of("libp2p_port") {
 		config.libp2p_listen_port = Some(port.parse().unwrap());
+	}
+	if let Some(bridge) = args.value_of("bridge") {
+		tor_config.bridge.bridge_line = Some(bridge.into());
 	}
 
 	let method = parse_required(args, "method")?;
@@ -621,6 +639,11 @@ pub fn parse_send_args(args: &ArgMatches) -> Result<command::SendArgs, ParseErro
 		None => None,
 	};
 
+	let bridge = match args.value_of("bridge") {
+		Some(b) => Some(b.to_string()),
+		None => None,
+	};
+
 	if minimum_confirmations_change_outputs_is_present && !exclude_change_outputs {
 		Err(ArgumentError("minimum_confirmations_change_outputs may only be specified if exclude_change_outputs is set".to_string()))
 	} else {
@@ -646,6 +669,7 @@ pub fn parse_send_args(args: &ArgMatches) -> Result<command::SendArgs, ParseErro
 			slatepack_recipient,
 			late_lock,
 			min_fee,
+			bridge: bridge,
 		})
 	}
 }
@@ -665,11 +689,14 @@ pub fn parse_receive_unpack_args(args: &ArgMatches) -> Result<command::ReceiveAr
 		false => None,
 	};
 
+	let bridge = parse_optional(args, "bridge")?;
+
 	Ok(command::ReceiveArgs {
 		input_file,
 		input_slatepack_message: args.value_of("content").map(|s| s.to_string()),
 		message: args.value_of("message").map(|s| s.to_string()),
 		outfile: args.value_of("outfile").map(|s| s.to_string()),
+		bridge,
 	})
 }
 
@@ -842,6 +869,8 @@ pub fn parse_process_invoice_args(
 		prompt_pay_invoice(&slate, method, dest)?;
 	}
 
+	let bridge = parse_optional(args, "bridge")?;
+
 	Ok(command::ProcessInvoiceArgs {
 		message: message,
 		minimum_confirmations: min_c,
@@ -852,6 +881,7 @@ pub fn parse_process_invoice_args(
 		max_outputs: max_outputs,
 		input: tx_file.to_owned(),
 		ttl_blocks,
+		bridge,
 	})
 }
 

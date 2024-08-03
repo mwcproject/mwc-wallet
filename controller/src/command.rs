@@ -258,6 +258,8 @@ where
 						&tor_config.socks_proxy_addr,
 						&config.libp2p_listen_port,
 						&tor_config.tor_log_file,
+						tor_config.bridge,
+						tor_config.proxy,
 					);
 					if let Err(e) = res {
 						error!("Error starting http listener: {}", e);
@@ -407,6 +409,7 @@ pub struct SendArgs {
 	pub slatepack_recipient: Option<ProvableAddress>, // Destination for slatepack. The address will be the same as for payment_proof_address. The role is different.
 	pub late_lock: bool,
 	pub min_fee: Option<u64>,
+	pub bridge: Option<String>,
 }
 
 pub fn send<L, C, K>(
@@ -665,6 +668,7 @@ pub struct ReceiveArgs {
 	pub input_slatepack_message: Option<String>,
 	pub message: Option<String>,
 	pub outfile: Option<String>,
+	pub bridge: Option<String>,
 }
 
 pub fn receive<L, C, K>(
@@ -1074,6 +1078,7 @@ pub struct ProcessInvoiceArgs {
 	pub input: String,
 	pub estimate_selection_strategies: bool,
 	pub ttl_blocks: Option<u64>,
+	pub bridge: Option<String>,
 }
 
 /// Process invoice
@@ -2421,6 +2426,8 @@ where
 										&tor_config.socks_proxy_addr,
 										&None,
 										&tor_config.tor_log_file,
+										tor_config.bridge,
+										tor_config.proxy,
 									);
 									if let Err(e) = res {
 										error!("Error starting http listener: {}", e);
@@ -2590,6 +2597,8 @@ where
 									&tor_config.socks_proxy_addr,
 									&None,
 									&tor_config.tor_log_file,
+									tor_config.bridge,
+									tor_config.proxy,
 								);
 								if let Err(e) = res {
 									error!("Error starting http listener: {}", e);
@@ -3811,6 +3820,8 @@ where
 		Some(tor_config.send_config_dir.clone()),
 		tor_config.socks_running,
 		tor_config.tor_log_file.clone(),
+		tor_config.bridge.clone(),
+		tor_config.proxy.clone(),
 	)
 	.map_err(|e| ErrorKind::GenericError(format!("Unable to create HTTP client to send, {}", e)))?;
 

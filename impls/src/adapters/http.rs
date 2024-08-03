@@ -18,9 +18,14 @@ use crate::error::{Error, ErrorKind};
 use crate::libwallet::slate_versions::{SlateVersion, VersionedSlate};
 use crate::libwallet::swap::message::Message;
 use crate::libwallet::Slate;
+use crate::tor::bridge::TorBridge;
+use crate::tor::proxy::TorProxy;
 use crate::{SlateSender, SwapMessageSender};
+use grin_wallet_config::types::{TorBridgeConfig, TorProxyConfig};
 use serde::Serialize;
 use serde_json::{json, Value};
+use std::collections::HashMap;
+use std::convert::TryFrom;
 use std::net::SocketAddr;
 use std::path::MAIN_SEPARATOR;
 
@@ -45,6 +50,8 @@ pub struct HttpDataSender {
 	tor_config_dir: String,
 	socks_running: bool,
 	tor_log_file: Option<String>,
+	bridge: TorBridgeConfig,
+	proxy: TorProxyConfig,
 }
 
 impl HttpDataSender {
@@ -67,6 +74,8 @@ impl HttpDataSender {
 				tor_config_dir: tor_config_dir.unwrap_or(String::from("")),
 				socks_running: socks_running,
 				tor_log_file,
+				bridge: TorBridgeConfig::default(),
+				proxy: TorProxyConfig::default(),
 			})
 		}
 	}
@@ -79,6 +88,8 @@ impl HttpDataSender {
 		tor_config_dir: Option<String>,
 		socks_running: bool,
 		tor_log_file: Option<String>,
+		tor_bridge: TorBridgeConfig,
+		tor_proxy: TorProxyConfig,
 	) -> Result<HttpDataSender, Error> {
 		let mut ret = Self::new(
 			base_url,
@@ -93,6 +104,8 @@ impl HttpDataSender {
 		})?;
 		ret.socks_proxy_addr = Some(SocketAddr::V4(addr));
 		ret.tor_config_dir = tor_config_dir.unwrap_or(String::from(""));
+		ret.bridge = tor_bridge;
+		ret.proxy = tor_proxy;
 		Ok(ret)
 	}
 
@@ -355,6 +368,25 @@ impl HttpDataSender {
 				"Starting TOR Process for send at {:?}",
 				self.socks_proxy_addr
 			);
+
+			let mut hm_tor_bridge: HashMap<String, String> = HashMap::new();
+			if self.bridge.bridge_line.is_some() {
+				let bridge_struct = TorBridge::try_from(self.bridge.clone())
+					.map_err(|e| ErrorKind::TorConfig(format!("{:?}", e).into()))?;
+				hm_tor_bridge = bridge_struct
+					.to_hashmap()
+					.map_err(|e| ErrorKind::TorConfig(format!("{:?}", e).into()))?;
+			}
+
+			let mut hm_tor_proxy: HashMap<String, String> = HashMap::new();
+			if self.proxy.transport.is_some() || self.proxy.allowed_port.is_some() {
+				let proxy = TorProxy::try_from(self.proxy.clone())
+					.map_err(|e| ErrorKind::TorConfig(format!("{:?}", e).into()))?;
+				hm_tor_proxy = proxy
+					.to_hashmap()
+					.map_err(|e| ErrorKind::TorConfig(format!("{:?}", e).into()))?;
+			}
+
 			tor_config::output_tor_sender_config(
 				&tor_dir,
 				&self
@@ -364,6 +396,8 @@ impl HttpDataSender {
 					))?
 					.to_string(),
 				&self.tor_log_file,
+				hm_tor_bridge,
+				hm_tor_proxy,
 			)
 			.map_err(|e| ErrorKind::TorConfig(format!("Failed to config Tor, {}", e)))?;
 			// Start TOR process
