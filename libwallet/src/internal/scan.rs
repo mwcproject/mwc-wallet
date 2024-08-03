@@ -2147,7 +2147,7 @@ where
 			None,
 			false,
 			false,
-			false
+			false,
 		)?
 		.0;
 		owner::tx_lock_outputs(&mut **w, keychain_mask, &slate, address, 0, false)?;

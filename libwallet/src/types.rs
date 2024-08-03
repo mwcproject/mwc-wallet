@@ -200,9 +200,13 @@ where
 	fn parent_key_id(&mut self) -> Identifier;
 
 	/// return the parent path
-	fn set_root_public_key(&mut self, root_public_key: &secp::key::PublicKey, index: u32) -> Result<(), Error>;
+	fn set_root_public_key(
+		&mut self,
+		root_public_key: &secp::key::PublicKey,
+		index: u32,
+	) -> Result<(), Error>;
 
-    fn get_root_public_key(&self, index: u32) -> Result<secp::key::PublicKey, Error>;
+	fn get_root_public_key(&self, index: u32) -> Result<secp::key::PublicKey, Error>;
 
 	/// Iterate over all output data stored by the backend
 	fn iter<'a>(&'a self) -> Box<dyn Iterator<Item = OutputData> + 'a>;
@@ -1258,7 +1262,7 @@ pub struct AcctPathMapping {
 	/// Corresponding parent BIP32 derivation path
 	pub path: Identifier,
 	/// Corresponding parent BIP32 derivation path
-	pub root_public_key: Option<Vec<u8>>
+	pub root_public_key: Option<Vec<u8>>,
 }
 
 impl ser::Writeable for AcctPathMapping {
@@ -1284,7 +1288,6 @@ impl ser::Readable for AcctPathMapping {
 		})
 	}
 }
-
 
 /// Store details of the last scanned block
 #[derive(Clone, Debug, Serialize, Deserialize)]

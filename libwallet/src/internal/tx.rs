@@ -14,16 +14,14 @@
 
 //! Transaction building functions
 
-
-use uuid::Uuid;
 use crate::grin_core::consensus::valid_header_version;
 use crate::grin_core::core::HeaderVersion;
 use crate::grin_keychain::{Identifier, Keychain};
 use crate::grin_util as util;
-use crate::grin_util::Mutex;
-use crate::grin_util::secp::{pedersen, Signature};
 use crate::grin_util::secp::pedersen::{Commitment, ProofMessage, RangeProof};
-use crate::grin_util::secp::{PublicKey, SecretKey, Secp256k1};
+use crate::grin_util::secp::{pedersen, Signature};
+use crate::grin_util::secp::{PublicKey, Secp256k1, SecretKey};
+use crate::grin_util::Mutex;
 use crate::internal::{selection, updater};
 use crate::proof::crypto;
 use crate::proof::crypto::Hex;
@@ -41,7 +39,7 @@ use ed25519_dalek::SecretKey as DalekSecretKey;
 use ed25519_dalek::Signature as DalekSignature;
 use ed25519_dalek::{Signer, Verifier};
 use grin_wallet_util::OnionV3Address;
-
+use uuid::Uuid;
 
 // static for incrementing test UUIDs
 lazy_static! {
@@ -253,7 +251,7 @@ pub fn add_output_to_slate<'a, T: ?Sized, C, K>(
 	is_initiator: bool,
 	use_test_rng: bool,
 	num_outputs: usize,
-	hardware: bool
+	hardware: bool,
 ) -> Result<Context, Error>
 where
 	T: WalletBackend<'a, C, K>,
@@ -859,22 +857,22 @@ where
 	Ok(())
 }
 
-
 #[cfg(test)]
 mod test {
-	use bitcoin_lib::secp256k1::SecretKey;
-use grin_wallet_util::grin_core::libtx::proof::{self, ProofBuild};
-use grin_wallet_util::grin_core::pow::Proof;
-use grin_wallet_util::grin_keychain::{Identifier, SwitchCommitmentType};
 	use crate::device::adpu::APDUCommands;
-	use crate::device::ledger::{self, get_bulletproof_components, get_commitment, get_rewind_nonce, get_root_public_key, proof_message, rewind_hash};
+	use crate::device::ledger::{
+		self, get_bulletproof_components, get_commitment, get_rewind_nonce, get_root_public_key,
+		proof_message, rewind_hash,
+	};
 	use crate::grin_core::core::committed::Committed;
 	use crate::grin_core::core::KernelFeatures;
 	use crate::grin_core::libtx::{build, ProofBuilder};
 	use crate::grin_keychain::{ExtKeychain, ExtKeychainPath, Keychain};
+	use bitcoin_lib::secp256k1::SecretKey;
+	use grin_wallet_util::grin_core::libtx::proof::{self, ProofBuild};
+	use grin_wallet_util::grin_core::pow::Proof;
+	use grin_wallet_util::grin_keychain::{Identifier, SwitchCommitmentType};
 	use secp256k1zkp::{ContextFlag, PublicKey, Secp256k1};
-
-	
 
 	#[test]
 	// demonstrate that input.commitment == referenced output.commitment
@@ -904,19 +902,16 @@ use grin_wallet_util::grin_keychain::{Identifier, SwitchCommitmentType};
 
 	#[test]
 	fn output_hardware() {
-		let value: u64 = std::u64::MAX -1 ;
+		let value: u64 = std::u64::MAX - 1;
 		let api = ledger::initialize_hid_api().unwrap();
-        let transport = ledger::create_transport(&api).unwrap();
+		let transport = ledger::create_transport(&api).unwrap();
 		let secp = Secp256k1::with_caps(ContextFlag::Commit);
 		let pk = get_root_public_key(&transport, 0).unwrap();
 		let rewind_hash = rewind_hash(&secp, PublicKey::from_slice(&secp, &pk).unwrap());
-        let switch = SwitchCommitmentType::Regular;
-        let identifier = Identifier::zero();
+		let switch = SwitchCommitmentType::Regular;
+		let identifier = Identifier::zero();
 		let commit = get_commitment(&transport, identifier.clone(), value, switch).unwrap();
 	}
-
-
-	
 
 	/*
 	#[test]

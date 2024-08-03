@@ -42,7 +42,6 @@ pub fn show_root_public_key(phrase: ZeroingString) {
 	println!();
 }
 
-
 pub fn show_recovery_phrase(phrase: ZeroingString) {
 	println!("Your recovery phrase is:");
 	println!();

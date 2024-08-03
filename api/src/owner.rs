@@ -343,11 +343,7 @@ where
 		owner::create_account_path(&mut **w, keychain_mask, label)
 	}
 
-
-	pub fn get_root_public_key(
-		&self,
-		label: &str,
-	) -> Result<Option<String>, Error> {
+	pub fn get_root_public_key(&self, label: &str) -> Result<Option<String>, Error> {
 		let mut w_lock = self.wallet_inst.lock();
 		let w = w_lock.lc_provider()?.wallet_inst()?;
 		let rpk = owner::get_root_public_key(&mut **w, label)?;
@@ -357,10 +353,10 @@ where
 				println!("{:?}", root_public_key);
 				match root_public_key {
 					Some(rp) => Ok(Some(to_hex(&rp))),
-					None => Ok(None)
+					None => Ok(None),
 				}
-			},
-			None => Ok(None)
+			}
+			None => Ok(None),
 		}
 	}
 
@@ -1763,7 +1759,7 @@ where
 			password,
 			self.doctest_mode,
 			wallet_data_dir,
-			None
+			None,
 		)
 	}
 
@@ -2662,7 +2658,7 @@ macro_rules! doctest_helper_setup_doc_env {
 
 		grin_wallet_util::grin_core::global::set_local_chain_type(
 			grin_wallet_util::grin_core::global::ChainTypes::AutomatedTesting,
-			);
+		);
 
 		let dir = tempdir().map_err(|e| format!("{:#?}", e)).unwrap();
 		let dir = dir
@@ -2678,7 +2674,7 @@ macro_rules! doctest_helper_setup_doc_env {
 		let node_client = HTTPNodeClient::new(node_list, None).unwrap();
 		let mut wallet = Box::new(
 			DefaultWalletImpl::<'static, HTTPNodeClient>::new(node_client.clone()).unwrap(),
-			)
+		)
 			as Box<
 				WalletInst<
 					'static,
@@ -2686,7 +2682,7 @@ macro_rules! doctest_helper_setup_doc_env {
 					HTTPNodeClient,
 					ExtKeychain,
 				>,
-				>;
+			>;
 		let lc = wallet.lc_provider().unwrap();
 		let _ = lc.set_top_level_directory(&wallet_config.data_file_dir);
 		lc.open_wallet(None, pw, false, false, None);

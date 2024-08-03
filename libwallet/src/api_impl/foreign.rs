@@ -118,7 +118,7 @@ pub fn receive_tx<'a, T: ?Sized, C, K>(
 	message: Option<String>,
 	use_test_rng: bool,
 	refresh_from_node: bool,
-	hardware: bool
+	hardware: bool,
 ) -> Result<(Slate, Context), Error>
 where
 	T: WalletBackend<'a, C, K>,
@@ -213,14 +213,14 @@ where
 
 	let num_outputs = match &output_amounts {
 		Some(v) => {
-			if hardware && v.len()>=1 {
+			if hardware && v.len() >= 1 {
 				return Err(ErrorKind::TransactionWithSameOffsetAlreadyReceived(
 					v.len().to_string(),
 				)
 				.into());
 			}
 			v.len()
-		},
+		}
 		None => 1,
 	};
 
@@ -241,7 +241,7 @@ where
 		false,
 		use_test_rng,
 		num_outputs,
-		hardware
+		hardware,
 	)?;
 
 	let keychain = w.keychain(keychain_mask)?;

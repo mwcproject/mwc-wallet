@@ -982,7 +982,7 @@ where
 			sender.map(|p| ProvableAddress::from_tor_pub_key(&p).public_key), // We don't want to change RPC. New fields required new version
 			dest_acct_name.as_ref().map(String::as_str),
 			message,
-			true
+			true,
 		)
 		.map_err(|e| e.kind())?;
 
@@ -1127,7 +1127,7 @@ pub fn run_doctest_foreign(
 		empty_string.clone(),
 		false,
 		None,
-		None
+		None,
 	)
 	.unwrap();
 	let mask1 = lc
@@ -1249,7 +1249,8 @@ pub fn run_doctest_foreign(
 				args.slatepack_recipient = Some(w1_slatepack_address.clone());
 			}
 
-			api_impl::owner::issue_invoice_tx(&mut **w, (&mask2).as_ref(), &args, true, 1, true).unwrap()
+			api_impl::owner::issue_invoice_tx(&mut **w, (&mask2).as_ref(), &args, true, 1, true)
+				.unwrap()
 		};
 		api_impl::owner::update_wallet_state(wallet1.clone(), (&mask1).as_ref(), &None).unwrap();
 		slate = {

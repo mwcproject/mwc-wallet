@@ -121,7 +121,7 @@ where
 		args.password.clone(),
 		false,
 		wallet_data_dir.clone(),
-		args.root_public_key.clone()
+		args.root_public_key.clone(),
 	)?;
 
 	let m = p.get_mnemonic(None, args.password, wallet_data_dir)?;
@@ -316,13 +316,13 @@ where
 }
 
 pub struct GetRootPublicKeyArgs {
-	pub account_label: String
+	pub account_label: String,
 }
 
 pub fn get_root_public_key<L, C, K>(
 	owner_api: &mut Owner<L, C, K>,
 	keychain_mask: Option<&SecretKey>,
-	args: GetRootPublicKeyArgs
+	args: GetRootPublicKeyArgs,
 ) -> Result<(), Error>
 where
 	L: WalletLCProvider<'static, C, K> + 'static,
@@ -335,7 +335,7 @@ where
 		let rpk = api.get_root_public_key(&label)?;
 		match rpk {
 			Some(s) => println!("Root public of account '{}': {}", label, s),
-			None => println!("No root public of account")
+			None => println!("No root public of account"),
 		}
 		Ok(())
 	});
@@ -556,7 +556,7 @@ where
 							Some(String::from("self")),
 							Some(&args.dest),
 							None,
-							true
+							true,
 						)?;
 						Ok(())
 					})?;
@@ -616,7 +616,7 @@ pub struct ReceiveArgs {
 	pub input_slatepack_message: Option<String>,
 	pub message: Option<String>,
 	pub outfile: Option<String>,
-	pub hardware: bool
+	pub hardware: bool,
 }
 
 pub fn receive<L, C, K>(

@@ -19,7 +19,8 @@ use crate::util::to_base64;
 use crossbeam_utils::thread::scope;
 use failure::{Backtrace, Context, Fail};
 use hyper::body;
-use hyper::header::{ACCEPT, AUTHORIZATION, CONTENT_TYPE, USER_AGENT, CONNECTION};
+use hyper::client::HttpConnector;
+use hyper::header::{ACCEPT, AUTHORIZATION, CONNECTION, CONTENT_TYPE, USER_AGENT};
 use hyper::{self, Body, Client as HyperClient, Request, Uri};
 use hyper_rustls;
 use hyper_timeout::TimeoutConnector;
@@ -27,10 +28,9 @@ use serde::{Deserialize, Serialize};
 use serde_json;
 use std::fmt::{self, Display};
 use std::net::SocketAddr;
-use tokio::runtime::Builder;
-use std::time::Duration;
-use hyper::client::HttpConnector;
 use std::sync::Arc;
+use std::time::Duration;
+use tokio::runtime::Builder;
 
 /// Errors that can be returned by an ApiEndpoint implementation.
 #[derive(Debug)]
@@ -90,16 +90,24 @@ impl From<Context<ErrorKind>> for Error {
 pub struct Client {
 	// At the same time only one client can exist. Probably it is a better way to write that, but we don't want
 	// to change signature.
-
 	/// Normal http(s) client.
-	https_client: Arc<Option<hyper::Client<TimeoutConnector<hyper_rustls::HttpsConnector<HttpConnector>>>>>,
+	https_client:
+		Arc<Option<hyper::Client<TimeoutConnector<hyper_rustls::HttpsConnector<HttpConnector>>>>>,
 	/// Socks proxy client
-	socks_client: Arc<Option<hyper::Client<TimeoutConnector<hyper_socks2::SocksConnector<hyper_rustls::HttpsConnector<HttpConnector>>>>>>,
+	socks_client: Arc<
+		Option<
+			hyper::Client<
+				TimeoutConnector<
+					hyper_socks2::SocksConnector<hyper_rustls::HttpsConnector<HttpConnector>>,
+				>,
+			>,
+		>,
+	>,
 }
 
 impl Client {
 	/// New client
-	pub fn new(use_socks: bool, socks_proxy_addr: Option<SocketAddr>) -> Result<Self,Error> {
+	pub fn new(use_socks: bool, socks_proxy_addr: Option<SocketAddr>) -> Result<Self, Error> {
 		let (https_client, socks_client) = Self::construct_client(use_socks, socks_proxy_addr)?;
 		Ok(Client {
 			https_client: Arc::new(https_client),
@@ -107,9 +115,22 @@ impl Client {
 		})
 	}
 
-	fn construct_client(use_socks: bool, socks_proxy_addr: Option<SocketAddr>) ->
-									Result< (Option<hyper::Client<TimeoutConnector<hyper_rustls::HttpsConnector<HttpConnector>>>>,
-										Option<hyper::Client<TimeoutConnector<hyper_socks2::SocksConnector<hyper_rustls::HttpsConnector<HttpConnector>>>>>), Error> {
+	fn construct_client(
+		use_socks: bool,
+		socks_proxy_addr: Option<SocketAddr>,
+	) -> Result<
+		(
+			Option<hyper::Client<TimeoutConnector<hyper_rustls::HttpsConnector<HttpConnector>>>>,
+			Option<
+				hyper::Client<
+					TimeoutConnector<
+						hyper_socks2::SocksConnector<hyper_rustls::HttpsConnector<HttpConnector>>,
+					>,
+				>,
+			>,
+		),
+		Error,
+	> {
 		if !use_socks {
 			let https = hyper_rustls::HttpsConnector::new();
 			let mut connector = TimeoutConnector::new(https);
@@ -132,9 +153,11 @@ impl Client {
 			let client = HyperClient::builder()
 				.pool_idle_timeout(Duration::from_secs(300))
 				.build::<_, Body>(connector);
-			Ok( (Some(client), None) )
+			Ok((Some(client), None))
 		} else {
-			let addr = socks_proxy_addr.ok_or_else(|| ErrorKind::RequestError("Missing Socks proxy address".to_string()))?;
+			let addr = socks_proxy_addr.ok_or_else(|| {
+				ErrorKind::RequestError("Missing Socks proxy address".to_string())
+			})?;
 			let auth = format!("{}:{}", addr.ip(), addr.port());
 
 			let https = hyper_rustls::HttpsConnector::new();
@@ -157,7 +180,7 @@ impl Client {
 			let client = HyperClient::builder()
 				.pool_idle_timeout(Duration::from_secs(300))
 				.build::<_, Body>(connector);
-			Ok((None, Some(client) ))
+			Ok((None, Some(client)))
 		}
 	}
 
@@ -383,8 +406,7 @@ impl Client {
 		let resp = if self.https_client.is_some() {
 			let client = self.https_client.iter().next().unwrap();
 			client.request(req).await
-		}
-		else {
+		} else {
 			debug_assert!(self.socks_client.is_some());
 			self.socks_client.iter().next().unwrap().request(req).await
 		};
@@ -422,7 +444,9 @@ impl Client {
 					panic!(e)
 				}
 			}*/
-			handle.join().unwrap_or(Ok("Error in client sending request".to_string()))
+			handle
+				.join()
+				.unwrap_or(Ok("Error in client sending request".to_string()))
 		})
 		.unwrap()
 	}

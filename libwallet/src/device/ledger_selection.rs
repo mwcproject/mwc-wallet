@@ -1,15 +1,16 @@
-
 use crate::device::adpu::APDUCommands;
-use crate::device::ledger::{self, get_bulletproof_components, get_commitment, parse_bp, parse_response};
+use crate::device::ledger::{
+	self, get_bulletproof_components, get_commitment, parse_bp, parse_response,
+};
 use crate::error::Error;
 use crate::grin_core::libtx::proof::ProofBuild;
 use crate::grin_keychain::{Identifier, Keychain};
 use crate::proof::message;
-use secp256k1zkp::{ContextFlag, PublicKey, Secp256k1};
-use util::secp::pedersen::{Commitment, RangeProof};
 use grin_wallet_util::grin_core::core::{Output, OutputFeatures, Transaction};
 use grin_wallet_util::grin_keychain::{BlindSum, SwitchCommitmentType};
 use grin_wallet_util::grin_util as util;
+use secp256k1zkp::{ContextFlag, PublicKey, Secp256k1};
+use util::secp::pedersen::{Commitment, RangeProof};
 
 use super::ledger::{get_rewind_nonce, proof_message, rewind_hash};
 
@@ -32,48 +33,50 @@ pub type Append<K, B> = dyn for<'a> Fn(
 	Result<(Transaction, BlindSum), Error>,
 ) -> Result<(Transaction, BlindSum), Error>;
 
-
-pub fn output<K, B>(value: u64, rpk: Vec<u8>,key_id: Identifier) -> Box<Append<K, B>>
+pub fn output<K, B>(value: u64, rpk: Vec<u8>, key_id: Identifier) -> Box<Append<K, B>>
 where
-    K: Keychain,
-    B: ProofBuild,
+	K: Keychain,
+	B: ProofBuild,
 {
-    Box::new(
-        move |build, acc| -> Result<(Transaction, BlindSum), Error> {
-            let (tx, sum) = acc?;
+	Box::new(
+		move |build, acc| -> Result<(Transaction, BlindSum), Error> {
+			let (tx, sum) = acc?;
 			let secp = Secp256k1::with_caps(ContextFlag::Commit);
-			
-            // Initialize HID API and create transport
-            let api = ledger::initialize_hid_api().unwrap();
-            let transport = ledger::create_transport(&api).unwrap();
 
-            // Set switch commitment type
-            let switch = SwitchCommitmentType::Regular;
-            let commit = get_commitment(&transport, key_id, value, switch).unwrap();
-            let (tau_x, t_one, t_two) = get_bulletproof_components(&secp, &transport, key_id, value, switch).unwrap();
+			// Initialize HID API and create transport
+			let api = ledger::initialize_hid_api().unwrap();
+			let transport = ledger::create_transport(&api).unwrap();
+
+			// Set switch commitment type
+			let switch = SwitchCommitmentType::Regular;
+			let commit = get_commitment(&transport, key_id, value, switch).unwrap();
+			let (tau_x, t_one, t_two) =
+				get_bulletproof_components(&secp, &transport, key_id, value, switch).unwrap();
 			let rewind_hash = rewind_hash(&secp, PublicKey::from_slice(&secp, &rpk).unwrap());
 			let rewind_nonce = get_rewind_nonce(&secp, commit, rewind_hash).unwrap();
 			let message = proof_message(&secp, key_id, switch).unwrap();
-			let proof = secp.bullet_proof_multisig(
-				value, 
-				None,
-				rewind_nonce, 
-				None,
-				Some(message),
-				Some(&mut tau_x), 
-				Some(&mut t_one), 
-				Some(&mut t_two),
-				vec![commit], 
-				None, 
-				0
-			).unwrap();
+			let proof = secp
+				.bullet_proof_multisig(
+					value,
+					None,
+					rewind_nonce,
+					None,
+					Some(message),
+					Some(&mut tau_x),
+					Some(&mut t_one),
+					Some(&mut t_two),
+					vec![commit],
+					None,
+					0,
+				)
+				.unwrap();
 			let _verify = secp.verify_bullet_proof(commit, proof, None).unwrap();
-            Ok((
-                tx.with_output(Output::new(OutputFeatures::Plain, commit, proof)),
-                sum.add_key_id(key_id.to_value_path(value)),
-            ))
-        }
-    )
+			Ok((
+				tx.with_output(Output::new(OutputFeatures::Plain, commit, proof)),
+				sum.add_key_id(key_id.to_value_path(value)),
+			))
+		},
+	)
 }
 
 /*Creates a new output in the wallet for the recipient,
@@ -107,7 +110,7 @@ where
 
 	// building transaction, apply provided key.
 	let amount = slate.amount;
-    let output_amount: u64 = amount;
+	let output_amount: u64 = amount;
 	assert!(num_outputs > 0);
 	let key_id = if key_id_opt.is_some() {
 		// Note! No need to handle so far, that is why we have one key_id_opt, so num_outputs can be only 1
@@ -118,7 +121,7 @@ where
 	} else {
 		keys::next_available_key(wallet, keychain_mask)?
 	};
-	
+
 	let key_amounts = (key_id.clone(), output_amount);
 
 	// Note, it is not very critical, has to match for all normal case,
@@ -140,10 +143,10 @@ where
 	let slate_id = slate.id.clone();
 
 	let mut out_vec = output(key_amounts.1, key_amounts.0.clone());
-	
-    
-    
-    let blinding =
+
+
+
+	let blinding =
 		slate.add_transaction_elements(&keychain, &ProofBuilder::new(&keychain), out_vec)?;
 
 	// Add blinding sum to our context

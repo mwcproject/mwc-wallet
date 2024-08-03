@@ -74,8 +74,10 @@ impl WalletRootPublicKey {
 			format!("{}{}{}.bak", data_file_dir, MAIN_SEPARATOR, ROOT_PK_FILE);
 		let mut i = 1;
 		while Path::new(&backup_rpk_file_name).exists() {
-			backup_rpk_file_name =
-				format!("{}{}{}.bak.{}", data_file_dir, MAIN_SEPARATOR, ROOT_PK_FILE, i);
+			backup_rpk_file_name = format!(
+				"{}{}{}.bak.{}",
+				data_file_dir, MAIN_SEPARATOR, ROOT_PK_FILE, i
+			);
 			i += 1;
 		}
 		path.push(backup_rpk_file_name.clone());
@@ -101,7 +103,7 @@ impl WalletRootPublicKey {
 			true,
 			None,
 			test_mode,
-			root_public_key
+			root_public_key,
 		)
 	}
 
@@ -129,8 +131,8 @@ impl WalletRootPublicKey {
 				data_file_dir
 			)))?;
 		}
-		
-		let rpk = WalletRootPublicKey::_from_hex( &*root_public_key)?;
+
+		let rpk = WalletRootPublicKey::_from_hex(&*root_public_key)?;
 		let enc_seed = EncryptedWalletRootPublicKey::from_root_public_key(&rpk, password)?;
 		let enc_seed_json = serde_json::to_string_pretty(&enc_seed).map_err(|e| {
 			ErrorKind::Format(format!(
@@ -168,24 +170,22 @@ impl WalletRootPublicKey {
 			})?;
 			let mut buffer = String::new();
 			file.read_to_string(&mut buffer).map_err(|e| {
-				ErrorKind::IO(format!(
-					"Unable to read from file {}, {}",
-					rpk_file_path, e
-				))
+				ErrorKind::IO(format!("Unable to read from file {}, {}", rpk_file_path, e))
 			})?;
-			let enc_seed: EncryptedWalletRootPublicKey = serde_json::from_str(&buffer).map_err(|e| {
-				ErrorKind::Format(format!(
-					"Json to EncryptedWalletRootPublicKey conversion error, {}",
-					e
-				))
-			})?;
+			let enc_seed: EncryptedWalletRootPublicKey =
+				serde_json::from_str(&buffer).map_err(|e| {
+					ErrorKind::Format(format!(
+						"Json to EncryptedWalletRootPublicKey conversion error, {}",
+						e
+					))
+				})?;
 			let wallet_seed = enc_seed.decrypt(&password)?;
 			Ok(wallet_seed)
 		} else {
 			error!(
 				"wallet seed file {} could not be opened (mwc wallet init). \
 				 Run \"mwc wallet init\" to initialize a new wallet.",
-				 rpk_file_path
+				rpk_file_path
 			);
 			Err(ErrorKind::WalletRootPublicKeyDoesntExist.into())
 		}
@@ -293,8 +293,6 @@ impl EncryptedWalletRootPublicKey {
 	}
 }
 
-
-
 #[cfg(test)]
 mod tests {
 	use super::*;
@@ -302,14 +300,17 @@ mod tests {
 	#[test]
 	fn wallet_root_pk_encrypt() {
 		let password = ZeroingString::from("passwoid");
-		let wallet_rpk = ZeroingString::from("03631e0596e299e51a0be8cfe28a610299a0888ddb6a1af00ebd5af966f0ac6bb4");
+		let wallet_rpk = ZeroingString::from(
+			"03631e0596e299e51a0be8cfe28a610299a0888ddb6a1af00ebd5af966f0ac6bb4",
+		);
 		let rpk = WalletRootPublicKey::_from_hex(&*wallet_rpk).unwrap();
 		println!("WPRK: {:?}", rpk._to_hex());
 
 		// Encrypt rpk
-		let mut enc_wallet_seed =EncryptedWalletRootPublicKey::from_root_public_key(&rpk, password.clone()).unwrap();
+		let mut enc_wallet_seed =
+			EncryptedWalletRootPublicKey::from_root_public_key(&rpk, password.clone()).unwrap();
 		println!("EWS: {:?}", enc_wallet_seed);
-		
+
 		// Decrypt RPK
 		let decrypted_wallet_seed = enc_wallet_seed.decrypt(&password).unwrap();
 		assert_eq!(rpk, decrypted_wallet_seed);

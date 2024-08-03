@@ -23,13 +23,13 @@
 #![warn(missing_docs)]
 
 use grin_wallet_config as config;
+use grin_wallet_util as util;
 use grin_wallet_util::grin_api;
 use grin_wallet_util::grin_core;
 use grin_wallet_util::grin_keychain;
 use grin_wallet_util::grin_p2p;
 use grin_wallet_util::grin_store;
 use grin_wallet_util::grin_util;
-use grin_wallet_util as util;
 use grin_wallet_util::secp256k1zkp as sec15;
 
 use blake2_rfc as blake2;
@@ -55,10 +55,10 @@ extern crate crc;
 
 pub mod address;
 pub mod api_impl;
+pub mod device;
 /// Ring prev version internals that are needed for our internal encription functionality
 mod error;
 pub mod internal;
-pub mod device;
 pub mod proof;
 mod slate;
 pub mod slate_versions;

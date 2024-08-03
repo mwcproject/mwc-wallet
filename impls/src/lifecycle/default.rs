@@ -209,7 +209,7 @@ where
 			mnemonic_length,
 			mnemonic.clone(),
 			password.clone(),
-			test_mode
+			test_mode,
 		)
 		.map_err(|e| {
 			ErrorKind::Lifecycle(format!(
@@ -219,20 +219,16 @@ where
 		})?;
 
 		if let Some(rkp) = root_public_key.clone() {
-			WalletRootPublicKey::init_file(
-				&data_dir_name,
-				password,
-				test_mode,
-				rkp
-			)
-			.map_err(|e| {
-				ErrorKind::Lifecycle(format!(
-					"Error creating wallet seed (is mnemonic valid?), {}",
-					e
-				))
-			})?;
+			WalletRootPublicKey::init_file(&data_dir_name, password, test_mode, rkp).map_err(
+				|e| {
+					ErrorKind::Lifecycle(format!(
+						"Error creating wallet seed (is mnemonic valid?), {}",
+						e
+					))
+				},
+			)?;
 		}
-		
+
 		let rpk = match root_public_key {
 			Some(rpk) => Some(rpk.as_bytes().to_vec()),
 			None => None,
@@ -240,7 +236,7 @@ where
 		info!("Wallet seed file created");
 		println!("Storing the pub key before {:?}", rpk.clone());
 		let mut wallet: LMDBBackend<'a, C, K> =
-			match LMDBBackend::new(&data_dir_name, self.node_client.clone(),rpk) {
+			match LMDBBackend::new(&data_dir_name, self.node_client.clone(), rpk) {
 				Err(e) => {
 					let msg = format!("Error creating wallet: {}, Data Dir: {}", e, &data_dir_name);
 					error!("{}", msg);
@@ -419,7 +415,7 @@ where
 			0,
 			Some(ZeroingString::from(orig_mnemonic)),
 			new.clone(),
-			false
+			false,
 		);
 		info!("Wallet seed file created");
 

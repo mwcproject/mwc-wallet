@@ -31,7 +31,9 @@
 //!   ]
 //! )
 
-use crate::grin_core::core::{Input, KernelFeatures, Output, OutputFeatures, Transaction, TxKernel};
+use crate::grin_core::core::{
+	Input, KernelFeatures, Output, OutputFeatures, Transaction, TxKernel,
+};
 use crate::grin_core::libtx::proof::{self, ProofBuild};
 use crate::grin_core::libtx::{aggsig, Error};
 use crate::grin_keychain::{BlindSum, BlindingFactor, Identifier, Keychain, SwitchCommitmentType};
@@ -120,20 +122,29 @@ where
 {
 	let rewind_nonce = get_rewind_nonce(&secp, commit, rewind_hash).unwrap();
 	let message = proof_message(&secp, &identifier, switch).unwrap();
-	let (mut tau_x, mut t_one, mut t_two) = get_bulletproof_components(&secp, &transport, identifier.to_bytes(), value, switch.into()).unwrap();
-	let bp = secp.bullet_proof_multisig(
-		amount, 
-		None,
-		rewind_nonce, 
-		None,
-		Some(message), 
-		Some(&mut tau_x), 
-		Some(&mut t_one),  
-		Some(&mut t_two), 
-		vec![commit], 
-		None,
-		0
-	).unwrap();
+	let (mut tau_x, mut t_one, mut t_two) = get_bulletproof_components(
+		&secp,
+		&transport,
+		identifier.to_bytes(),
+		value,
+		switch.into(),
+	)
+	.unwrap();
+	let bp = secp
+		.bullet_proof_multisig(
+			amount,
+			None,
+			rewind_nonce,
+			None,
+			Some(message),
+			Some(&mut tau_x),
+			Some(&mut t_one),
+			Some(&mut t_two),
+			vec![commit],
+			None,
+			0,
+		)
+		.unwrap();
 	let _verify = secp.verify_bullet_proof(commit, bp, None).unwrap();
 }
 

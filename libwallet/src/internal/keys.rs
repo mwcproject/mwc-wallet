@@ -61,13 +61,16 @@ where
 }
 
 /// Returns a list of account to BIP32 path mappings
-pub fn get_root_public_key<'a, T: ?Sized, C, K>(wallet: &mut T, label: String) -> Result<Option<AcctPathMapping>, Error>
+pub fn get_root_public_key<'a, T: ?Sized, C, K>(
+	wallet: &mut T,
+	label: String,
+) -> Result<Option<AcctPathMapping>, Error>
 where
 	T: WalletBackend<'a, C, K>,
 	C: NodeClient + 'a,
 	K: Keychain + 'a,
 {
-	let rpk  = wallet.get_acct_path(label)?;
+	let rpk = wallet.get_acct_path(label)?;
 	Ok(rpk)
 }
 
@@ -154,7 +157,7 @@ where
 	let save_path = AcctPathMapping {
 		label: label,
 		path: return_id.clone(),
-		root_public_key: None
+		root_public_key: None,
 	};
 
 	let mut batch = wallet.batch(keychain_mask)?;
@@ -179,7 +182,7 @@ where
 	let save_path = AcctPathMapping {
 		label: label,
 		path: path.clone(),
-		root_public_key: None
+		root_public_key: None,
 	};
 
 	let mut batch = wallet.batch(keychain_mask)?;

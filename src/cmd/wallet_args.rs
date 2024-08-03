@@ -33,6 +33,7 @@ use grin_wallet_controller::{Error, ErrorKind};
 use grin_wallet_impls::tor::config::is_tor_address;
 use grin_wallet_impls::{DefaultLCProvider, DefaultWalletImpl};
 use grin_wallet_impls::{PathToSlateGetter, SlateGetter};
+use grin_wallet_libwallet::device::types::ParseError;
 use grin_wallet_libwallet::device::*;
 use grin_wallet_libwallet::proof::proofaddress;
 use grin_wallet_libwallet::proof::proofaddress::ProvableAddress;
@@ -41,7 +42,6 @@ use grin_wallet_libwallet::{
 	swap::types::Currency, IssueInvoiceTxArgs, NodeClient, SwapStartArgs, WalletInst,
 	WalletLCProvider,
 };
-use grin_wallet_libwallet::device::types::ParseError;
 use grin_wallet_util::grin_core as core;
 use grin_wallet_util::grin_core::core::amount_to_hr_string;
 use grin_wallet_util::grin_core::global;
@@ -344,7 +344,7 @@ where
 		true => {
 			println!("Please export the Root Public Key of your Harware wallet");
 			Some(prompt_pk(0)?)
-		},
+		}
 		false => None,
 	};
 
@@ -355,7 +355,6 @@ where
 	} else {
 		println!("Please enter a password for your new wallet");
 	}
-
 
 	let password = match g_args.password.clone() {
 		Some(p) => p,
@@ -368,7 +367,7 @@ where
 		config: config.clone(),
 		recovery_phrase: recovery_phrase,
 		restore: false,
-		root_public_key: root_pk
+		root_public_key: root_pk,
 	})
 }
 
@@ -388,9 +387,9 @@ pub fn parse_get_root_public_key_args(
 ) -> Result<command::GetRootPublicKeyArgs, ParseError>
 where
 {
-	let account_label= args.value_of("label").unwrap();
+	let account_label = args.value_of("label").unwrap();
 	Ok(command::GetRootPublicKeyArgs {
-    	account_label: account_label.to_owned(),
+		account_label: account_label.to_owned(),
 	})
 }
 
@@ -665,7 +664,7 @@ pub fn parse_receive_unpack_args(args: &ArgMatches) -> Result<command::ReceiveAr
 		input_slatepack_message: args.value_of("content").map(|s| s.to_string()),
 		message: args.value_of("message").map(|s| s.to_string()),
 		outfile: args.value_of("outfile").map(|s| s.to_string()),
-		hardware: args.is_present("hardware")
+		hardware: args.is_present("hardware"),
 	})
 }
 

@@ -232,7 +232,7 @@ where
 				None,
 				false,
 				false,
-				false
+				false,
 			) {
 				Err(e) => {
 					return Ok(WalletProxyMessage {

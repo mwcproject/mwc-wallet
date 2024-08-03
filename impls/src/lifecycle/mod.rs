@@ -13,8 +13,8 @@
 // limitations under the License.
 
 mod default;
-mod seed;
 mod root_public_key;
+mod seed;
 
 pub use self::default::DefaultLCProvider;
 pub use seed::show_recovery_phrase;

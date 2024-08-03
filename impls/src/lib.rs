@@ -31,9 +31,9 @@ use grin_wallet_util::grin_api as api;
 use grin_wallet_util::grin_chain as chain;
 use grin_wallet_util::grin_core as core;
 pub use grin_wallet_util::grin_keychain as keychain;
+use grin_wallet_util::grin_p2p;
 use grin_wallet_util::grin_store as store;
 use grin_wallet_util::grin_util as util;
-use grin_wallet_util::grin_p2p;
 
 use grin_wallet_config as config;
 
@@ -46,21 +46,17 @@ pub mod node_clients;
 pub mod test_framework;
 pub mod tor;
 
-
+pub use crate::adapters::libp2p_messaging;
 pub use crate::adapters::{
-	create_sender,
-	get_mwcmqs_brocker, init_mwcmqs_access_data,
-	Address, AddressType, CloseReason,
-	HttpDataSender, HttpsAddress,
-	MWCMQPublisher, MWCMQSAddress, MWCMQSubscriber, MwcMqsChannel, PathToSlatePutter, PathToSlateGetter, Publisher,
-	SlateGetter, SlatePutter, SlateReceiver, SlateSender, Subscriber, SubscriptionHandler,
-	SwapMessageSender,
+	create_sender, get_mwcmqs_brocker, init_mwcmqs_access_data, Address, AddressType, CloseReason,
+	HttpDataSender, HttpsAddress, MWCMQPublisher, MWCMQSAddress, MWCMQSubscriber, MwcMqsChannel,
+	PathToSlateGetter, PathToSlatePutter, Publisher, SlateGetter, SlatePutter, SlateReceiver,
+	SlateSender, Subscriber, SubscriptionHandler, SwapMessageSender,
 };
 pub use crate::backends::{wallet_db_exists, LMDBBackend};
 pub use crate::error::{Error, ErrorKind};
 pub use crate::lifecycle::DefaultLCProvider;
 pub use crate::node_clients::HTTPNodeClient;
-pub use crate::adapters::libp2p_messaging;
 
 use crate::keychain::{ExtKeychain, Keychain};
 

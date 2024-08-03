@@ -3245,7 +3245,7 @@ pub fn run_doctest_owner(
 		empty_string.clone(),
 		false,
 		None,
-		None
+		None,
 	)
 	.unwrap();
 	let mask2 = lc
@@ -3384,7 +3384,7 @@ pub fn run_doctest_owner(
 				None,
 				true,
 				false,
-				false
+				false,
 			)
 			.unwrap()
 			.0;
