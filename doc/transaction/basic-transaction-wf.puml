@@ -1,13 +1,12 @@
-@startuml grin-transaction
-
+@startuml
 title 
-**Current Grin Tranaction Workflow** 
+**Current MWC Transaction Workflow** 
 Accurate as of Oct 10, 2018 - Master branch only
 end title
 
 actor "Sender" as sender
 actor "Recipient" as recipient
-entity "Grin Node" as grin_node
+entity "MWC Node" as mwc_node
 
 == Round 1 ==
 
@@ -25,7 +24,7 @@ end note
 note left of sender
 	8: Calculate **tx_weight**: MAX(-1 * **num_inputs** + 4 * (**num_change_outputs** + 1), 1)
 		(+1 covers a single output on the receiver's side)
-	9: Calculate **fee**:  **tx_weight** * 1_000_000 nG
+	9: Calculate **fee**:  **tx_weight** * 1_000_000 nMWC
 	10: Calculate total blinding excess sum for all inputs and outputs **xS1** = **xC** - **xI** (private scalar)
 	11: Select a random nonce **kS** (private scalar)
 	12: Subtract random kernel offset **oS** from **xS1**. Calculate **xS** = **xS1** - **oS**
@@ -74,15 +73,15 @@ note left of sender
 		 **lock_height**
 end note
 sender -> sender: Create final transaction **tx** from **Slate**
-sender -> grin_node: Post **tx** to mempool
-grin_node --> recipient: "Ok"
+sender -> mwc_node: Post **tx** to mempool
+mwc_node --> recipient: "Ok"
 alt All Okay
 recipient --> sender: "Ok" - **UUID**
 sender -> sender: Execute wallet lock function **sF**
 ...Await confirmation...
-recipient -> grin_node: Confirm **receiver_output**
+recipient -> mwc_node: Confirm **receiver_output**
 recipient -> recipient: Change status of **receiver_output** to "Confirmed"
-sender -> grin_node: Confirm **change_output**
+sender -> mwc_node: Confirm **change_output**
 sender -> sender: Change status of **inputs** to "Spent"
 sender -> sender: Change status of **change_output** to "Confirmed"
 else Any Error
@@ -92,6 +91,4 @@ recipient --> sender: Error
 sender -> sender: Unlock **inputs** and delete **change_output** identified in transaction log entry **TS**
 [x<- sender: Abort
 end
-
-
 @enduml
