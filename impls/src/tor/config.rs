@@ -312,20 +312,28 @@ pub fn is_tor_address(input: &str) -> Result<(), Error> {
 }
 
 pub fn complete_tor_address(input: &str) -> Result<String, Error> {
-	let input = if input.ends_with("/") {
-		&input[..input.len() - 1]
-	} else {
-		input
+	let (subdomain, domain, trailing_data) = match input.to_uppercase().find(".ONION") {
+		Some(index) => {
+			let (host, trailing_data) = input.split_at(index + ".ONION".len());
+			let (subdomain, domain) = match host[..host.len() - ".ONION".len()].rfind(".") {
+				Some(index) => {
+					host.split_at(index + ".".len())
+				}
+				None => ("", host)
+			};
+			(subdomain, domain, trailing_data)
+		}
+		None => ("", input, "")
 	};
-	is_tor_address(input)?;
-	let mut input = input.to_uppercase();
-	if !input.starts_with("HTTP://") && !input.starts_with("HTTPS://") {
-		input = format!("HTTP://{}", input);
+	is_tor_address(domain)?;
+	let mut domain = format!("{}{}", subdomain.to_uppercase(), domain.to_uppercase());
+	if !domain.starts_with("HTTP://") && !domain.starts_with("HTTPS://") {
+		domain = format!("HTTP://{}", domain);
 	}
-	if !input.ends_with(".ONION") {
-		input = format!("{}.ONION", input);
+	if !domain.ends_with(".ONION") {
+		domain = format!("{}.ONION", domain);
 	}
-	Ok(input.to_lowercase())
+	Ok(format!("{}{}", domain.to_lowercase(), trailing_data))
 }
 
 #[cfg(test)]

@@ -380,11 +380,15 @@ impl SlateSender for HttpDataSender {
 	) -> Result<Option<(SlateVersion, Option<String>)>, Error> {
 		// we need to keep _tor in scope so that the process is not killed by drop.
 		let (url_str, _tor) = self.set_up_tor_send_process()?;
-		Ok(Some(self.check_other_version(
+		let (slate_version, slatepack_address) = self.check_other_version(
 			&url_str,
 			None,
 			destination_address,
-		)?))
+		)?;
+		if tor::status::get_tor_sender_running() {
+			tor::status::set_tor_sender_running(false);
+		}
+		Ok(Some((slate_version, slatepack_address)))
 	}
 
 	fn send_tx(
