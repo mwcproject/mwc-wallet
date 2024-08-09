@@ -27,6 +27,8 @@ use sha2::{Digest, Sha256};
 use std::str;
 
 // Framing and formatting for slate armor. Headers and footers better to be the same size, otherwise formatting makes it ugly
+
+/// Header used for armored slatepack
 pub static HEADER_ENC: &str = "BEGINSLATEPACK.";
 static FOOTER_ENC: &str = ". ENDSLATEPACK.";
 pub static HEADER_BIN: &str = "BEGINSLATE_BIN.";

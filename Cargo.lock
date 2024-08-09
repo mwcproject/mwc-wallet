@@ -2307,6 +2307,7 @@ dependencies = [
  "libp2p",
  "log",
  "prettytable-rs",
+ "qr_code",
  "rand 0.7.3",
  "remove_dir_all",
  "ring 0.16.20",
@@ -4432,6 +4433,12 @@ dependencies = [
  "bytes 1.6.1",
  "prost",
 ]
+
+[[package]]
+name = "qr_code"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5520fbcd7da152a449261c5a533a1c7fad044e9e8aa9528cfec3f464786c7926"
 
 [[package]]
 name = "quick-error"

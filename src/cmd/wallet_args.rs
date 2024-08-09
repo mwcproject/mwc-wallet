@@ -644,6 +644,8 @@ pub fn parse_send_args(args: &ArgMatches) -> Result<command::SendArgs, ParseErro
 		None => None,
 	};
 
+	let slatepack_qr = args.is_present("slatepack_qr");
+
 	if minimum_confirmations_change_outputs_is_present && !exclude_change_outputs {
 		Err(ArgumentError("minimum_confirmations_change_outputs may only be specified if exclude_change_outputs is set".to_string()))
 	} else {
@@ -670,6 +672,7 @@ pub fn parse_send_args(args: &ArgMatches) -> Result<command::SendArgs, ParseErro
 			late_lock,
 			min_fee,
 			bridge: bridge,
+			slatepack_qr: slatepack_qr,
 		})
 	}
 }
@@ -691,12 +694,15 @@ pub fn parse_receive_unpack_args(args: &ArgMatches) -> Result<command::ReceiveAr
 
 	let bridge = parse_optional(args, "bridge")?;
 
+	let slatepack_qr = args.is_present("slatepack_qr");
+
 	Ok(command::ReceiveArgs {
 		input_file,
 		input_slatepack_message: args.value_of("content").map(|s| s.to_string()),
 		message: args.value_of("message").map(|s| s.to_string()),
 		outfile: args.value_of("outfile").map(|s| s.to_string()),
 		bridge,
+		slatepack_qr: slatepack_qr,
 	})
 }
 
@@ -715,12 +721,15 @@ pub fn parse_finalize_args(args: &ArgMatches) -> Result<command::FinalizeArgs, P
 		false => None,
 	};
 
+	let slatepack_qr = args.is_present("slatepack_qr");
+
 	Ok(command::FinalizeArgs {
 		input_file,
 		input_slatepack_message: args.value_of("content").map(|s| s.to_string()),
 		fluff: args.is_present("fluff"),
 		nopost: args.is_present("nopost"),
 		dest: args.value_of("dest").map(|s| s.to_string()),
+		slatepack_qr: slatepack_qr,
 	})
 }
 
@@ -772,6 +781,8 @@ pub fn parse_issue_invoice_args(
 		None => None,
 	};
 
+	let slatepack_qr = args.is_present("slatepack_qr");
+
 	// dest (output file)
 	let dest = parse_required(args, "dest")?;
 	Ok(command::IssueInvoiceArgs {
@@ -784,6 +795,7 @@ pub fn parse_issue_invoice_args(
 			target_slate_version,
 			slatepack_recipient,
 		},
+		slatepack_qr: slatepack_qr,
 	})
 }
 
@@ -871,6 +883,8 @@ pub fn parse_process_invoice_args(
 
 	let bridge = parse_optional(args, "bridge")?;
 
+	let slatepack_qr = args.is_present("slatepack_qr");
+
 	Ok(command::ProcessInvoiceArgs {
 		message: message,
 		minimum_confirmations: min_c,
@@ -882,6 +896,7 @@ pub fn parse_process_invoice_args(
 		input: tx_file.to_owned(),
 		ttl_blocks,
 		bridge,
+		slatepack_qr: slatepack_qr,
 	})
 }
 

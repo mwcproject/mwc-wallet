@@ -105,6 +105,17 @@ impl SlatePurpose {
 			SlatePurpose::FullSlate => 4,
 		}
 	}
+
+	/// Show slatepack purpose as string
+	pub fn to_str(&self) -> &str {
+		match self {
+			SlatePurpose::SendInitial => "send_init",
+			SlatePurpose::SendResponse => "send_response",
+			SlatePurpose::InvoiceInitial => "invoice_init",
+			SlatePurpose::InvoiceResponse => "invoice_response",
+			SlatePurpose::FullSlate => "full",
+		}
+	}
 }
 
 const SLATE_PACK_PLAIN_DATA_SIZE: usize = 1 + 32 + 32;

@@ -53,6 +53,7 @@ use grin_wallet_util::grin_p2p::libp2p_connection::ReceivedMessage;
 use grin_wallet_util::grin_p2p::{libp2p_connection, PeerAddr};
 use grin_wallet_util::grin_util::secp::{ContextFlag, Secp256k1};
 use grin_wallet_util::grin_util::static_secp_instance;
+use qr_code::QrCode;
 use serde_json as json;
 use serde_json::json;
 use serde_json::{Map as JsonMap, Value as JsonValue};
@@ -410,6 +411,7 @@ pub struct SendArgs {
 	pub late_lock: bool,
 	pub min_fee: Option<u64>,
 	pub bridge: Option<String>,
+	pub slatepack_qr: bool,
 }
 
 pub fn send<L, C, K>(
@@ -578,21 +580,40 @@ where
 						Some((&args.dest).into())
 					};
 
+					let slatepack_format = args.method == "slatepack";
 					let slate_str = PathToSlatePutter::build_encrypted(
 						dest,
 						SlatePurpose::SendInitial,
 						slatepack_sender,
 						recipient,
-						args.method == "slatepack",
+						slatepack_format,
 					)
 					.put_tx(&slate, Some(&slatepack_secret), false, &secp)
 					.map_err(|e| {
 						ErrorKind::IO(format!("Unable to store the file at {}, {}", args.dest, e))
 					})?;
 					api.tx_lock_outputs(m, &slate, Some(String::from("file")), 0)?;
-					if args.dest.is_empty() {
-						println!("Slatepack: {}", slate_str);
+
+					if !args.dest.is_empty() {
+						println!(
+							"Resulting transaction is successfully stored at : {}",
+							args.dest
+						);
+						println!();
 					}
+
+					if slatepack_format {
+						show_slatepack(
+							api,
+							&slate_str, // encrypted (optionally) slate with a purpose.
+							&slate.id,
+							&SlatePurpose::SendInitial,
+							recipient.is_some(),
+							false,
+							args.slatepack_qr,
+						)?;
+					}
+
 					return Ok(());
 				}
 				"self" => {
@@ -662,6 +683,82 @@ where
 	Ok(())
 }
 
+/// Show slate pack and save it into the backup for historical purpose
+pub fn show_slatepack<L, C, K>(
+	api: &mut Owner<L, C, K>,
+	slate_str: &str, // encrypted (optionally) slate with a purpose.
+	slate_id: &Uuid,
+	slate_purpose: &SlatePurpose,
+	is_encrypted: bool,
+	show_finalizing_message: bool,
+	show_qr: bool,
+) -> Result<(), Error>
+where
+	L: WalletLCProvider<'static, C, K> + 'static,
+	C: NodeClient + 'static,
+	K: keychain::Keychain + 'static,
+{
+	// Output if it is a slatepack, into stdout and backup file
+	let tld = api.get_top_level_directory()?;
+
+	// create a directory to which files will be output
+	let slate_dir = format!("{}/{}", tld, "slatepack");
+	let _ = std::fs::create_dir_all(slate_dir.clone());
+	let out_file_name = format!(
+		"{}/{}.{}.slatepack",
+		slate_dir,
+		slate_id,
+		slate_purpose.to_str()
+	);
+
+	let mut output = File::create(out_file_name.clone()).map_err(|e| {
+		ErrorKind::IO(format!(
+			"Unable to create slate backup file {}, {}",
+			out_file_name, e
+		))
+	})?;
+	output.write_all(&slate_str.as_bytes()).map_err(|e| {
+		ErrorKind::IO(format!(
+			"Unable to store slate backup data into file {}, {}",
+			out_file_name, e
+		))
+	})?;
+	output.sync_all().map_err(|e| {
+		ErrorKind::IO(format!(
+			"Unable to sync data for file {}, {}",
+			out_file_name, e
+		))
+	})?;
+
+	println!();
+	if !show_finalizing_message {
+		println!("Slatepack data follows. Please provide this output to the other party");
+	} else {
+		println!("Slatepack data follows.");
+	}
+	println!();
+	println!("--- CUT BELOW THIS LINE ---");
+	println!();
+	println!("{}", slate_str);
+	println!("--- CUT ABOVE THIS LINE ---");
+	println!();
+	println!("Slatepack data was also backed up at {}", out_file_name);
+	println!();
+	if show_qr {
+		if let Ok(qr_string) = QrCode::new(slate_str) {
+			println!("{}", qr_string.to_string(false, 3));
+			println!();
+		}
+	}
+	if is_encrypted {
+		println!("The slatepack data is encrypted for the recipient only");
+	} else {
+		println!("The slatepack data is NOT encrypted");
+	}
+	println!();
+	Ok(())
+}
+
 /// Receive command argument
 pub struct ReceiveArgs {
 	pub input_file: Option<String>,
@@ -669,6 +766,7 @@ pub struct ReceiveArgs {
 	pub message: Option<String>,
 	pub outfile: Option<String>,
 	pub bridge: Option<String>,
+	pub slatepack_qr: bool,
 }
 
 pub fn receive<L, C, K>(
@@ -756,10 +854,22 @@ where
 		.put_tx(&slate, Some(&slatepack_secret), false, &secp)?;
 
 		if let Some(response_file) = &response_file {
-			info!("Response file {}.response generated, and can be sent back to the transaction originator.", response_file);
-		} else {
-			println!("Response Slate: {}", slatepack_str);
+			println!("Response file {}.response generated, and can be sent back to the transaction originator.", response_file);
+			println!();
 		}
+
+		if slatepack_format {
+			show_slatepack(
+				owner_api,
+				&slatepack_str, // encrypted (optionally) slate with a purpose.
+				&slate.id,
+				&SlatePurpose::SendInitial,
+				sender.is_some(),
+				false,
+				args.slatepack_qr,
+			)?;
+		}
+
 		Ok(())
 	})?;
 
@@ -855,6 +965,7 @@ pub struct FinalizeArgs {
 	pub fluff: bool,
 	pub nopost: bool,
 	pub dest: Option<String>,
+	pub slatepack_qr: bool,
 }
 
 pub fn finalize<L, C, K>(
@@ -1002,7 +1113,7 @@ where
 			};
 
 			// save to a destination not as a slatepack
-			PathToSlatePutter::build_encrypted(
+			let slatepack_str = PathToSlatePutter::build_encrypted(
 				Some((&args.dest.unwrap()).into()),
 				SlatePurpose::FullSlate,
 				DalekPublicKey::from(&slatepack_secret),
@@ -1010,6 +1121,18 @@ where
 				slatepack_format,
 			)
 			.put_tx(&slate, Some(&slatepack_secret), false, &secp)?;
+
+			if slatepack_format {
+				show_slatepack(
+					api,
+					&slatepack_str, // encrypted (optionally) slate with a purpose.
+					&slate.id,
+					&SlatePurpose::FullSlate,
+					sender.is_some(),
+					true,
+					args.slatepack_qr,
+				)?;
+			}
 
 			Ok(())
 		})?;
@@ -1024,6 +1147,8 @@ pub struct IssueInvoiceArgs {
 	pub dest: String,
 	/// issue invoice tx args
 	pub issue_args: IssueInvoiceTxArgs,
+	/// show slatepack as QR code
+	pub slatepack_qr: bool,
 }
 
 pub fn issue_invoice_tx<L, C, K>(
@@ -1054,14 +1179,28 @@ where
 			(slatepack_secret, slatepack_pk, keychain.secp().clone())
 		};
 
-		PathToSlatePutter::build_encrypted(
+		let slatepack_format = recipient.is_some();
+		let slate_str = PathToSlatePutter::build_encrypted(
 			Some((&args.dest).into()),
 			SlatePurpose::InvoiceInitial,
 			tor_address,
 			recipient,
-			recipient.is_some(),
+			slatepack_format,
 		)
 		.put_tx(&slate, Some(&slatepack_secret), false, &secp)?;
+
+		if slatepack_format {
+			show_slatepack(
+				api,
+				&slate_str, // encrypted (optionally) slate with a purpose.
+				&slate.id,
+				&SlatePurpose::InvoiceInitial,
+				recipient.is_some(),
+				false,
+				args.slatepack_qr,
+			)?;
+		}
+
 		Ok(())
 	})?;
 	Ok(())
@@ -1079,6 +1218,7 @@ pub struct ProcessInvoiceArgs {
 	pub estimate_selection_strategies: bool,
 	pub ttl_blocks: Option<u64>,
 	pub bridge: Option<String>,
+	pub slatepack_qr: bool,
 }
 
 /// Process invoice
@@ -1094,13 +1234,19 @@ where
 	C: NodeClient + 'static,
 	K: keychain::Keychain + 'static,
 {
-	let (slatepack_secret, height, secp) = {
+	let (slatepack_secret, tor_address, height, secp) = {
 		let mut w_lock = owner_api.wallet_inst.lock();
 		let w = w_lock.lc_provider()?.wallet_inst()?;
 		let keychain = w.keychain(keychain_mask)?;
 		let slatepack_secret = proofaddress::payment_proof_address_dalek_secret(&keychain, None)?;
+		let slatepack_pk = DalekPublicKey::from(&slatepack_secret);
 		let (height, _, _) = w.w2n_client().get_chain_tip()?;
-		(slatepack_secret, height, keychain.secp().clone())
+		(
+			slatepack_secret,
+			slatepack_pk,
+			height,
+			keychain.secp().clone(),
+		)
 	};
 
 	let slate_pkg = PathToSlateGetter::build_form_path((&args.input).into()).get_tx(
@@ -1181,13 +1327,28 @@ where
 			match args.method.as_str() {
 				"file" => {
 					// Process invoice slate is not required to send anywhere. Let's write it for our records.
-					PathToSlatePutter::build_plain(Some((&args.dest).into())).put_tx(
-						&slate,
-						Some(&slatepack_secret),
-						false,
-						&secp,
-					)?;
+					let slatepack_format = sender_pk.is_some();
+					let slate_str = PathToSlatePutter::build_encrypted(
+						Some((&args.dest).into()),
+						SlatePurpose::InvoiceResponse,
+						tor_address,
+						sender_pk,
+						slatepack_format,
+					)
+					.put_tx(&slate, Some(&slatepack_secret), false, &secp)?;
 					api.tx_lock_outputs(m, &slate, Some(String::from("file")), 1)?;
+
+					if slatepack_format {
+						show_slatepack(
+							api,
+							&slate_str, // encrypted (optionally) slate with a purpose.
+							&slate.id,
+							&SlatePurpose::InvoiceResponse,
+							sender_pk.is_some(),
+							false,
+							args.slatepack_qr,
+						)?;
+					}
 				}
 				"self" => {
 					api.tx_lock_outputs(m, &slate, Some(String::from("self")), 1)?;
