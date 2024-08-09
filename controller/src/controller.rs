@@ -28,6 +28,7 @@ use grin_wallet_util::OnionV3Address;
 use hyper::body;
 use hyper::header::HeaderValue;
 use hyper::{Body, Request, Response, StatusCode};
+use qr_code::QrCode;
 use serde::{Deserialize, Serialize};
 use serde_json;
 
@@ -51,9 +52,11 @@ use crate::impls::tor::{bridge as tor_bridge, proxy as tor_proxy};
 use crate::keychain::Keychain;
 use chrono::Utc;
 use easy_jsonrpc_mw::{Handler, MaybeReply};
+use ed25519_dalek::PublicKey as DalekPublicKey;
 use grin_wallet_impls::tor;
 use grin_wallet_libwallet::proof::crypto;
 use grin_wallet_libwallet::proof::proofaddress;
+use grin_wallet_libwallet::proof::proofaddress::ProvableAddress;
 use grin_wallet_util::grin_core::core::TxKernel;
 use grin_wallet_util::grin_p2p;
 use grin_wallet_util::grin_p2p::libp2p_connection;
@@ -987,12 +990,15 @@ where
 		);
 	}
 
-	// Check if wallet has been opened first
-	{
+	// Check if wallet has been opened first, get slatepack public key
+	let slatepack_pk = {
 		let mut w_lock = wallet.lock();
-		let lc = w_lock.lc_provider()?;
-		let _ = lc.wallet_inst()?;
-	}
+		let w = w_lock.lc_provider()?.wallet_inst()?;
+		let keychain = w.keychain(keychain_mask.lock().as_ref())?;
+		let slatepack_secret = proofaddress::payment_proof_address_dalek_secret(&keychain, None)?;
+		let slatepack_pk = DalekPublicKey::from(&slatepack_secret);
+		slatepack_pk
+	};
 
 	// need to keep in scope while the main listener is running
 	let tor_info = match use_tor {
@@ -1038,6 +1044,19 @@ where
 		.map_err(|e| ErrorKind::GenericError(format!("API thread failed to start, {}", e)))?;
 
 	warn!("HTTP Foreign listener started.");
+
+	{
+		let address = ProvableAddress::from_tor_pub_key(&slatepack_pk);
+		let qr_string = match QrCode::new(address.public_key.clone()) {
+			Ok(qr) => qr.to_string(false, 3),
+			Err(_) => "Failed to generate QR code!".to_string(),
+		};
+		warn!(
+			"Slatepack Address is: {}\n{}",
+			address.public_key, qr_string
+		);
+	}
+
 	*FOREIGN_API_RUNNING.write().unwrap() = true;
 
 	// Starting libp2p listener
