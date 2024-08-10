@@ -460,7 +460,11 @@ pub fn parse_account_args(account_args: &ArgMatches) -> Result<command::AccountA
 pub fn parse_send_args(args: &ArgMatches) -> Result<command::SendArgs, ParseError> {
 	// amount
 	let amount = parse_required(args, "amount")?;
-	let amount = core::core::amount_from_hr_string(amount);
+	let (amount, spend_max) = if amount.eq_ignore_ascii_case("max") {
+		(Ok(0), true)
+	} else {
+		(core::core::amount_from_hr_string(amount), false)
+	};
 	let amount = match amount {
 		Ok(a) => a,
 		Err(e) => {
@@ -471,6 +475,7 @@ pub fn parse_send_args(args: &ArgMatches) -> Result<command::SendArgs, ParseErro
 			return Err(ParseError::ArgumentError(msg));
 		}
 	};
+	let amount_includes_fee = args.is_present("amount_includes_fee") || spend_max;
 
 	// message
 	let message = match args.is_present("message") {
@@ -513,7 +518,10 @@ pub fn parse_send_args(args: &ArgMatches) -> Result<command::SendArgs, ParseErro
 			if !estimate_selection_strategies && method != "slatepack" {
 				parse_required(args, "dest")?
 			} else {
-				""
+				match args.value_of("dest") {
+					Some(d) => d,
+					None => "",
+				}
 			}
 		}
 	};
@@ -553,7 +561,13 @@ pub fn parse_send_args(args: &ArgMatches) -> Result<command::SendArgs, ParseErro
 				let v = parse_required(args, "slate_version")?;
 				Some(parse_u64(v, "slate_version")? as u16)
 			}
-			false => None,
+			false => {
+				if method == "slatepack" {
+					Some(4 as u16)
+				} else {
+					None
+				}
+			}
 		}
 	};
 
@@ -651,6 +665,8 @@ pub fn parse_send_args(args: &ArgMatches) -> Result<command::SendArgs, ParseErro
 	} else {
 		Ok(command::SendArgs {
 			amount: amount,
+			amount_includes_fee: amount_includes_fee,
+			use_max_amount: spend_max,
 			message: message,
 			minimum_confirmations: min_c,
 			selection_strategy: selection_strategy.to_owned(),
@@ -1599,6 +1615,12 @@ where
 	K: keychain::Keychain + 'static,
 {
 	let km = (&keychain_mask).as_ref();
+
+	if test_mode {
+		owner_api.doctest_mode = true;
+		owner_api.doctest_retain_tld = true;
+	}
+
 	match wallet_args.subcommand() {
 		("init", Some(args)) => {
 			let a = arg_parse!(parse_init_args(

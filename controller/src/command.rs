@@ -390,6 +390,8 @@ where
 /// Arguments for the send command
 pub struct SendArgs {
 	pub amount: u64,
+	pub amount_includes_fee: bool,
+	pub use_max_amount: bool,
 	pub message: Option<String>,
 	pub minimum_confirmations: u64,
 	pub selection_strategy: String,
@@ -430,6 +432,16 @@ where
 	C: NodeClient + 'static,
 	K: keychain::Keychain + 'static,
 {
+	let mut amount = args.amount;
+	if args.use_max_amount {
+		controller::owner_single_use(None, keychain_mask, Some(owner_api), |api, m| {
+			let (_, wallet_info) =
+				api.retrieve_summary_info(m, true, args.minimum_confirmations)?;
+			amount = wallet_info.amount_currently_spendable;
+			Ok(())
+		})?;
+	};
+
 	let wallet_inst = owner_api.wallet_inst.clone();
 	controller::owner_single_use(None, keychain_mask, Some(owner_api), |api, m| {
 		if args.estimate_selection_strategies {
@@ -437,7 +449,8 @@ where
 			for strategy in vec!["smallest", "all"] {
 				let init_args = InitTxArgs {
 					src_acct_name: None,
-					amount: args.amount,
+					amount: amount,
+					amount_includes_fee: Some(args.amount_includes_fee),
 					minimum_confirmations: args.minimum_confirmations,
 					max_outputs: args.max_outputs as u32,
 					num_change_outputs: args.change_outputs as u32,
@@ -453,11 +466,12 @@ where
 				let slate = api.init_send_tx(m, &init_args, 1)?;
 				strategies.push((strategy, slate.amount, slate.fee));
 			}
-			display::estimate(args.amount, strategies, dark_scheme);
+			display::estimate(amount, strategies, dark_scheme);
 		} else {
 			let mut init_args = InitTxArgs {
 				src_acct_name: None,
-				amount: args.amount,
+				amount: amount,
+				amount_includes_fee: Some(args.amount_includes_fee),
 				minimum_confirmations: args.minimum_confirmations,
 				max_outputs: args.max_outputs as u32,
 				num_change_outputs: args.change_outputs as u32,
@@ -529,7 +543,7 @@ where
 				Ok(s) => {
 					info!(
 						"Tx created: {} mwc to {} (strategy '{}')",
-						core::amount_to_hr_string(args.amount, false),
+						core::amount_to_hr_string(amount, false),
 						args.dest,
 						args.selection_strategy,
 					);
@@ -863,7 +877,7 @@ where
 				owner_api,
 				&slatepack_str, // encrypted (optionally) slate with a purpose.
 				&slate.id,
-				&SlatePurpose::SendInitial,
+				&SlatePurpose::SendResponse,
 				sender.is_some(),
 				false,
 				args.slatepack_qr,
@@ -1098,7 +1112,7 @@ where
 		})?;
 	}
 
-	if args.dest.is_some() {
+	if args.dest.is_some() || slatepack_format {
 		controller::owner_single_use(None, keychain_mask, Some(owner_api), |api, m| {
 			let (slatepack_secret, secp) = {
 				let mut w_lock = api.wallet_inst.lock();
@@ -1112,9 +1126,14 @@ where
 				(slatepack_secret, keychain.secp().clone())
 			};
 
+			let path_buf: Option<PathBuf> = match args.dest {
+				Some(d) => Some(d.into()),
+				None => None,
+			};
+
 			// save to a destination not as a slatepack
 			let slatepack_str = PathToSlatePutter::build_encrypted(
-				Some((&args.dest.unwrap()).into()),
+				path_buf,
 				SlatePurpose::FullSlate,
 				DalekPublicKey::from(&slatepack_secret),
 				sender,

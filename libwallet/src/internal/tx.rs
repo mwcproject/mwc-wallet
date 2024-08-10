@@ -103,6 +103,7 @@ where
 pub fn estimate_send_tx<'a, T: ?Sized, C, K>(
 	wallet: &mut T,
 	amount: u64,
+	amount_includes_fee: bool,
 	min_fee: &Option<u64>,
 	minimum_confirmations: u64,
 	max_outputs: usize,
@@ -139,6 +140,7 @@ where
 	let (_coins, total, _amount, fee) = selection::select_coins_and_fee(
 		wallet,
 		amount,
+		amount_includes_fee,
 		min_fee,
 		current_height,
 		minimum_confirmations,
@@ -174,6 +176,7 @@ pub fn add_inputs_to_slate<'a, T: ?Sized, C, K>(
 	routputs: usize,               // Number of resulting outputs. Normally it is 1
 	exclude_change_outputs: bool,
 	change_output_minimum_confirmations: u64,
+	amount_includes_fee: bool,
 ) -> Result<Context, Error>
 where
 	T: WalletBackend<'a, C, K>,
@@ -208,6 +211,7 @@ where
 		exclude_change_outputs,
 		change_output_minimum_confirmations,
 		message.clone(),
+		amount_includes_fee,
 	)?;
 
 	// Generate a kernel offset and subtract from our context's secret key. Store
@@ -334,6 +338,7 @@ where
 	let (_coins, _total, _amount, fee) = selection::select_coins_and_fee(
 		wallet,
 		init_tx_args.amount,
+		init_tx_args.amount_includes_fee.unwrap_or(false),
 		&init_tx_args.min_fee,
 		current_height,
 		init_tx_args.minimum_confirmations,

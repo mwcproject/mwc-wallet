@@ -456,6 +456,7 @@ where
 		let (total, fee) = tx::estimate_send_tx(
 			&mut *w,
 			args.amount,
+			args.amount_includes_fee.unwrap_or(false),
 			&args.min_fee,
 			args.minimum_confirmations,
 			args.max_outputs as usize,
@@ -513,6 +514,7 @@ where
 			routputs,
 			args.exclude_change_outputs.unwrap_or(false),
 			args.minimum_confirmations_change_outputs,
+			args.amount_includes_fee.unwrap_or(false),
 		)?
 	};
 
@@ -715,6 +717,7 @@ where
 		1,
 		args.exclude_change_outputs.unwrap_or(false),
 		args.minimum_confirmations_change_outputs,
+		false,
 	)?;
 
 	if slate.compact_slate {
@@ -873,6 +876,7 @@ where
 			args.exclude_change_outputs.unwrap_or(false),
 			args.minimum_confirmations_change_outputs,
 			args.message,
+			false,
 		)?;
 
 		// Add inputs and outputs to original context

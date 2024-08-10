@@ -65,6 +65,8 @@ pub struct InitTxArgs {
 	#[serde(with = "secp_ser::string_or_u64")]
 	/// The amount to send, in nano MWC. (`1 MWC = 1_000_000_000 nMWC`)
 	pub amount: u64,
+	/// Does the amount include the fee, or will fees be spent in addition to the amount?
+	pub amount_includes_fee: Option<bool>,
 	#[serde(with = "secp_ser::string_or_u64")]
 	/// The minimum number of confirmations an output
 	/// should have in order to be included in the transaction.
@@ -178,6 +180,7 @@ impl Default for InitTxArgs {
 		InitTxArgs {
 			src_acct_name: None,
 			amount: 0,
+			amount_includes_fee: None,
 			minimum_confirmations: 10,
 			max_outputs: 500,
 			num_change_outputs: 1,

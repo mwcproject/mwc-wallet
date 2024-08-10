@@ -55,6 +55,7 @@ pub fn build_send_tx<'a, T: ?Sized, C, K>(
 	exclude_change_outputs: bool,
 	change_output_minimum_confirmations: u64,
 	message: Option<String>,
+	amount_includes_fee: bool,
 ) -> Result<Context, Error>
 where
 	T: WalletBackend<'a, C, K>,
@@ -65,6 +66,7 @@ where
 		wallet,
 		keychain_mask,
 		slate.amount,
+		amount_includes_fee,
 		min_fee,
 		slate.height,
 		minimum_confirmations,
@@ -78,6 +80,14 @@ where
 		change_output_minimum_confirmations,
 		true, // Legacy value is true
 	)?;
+	if amount_includes_fee {
+		slate.amount = slate
+			.amount
+			.checked_sub(fee)
+			.ok_or(ErrorKind::GenericError(
+				format!("Transaction amount is too small to include fee").into(),
+			))?;
+	};
 
 	// Update the fee on the slate so we account for this when building the tx.
 	slate.fee = fee;
@@ -491,6 +501,7 @@ pub fn select_send_tx<'a, T: ?Sized, C, K, B>(
 	wallet: &mut T,
 	keychain_mask: Option<&SecretKey>,
 	amount: u64,
+	amount_includes_fee: bool,
 	min_fee: &Option<u64>,
 	current_height: u64,
 	minimum_confirmations: u64,
@@ -521,6 +532,7 @@ where
 	let (coins, _total, amount, fee) = select_coins_and_fee(
 		wallet,
 		amount,
+		amount_includes_fee,
 		min_fee,
 		current_height,
 		minimum_confirmations,
@@ -554,6 +566,7 @@ where
 pub fn select_coins_and_fee<'a, T: ?Sized, C, K>(
 	wallet: &mut T,
 	amount: u64,
+	amount_includes_fee: bool,
 	min_fee: &Option<u64>,
 	current_height: u64,
 	minimum_confirmations: u64,
@@ -613,7 +626,10 @@ where
 	}
 
 	let mut total: u64 = coins.iter().map(|c| c.value).sum();
-	let mut amount_with_fee = amount + fee;
+	let mut amount_with_fee = match amount_includes_fee {
+		true => amount,
+		false => amount + fee,
+	};
 
 	let num_outputs = change_outputs + routputs;
 
@@ -625,7 +641,10 @@ where
 		if let Some(min_fee) = min_fee {
 			fee = std::cmp::max(*min_fee, fee);
 		}
-		amount_with_fee = amount + fee;
+		amount_with_fee = match amount_includes_fee {
+			true => amount,
+			false => amount + fee,
+		};
 
 		// Here check if we have enough outputs for the amount including fee otherwise
 		// look for other outputs and check again
@@ -653,7 +672,10 @@ where
 				fee = std::cmp::max(*min_fee, fee);
 			}
 			total = coins.iter().map(|c| c.value).sum();
-			amount_with_fee = amount + fee;
+			amount_with_fee = match amount_includes_fee {
+				true => amount,
+				false => amount + fee,
+			};
 
 			// Checking if new solution is better (has more outputs)
 			// Don't checking outputs limit because light overcounting is fine
@@ -671,7 +693,15 @@ where
 			})?;
 		}
 	}
-	Ok((coins, total, amount, fee))
+	// If original amount includes fee, the new amount should
+	// be reduced, to accommodate the fee.
+	let new_amount = match amount_includes_fee {
+		true => amount.checked_sub(fee).ok_or(ErrorKind::GenericError(
+			format!("Transaction amount is too small to include fee").into(),
+		))?,
+		false => amount,
+	};
+	Ok((coins, total, new_amount, fee))
 }
 
 /// Selects inputs and change for a transaction

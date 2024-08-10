@@ -27,16 +27,17 @@ use std::thread;
 use std::time::Duration;
 
 use grin_wallet_impls::DefaultLCProvider;
-use grin_wallet_util::grin_core::global;
 use grin_wallet_util::grin_keychain::ExtKeychain;
 
 mod common;
 use common::{clean_output_dir, execute_command, initial_setup_wallet, instantiate_wallet, setup};
+use grin_wallet_controller::controller;
+use grin_wallet_libwallet::proof::proofaddress::ProvableAddress;
+use grin_wallet_util::grin_core::consensus::calc_mwc_block_reward;
 
 /// command line tests
 fn command_line_test_impl(test_dir: &str) -> Result<(), grin_wallet_controller::Error> {
 	setup(test_dir);
-	global::set_local_chain_type(global::ChainTypes::AutomatedTesting);
 	// Create a new proxy to simulate server and wallet responses
 	let mut wallet_proxy: WalletProxy<
 		DefaultLCProvider<LocalWalletClient, ExtKeychain>,
@@ -50,7 +51,7 @@ fn command_line_test_impl(test_dir: &str) -> Result<(), grin_wallet_controller::
 	let app = App::from_yaml(yml);
 
 	// wallet init
-	let arg_vec = vec!["mwc-wallet", "-p", "password", "init", "-h"];
+	let arg_vec = vec!["mwc-wallet", "-p", "password1", "init", "-h"];
 	// should create new wallet file
 	let client1 = LocalWalletClient::new("wallet1", wallet_proxy.tx.clone());
 	execute_command(&app, test_dir, "wallet1", &client1, arg_vec.clone())?;
@@ -66,7 +67,7 @@ fn command_line_test_impl(test_dir: &str) -> Result<(), grin_wallet_controller::
 	let (wallet1, mask1_i) = instantiate_wallet(
 		wallet_config1.clone(),
 		client1.clone(),
-		"password",
+		"password1",
 		"default",
 	)?;
 	wallet_proxy.add_wallet(
@@ -77,6 +78,7 @@ fn command_line_test_impl(test_dir: &str) -> Result<(), grin_wallet_controller::
 	);
 
 	// Create wallet 2
+	let arg_vec = vec!["mwc-wallet", "-p", "password2", "init", "-h"];
 	let client2 = LocalWalletClient::new("wallet2", wallet_proxy.tx.clone());
 	execute_command(&app, test_dir, "wallet2", &client2, arg_vec.clone())?;
 
@@ -85,7 +87,7 @@ fn command_line_test_impl(test_dir: &str) -> Result<(), grin_wallet_controller::
 	let (wallet2, mask2_i) = instantiate_wallet(
 		wallet_config2.clone(),
 		client2.clone(),
-		"password",
+		"password2",
 		"default",
 	)?;
 	wallet_proxy.add_wallet(
@@ -97,41 +99,61 @@ fn command_line_test_impl(test_dir: &str) -> Result<(), grin_wallet_controller::
 
 	// Set the wallet proxy listener running
 	thread::spawn(move || {
-		global::set_local_chain_type(global::ChainTypes::AutomatedTesting);
 		if let Err(e) = wallet_proxy.run() {
 			error!("Wallet Proxy error: {}", e);
 		}
 	});
 
 	// Create some accounts in wallet 1
-	let arg_vec = vec!["mwc-wallet", "-p", "password", "account", "-c", "mining"];
+	let arg_vec = vec!["mwc-wallet", "-p", "password1", "account", "-c", "mining"];
 	execute_command(&app, test_dir, "wallet1", &client1, arg_vec)?;
 
-	let arg_vec = vec!["mwc-wallet", "-p", "password", "account", "-c", "account_1"];
+	let arg_vec = vec![
+		"mwc-wallet",
+		"-p",
+		"password1",
+		"account",
+		"-c",
+		"account_1",
+	];
 	execute_command(&app, test_dir, "wallet1", &client1, arg_vec)?;
 
 	// Create some accounts in wallet 2
-	let arg_vec = vec!["mwc-wallet", "-p", "password", "account", "-c", "account_1"];
+	let arg_vec = vec![
+		"mwc-wallet",
+		"-p",
+		"password2",
+		"account",
+		"-c",
+		"account_1",
+	];
 	execute_command(&app, test_dir, "wallet2", &client2, arg_vec.clone())?;
 	// already exists
 	assert!(execute_command(&app, test_dir, "wallet2", &client2, arg_vec).is_err());
 
-	let arg_vec = vec!["mwc-wallet", "-p", "password", "account", "-c", "account_2"];
+	let arg_vec = vec![
+		"mwc-wallet",
+		"-p",
+		"password2",
+		"account",
+		"-c",
+		"account_2",
+	];
 	execute_command(&app, test_dir, "wallet2", &client2, arg_vec)?;
 
 	// let's see those accounts
-	let arg_vec = vec!["mwc-wallet", "-p", "password", "account"];
-	execute_command(&app, test_dir, "wallet2", &client2, arg_vec)?;
+	let arg_vec = vec!["mwc-wallet", "-p", "password1", "account"];
+	execute_command(&app, test_dir, "wallet1", &client1, arg_vec)?;
 
 	// let's see those accounts
-	let arg_vec = vec!["mwc-wallet", "-p", "password", "account"];
+	let arg_vec = vec!["mwc-wallet", "-p", "password2", "account"];
 	execute_command(&app, test_dir, "wallet2", &client2, arg_vec)?;
 
 	// Mine a bit into wallet 1 so we have something to send
 	// (TODO: Be able to stop listeners so we can test this better)
 	let wallet_config1 = config1.clone().members.unwrap().wallet;
 	let (wallet1, mask1_i) =
-		instantiate_wallet(wallet_config1, client1.clone(), "password", "default")?;
+		instantiate_wallet(wallet_config1, client1.clone(), "password1", "default")?;
 	let mask1 = (&mask1_i).as_ref();
 	grin_wallet_controller::controller::owner_single_use(
 		Some(wallet1.clone()),
@@ -143,7 +165,7 @@ fn command_line_test_impl(test_dir: &str) -> Result<(), grin_wallet_controller::
 		},
 	)?;
 
-	let mut bh = 10u64; // Note, we better to use 10 blocks, becaus of transactions numbers that this test expect
+	let mut bh = 10u64;
 	let _ =
 		test_framework::award_blocks_to_wallet(&chain, wallet1.clone(), mask1, bh as usize, false);
 
@@ -158,33 +180,40 @@ fn command_line_test_impl(test_dir: &str) -> Result<(), grin_wallet_controller::
 	                         This part should all be truncated";
 
 	// Update info and check
-	let arg_vec = vec!["mwc-wallet", "-p", "password", "-a", "mining", "info"];
+	let arg_vec = vec!["mwc-wallet", "-p", "password1", "-a", "mining", "info"];
 	execute_command(&app, test_dir, "wallet1", &client1, arg_vec)?;
 
 	// try a file exchange
-	let file_name = format!("{}/tx1.part_tx", test_dir);
-	let response_file_name = format!("{}/tx1.part_tx.response", test_dir);
+	let file_name = format!(
+		"{}/wallet1/slatepack/0436430c-2b02-624c-2032-570501212b00.send_init.slatepack",
+		test_dir
+	);
+
+	let out_file_name = format!("{}/out_tx", test_dir);
+
 	let arg_vec = vec![
 		"mwc-wallet",
 		"-p",
-		"password",
+		"password1",
 		"-a",
 		"mining",
 		"send",
 		"-m",
-		"file",
+		"slatepack",
 		"-d",
-		&file_name,
+		out_file_name.as_str(),
 		"-g",
 		very_long_message,
 		"0.3", // grin: "10"
 	];
 	execute_command(&app, test_dir, "wallet1", &client1, arg_vec)?;
+	let arg_vec = vec!["mwc-wallet", "-a", "mining", "-p", "password1", "txs"];
+	execute_command(&app, test_dir, "wallet1", &client1, arg_vec)?;
 
 	let arg_vec = vec![
 		"mwc-wallet",
 		"-p",
-		"password",
+		"password2",
 		"-a",
 		"account_1",
 		"receive",
@@ -198,15 +227,20 @@ fn command_line_test_impl(test_dir: &str) -> Result<(), grin_wallet_controller::
 	// shouldn't be allowed to receive twice
 	assert!(execute_command(&app, test_dir, "wallet2", &client2, arg_vec).is_err());
 
+	let file_name = format!(
+		"{}/wallet2/slatepack/0436430c-2b02-624c-2032-570501212b00.send_response.slatepack",
+		test_dir
+	);
+
 	let arg_vec = vec![
 		"mwc-wallet",
 		"-a",
 		"mining",
 		"-p",
-		"password",
+		"password1",
 		"finalize",
 		"-f",
-		&response_file_name,
+		&file_name,
 	];
 	execute_command(&app, test_dir, "wallet1", &client1, arg_vec)?;
 	bh += 1;
@@ -215,7 +249,7 @@ fn command_line_test_impl(test_dir: &str) -> Result<(), grin_wallet_controller::
 	let (wallet1, mask1_i) = instantiate_wallet(
 		wallet_config1.clone(),
 		client1.clone(),
-		"password",
+		"password1",
 		"default",
 	)?;
 	let mask1 = (&mask1_i).as_ref();
@@ -241,10 +275,10 @@ fn command_line_test_impl(test_dir: &str) -> Result<(), grin_wallet_controller::
 	bh += 10;
 
 	// update info for each
-	let arg_vec = vec!["mwc-wallet", "-p", "password", "-a", "mining", "info"];
+	let arg_vec = vec!["mwc-wallet", "-p", "password1", "-a", "mining", "info"];
 	execute_command(&app, test_dir, "wallet1", &client1, arg_vec)?;
 
-	let arg_vec = vec!["mwc-wallet", "-p", "password", "-a", "account_1", "info"];
+	let arg_vec = vec!["mwc-wallet", "-p", "password2", "-a", "account_1", "info"];
 	execute_command(&app, test_dir, "wallet2", &client1, arg_vec)?;
 
 	// check results in wallet 2
@@ -252,77 +286,243 @@ fn command_line_test_impl(test_dir: &str) -> Result<(), grin_wallet_controller::
 	let (wallet2, mask2_i) = instantiate_wallet(
 		wallet_config2.clone(),
 		client2.clone(),
-		"password",
+		"password2",
 		"default",
 	)?;
 	let mask2 = (&mask2_i).as_ref();
 
+	// Extracting slatepack/tor addresses
+	let mut tor_addr1 = String::new();
+	controller::owner_single_use(Some(wallet1.clone()), mask1, None, |api, m| {
+		// Just address at derivation index 0 for now
+		let tor_pub_key = api.get_wallet_public_address(m)?;
+		tor_addr1 = ProvableAddress::from_tor_pub_key(&tor_pub_key).to_string();
+		Ok(())
+	})?;
+
+	let mut tor_addr2 = String::new();
+	controller::owner_single_use(Some(wallet2.clone()), mask2, None, |api, m| {
+		// Just address at derivation index 0 for now
+		let tor_pub_key = api.get_wallet_public_address(m)?;
+		tor_addr2 = ProvableAddress::from_tor_pub_key(&tor_pub_key).to_string();
+		Ok(())
+	})?;
+
+	controller::owner_single_use(Some(wallet2.clone()), mask2, None, |api, m| {
+		api.set_active_account(m, "account_1")?;
+		let (_, wallet1_info) = api.retrieve_summary_info(m, true, 1)?;
+		assert_eq!(wallet1_info.last_confirmed_height, bh);
+		assert_eq!(wallet1_info.amount_currently_spendable, 300_000_000); // grin: 10_000_000_000,  mwc 0.3 to nano
+		Ok(())
+	})?;
+
+	// Send to wallet 2 with --amount_includes_fee
+	let mut old_balance = 0;
 	grin_wallet_controller::controller::owner_single_use(
-		Some(wallet2.clone()),
-		mask2,
+		Some(wallet1.clone()),
+		mask1,
 		None,
 		|api, m| {
-			api.set_active_account(m, "account_1")?;
+			api.set_active_account(m, "mining")?;
 			let (_, wallet1_info) = api.retrieve_summary_info(m, true, 1)?;
-			assert_eq!(wallet1_info.last_confirmed_height, bh);
-			assert_eq!(wallet1_info.amount_currently_spendable, 300_000_000); // grin: 10_000_000_000,  mwc 0.3 to nano
+			old_balance = wallet1_info.amount_currently_spendable;
 			Ok(())
 		},
 	)?;
 
-	// Self-send to same account, using smallest strategy
+	let file_name = format!("{}/tmp_tx.part_tx", test_dir);
 	let arg_vec = vec![
 		"mwc-wallet",
 		"-p",
-		"password",
+		"password1",
 		"-a",
 		"mining",
 		"send",
 		"-m",
-		"file",
+		"slatepack",
 		"-d",
 		&file_name,
-		"-g",
-		"Love, Yeast, Smallest",
-		"-s",
-		"smallest",
-		"0.3", // grin: "10"
+		"--amount_includes_fee",
+		"0.25", // grin: "10"
 	];
 	execute_command(&app, test_dir, "wallet1", &client1, arg_vec)?;
-
+	// let's check if backup is there
+	let file_name = format!(
+		"{}/wallet1/slatepack/0436430c-2b02-624c-2032-570501212b01.send_init.slatepack",
+		test_dir
+	);
 	let arg_vec = vec![
 		"mwc-wallet",
 		"-p",
-		"password",
+		"password2",
 		"-a",
-		"mining",
+		"account_1",
 		"receive",
 		"-f",
 		&file_name,
-		"-g",
-		"Thanks, Yeast!",
 	];
-	execute_command(&app, test_dir, "wallet1", &client1, arg_vec.clone())?;
-
+	execute_command(&app, test_dir, "wallet2", &client2, arg_vec.clone())?;
+	let file_name = format!(
+		"{}/wallet2/slatepack/0436430c-2b02-624c-2032-570501212b01.send_response.slatepack",
+		test_dir
+	);
 	let arg_vec = vec![
 		"mwc-wallet",
 		"-a",
 		"mining",
 		"-p",
-		"password",
+		"password1",
 		"finalize",
 		"-f",
-		&response_file_name,
+		&file_name,
 	];
 	execute_command(&app, test_dir, "wallet1", &client1, arg_vec)?;
 	bh += 1;
 
-	// Check our transaction log, should have bh entries + one for the self receive
+	// Mine some blocks to confirm the transaction
+	let _ = test_framework::award_blocks_to_wallet(&chain, wallet1.clone(), mask1, 10, false);
+	bh += 10;
+
+	// Now let's check a balance at wallet2
+	controller::owner_single_use(Some(wallet2.clone()), mask2, None, |api, m| {
+		api.set_active_account(m, "account_1")?;
+		let (_, wallet1_info) = api.retrieve_summary_info(m, true, 1)?;
+		assert_eq!(
+			wallet1_info.amount_currently_spendable,
+			300_000_000 + 250_000_000 - 8_000_000
+		); // grin: 10_000_000_000,  mwc 0.3 to nano
+		Ok(())
+	})?;
+
+	// Check the new balance of wallet 1 reduced by EXACTLY the tx amount (instead of amount + fee)
+	// This confirms that the TX amount was correctly computed to allow for the fee
+	grin_wallet_controller::controller::owner_single_use(
+		Some(wallet1.clone()),
+		mask1,
+		None,
+		|api, m| {
+			api.set_active_account(m, "mining")?;
+			let (_, wallet1_info) = api.retrieve_summary_info(m, true, 1)?;
+			// make sure the new balance is exactly equal to the old balance - the tx amount + the amount mined since then
+			let amt_mined = 10 * calc_mwc_block_reward(1);
+			assert_eq!(
+				wallet1_info.amount_currently_spendable + 250_000_000,
+				old_balance + amt_mined
+			);
+			Ok(())
+		},
+	)?;
+
+	// Send encrypted from wallet 1 to wallet 2
+	// output wallet 2's address for test creation purposes,
+	let arg_vec = vec![
+		"mwc-wallet",
+		"-p",
+		"password2",
+		"-a",
+		"account_1",
+		"address",
+	];
+	execute_command(&app, test_dir, "wallet2", &client2, arg_vec)?;
+
+	// Send encrypted to wallet 2
+	let arg_vec = vec![
+		"mwc-wallet",
+		"-p",
+		"password1",
+		"-a",
+		"mining",
+		"send",
+		"-m",
+		"slatepack",
+		"--slatepack_recipient",
+		"fgmrkh7py6grrcv7ks72y5nv5ytbrvhmjaeg3pj7rv3uyqjgqqbpu6yd",
+		"-d",
+		out_file_name.as_str(),
+		"1.1",
+	];
+	execute_command(&app, test_dir, "wallet1", &client1, arg_vec)?;
+
+	let file_name = format!(
+		"{}/wallet1/slatepack/0436430c-2b02-624c-2032-570501212b02.send_init.slatepack",
+		test_dir
+	);
+	let arg_vec = vec![
+		"mwc-wallet",
+		"-p",
+		"password2",
+		"-a",
+		"account_1",
+		"receive",
+		"-f",
+		&file_name,
+	];
+	if let Err(err) = execute_command(&app, test_dir, "wallet2", &client2, arg_vec) {
+		assert_eq!( String::from("Impls Error, LibWallet Error, Slatepack decode error, Unable to decrypt, ring::error::Unspecified"),
+					err.to_string() );
+	} else {
+		panic!("Expected to fail because of another recipient")
+	}
+
+	// Now let's send to correct slatepack address
+	// Send encrypted to wallet 2
+	let arg_vec = vec![
+		"mwc-wallet",
+		"-p",
+		"password1",
+		"-a",
+		"mining",
+		"send",
+		"-m",
+		"slatepack",
+		"--slatepack_recipient",
+		tor_addr2.as_str(),
+		"-d",
+		out_file_name.as_str(),
+		"1.1",
+	];
+	execute_command(&app, test_dir, "wallet1", &client1, arg_vec)?;
+
+	let file_name = format!(
+		"{}/wallet1/slatepack/0436430c-2b02-624c-2032-570501212b03.send_init.slatepack",
+		test_dir
+	);
+	let arg_vec = vec![
+		"mwc-wallet",
+		"-p",
+		"password2",
+		"-a",
+		"account_1",
+		"receive",
+		"-f",
+		&file_name,
+	];
+	execute_command(&app, test_dir, "wallet2", &client2, arg_vec)?;
+
+	let file_name = format!(
+		"{}/wallet2/slatepack/0436430c-2b02-624c-2032-570501212b03.send_response.slatepack",
+		test_dir
+	);
+
+	let arg_vec = vec![
+		"mwc-wallet",
+		"-a",
+		"mining",
+		"-p",
+		"password1",
+		"finalize",
+		"-f",
+		&file_name,
+	];
+	execute_command(&app, test_dir, "wallet1", &client1, arg_vec)?;
+	bh += 1;
+
+	// Check our transaction log, should have bh entries
 	let wallet_config1 = config1.clone().members.unwrap().wallet;
 	let (wallet1, mask1_i) = instantiate_wallet(
 		wallet_config1.clone(),
 		client1.clone(),
-		"password",
+		"password1",
 		"default",
 	)?;
 	let mask1 = (&mask1_i).as_ref();
@@ -340,35 +540,34 @@ fn command_line_test_impl(test_dir: &str) -> Result<(), grin_wallet_controller::
 		},
 	)?;
 
-	// Try using the self-send method, splitting up outputs for the fun of it
+	// Send to self
 	let arg_vec = vec![
 		"mwc-wallet",
 		"-p",
-		"password",
+		"password1",
 		"-a",
 		"mining",
 		"send",
 		"-m",
 		"self",
-		"-d",
-		"mining",
-		"-g",
-		"Self love",
 		"-o",
 		"3",
 		"-s",
 		"smallest",
-		"0.3", // grin: "10"
+		"0.5", // grin: "10"
 	];
 	execute_command(&app, test_dir, "wallet1", &client1, arg_vec)?;
+
+	// MWC send to self include recieve and finalize. So no more steps are required
+
 	bh += 1;
 
-	// Check our transaction log, should have bh entries + 2 for the self receives
+	// Check our transaction log, should have bh entries + 1 for self-seld
 	let wallet_config1 = config1.clone().members.unwrap().wallet;
 	let (wallet1, mask1_i) = instantiate_wallet(
 		wallet_config1.clone(),
 		client1.clone(),
-		"password",
+		"password1",
 		"default",
 	)?;
 	let mask1 = (&mask1_i).as_ref();
@@ -381,7 +580,7 @@ fn command_line_test_impl(test_dir: &str) -> Result<(), grin_wallet_controller::
 			api.set_active_account(m, "mining")?;
 			let (refreshed, txs) = api.retrieve_txs(m, true, None, None)?;
 			assert!(refreshed);
-			assert_eq!(txs.len(), bh as usize + 2);
+			assert_eq!(txs.len(), bh as usize + 1);
 			Ok(())
 		},
 	)?;
@@ -390,68 +589,72 @@ fn command_line_test_impl(test_dir: &str) -> Result<(), grin_wallet_controller::
 	let arg_vec = vec![
 		"mwc-wallet",
 		"-p",
-		"password",
+		"password1",
 		"-a",
 		"mining",
 		"send",
 		"-m",
-		"file",
+		"slatepack",
 		"-d",
-		&file_name,
-		"-g",
-		"Ain't sending",
-		"0.3", // grin: "10"
+		out_file_name.as_str(),
+		"1.2", // grin 10
 	];
 	execute_command(&app, test_dir, "wallet1", &client1, arg_vec)?;
 
-	let arg_vec = vec!["mwc-wallet", "-p", "password", "scan", "-d"];
+	let arg_vec = vec!["mwc-wallet", "-p", "password1", "scan", "-d"];
 	execute_command(&app, test_dir, "wallet1", &client1, arg_vec)?;
 
 	// Another file exchange, cancel this time
 	let arg_vec = vec![
 		"mwc-wallet",
 		"-p",
-		"password",
+		"password1",
 		"-a",
 		"mining",
 		"send",
 		"-m",
-		"file",
+		"slatepack",
 		"-d",
-		&file_name,
-		"-g",
-		"Ain't sending 2",
-		"0.3", // grin: "10"
+		out_file_name.as_str(),
+		"1.5", // grin was 10
 	];
+	execute_command(&app, test_dir, "wallet1", &client1, arg_vec)?;
+
+	let arg_vec = vec!["mwc-wallet", "-a", "mining", "-p", "password1", "txs"];
 	execute_command(&app, test_dir, "wallet1", &client1, arg_vec)?;
 
 	let arg_vec = vec![
 		"mwc-wallet",
 		"-p",
-		"password",
+		"password1",
 		"-a",
 		"mining",
 		"cancel",
-		"-i",
-		"26",
+		"--txid",
+		"0436430c-2b02-624c-2032-570501212b06",
 	];
 	execute_command(&app, test_dir, "wallet1", &client1, arg_vec)?;
 
 	// issue an invoice tx, wallet 2
-	let file_name = format!("{}/invoice.slate", test_dir);
 	let arg_vec = vec![
 		"mwc-wallet",
 		"-p",
-		"password",
+		"password2",
+		"-a",
+		"account_1",
 		"invoice",
+		"--slatepack_recipient",
+		"fgmrkh7py6grrcv7ks72y5nv5ytbrvhmjaeg3pj7rv3uyqjgqqbpu6yd",
 		"-d",
-		&file_name,
-		"-g",
-		"Please give me your precious grins. Love, Yeast",
-		"3", // grin: "65"
+		out_file_name.as_str(),
+		"0.45", // 65 at grin test
 	];
 	execute_command(&app, test_dir, "wallet2", &client2, arg_vec)?;
-	let output_file_name = format!("{}/invoice.slate.paid", test_dir);
+
+	let file_name = format!(
+		"{}/wallet2/slatepack/0436430c-2b02-624c-2032-570501212b07.invoice_init.slatepack",
+		test_dir
+	);
 
 	// now pay the invoice tx, wallet 1
 	let arg_vec = vec![
@@ -459,25 +662,71 @@ fn command_line_test_impl(test_dir: &str) -> Result<(), grin_wallet_controller::
 		"-a",
 		"mining",
 		"-p",
-		"password",
+		"password1",
 		"pay",
-		"-i",
+		"--input",
 		&file_name,
+		"--dest",
+		out_file_name.as_str(),
+	];
+	if let Err(err) = execute_command(&app, test_dir, "wallet1", &client1, arg_vec) {
+		assert_eq!( String::from("Impls Error, LibWallet Error, Slatepack decode error, Unable to decrypt, ring::error::Unspecified"), err.to_string() );
+	} else {
+		panic!("Expected to fail because of another recipient")
+	}
+
+	// Retry invoice with correct slatepack address
+	// issue an invoice tx, wallet 2
+	let arg_vec = vec![
+		"mwc-wallet",
+		"-p",
+		"password2",
+		"-a",
+		"account_1",
+		"invoice",
+		"--slatepack_recipient",
+		tor_addr1.as_str(),
 		"-d",
-		&output_file_name,
-		"-g",
-		"Here you go",
+		out_file_name.as_str(),
+		"0.45", // 65 at grin test
+	];
+	execute_command(&app, test_dir, "wallet2", &client2, arg_vec)?;
+
+	let file_name = format!(
+		"{}/wallet2/slatepack/0436430c-2b02-624c-2032-570501212b08.invoice_init.slatepack",
+		test_dir
+	);
+
+	// now pay the invoice tx, wallet 1
+	let arg_vec = vec![
+		"mwc-wallet",
+		"-a",
+		"mining",
+		"-p",
+		"password1",
+		"pay",
+		"--input",
+		&file_name,
+		"--dest",
+		out_file_name.as_str(),
 	];
 	execute_command(&app, test_dir, "wallet1", &client1, arg_vec)?;
+
+	let file_name = format!(
+		"{}/wallet1/slatepack/0436430c-2b02-624c-2032-570501212b08.invoice_response.slatepack",
+		test_dir
+	);
 
 	// and finalize, wallet 2
 	let arg_vec = vec![
 		"mwc-wallet",
 		"-p",
-		"password",
+		"password2",
+		"-a",
+		"account_1",
 		"finalize_invoice",
 		"-f",
-		&output_file_name,
+		&file_name,
 	];
 	execute_command(&app, test_dir, "wallet2", &client2, arg_vec)?;
 
@@ -486,14 +735,14 @@ fn command_line_test_impl(test_dir: &str) -> Result<(), grin_wallet_controller::
 	//bh += 5;
 
 	// txs and outputs (mostly spit out for a visual in test logs)
-	let arg_vec = vec!["mwc-wallet", "-p", "password", "-a", "mining", "txs"];
+	let arg_vec = vec!["mwc-wallet", "-p", "password1", "-a", "mining", "txs"];
 	execute_command(&app, test_dir, "wallet1", &client1, arg_vec)?;
 
 	// message output (mostly spit out for a visual in test logs)
 	let arg_vec = vec![
 		"mwc-wallet",
 		"-p",
-		"password",
+		"password1",
 		"-a",
 		"mining",
 		"txs",
@@ -503,13 +752,20 @@ fn command_line_test_impl(test_dir: &str) -> Result<(), grin_wallet_controller::
 	execute_command(&app, test_dir, "wallet1", &client1, arg_vec)?;
 
 	// txs and outputs (mostly spit out for a visual in test logs)
-	let arg_vec = vec!["mwc-wallet", "-p", "password", "-a", "mining", "outputs"];
+	let arg_vec = vec!["mwc-wallet", "-p", "password1", "-a", "mining", "outputs"];
 	execute_command(&app, test_dir, "wallet1", &client1, arg_vec)?;
 
-	let arg_vec = vec!["mwc-wallet", "-p", "password", "txs"];
+	let arg_vec = vec!["mwc-wallet", "-p", "password2", "-a", "account_1", "txs"];
 	execute_command(&app, test_dir, "wallet2", &client2, arg_vec)?;
 
-	let arg_vec = vec!["mwc-wallet", "-p", "password", "outputs"];
+	let arg_vec = vec![
+		"mwc-wallet",
+		"-p",
+		"password2",
+		"-a",
+		"account_1",
+		"outputs",
+	];
 	execute_command(&app, test_dir, "wallet2", &client2, arg_vec)?;
 
 	// get tx output via -tx parameter
@@ -519,7 +775,7 @@ fn command_line_test_impl(test_dir: &str) -> Result<(), grin_wallet_controller::
 		mask2,
 		None,
 		|api, m| {
-			api.set_active_account(m, "default")?;
+			api.set_active_account(m, "account_1")?;
 			let (_, txs) = api.retrieve_txs(m, true, None, None)?;
 			let some_tx_id = txs[0].tx_slate_id.clone();
 			assert!(some_tx_id.is_some());
@@ -527,8 +783,99 @@ fn command_line_test_impl(test_dir: &str) -> Result<(), grin_wallet_controller::
 			Ok(())
 		},
 	)?;
-	let arg_vec = vec!["mwc-wallet", "-p", "password", "txs", "-t", &tx_id[..]];
+	let arg_vec = vec![
+		"mwc-wallet",
+		"-p",
+		"password2",
+		"-a",
+		"account_1",
+		"txs",
+		"-t",
+		&tx_id[..],
+	];
 	execute_command(&app, test_dir, "wallet2", &client2, arg_vec)?;
+
+	// bit of mining
+	let _ = test_framework::award_blocks_to_wallet(&chain, wallet1.clone(), mask1, 10, false);
+
+	// Now let's check a balance at wallet2
+	controller::owner_single_use(Some(wallet2.clone()), mask2, None, |api, m| {
+		api.set_active_account(m, "account_1")?;
+		let (_, wallet1_info) = api.retrieve_summary_info(m, true, 1)?;
+		assert_eq!(
+			wallet1_info.amount_currently_spendable,
+			300_000_000 + 250_000_000 - 8_000_000 + 1_100_000_000 + 450_000_000
+		); // grin: 10_000_000_000,  mwc 0.3 to nano
+		Ok(())
+	})?;
+
+	// Test wallet sweep
+	let arg_vec = vec![
+		"mwc-wallet",
+		"-p",
+		"password1",
+		"-a",
+		"mining",
+		"send",
+		"-m",
+		"slatepack",
+		"-d",
+		out_file_name.as_str(),
+		"max",
+	];
+	execute_command(&app, test_dir, "wallet1", &client1, arg_vec)?;
+	let file_name = format!(
+		"{}/wallet1/slatepack/0436430c-2b02-624c-2032-570501212b09.send_init.slatepack",
+		test_dir
+	);
+	let arg_vec = vec![
+		"mwc-wallet",
+		"-p",
+		"password2",
+		"-a",
+		"account_1",
+		"receive",
+		"-f",
+		&file_name,
+	];
+	execute_command(&app, test_dir, "wallet2", &client2, arg_vec.clone())?;
+	let file_name = format!(
+		"{}/wallet2/slatepack/0436430c-2b02-624c-2032-570501212b09.send_response.slatepack",
+		test_dir
+	);
+	let arg_vec = vec![
+		"mwc-wallet",
+		"-a",
+		"mining",
+		"-p",
+		"password1",
+		"finalize",
+		"-f",
+		&file_name,
+	];
+	execute_command(&app, test_dir, "wallet1", &client1, arg_vec)?;
+
+	// Mine some blocks to confirm the transaction
+	let _ = test_framework::award_blocks_to_wallet(&chain, wallet1.clone(), mask1, 10, false);
+
+	// Check wallet 1 is now empty, except for immature coinbase outputs from recent mining),
+	// and recently matured coinbase outputs, which were not mature at time of spending.
+	// This confirms that the TX amount was correctly computed to allow for the fee
+	grin_wallet_controller::controller::owner_single_use(
+		Some(wallet1.clone()),
+		mask1,
+		None,
+		|api, m| {
+			api.set_active_account(m, "mining")?;
+			let (_, wallet1_info) = api.retrieve_summary_info(m, true, 10)?;
+			// Entire 'spendable' wallet balance should have been swept, except the coinbase outputs
+			// which matured in the last batch of mining. Check that the new spendable balance is
+			// exactly equal to those matured coins.
+			let amt_mined = 10 * calc_mwc_block_reward(1);
+			assert_eq!(wallet1_info.amount_currently_spendable, amt_mined);
+			Ok(())
+		},
+	)?;
 
 	// let logging finish
 	thread::sleep(Duration::from_millis(200));

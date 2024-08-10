@@ -404,6 +404,7 @@ where
 				let params = grin_wallet_libwallet::InitTxArgs {
 					src_acct_name: None, //it will be set in the implementation layer.
 					amount: slate.amount,
+					amount_includes_fee: None,
 					minimum_confirmations: 10,
 					max_outputs: 500,
 					num_change_outputs: 1,
