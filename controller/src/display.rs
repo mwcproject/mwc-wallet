@@ -131,7 +131,7 @@ pub fn txs(
 	account: &str,
 	cur_height: u64,
 	validated: bool,
-	txs: &Vec<TxLogEntry>,
+	txs: &[TxLogEntry],
 	include_status: bool,
 	dark_background_color_scheme: bool,
 	show_full_info: bool,
