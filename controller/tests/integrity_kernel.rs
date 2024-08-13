@@ -211,7 +211,8 @@ fn integrity_kernel_impl(test_dir: &'static str) -> Result<(), wallet::Error> {
 	// Let's verify if Integrity context match the Tx Kernels.
 	let txs = {
 		wallet_inst!(wallet1, w);
-		let mut txs = updater::retrieve_txs(&mut **w, mask1, None, None, None, false, None, None)?;
+		let mut txs =
+			updater::retrieve_txs(&mut **w, mask1, None, None, None, None, false, None, None)?;
 
 		txs.retain(|t| t.tx_type == TxLogEntryType::TxSent);
 		txs

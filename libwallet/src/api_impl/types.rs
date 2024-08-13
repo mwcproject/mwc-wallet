@@ -23,6 +23,8 @@ use crate::proof::proofaddress::ProvableAddress;
 use crate::slate_versions::SlateVersion;
 use crate::types::OutputData;
 
+use chrono::prelude::*;
+
 /// Send TX API Args
 // TODO: This is here to ensure the legacy V1 API remains intact
 // remove this when v1 api is removed
@@ -290,6 +292,32 @@ impl Default for ReplayMitigationConfig {
 	}
 }
 
+/// Sort tx retrieval order
+#[derive(Clone, Serialize, Deserialize)]
+pub enum RetrieveTxQuerySortOrder {
+	/// Ascending
+	Asc,
+	/// Descending
+	Desc,
+}
+
+/// Valid sort fields for a transaction list retrieval query
+#[derive(Clone, Serialize, Deserialize)]
+pub enum RetrieveTxQuerySortField {
+	/// Transaction Id
+	Id,
+	/// Creation Timestamp
+	CreationTimestamp,
+	/// Confirmation Timestamp
+	ConfirmationTimestamp,
+	/// TotalAmount (AmountCredited-AmountDebited)
+	TotalAmount,
+	/// Amount Credited
+	AmountCredited,
+	/// Amount Debited
+	AmountDebited,
+}
+
 /// Retrieve Transaction List Pagination Arguments
 #[derive(Clone, Serialize, Deserialize)]
 pub struct RetrieveTxQueryArgs {
@@ -305,6 +333,27 @@ pub struct RetrieveTxQueryArgs {
 	pub limit: Option<u32>,
 	/// whether to include cancelled transactions in the returned set
 	pub include_cancelled: Option<bool>,
+	/// whether to only consider non-cancelled, outstanding transactions
+	pub include_outstanding_only: Option<bool>,
+	/// whether to only consider confirmed-only transactions
+	pub include_confirmed_only: Option<bool>,
+	/// lower bound on the total amount (amount_credited - amount_debited), inclusive
+	pub min_amount_inc: Option<u64>,
+	/// higher bound on the total amount (amount_credited - amount_debited), inclusive
+	pub max_amount_inc: Option<u64>,
+	/// lower bound on the creation timestamp, inclusive
+	pub min_creation_timestamp_inc: Option<DateTime<Utc>>,
+	/// higher bound on on the creation timestamp, inclusive
+	pub max_creation_timestamp_inc: Option<DateTime<Utc>>,
+	/// lower bound on the confirmation timestamp, inclusive
+	pub min_confirmed_timestamp_inc: Option<DateTime<Utc>>,
+	/// higher bound on the confirmation timestamp, inclusive
+	pub max_confirmed_timestamp_inc: Option<DateTime<Utc>>,
+	/// Field within the tranasction list on which to sort
+	/// defaults to ID if not present
+	pub sort_field: Option<RetrieveTxQuerySortField>,
+	/// Sort order, defaults to DESC if not present (most recent is first)
+	pub sort_order: Option<RetrieveTxQuerySortOrder>,
 }
 
 impl Default for RetrieveTxQueryArgs {
@@ -313,7 +362,17 @@ impl Default for RetrieveTxQueryArgs {
 			before_id_inc: None,
 			after_id_inc: None,
 			limit: None,
-			include_cancelled: None,
+			include_cancelled: Some(true),
+			include_outstanding_only: Some(false),
+			include_confirmed_only: Some(false),
+			min_amount_inc: None,
+			max_amount_inc: None,
+			min_creation_timestamp_inc: None,
+			max_creation_timestamp_inc: None,
+			min_confirmed_timestamp_inc: None,
+			max_confirmed_timestamp_inc: None,
+			sort_field: Some(RetrieveTxQuerySortField::Id),
+			sort_order: Some(RetrieveTxQuerySortOrder::Desc),
 		}
 	}
 }

@@ -330,7 +330,7 @@ pub trait OwnerRpcV3 {
 		refresh_from_node: bool,
 		tx_id: Option<u32>,
 		tx_slate_id: Option<Uuid>,
-		query_args: Option<RetrieveTxQueryArgs>,
+		tx_query_args: Option<RetrieveTxQueryArgs>,
 	) -> Result<(bool, Vec<TxLogEntryAPI>), Error>;
 
 	/**
@@ -3490,7 +3490,7 @@ where
 		refresh_from_node: bool,
 		tx_id: Option<u32>,
 		tx_slate_id: Option<Uuid>,
-		query_args: Option<RetrieveTxQueryArgs>,
+		tx_query_args: Option<RetrieveTxQueryArgs>,
 	) -> Result<(bool, Vec<TxLogEntryAPI>), Error> {
 		Owner::retrieve_txs(
 			self,
@@ -3498,7 +3498,7 @@ where
 			refresh_from_node,
 			tx_id,
 			tx_slate_id,
-			query_args,
+			tx_query_args,
 		)
 		.map(|(b, tx)| {
 			(

@@ -32,7 +32,7 @@ use crate::internal::keys;
 use crate::types::{
 	NodeClient, OutputData, OutputStatus, TxLogEntry, TxLogEntryType, WalletBackend, WalletInfo,
 };
-use crate::{BlockFees, CbData, OutputCommitMapping};
+use crate::{BlockFees, CbData, OutputCommitMapping, RetrieveTxQueryArgs};
 
 /// Retrieve all of the outputs (doesn't attempt to update from node)
 pub fn retrieve_outputs<'a, T: ?Sized, C, K>(
@@ -145,6 +145,7 @@ pub fn retrieve_txs<'a, T: ?Sized, C, K>(
 	_keychain_mask: Option<&SecretKey>,
 	tx_id: Option<u32>,
 	tx_slate_id: Option<Uuid>,
+	query_args: Option<RetrieveTxQueryArgs>,
 	parent_key_id: Option<&Identifier>,
 	outstanding_only: bool,
 	pagination_start: Option<u32>,
@@ -155,39 +156,46 @@ where
 	C: NodeClient + 'a,
 	K: Keychain + 'a,
 {
-	let mut txs: Vec<TxLogEntry> = wallet
-		.tx_log_iter()
-		.filter(|tx_entry| {
-			let f_pk = match parent_key_id {
-				Some(k) => tx_entry.parent_key_id == *k,
-				None => true,
-			};
-			let f_tx_id = match tx_id {
-				Some(i) => tx_entry.id == i,
-				None => true,
-			};
-			let f_txs = match tx_slate_id {
-				Some(t) => tx_entry.tx_slate_id == Some(t),
-				None => true,
-			};
-			let f_outstanding = match outstanding_only {
-				true => {
-					!tx_entry.confirmed
-						&& (tx_entry.tx_type == TxLogEntryType::TxReceived
-							|| tx_entry.tx_type == TxLogEntryType::TxSent
-							|| tx_entry.tx_type == TxLogEntryType::TxReverted)
-				}
-				false => true,
-			};
-			// Miners doesn't like the fact that CoinBase tx can be unconfirmed. That is we are hiding them fir Rest API and for UI
-			let non_confirmed_coinbase =
-				!tx_entry.confirmed && (tx_entry.tx_type == TxLogEntryType::ConfirmedCoinbase);
+	let mut txs: Vec<TxLogEntry> = vec![];
+	// Adding in new tranasction list query logic. If `tx_id` or `tx_slate_id`
+	// is provided, then `query_args` is ignored and old logic is followed.
+	if tx_id.is_some() || tx_slate_id.is_some() {
+		txs = wallet
+			.tx_log_iter()
+			.filter(|tx_entry| {
+				let f_pk = match parent_key_id {
+					Some(k) => tx_entry.parent_key_id == *k,
+					None => true,
+				};
+				let f_tx_id = match tx_id {
+					Some(i) => tx_entry.id == i,
+					None => true,
+				};
+				let f_txs = match tx_slate_id {
+					Some(t) => tx_entry.tx_slate_id == Some(t),
+					None => true,
+				};
+				let f_outstanding = match outstanding_only {
+					true => {
+						!tx_entry.confirmed
+							&& (tx_entry.tx_type == TxLogEntryType::TxReceived
+								|| tx_entry.tx_type == TxLogEntryType::TxSent
+								|| tx_entry.tx_type == TxLogEntryType::TxReverted)
+					}
+					false => true,
+				};
+				// Miners doesn't like the fact that CoinBase tx can be unconfirmed. That is we are hiding them for Rest API and for UI
+				let non_confirmed_coinbase =
+					!tx_entry.confirmed && (tx_entry.tx_type == TxLogEntryType::ConfirmedCoinbase);
 
-			f_pk && f_tx_id && f_txs && f_outstanding && !non_confirmed_coinbase
-		})
-		.collect();
+				f_pk && f_tx_id && f_txs && f_outstanding && !non_confirmed_coinbase
+			})
+			.collect();
 
-	txs.sort_by_key(|tx| tx.creation_ts);
+		txs.sort_by_key(|tx| tx.creation_ts);
+	} else {
+		// TODO: Call Query Filter Function
+	}
 
 	if pagination_start.is_some() || pagination_len.is_some() {
 		let pag_len = pagination_len.unwrap_or(txs.len() as u32);

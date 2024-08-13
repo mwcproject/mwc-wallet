@@ -1353,8 +1353,17 @@ where
 	{
 		wallet_lock!(wallet_inst, w);
 
-		let transactions =
-			updater::retrieve_txs(&mut **w, keychain_mask, None, None, None, false, None, None)?;
+		let transactions = updater::retrieve_txs(
+			&mut **w,
+			keychain_mask,
+			None,
+			None,
+			None,
+			None,
+			false,
+			None,
+			None,
+		)?;
 
 		for tx_log in &transactions {
 			if tx_log.confirmed || tx_log.is_cancelled_reverted() {

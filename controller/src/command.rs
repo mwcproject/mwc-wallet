@@ -1468,6 +1468,7 @@ where
 	let updater_running = owner_api.updater_running.load(Ordering::Relaxed);
 	controller::owner_single_use(None, keychain_mask, Some(owner_api), |api, m| {
 		let res = api.node_height(m)?;
+		// Note advanced query args not currently supported by command line client
 		let (validated, txs) = api.retrieve_txs(m, true, args.id, args.tx_slate_id, None)?;
 		let include_status = !args.id.is_some() && !args.tx_slate_id.is_some();
 		// If view count is specified, restrict the TX list to `txs.len() - count`
