@@ -49,7 +49,6 @@ extern crate chrono;
 extern crate regex;
 extern crate timer;
 
-use failure::Fail;
 use regex::Regex;
 use std::fs::{self, File};
 use std::io;
@@ -66,25 +65,25 @@ const TOR_EXE_NAME: &str = "tor.exe";
 #[cfg(not(windows))]
 const TOR_EXE_NAME: &str = "tor";
 
-#[derive(Fail, Debug)]
+#[derive(thiserror::Error, Debug)]
 pub enum Error {
-	#[fail(display = "Tor process error, {}", _0)]
+	#[error("Tor process error, {0}")]
 	Process(String),
-	#[fail(display = "Tor IO error, {}, {}", _0, _1)]
+	#[error("Tor IO error, {0}, {1}")]
 	IO(String, io::Error),
-	#[fail(display = "Tor PID error, {}", _0)]
+	#[error("Tor PID error, {0}")]
 	PID(String),
-	#[fail(display = "Tor Reported Error {}, and warnings: {:?}", _0, _1)]
+	#[error("Tor Reported Error {0}, and warnings: {1:?}")]
 	Tor(String, Vec<String>),
-	#[fail(display = "Tor invalid log line: {}", _0)]
+	#[error("Tor invalid log line: {0}")]
 	InvalidLogLine(String),
-	#[fail(display = "Tor invalid bootstrap line: {}", _0)]
+	#[error("Tor invalid bootstrap line: {0}")]
 	InvalidBootstrapLine(String),
-	#[fail(display = "Tor regex error {}, {}", _0, _1)]
+	#[error("Tor regex error {0}, {1}")]
 	Regex(String, regex::Error),
-	#[fail(display = "Tor process not running")]
+	#[error("Tor process not running")]
 	ProcessNotStarted,
-	#[fail(display = "Waiting for tor respond timeout")]
+	#[error("Waiting for tor respond timeout")]
 	Timeout,
 }
 

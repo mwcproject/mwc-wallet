@@ -14,7 +14,6 @@
 
 //! Public types for config modules
 
-use failure::Fail;
 use std::fmt;
 use std::io;
 use std::path::PathBuf;
@@ -189,34 +188,28 @@ impl WalletConfig {
 }
 
 /// Error type wrapping config errors.
-#[derive(Debug, Fail)]
+#[derive(Debug, thiserror::Error)]
 pub enum ConfigError {
 	/// Error with parsing of config file (file_name, message)
-	#[fail(display = "Error parsing configuration file at {}, {}", _0, _1)]
+	#[error("Error parsing configuration file at {0}, {1}")]
 	ParseError(String, String),
 
 	/// Error with fileIO while reading config file
 	/// (file_name, message)
-	#[fail(display = "Config IO error, {}", _0)]
-	FileIOError(String),
+	#[error("Config IO error, {0}")]
+	FileIOError(#[from] io::Error),
 
 	/// No file found (file_name)
-	#[fail(display = "Configuration file not found: {}", _0)]
+	#[error("Configuration file not found: {0}")]
 	FileNotFoundError(String),
 
 	/// Error serializing config values
-	#[fail(display = "Error serializing configuration, {}", _0)]
+	#[error("Error serializing configuration, {0}")]
 	SerializationError(String),
 
 	/// Path doesn't exist
-	#[fail(display = "Not found expected path {}", _0)]
+	#[error("Not found expected path {0}")]
 	PathNotFoundError(String),
-}
-
-impl From<io::Error> for ConfigError {
-	fn from(error: io::Error) -> ConfigError {
-		ConfigError::FileIOError(format!("Error loading config file, {}", error))
-	}
 }
 
 /// Tor configuration

@@ -20,7 +20,6 @@ use crate::grin_util::secp::key::PublicKey;
 use crate::grin_util::secp::key::SecretKey;
 use crate::proof::crypto;
 use crate::proof::hasher;
-use crate::ErrorKind;
 use ed25519_dalek::PublicKey as DalekPublicKey;
 use ed25519_dalek::SecretKey as DalekSecretKey;
 use grin_wallet_util::OnionV3Address;
@@ -225,7 +224,7 @@ where
 {
 	let sk = payment_proof_address_secret(keychain, address_index)?;
 	let dalek_sk = DalekSecretKey::from_bytes(&sk.0).map_err(|e| {
-		ErrorKind::SlatepackDecodeError(format!("Unable to convert key to decrypt, {}", e))
+		Error::SlatepackDecodeError(format!("Unable to convert key to decrypt, {}", e))
 	})?;
 	Ok(dalek_sk)
 }
@@ -242,7 +241,7 @@ where
 /// Build Tor public Key from the secret
 pub fn secret_2_tor_pub(secret: &SecretKey) -> Result<DalekPublicKey, Error> {
 	let secret = DalekSecretKey::from_bytes(&secret.0)
-		.map_err(|e| ErrorKind::GenericError(format!("Unable build dalek public key, {}", e)))?;
+		.map_err(|e| Error::GenericError(format!("Unable build dalek public key, {}", e)))?;
 	let d_pub_key: DalekPublicKey = (&secret).into();
 	Ok(d_pub_key)
 }
@@ -266,9 +265,9 @@ pub fn tor_pub_2_slatepack_pub(tor_pub_key: &DalekPublicKey) -> Result<xDalekPub
 	let ep = match cep.decompress() {
 		Some(p) => p,
 		None => {
-			return Err(
-				ErrorKind::ED25519Key("Can't decompress ed25519 Edwards Point".into()).into(),
-			);
+			return Err(Error::ED25519Key(
+				"Can't decompress ed25519 Edwards Point".into(),
+			));
 		}
 	};
 	let res = xDalekPublicKey::from(ep.to_montgomery().to_bytes());

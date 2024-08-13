@@ -14,7 +14,7 @@
 
 //! Selection of inputs for building transactions
 
-use crate::error::{Error, ErrorKind};
+use crate::error::Error;
 use crate::grin_core::core::amount_to_hr_string;
 use crate::grin_core::libtx::{
 	build,
@@ -81,12 +81,9 @@ where
 		true, // Legacy value is true
 	)?;
 	if amount_includes_fee {
-		slate.amount = slate
-			.amount
-			.checked_sub(fee)
-			.ok_or(ErrorKind::GenericError(
-				format!("Transaction amount is too small to include fee").into(),
-			))?;
+		slate.amount = slate.amount.checked_sub(fee).ok_or(Error::GenericError(
+			"Transaction amount is too small to include fee".into(),
+		))?;
 	};
 
 	// Update the fee on the slate so we account for this when building the tx.
@@ -249,10 +246,9 @@ where
 			let sender_address_path = match context.payment_proof_derivation_index {
 				Some(p) => p,
 				None => {
-					return Err(ErrorKind::PaymentProof(
+					return Err(Error::PaymentProof(
 						"Payment proof derivation index required".to_owned(),
-					)
-					.into());
+					));
 				}
 			};
 			// MQS type because public key is requred
@@ -341,7 +337,7 @@ where
 		}
 		if sum != slate.amount {
 			println!("mismatch sum = {}, amount = {}", sum, slate.amount);
-			return Err(ErrorKind::AmountMismatch {
+			return Err(Error::AmountMismatch {
 				amount: slate.amount,
 				sum: sum,
 			})?;
@@ -379,11 +375,10 @@ where
 	debug_assert!(key_vec_amounts.len() == num_outputs);
 
 	if slate.amount == 0 || num_outputs == 0 || key_vec_amounts.len() != num_outputs {
-		return Err(ErrorKind::GenericError(format!(
+		return Err(Error::GenericError(format!(
 			"Unable to build transaction for amount {} and outputs number {}",
 			slate.amount, num_outputs
-		))
-		.into());
+		)));
 	}
 
 	let keychain = wallet.keychain(keychain_mask)?;
@@ -438,7 +433,7 @@ where
 		let commit = wallet.calc_commit_for_cache(keychain_mask, kva.1, &kva.0)?;
 		if let Some(cm) = commit.clone() {
 			commit_ped.push(Commitment::from_vec(util::from_hex(&cm).map_err(|e| {
-				ErrorKind::GenericError(format!("Output commit parse error, {}", e))
+				Error::GenericError(format!("Output commit parse error, {}", e))
 			})?));
 		}
 		commit_vec.push(commit);
@@ -607,7 +602,7 @@ where
 	);
 
 	if coins.len() + routputs + change_outputs > max_outputs {
-		return Err(ErrorKind::TooLargeSlate(max_outputs))?;
+		return Err(Error::TooLargeSlate(max_outputs))?;
 	}
 
 	// sender is responsible for setting the fee on the partial tx
@@ -685,7 +680,7 @@ where
 		}
 
 		if total < amount_with_fee {
-			return Err(ErrorKind::NotEnoughFunds {
+			return Err(Error::NotEnoughFunds {
 				available: total as u64,
 				available_disp: amount_to_hr_string(total, true),
 				needed: amount_with_fee as u64,
@@ -696,8 +691,8 @@ where
 	// If original amount includes fee, the new amount should
 	// be reduced, to accommodate the fee.
 	let new_amount = match amount_includes_fee {
-		true => amount.checked_sub(fee).ok_or(ErrorKind::GenericError(
-			format!("Transaction amount is too small to include fee").into(),
+		true => amount.checked_sub(fee).ok_or(Error::GenericError(
+			"Transaction amount is too small to include fee".into(),
 		))?,
 		false => amount,
 	};

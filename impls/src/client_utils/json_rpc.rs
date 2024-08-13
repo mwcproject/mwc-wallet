@@ -14,7 +14,6 @@
 // Derived from https://github.com/apoelstra/rust-jsonrpc
 
 //! JSON RPC Client functionality
-use failure::Fail;
 use serde_json;
 
 /// Builds a request
@@ -98,16 +97,16 @@ impl Response {
 }
 
 /// A library error
-#[derive(Debug, Fail, Clone)]
+#[derive(Debug, thiserror::Error, Clone)]
 pub enum Error {
 	/// Json error
-	#[fail(display = "Unable to parse json, {}", _0)]
+	#[error("Unable to parse json, {0}")]
 	Json(String),
 	/// Error response
-	#[fail(display = "RPC error: {:?}", _0)]
+	#[error("RPC error: {0:?}")]
 	Rpc(RpcError),
 	/// Internal generic Error
-	#[fail(display = "Client error: {}", _0)]
+	#[error("Client error: {0}")]
 	GenericError(String),
 }
 

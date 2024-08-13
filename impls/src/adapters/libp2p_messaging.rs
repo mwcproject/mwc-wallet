@@ -14,7 +14,7 @@
 
 use crate::grin_p2p::libp2p_connection;
 use crate::util::RwLock;
-use crate::{Error, ErrorKind};
+use crate::Error;
 use chrono::Utc;
 use grin_wallet_libwallet::IntegrityContext;
 use grin_wallet_util::grin_util::secp::Secp256k1;
@@ -82,11 +82,10 @@ pub fn add_broadcasting_messages(
 		.next()
 		.is_some()
 	{
-		return Err(ErrorKind::ArgumentError(format!(
+		return Err(Error::ArgumentError(format!(
 			"Message with integrity_ctx {} is already exist",
 			integrity_ctx.tx_uuid
-		))
-		.into());
+		)));
 	}
 
 	// we are good to add a new message
@@ -168,7 +167,7 @@ pub fn add_broadcasting_messages(
 					*BROADCASTING_RUNNUNG.write() = false;
 				})
 				.map_err(|e| {
-					ErrorKind::GenericError(format!(
+					Error::GenericError(format!(
 						"Unable to start broadcasting_messages thread, {}",
 						e
 					))

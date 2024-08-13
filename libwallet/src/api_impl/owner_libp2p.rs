@@ -29,11 +29,10 @@ use crate::grin_util::secp::pedersen::Commitment;
 use crate::grin_util::secp::Signature;
 use crate::grin_util::secp::{Message, PublicKey};
 use crate::internal::{keys, updater};
-use crate::swap::error::ErrorKind;
 use crate::types::NodeClient;
-use crate::Context;
 use crate::{wallet_lock, WalletInst, WalletLCProvider};
-use crate::{AcctPathMapping, Error, InitTxArgs, OutputCommitMapping, OutputStatus};
+use crate::{AcctPathMapping, InitTxArgs, OutputCommitMapping, OutputStatus};
+use crate::{Context, Error};
 use ed25519_dalek::PublicKey as DalekPublicKey;
 use grin_wallet_util::grin_util::secp::Secp256k1;
 use std::collections::HashMap;
@@ -453,7 +452,7 @@ where
 	let total_amount: u64 = outputs.iter().map(|o| o.output.value).sum();
 	let fee = tx_fee(outputs.len(), 1, 1);
 	if total_amount <= fee {
-		return Err(ErrorKind::Generic("Reserved amount for Integrity fees is smaller then a transaction fee. It is impossible to move dust funds.".to_string()).into());
+		return Err(Error::GenericError("Reserved amount for Integrity fees is smaller then a transaction fee. It is impossible to move dust funds.".to_string()));
 	}
 
 	let mut args = InitTxArgs::default();

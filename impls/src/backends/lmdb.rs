@@ -29,8 +29,8 @@ use crate::store::{self, option_to_not_found, to_key, to_key_u64, u64_to_key};
 use crate::core::core::Transaction;
 use crate::core::ser;
 use crate::libwallet::{
-	swap::ethereum::EthereumWallet, AcctPathMapping, Context, Error, ErrorKind, NodeClient,
-	OutputData, ScannedBlockInfo, TxLogEntry, TxProof, WalletBackend, WalletOutputBatch,
+	swap::ethereum::EthereumWallet, AcctPathMapping, Context, Error, NodeClient, OutputData,
+	ScannedBlockInfo, TxLogEntry, TxProof, WalletBackend, WalletOutputBatch,
 };
 use crate::util::secp::constants::SECRET_KEY_SIZE;
 use crate::util::secp::key::SecretKey;
@@ -247,11 +247,11 @@ where
 				hasher.update(&root_key.0[..]);
 				if *self.master_checksum != Some(hasher.finalize()) {
 					error!("Supplied keychain mask is invalid");
-					return Err(ErrorKind::InvalidKeychainMask.into());
+					return Err(Error::InvalidKeychainMask);
 				}
 				Ok(k_masked)
 			}
-			None => Err(ErrorKind::KeychainDoesntExist.into()),
+			None => Err(Error::KeychainDoesntExist),
 		}
 	}
 
@@ -289,7 +289,7 @@ where
 			self.set_parent_key_id(a.path);
 			Ok(())
 		} else {
-			Err(ErrorKind::UnknownAccountLabel(label).into())
+			Err(Error::UnknownAccountLabel(label))
 		}
 	}
 
@@ -410,7 +410,7 @@ where
 
 		match path.to_str() {
 			Some(s) => Ok(Some(self.load_stored_tx(s)?)),
-			None => Err(ErrorKind::GenericError(
+			None => Err(Error::GenericError(
 				"Unable to build transaction path".to_string(),
 			))?,
 		}
@@ -426,9 +426,9 @@ where
 					.join(TX_SAVE_DIR)
 					.join(filename);
 
-				let trans = self.load_stored_tx(path.to_str().ok_or(
-					ErrorKind::GenericError("Unable to build transaction path".to_string()),
-				)?)?;
+				let trans = self.load_stored_tx(path.to_str().ok_or(Error::GenericError(
+					"Unable to build transaction path".to_string(),
+				))?)?;
 				Ok(trans)
 			};
 
@@ -442,7 +442,7 @@ where
 		let mut content = String::new();
 		tx_f.read_to_string(&mut content)?;
 		let tx_bin = util::from_hex(&content).map_err(|e| {
-			ErrorKind::StoredTransactionError(format!("Unable to decode the data, {}", e))
+			Error::StoredTransactionError(format!("Unable to decode the data, {}", e))
 		})?;
 		Ok(ser::deserialize(
 			&mut &tx_bin[..],
@@ -450,7 +450,7 @@ where
 			ser::DeserializationMode::default(),
 		)
 		.map_err(|e| {
-			ErrorKind::StoredTransactionError(format!("Unable to deserialize the data, {}", e))
+			Error::StoredTransactionError(format!("Unable to deserialize the data, {}", e))
 		})?)
 	}
 
@@ -561,10 +561,9 @@ where
 		if self.ethereum_wallet.is_some() {
 			Ok(self.ethereum_wallet.clone().unwrap())
 		} else {
-			Err(
-				ErrorKind::EthereumWalletError("Ethereum Wallet Not Generated!!!".to_string())
-					.into(),
-			)
+			Err(Error::EthereumWalletError(
+				"Ethereum Wallet Not Generated!!!".to_string(),
+			))
 		}
 	}
 }

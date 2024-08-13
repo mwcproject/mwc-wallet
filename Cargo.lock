@@ -1627,7 +1627,6 @@ version = "0.1.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d32e9bd16cc02eae7db7ef620b392808b89f6a5e16bb3497d159c6b92a0f4f86"
 dependencies = [
- "backtrace",
  "failure_derive",
 ]
 
@@ -2254,8 +2253,6 @@ dependencies = [
  "colored",
  "easy-jsonrpc-mw",
  "ed25519-dalek",
- "failure",
- "failure_derive",
  "grin_wallet_config",
  "grin_wallet_impls",
  "grin_wallet_libwallet",
@@ -2276,13 +2273,12 @@ name = "grin_wallet_config"
 version = "5.1.0"
 dependencies = [
  "dirs 2.0.2",
- "failure",
- "failure_derive",
  "grin_wallet_util",
  "pretty_assertions",
  "rand 0.6.5",
  "serde",
  "serde_derive",
+ "thiserror",
  "toml",
 ]
 
@@ -2294,8 +2290,6 @@ dependencies = [
  "colored",
  "easy-jsonrpc-mw",
  "ed25519-dalek",
- "failure",
- "failure_derive",
  "futures 0.3.30",
  "grin_wallet_api",
  "grin_wallet_config",
@@ -2315,6 +2309,7 @@ dependencies = [
  "serde_derive",
  "serde_json",
  "term 0.6.1",
+ "thiserror",
  "tokio 0.2.25",
  "url",
  "uuid",
@@ -2332,8 +2327,6 @@ dependencies = [
  "chrono",
  "data-encoding",
  "ed25519-dalek",
- "failure",
- "failure_derive",
  "futures 0.3.30",
  "grin_wallet_config",
  "grin_wallet_libwallet",
@@ -2351,6 +2344,7 @@ dependencies = [
  "serde_derive",
  "serde_json",
  "sysinfo",
+ "thiserror",
  "timer",
  "tokio 0.2.25",
  "url",
@@ -2380,8 +2374,6 @@ dependencies = [
  "data-encoding",
  "digest 0.9.0",
  "ed25519-dalek",
- "failure",
- "failure_derive",
  "futures-timer",
  "grin_wallet_config",
  "grin_wallet_util",
@@ -2409,6 +2401,7 @@ dependencies = [
  "smaz",
  "strum",
  "strum_macros",
+ "thiserror",
  "tokio 0.2.25",
  "uuid",
  "wagyu-ethereum",
@@ -2424,8 +2417,6 @@ version = "5.1.0"
 dependencies = [
  "data-encoding",
  "ed25519-dalek",
- "failure",
- "failure_derive",
  "grin_api",
  "grin_chain",
  "grin_core",
@@ -2439,6 +2430,7 @@ dependencies = [
  "serde",
  "serde_derive",
  "sha3 0.8.2",
+ "thiserror",
  "tokio 0.2.25",
 ]
 
@@ -3605,8 +3597,6 @@ dependencies = [
  "clap",
  "easy-jsonrpc-mw",
  "ed25519-dalek",
- "failure",
- "failure_derive",
  "funty",
  "grin_wallet_api",
  "grin_wallet_config",
@@ -3625,6 +3615,7 @@ dependencies = [
  "serde",
  "serde_derive",
  "serde_json",
+ "thiserror",
  "url",
  "uuid",
  "x25519-dalek 0.6.0",

@@ -17,7 +17,7 @@
 //! * Addition of payment_proof (PaymentInfo struct)
 //! * Addition of a u64 ttl_cutoff_height field
 
-use crate::error::{Error, ErrorKind};
+use crate::error::Error;
 use crate::grin_core::core::transaction::OutputFeatures;
 use crate::grin_core::global;
 use crate::grin_core::libtx::secp_ser;
@@ -106,19 +106,18 @@ fn u8_is_blank(u: &u8) -> bool {
 impl SlateV3 {
 	pub fn to_slate(self, fix_kernel: bool) -> Result<Slate, Error> {
 		if self.coin_type.unwrap_or("mwc".to_string()) != "mwc" {
-			return Err(
-				ErrorKind::SlateDeser("slate doesn't belong to MWC network".to_string()).into(),
-			);
+			return Err(Error::SlateDeser(
+				"slate doesn't belong to MWC network".to_string(),
+			));
 		}
 
 		if let Some(network) = self.network_type {
 			if network != global::get_network_name() {
-				return Err(ErrorKind::SlateDeser(format!(
+				return Err(Error::SlateDeser(format!(
 					"slate from {} network, expected {} network",
 					network,
 					global::get_network_name()
-				))
-				.into());
+				)));
 			}
 		}
 
@@ -482,11 +481,10 @@ impl TryFrom<&SlateV3> for SlateV2 {
 			panic!("Slate V3 to V2 conversion error. V2 doesn't support compact model");
 		}
 		if !(*kernel_features == 0 || *kernel_features == 2) {
-			return Err(ErrorKind::SlateInvalidDowngrade(format!(
+			return Err(Error::SlateInvalidDowngrade(format!(
 				"Only plain or height lock kernel features are supported, get {}",
 				*kernel_features
-			))
-			.into());
+			)));
 		}
 
 		let num_participants = *num_participants;
@@ -508,10 +506,9 @@ impl TryFrom<&SlateV3> for SlateV2 {
 		let tx = match tx {
 			Some(t) => TransactionV2::from(t),
 			None => {
-				return Err(ErrorKind::SlateInvalidDowngrade(
+				return Err(Error::SlateInvalidDowngrade(
 					"Full transaction info required".to_owned(),
-				)
-				.into())
+				))
 			}
 		};
 		Ok(SlateV2 {

@@ -21,7 +21,7 @@ use crate::core::core::Transaction;
 use crate::keychain::{Identifier, Keychain};
 use crate::libwallet::slate_versions::v3::TransactionV3;
 use crate::libwallet::{
-	AcctPathMapping, ErrorKind, InitTxArgs, IssueInvoiceTxArgs, NodeClient, NodeHeightResult,
+	AcctPathMapping, Error, InitTxArgs, IssueInvoiceTxArgs, NodeClient, NodeHeightResult,
 	OutputCommitMapping, PaymentProof, Slate, SlatePurpose, SlateVersion, StatusMessage,
 	TxLogEntry, VersionedSlate, WalletInfo, WalletLCProvider,
 };
@@ -77,7 +77,7 @@ pub trait OwnerRpcV2: Sync + Send {
 	# , false, 4, false, false, false, false, true);
 	```
 	*/
-	fn accounts(&self) -> Result<Vec<AcctPathMapping>, ErrorKind>;
+	fn accounts(&self) -> Result<Vec<AcctPathMapping>, Error>;
 
 	/**
 	Networked version of [Owner::create_account_path](struct.Owner.html#method.create_account_path).
@@ -110,7 +110,7 @@ pub trait OwnerRpcV2: Sync + Send {
 
 	```
 	 */
-	fn create_account_path(&self, label: &String) -> Result<Identifier, ErrorKind>;
+	fn create_account_path(&self, label: &String) -> Result<Identifier, Error>;
 
 	/**
 	Networked version of [Owner::set_active_account](struct.Owner.html#method.set_active_account).
@@ -142,7 +142,7 @@ pub trait OwnerRpcV2: Sync + Send {
 	# , false, 4, false, false, false, false, true);
 	```
 	 */
-	fn set_active_account(&self, label: &String) -> Result<(), ErrorKind>;
+	fn set_active_account(&self, label: &String) -> Result<(), Error>;
 
 	/**
 	Networked version of [Owner::retrieve_outputs](struct.Owner.html#method.retrieve_outputs).
@@ -217,7 +217,7 @@ pub trait OwnerRpcV2: Sync + Send {
 		include_spent: bool,
 		refresh_from_node: bool,
 		tx_id: Option<u32>,
-	) -> Result<(bool, Vec<OutputCommitMapping>), ErrorKind>;
+	) -> Result<(bool, Vec<OutputCommitMapping>), Error>;
 
 	/**
 	Networked version of [Owner::retrieve_txs](struct.Owner.html#method.retrieve_txs).
@@ -317,7 +317,7 @@ pub trait OwnerRpcV2: Sync + Send {
 		refresh_from_node: bool,
 		tx_id: Option<u32>,
 		tx_slate_id: Option<Uuid>,
-	) -> Result<(bool, Vec<TxLogEntryAPI>), ErrorKind>;
+	) -> Result<(bool, Vec<TxLogEntryAPI>), Error>;
 
 	/**
 	Networked version of [Owner::retrieve_summary_info](struct.Owner.html#method.retrieve_summary_info).
@@ -366,7 +366,7 @@ pub trait OwnerRpcV2: Sync + Send {
 		&self,
 		refresh_from_node: bool,
 		minimum_confirmations: u64,
-	) -> Result<(bool, WalletInfo), ErrorKind>;
+	) -> Result<(bool, WalletInfo), Error>;
 
 	// 	Case with Minimal and full number of arguments.
 	//  Minimal test doesn't have funds because defailt numbers of confirmations is 10, so funds are not available yet
@@ -718,7 +718,7 @@ pub trait OwnerRpcV2: Sync + Send {
 	```
 	*/
 
-	fn init_send_tx(&self, args: InitTxArgs) -> Result<VersionedSlate, ErrorKind>;
+	fn init_send_tx(&self, args: InitTxArgs) -> Result<VersionedSlate, Error>;
 
 	/**
 	Networked version of [Owner::issue_invoice_tx](struct.Owner.html#method.issue_invoice_tx).
@@ -907,7 +907,7 @@ pub trait OwnerRpcV2: Sync + Send {
 	```
 	*/
 
-	fn issue_invoice_tx(&self, args: IssueInvoiceTxArgs) -> Result<VersionedSlate, ErrorKind>;
+	fn issue_invoice_tx(&self, args: IssueInvoiceTxArgs) -> Result<VersionedSlate, Error>;
 
 	/**
 	Networked version of [Owner::process_invoice_tx](struct.Owner.html#method.process_invoice_tx).
@@ -1255,7 +1255,7 @@ pub trait OwnerRpcV2: Sync + Send {
 		&self,
 		slate: VersionedSlate,
 		args: InitTxArgs,
-	) -> Result<VersionedSlate, ErrorKind>;
+	) -> Result<VersionedSlate, Error>;
 
 	/**
 	Networked version of [Owner::tx_lock_outputs](struct.Owner.html#method.tx_lock_outputs).
@@ -1425,11 +1425,7 @@ pub trait OwnerRpcV2: Sync + Send {
 	# , false, 5 ,true, false, false, false, true);
 	```
 	 */
-	fn tx_lock_outputs(
-		&self,
-		slate: VersionedSlate,
-		participant_id: usize,
-	) -> Result<(), ErrorKind>;
+	fn tx_lock_outputs(&self, slate: VersionedSlate, participant_id: usize) -> Result<(), Error>;
 
 	/**
 	Networked version of [Owner::finalize_tx](struct.Owner.html#method.finalize_tx).
@@ -1785,7 +1781,7 @@ pub trait OwnerRpcV2: Sync + Send {
 	# , false, 5, true, true, false, false, true);
 	```
 	 */
-	fn finalize_tx(&self, slate: VersionedSlate) -> Result<VersionedSlate, ErrorKind>;
+	fn finalize_tx(&self, slate: VersionedSlate) -> Result<VersionedSlate, Error>;
 
 	/**
 	Networked version of [Owner::post_tx](struct.Owner.html#method.post_tx).
@@ -1852,7 +1848,7 @@ pub trait OwnerRpcV2: Sync + Send {
 	```
 	 */
 
-	fn post_tx(&self, tx: TransactionV3, fluff: bool) -> Result<(), ErrorKind>;
+	fn post_tx(&self, tx: TransactionV3, fluff: bool) -> Result<(), Error>;
 
 	/**
 	Networked version of [Owner::cancel_tx](struct.Owner.html#method.cancel_tx).
@@ -1908,7 +1904,7 @@ pub trait OwnerRpcV2: Sync + Send {
 	# , false, 5, true, true, false, false, true);
 	```
 	 */
-	fn cancel_tx(&self, tx_id: Option<u32>, tx_slate_id: Option<Uuid>) -> Result<(), ErrorKind>;
+	fn cancel_tx(&self, tx_id: Option<u32>, tx_slate_id: Option<Uuid>) -> Result<(), Error>;
 
 	/**
 	Networked version of [Owner::get_stored_tx](struct.Owner.html#method.get_stored_tx).
@@ -1978,7 +1974,7 @@ pub trait OwnerRpcV2: Sync + Send {
 	# , false, 5, true, true, false, false, false);
 	```
 	 */
-	fn get_stored_tx(&self, tx: &TxLogEntryAPI) -> Result<Option<TransactionV3>, ErrorKind>;
+	fn get_stored_tx(&self, tx: &TxLogEntryAPI) -> Result<Option<TransactionV3>, Error>;
 
 	/**
 	Networked version of [Owner::verify_slate_messages](struct.Owner.html#method.verify_slate_messages).
@@ -2058,7 +2054,7 @@ pub trait OwnerRpcV2: Sync + Send {
 	# ,false, 0 ,false, false, false, false, true);
 	```
 	*/
-	fn verify_slate_messages(&self, slate: VersionedSlate) -> Result<(), ErrorKind>;
+	fn verify_slate_messages(&self, slate: VersionedSlate) -> Result<(), Error>;
 
 	/**
 	Networked version of [Owner::scan](struct.Owner.html#method.scan).
@@ -2090,7 +2086,7 @@ pub trait OwnerRpcV2: Sync + Send {
 	# , false, 1, false, false, false, false, true);
 	```
 	 */
-	fn scan(&self, start_height: Option<u64>, delete_unconfirmed: bool) -> Result<(), ErrorKind>;
+	fn scan(&self, start_height: Option<u64>, delete_unconfirmed: bool) -> Result<(), Error>;
 
 	/**
 	Networked version of [Owner::node_height](struct.Owner.html#method.node_height).
@@ -2123,7 +2119,7 @@ pub trait OwnerRpcV2: Sync + Send {
 	# , false, 5, false, false, false, false, true);
 	```
 	 */
-	fn node_height(&self) -> Result<NodeHeightResult, ErrorKind>;
+	fn node_height(&self) -> Result<NodeHeightResult, Error>;
 
 	/**
 	Networked version of [Owner::start_updated](struct.Owner.html#method.start_updater).
@@ -2153,7 +2149,7 @@ pub trait OwnerRpcV2: Sync + Send {
 	```
 	*/
 
-	fn start_updater(&self, frequency: u32) -> Result<(), ErrorKind>;
+	fn start_updater(&self, frequency: u32) -> Result<(), Error>;
 
 	/**
 	Networked version of [Owner::stop_updater](struct.Owner.html#method.stop_updater).
@@ -2180,7 +2176,7 @@ pub trait OwnerRpcV2: Sync + Send {
 	# , false, 0, false, false, false, false, true);
 	```
 	*/
-	fn stop_updater(&self) -> Result<(), ErrorKind>;
+	fn stop_updater(&self) -> Result<(), Error>;
 
 	/**
 	Networked version of [Owner::get_updater_messages](struct.Owner.html#method.get_updater_messages).
@@ -2210,7 +2206,7 @@ pub trait OwnerRpcV2: Sync + Send {
 	```
 	*/
 
-	fn get_updater_messages(&self, count: u32) -> Result<Vec<StatusMessage>, ErrorKind>;
+	fn get_updater_messages(&self, count: u32) -> Result<Vec<StatusMessage>, Error>;
 
 	/**
 	Networked version of [Owner::get_mqs_address](struct.Owner.html#method.get_mqs_address).
@@ -2242,7 +2238,7 @@ pub trait OwnerRpcV2: Sync + Send {
 	```
 	*/
 
-	fn get_mqs_address(&self) -> Result<ProvableAddress, ErrorKind>;
+	fn get_mqs_address(&self) -> Result<ProvableAddress, Error>;
 
 	/**
 	Networked version of [Owner::get_wallet_public_address](struct.Owner.html#method.get_wallet_public_address).
@@ -2274,7 +2270,7 @@ pub trait OwnerRpcV2: Sync + Send {
 	```
 	*/
 
-	fn get_wallet_public_address(&self) -> Result<ProvableAddress, ErrorKind>;
+	fn get_wallet_public_address(&self) -> Result<ProvableAddress, Error>;
 
 	/**
 	Networked version of [Owner::retrieve_payment_proof](struct.Owner.html#method.retrieve_payment_proof).
@@ -2368,7 +2364,7 @@ pub trait OwnerRpcV2: Sync + Send {
 		refresh_from_node: bool,
 		tx_id: Option<u32>,
 		tx_slate_id: Option<Uuid>,
-	) -> Result<PaymentProof, ErrorKind>;
+	) -> Result<PaymentProof, Error>;
 
 	/**
 	Networked version of [Owner::verify_payment_proof](struct.Owner.html#method.verify_payment_proof).
@@ -2458,7 +2454,7 @@ pub trait OwnerRpcV2: Sync + Send {
 	```
 	*/
 
-	fn verify_payment_proof(&self, proof: PaymentProof) -> Result<(bool, bool), ErrorKind>;
+	fn verify_payment_proof(&self, proof: PaymentProof) -> Result<(bool, bool), Error>;
 
 	/**
 	Networked version of [Owner::encode_slatepack_message](struct.Owner.html#method.encode_slatepack_message).
@@ -2628,7 +2624,7 @@ pub trait OwnerRpcV2: Sync + Send {
 		content: SlatePurpose,
 		recipient: Option<ProvableAddress>,
 		address_index: Option<u32>,
-	) -> Result<String, ErrorKind>;
+	) -> Result<String, Error>;
 
 	/**
 	Networked version of [Owner::decode_slatepack_message](struct.Owner.html#method.decode_slatepack_message).
@@ -2803,7 +2799,7 @@ pub trait OwnerRpcV2: Sync + Send {
 		&self,
 		message: String,
 		address_index: Option<u32>,
-	) -> Result<SlatepackInfo, ErrorKind>;
+	) -> Result<SlatepackInfo, Error>;
 }
 
 impl<'a, L, C, K> OwnerRpcV2 for Owner<L, C, K>
@@ -2812,16 +2808,16 @@ where
 	C: NodeClient + 'static,
 	K: Keychain + 'static,
 {
-	fn accounts(&self) -> Result<Vec<AcctPathMapping>, ErrorKind> {
-		Owner::accounts(self, None).map_err(|e| e.kind())
+	fn accounts(&self) -> Result<Vec<AcctPathMapping>, Error> {
+		Owner::accounts(self, None)
 	}
 
-	fn create_account_path(&self, label: &String) -> Result<Identifier, ErrorKind> {
-		Owner::create_account_path(self, None, label).map_err(|e| e.kind())
+	fn create_account_path(&self, label: &String) -> Result<Identifier, Error> {
+		Owner::create_account_path(self, None, label)
 	}
 
-	fn set_active_account(&self, label: &String) -> Result<(), ErrorKind> {
-		Owner::set_active_account(self, None, label).map_err(|e| e.kind())
+	fn set_active_account(&self, label: &String) -> Result<(), Error> {
+		Owner::set_active_account(self, None, label)
 	}
 
 	fn retrieve_outputs(
@@ -2829,9 +2825,8 @@ where
 		include_spent: bool,
 		refresh_from_node: bool,
 		tx_id: Option<u32>,
-	) -> Result<(bool, Vec<OutputCommitMapping>), ErrorKind> {
+	) -> Result<(bool, Vec<OutputCommitMapping>), Error> {
 		Owner::retrieve_outputs(self, None, include_spent, refresh_from_node, tx_id)
-			.map_err(|e| e.kind())
 	}
 
 	fn retrieve_txs(
@@ -2839,30 +2834,27 @@ where
 		refresh_from_node: bool,
 		tx_id: Option<u32>,
 		tx_slate_id: Option<Uuid>,
-	) -> Result<(bool, Vec<TxLogEntryAPI>), ErrorKind> {
-		Owner::retrieve_txs(self, None, refresh_from_node, tx_id, tx_slate_id)
-			.map_err(|e| e.kind())
-			.map(|(b, tx)| {
-				(
-					b,
-					tx.iter()
-						.map(|t| TxLogEntryAPI::from_txlogemtry(t))
-						.collect(),
-				)
-			})
+	) -> Result<(bool, Vec<TxLogEntryAPI>), Error> {
+		Owner::retrieve_txs(self, None, refresh_from_node, tx_id, tx_slate_id).map(|(b, tx)| {
+			(
+				b,
+				tx.iter()
+					.map(|t| TxLogEntryAPI::from_txlogemtry(t))
+					.collect(),
+			)
+		})
 	}
 
 	fn retrieve_summary_info(
 		&self,
 		refresh_from_node: bool,
 		minimum_confirmations: u64,
-	) -> Result<(bool, WalletInfo), ErrorKind> {
+	) -> Result<(bool, WalletInfo), Error> {
 		Owner::retrieve_summary_info(self, None, refresh_from_node, minimum_confirmations)
-			.map_err(|e| e.kind())
 	}
 
-	fn init_send_tx(&self, args: InitTxArgs) -> Result<VersionedSlate, ErrorKind> {
-		let slate = Owner::init_send_tx(self, None, &args, 1).map_err(|e| e.kind())?;
+	fn init_send_tx(&self, args: InitTxArgs) -> Result<VersionedSlate, Error> {
+		let slate = Owner::init_send_tx(self, None, &args, 1)?;
 
 		// Return plain slate. If caller don't want sent slate with this API, than probvably caller want
 		// handle the workflow in lower level.
@@ -2870,11 +2862,11 @@ where
 		// better to have plain slate so it can be readable.
 		let version = slate.lowest_version();
 		Ok(VersionedSlate::into_version_plain(slate, version)
-			.map_err(|e| ErrorKind::SlatepackEncodeError(format!("{}", e)))?)
+			.map_err(|e| Error::SlatepackEncodeError(format!("{}", e)))?)
 	}
 
-	fn issue_invoice_tx(&self, args: IssueInvoiceTxArgs) -> Result<VersionedSlate, ErrorKind> {
-		let slate = Owner::issue_invoice_tx(self, None, &args).map_err(|e| e.kind())?;
+	fn issue_invoice_tx(&self, args: IssueInvoiceTxArgs) -> Result<VersionedSlate, Error> {
+		let slate = Owner::issue_invoice_tx(self, None, &args)?;
 
 		let vslate = Owner::encrypt_slate(
 			&self,
@@ -2888,8 +2880,7 @@ where
 				.map(|a| a.unwrap()),
 			None,
 			self.doctest_mode,
-		)
-		.map_err(|e| e.kind())?;
+		)?;
 
 		Ok(vslate)
 	}
@@ -2898,22 +2889,21 @@ where
 		&self,
 		in_slate: VersionedSlate,
 		args: InitTxArgs,
-	) -> Result<VersionedSlate, ErrorKind> {
+	) -> Result<VersionedSlate, Error> {
 		let version = in_slate.version();
 		let (slate_from, content, sender) = Owner::decrypt_versioned_slate(self, None, in_slate)
-			.map_err(|e| ErrorKind::SlatepackDecodeError(format!("{}", e)))?;
+			.map_err(|e| Error::SlatepackDecodeError(format!("{}", e)))?;
 
 		if let Some(content) = &content {
 			if *content != SlatePurpose::InvoiceInitial {
-				return Err(ErrorKind::SlatepackDecodeError(format!(
+				return Err(Error::SlatepackDecodeError(format!(
 					"Expecting InvoiceInitial slate content, get {:?}",
 					content
 				)));
 			}
 		}
 
-		let out_slate =
-			Owner::process_invoice_tx(self, None, &slate_from, &args).map_err(|e| e.kind())?;
+		let out_slate = Owner::process_invoice_tx(self, None, &slate_from, &args)?;
 
 		let vslate = Owner::encrypt_slate(
 			&self,
@@ -2924,20 +2914,19 @@ where
 			sender,
 			None,
 			self.doctest_mode,
-		)
-		.map_err(|e| e.kind())?;
+		)?;
 
 		Ok(vslate)
 	}
 
-	fn finalize_tx(&self, in_slate: VersionedSlate) -> Result<VersionedSlate, ErrorKind> {
+	fn finalize_tx(&self, in_slate: VersionedSlate) -> Result<VersionedSlate, Error> {
 		let version = in_slate.version();
 		let (slate_from, _content, sender) =
 			Owner::decrypt_versioned_slate(self, None, in_slate)
-				.map_err(|e| ErrorKind::SlatepackDecodeError(format!("{}", e)))?;
+				.map_err(|e| Error::SlatepackDecodeError(format!("{}", e)))?;
 
 		// Not checking content. If slate good enough to finalize, there is not problem with a content
-		let out_slate = Owner::finalize_tx(self, None, &slate_from).map_err(|e| e.kind())?;
+		let out_slate = Owner::finalize_tx(self, None, &slate_from)?;
 
 		let vslate = Owner::encrypt_slate(
 			&self,
@@ -2950,27 +2939,23 @@ where
 			self.doctest_mode,
 		)
 		.map_err(|e| {
-			ErrorKind::SlatepackEncodeError(format!("Unable to encode the slatepack, {}", e))
+			Error::SlatepackEncodeError(format!("Unable to encode the slatepack, {}", e))
 		})?;
 
 		Ok(vslate)
 	}
 
-	fn tx_lock_outputs(
-		&self,
-		slate: VersionedSlate,
-		participant_id: usize,
-	) -> Result<(), ErrorKind> {
+	fn tx_lock_outputs(&self, slate: VersionedSlate, participant_id: usize) -> Result<(), Error> {
 		let (slate_from, _content, _sender) = Owner::decrypt_versioned_slate(self, None, slate)
-			.map_err(|e| ErrorKind::SlatepackDecodeError(format!("{}", e)))?;
-		Owner::tx_lock_outputs(self, None, &slate_from, None, participant_id).map_err(|e| e.kind())
+			.map_err(|e| Error::SlatepackDecodeError(format!("{}", e)))?;
+		Owner::tx_lock_outputs(self, None, &slate_from, None, participant_id)
 	}
 
-	fn cancel_tx(&self, tx_id: Option<u32>, tx_slate_id: Option<Uuid>) -> Result<(), ErrorKind> {
-		Owner::cancel_tx(self, None, tx_id, tx_slate_id).map_err(|e| e.kind())
+	fn cancel_tx(&self, tx_id: Option<u32>, tx_slate_id: Option<Uuid>) -> Result<(), Error> {
+		Owner::cancel_tx(self, None, tx_id, tx_slate_id)
 	}
 
-	fn get_stored_tx(&self, tx: &TxLogEntryAPI) -> Result<Option<TransactionV3>, ErrorKind> {
+	fn get_stored_tx(&self, tx: &TxLogEntryAPI) -> Result<Option<TransactionV3>, Error> {
 		Owner::get_stored_tx(
 			self,
 			None,
@@ -3011,64 +2996,61 @@ where
 			),
 		)
 		.map(|x| x.map(TransactionV3::from))
-		.map_err(|e| e.kind())
 	}
 
-	fn post_tx(&self, tx: TransactionV3, fluff: bool) -> Result<(), ErrorKind> {
+	fn post_tx(&self, tx: TransactionV3, fluff: bool) -> Result<(), Error> {
 		Owner::post_tx(
 			self,
 			None,
 			&Transaction::try_from(tx).map_err(|e| {
-				ErrorKind::GenericError(format!("Unable convert V3 transaction, {}", e))
+				Error::GenericError(format!("Unable convert V3 transaction, {}", e))
 			})?,
 			fluff,
 		)
-		.map_err(|e| e.kind())
 	}
 
-	fn verify_slate_messages(&self, slate: VersionedSlate) -> Result<(), ErrorKind> {
+	fn verify_slate_messages(&self, slate: VersionedSlate) -> Result<(), Error> {
 		if slate.is_slatepack() {
-			return Err(ErrorKind::SlatepackDecodeError(
+			return Err(Error::SlatepackDecodeError(
 				"verify_slate_messages is not applicable for slatepack".to_string(),
 			));
 		}
 		let slate = slate
 			.into_slate_plain(true)
-			.map_err(|e| ErrorKind::SlatepackDecodeError(format!("{}", e)))?;
+			.map_err(|e| Error::SlatepackDecodeError(format!("{}", e)))?;
 
-		Owner::verify_slate_messages(self, None, &slate).map_err(|e| e.kind())
+		Owner::verify_slate_messages(self, None, &slate)
 	}
 
-	fn scan(&self, start_height: Option<u64>, delete_unconfirmed: bool) -> Result<(), ErrorKind> {
-		Owner::scan(self, None, start_height, delete_unconfirmed).map_err(|e| e.kind())
+	fn scan(&self, start_height: Option<u64>, delete_unconfirmed: bool) -> Result<(), Error> {
+		Owner::scan(self, None, start_height, delete_unconfirmed)
 	}
 
-	fn node_height(&self) -> Result<NodeHeightResult, ErrorKind> {
-		Owner::node_height(self, None).map_err(|e| e.kind())
+	fn node_height(&self) -> Result<NodeHeightResult, Error> {
+		Owner::node_height(self, None)
 	}
 
-	fn start_updater(&self, frequency: u32) -> Result<(), ErrorKind> {
+	fn start_updater(&self, frequency: u32) -> Result<(), Error> {
 		Owner::start_updater(self, None, Duration::from_millis(frequency as u64))
-			.map_err(|e| e.kind())
 	}
 
-	fn stop_updater(&self) -> Result<(), ErrorKind> {
-		Owner::stop_updater(self).map_err(|e| e.kind())
+	fn stop_updater(&self) -> Result<(), Error> {
+		Owner::stop_updater(self)
 	}
 
-	fn get_updater_messages(&self, count: u32) -> Result<Vec<StatusMessage>, ErrorKind> {
-		Owner::get_updater_messages(self, count as usize).map_err(|e| e.kind())
+	fn get_updater_messages(&self, count: u32) -> Result<Vec<StatusMessage>, Error> {
+		Owner::get_updater_messages(self, count as usize)
 	}
 
-	fn get_mqs_address(&self) -> Result<ProvableAddress, ErrorKind> {
-		let address = Owner::get_mqs_address(self, None).map_err(|e| e.kind())?;
+	fn get_mqs_address(&self) -> Result<ProvableAddress, Error> {
+		let address = Owner::get_mqs_address(self, None)?;
 		let public_proof_address = ProvableAddress::from_pub_key(&address);
 		println!("mqs_address address {}", public_proof_address.public_key);
 		Ok(public_proof_address)
 	}
 
-	fn get_wallet_public_address(&self) -> Result<ProvableAddress, ErrorKind> {
-		let address = Owner::get_wallet_public_address(self, None).map_err(|e| e.kind())?;
+	fn get_wallet_public_address(&self) -> Result<ProvableAddress, Error> {
+		let address = Owner::get_wallet_public_address(self, None)?;
 		let address = ProvableAddress::from_tor_pub_key(&address);
 		println!("wallet_public_address address {}", address.public_key);
 		Ok(address)
@@ -3079,13 +3061,12 @@ where
 		refresh_from_node: bool,
 		tx_id: Option<u32>,
 		tx_slate_id: Option<Uuid>,
-	) -> Result<PaymentProof, ErrorKind> {
+	) -> Result<PaymentProof, Error> {
 		Owner::retrieve_payment_proof(self, None, refresh_from_node, tx_id, tx_slate_id)
-			.map_err(|e| e.kind())
 	}
 
-	fn verify_payment_proof(&self, proof: PaymentProof) -> Result<(bool, bool), ErrorKind> {
-		Owner::verify_payment_proof(self, None, &proof).map_err(|e| e.kind())
+	fn verify_payment_proof(&self, proof: PaymentProof) -> Result<(bool, bool), Error> {
+		Owner::verify_payment_proof(self, None, &proof)
 	}
 
 	fn encode_slatepack_message(
@@ -3094,15 +3075,15 @@ where
 		content: SlatePurpose,
 		recipient: Option<ProvableAddress>,
 		address_index: Option<u32>,
-	) -> Result<String, ErrorKind> {
+	) -> Result<String, Error> {
 		// Expected Slate in Json (plain) format
 		let slate = slate.into_slate_plain(false).map_err(|e| {
-			ErrorKind::SlatepackDecodeError(format!("Expected to get slate in Json format, {}", e))
+			Error::SlatepackDecodeError(format!("Expected to get slate in Json format, {}", e))
 		})?;
 
 		let recipient: Option<DalekPublicKey> = match recipient {
 			Some(recipient) => Some(recipient.tor_public_key().map_err(|e| {
-				ErrorKind::SlatepackEncodeError(format!("Expecting recipient tor address, {}", e))
+				Error::SlatepackEncodeError(format!("Expecting recipient tor address, {}", e))
 			})?),
 			None => None,
 		};
@@ -3116,13 +3097,12 @@ where
 			recipient,
 			address_index,
 			self.doctest_mode,
-		)
-		.map_err(|e| e.kind())?;
+		)?;
 
 		if let VersionedSlate::SP(message) = vslate {
 			return Ok(message);
 		} else {
-			return Err(ErrorKind::SlatepackEncodeError(
+			return Err(Error::SlatepackEncodeError(
 				"Unable to encode the slate, internal error".to_string(),
 			));
 		}
@@ -3132,16 +3112,14 @@ where
 		&self,
 		message: String,
 		address_index: Option<u32>,
-	) -> Result<SlatepackInfo, ErrorKind> {
+	) -> Result<SlatepackInfo, Error> {
 		let (slate, content, sender, recipient) =
-			Owner::decrypt_slatepack(&self, None, VersionedSlate::SP(message), address_index)
-				.map_err(|e| e.kind())?;
+			Owner::decrypt_slatepack(&self, None, VersionedSlate::SP(message), address_index)?;
 
 		let slate_version = slate.lowest_version();
 
-		let vslate = VersionedSlate::into_version_plain(slate, slate_version).map_err(|e| {
-			ErrorKind::SlatepackDecodeError(format!("Unable to convert slate, {}", e))
-		})?;
+		let vslate = VersionedSlate::into_version_plain(slate, slate_version)
+			.map_err(|e| Error::SlatepackDecodeError(format!("Unable to convert slate, {}", e)))?;
 
 		Ok(SlatepackInfo {
 			slate: vslate,

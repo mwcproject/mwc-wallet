@@ -12,9 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::ErrorKind;
+use crate::Error;
 use colored::*;
-use failure::Fail;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 use std::{fmt, fmt::Display, str::FromStr};
@@ -31,55 +30,49 @@ use wagyu_model::{
 };
 
 /// Ethereum Error
-#[derive(Debug, Fail)]
+#[derive(Debug, thiserror::Error)]
 pub enum EthError {
 	/// Address error
-	#[fail(display = "{}", _0)]
+	#[error("{0}")]
 	AddressError(AddressError),
 	/// Amount error
-	#[fail(display = "{}", _0)]
+	#[error("#[from] {0}")]
 	AmountError(AmountError),
 	/// Crate error
-	#[fail(display = "{}: {}", _0, _1)]
+	#[error("{0}: {1}")]
 	Crate(&'static str, String),
 	/// Derivation Path Error
-	#[fail(display = "{}", _0)]
+	#[error("{0}")]
 	DerivationPathError(DerivationPathError),
 	/// ExtendedPrivateKey Error
-	#[fail(display = "{}", _0)]
+	#[error("{0}")]
 	ExtendedPrivateKeyError(ExtendedPrivateKeyError),
 	/// ExtendedPublicKey Error
-	#[fail(display = "{}", _0)]
+	#[error("{0}")]
 	ExtendedPublicKeyError(ExtendedPublicKeyError),
 	/// InvalidMnemonicForPrivateSpendKey
-	#[fail(display = "invalid derived mnemonic for a given private spend key")]
+	#[error("invalid derived mnemonic for a given private spend key")]
 	InvalidMnemonicForPrivateSpendKey,
 	/// PrivateKeyError
-	#[fail(display = "{}", _0)]
+	#[error("{0}")]
 	PrivateKeyError(PrivateKeyError),
 	/// PublicKeyError
-	#[fail(display = "{}", _0)]
+	#[error("{0}")]
 	PublicKeyError(PublicKeyError),
 	/// MnemonicError
-	#[fail(display = "{}", _0)]
+	#[error("{0}")]
 	MnemonicError(MnemonicError),
 	/// TransactionError
-	#[fail(display = "{}", _0)]
+	#[error("{0}")]
 	TransactionError(TransactionError),
 	/// Unsupported Mnemonic Language
-	#[fail(display = "unsupported mnemonic language")]
+	#[error("unsupported mnemonic language")]
 	UnsupportedLanguage,
 }
 
 impl From<AddressError> for EthError {
 	fn from(error: AddressError) -> Self {
 		EthError::AddressError(error)
-	}
-}
-
-impl From<AmountError> for EthError {
-	fn from(error: AmountError) -> Self {
-		EthError::AmountError(error)
 	}
 }
 
@@ -142,6 +135,7 @@ impl From<TransactionError> for EthError {
 		EthError::TransactionError(error)
 	}
 }
+
 /// Represents parameters for an Ethereum transaction input
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct EthereumInput {
@@ -452,7 +446,7 @@ pub fn generate_ethereum_wallet(
 	mnemonic: &str,
 	password: &str,
 	path: &str,
-) -> Result<EthereumWallet, ErrorKind> {
+) -> Result<EthereumWallet, Error> {
 	let ethereum_wallet = match network {
 		"mainnet" => {
 			EthereumWallet::from_mnemonic::<Mainnet, English>(mnemonic, Some(password), path)
@@ -462,10 +456,8 @@ pub fn generate_ethereum_wallet(
 
 	match ethereum_wallet {
 		Ok(w) => Ok(w),
-		Err(e) => Err(ErrorKind::EthereumWalletError(format!(
-			"create ethereum wallet failed!, {}",
-			e
-		))
-		.into()),
+		Err(e) => {
+			Err(Error::EthereumWalletError(format!("create ethereum wallet failed!, {}", e)).into())
+		}
 	}
 }

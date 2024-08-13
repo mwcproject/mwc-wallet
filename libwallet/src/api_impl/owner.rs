@@ -33,12 +33,12 @@ use crate::slate::{PaymentInfo, Slate};
 use crate::types::{
 	AcctPathMapping, Context, NodeClient, OutputData, TxLogEntry, WalletBackend, WalletInfo,
 };
+use crate::Error;
 use crate::{
 	wallet_lock, BuiltOutput, InitTxArgs, IssueInvoiceTxArgs, NodeHeightResult,
 	OutputCommitMapping, PaymentProof, ScannedBlockInfo, TxLogEntryType, ViewWallet, WalletInst,
 	WalletLCProvider,
 };
-use crate::{Error, ErrorKind};
 
 use crate::proof::tx_proof::{pop_proof_for_slate, TxProof};
 use ed25519_dalek::PublicKey as DalekPublicKey;
@@ -284,10 +284,9 @@ where
 	K: Keychain + 'a,
 {
 	if tx_id.is_none() && tx_slate_id.is_none() {
-		return Err(ErrorKind::PaymentProofRetrieval(
-			"Transaction ID or Slate UUID must be specified".into(),
-		)
-		.into());
+		return Err(Error::PaymentProofRetrieval(
+			"Transaction ID or Slate UUID must be specified".to_owned(),
+		));
 	}
 	if refresh_from_node {
 		update_wallet_state(wallet_inst.clone(), keychain_mask, status_send_channel)?
@@ -303,17 +302,18 @@ where
 		tx_slate_id,
 	)?;
 	if txs.1.len() != 1 {
-		return Err(ErrorKind::PaymentProofRetrieval("Transaction doesn't exist".into()).into());
+		return Err(Error::PaymentProofRetrieval(
+			"Transaction doesn't exist".to_owned(),
+		));
 	}
 	// Pull out all needed fields, returning an error if they're not present
 	let tx = txs.1[0].clone();
 	let proof = match tx.payment_proof {
 		Some(p) => p,
 		None => {
-			return Err(ErrorKind::PaymentProofRetrieval(
-				"Transaction does not contain a payment proof".into(),
-			)
-			.into());
+			return Err(Error::PaymentProofRetrieval(
+				"Transaction does not contain a payment proof".to_owned(),
+			));
 		}
 	};
 	let amount = if tx.amount_credited >= tx.amount_debited {
@@ -328,28 +328,25 @@ where
 	let excess = match tx.kernel_excess {
 		Some(e) => e,
 		None => {
-			return Err(ErrorKind::PaymentProofRetrieval(
-				"Transaction does not contain kernel excess".into(),
-			)
-			.into());
+			return Err(Error::PaymentProofRetrieval(
+				"Transaction does not contain kernel excess".to_owned(),
+			));
 		}
 	};
 	let r_sig = match proof.receiver_signature {
 		Some(e) => e,
 		None => {
-			return Err(ErrorKind::PaymentProofRetrieval(
-				"Proof does not contain receiver signature ".into(),
-			)
-			.into());
+			return Err(Error::PaymentProofRetrieval(
+				"Proof does not contain receiver signature ".to_owned(),
+			));
 		}
 	};
 	let s_sig = match proof.sender_signature {
 		Some(e) => e,
 		None => {
-			return Err(ErrorKind::PaymentProofRetrieval(
-				"Proof does not contain sender signature ".into(),
-			)
-			.into());
+			return Err(Error::PaymentProofRetrieval(
+				"Proof does not contain sender signature ".to_owned(),
+			));
 		}
 	};
 	Ok(PaymentProof {
@@ -372,9 +369,9 @@ where
 	K: Keychain + 'a,
 {
 	if id.is_none() {
-		return Err(
-			ErrorKind::PaymentProofRetrieval("Transaction ID must be specified".into()).into(),
-		);
+		return Err(Error::PaymentProofRetrieval(
+			"Transaction ID must be specified".into(),
+		));
 	}
 	let tx_id = id.unwrap();
 	wallet_lock!(wallet_inst, w);
@@ -389,18 +386,15 @@ where
 		None,
 		None,
 	)
-	.map_err(|e| ErrorKind::StoredTransactionError(format!("{}", e)))?;
+	.map_err(|e| Error::StoredTransactionError(format!("{}", e)))?;
 	if txs.len() != 1 {
-		return Err(ErrorKind::GenericError(format!(
-			"Unable to find tx, {}",
-			tx_id
-		)))?;
+		return Err(Error::GenericError(format!("Unable to find tx, {}", tx_id)))?;
 	}
 	let uuid = txs[0].tx_slate_id.ok_or_else(|| {
-		ErrorKind::GenericError(format!("Unable to find slateId for txId, {}", tx_id))
+		Error::GenericError(format!("Unable to find slateId for txId, {}", tx_id))
 	})?;
 	let proof = TxProof::get_stored_tx_proof(w.get_data_file_dir(), &uuid.to_string())
-		.map_err(|e| ErrorKind::TransactionHasNoProof(format!("{}", e)))?;
+		.map_err(|e| Error::TransactionHasNoProof(format!("{}", e)))?;
 	return Ok(proof);
 }
 
@@ -478,11 +472,10 @@ where
 	let h = slate.height;
 	let mut context = if args.late_lock.unwrap_or(false) {
 		if !slate.compact_slate {
-			return Err(ErrorKind::GenericError(
+			return Err(Error::GenericError(
 				"Lock later feature available only with a slatepack (compact slate) model"
 					.to_string(),
-			)
-			.into());
+			));
 		}
 
 		tx::create_late_lock_context(
@@ -674,7 +667,7 @@ where
 	)?;
 	for t in &tx {
 		if t.tx_type == TxLogEntryType::TxSent {
-			return Err(ErrorKind::TransactionAlreadyReceived(ret_slate.id.to_string()).into());
+			return Err(Error::TransactionAlreadyReceived(ret_slate.id.to_string()));
 		}
 	}
 
@@ -949,7 +942,7 @@ where
 	K: Keychain + 'a,
 {
 	if !perform_refresh_from_node(wallet_inst.clone(), keychain_mask, status_send_channel)? {
-		return Err(ErrorKind::TransactionCancellationError(
+		return Err(Error::TransactionCancellationError(
 			"Can't contact running MWC node. Not Cancelling.",
 		))?;
 	}
@@ -1023,7 +1016,7 @@ where
 	let rewind_hash = rewind_hash.to_lowercase();
 	if !(is_hex && rewind_hash.len() == 64) {
 		let msg = format!("Invalid Rewind Hash");
-		return Err(ErrorKind::RewindHash(msg).into());
+		return Err(Error::RewindHash(msg));
 	}
 
 	let tip = {
@@ -1075,7 +1068,7 @@ where
 	)?;
 
 	if tip_height == 0 {
-		return Err(ErrorKind::NodeNotReady)?;
+		return Err(Error::NodeNotReady)?;
 	}
 
 	if has_reorg {
@@ -1446,7 +1439,7 @@ where
 
 	if let Some(e) = slate.ttl_cutoff_height {
 		if last_confirmed_height >= e {
-			return Err(ErrorKind::TransactionExpired.into());
+			return Err(Error::TransactionExpired);
 		}
 	}
 	Ok(())
@@ -1475,18 +1468,16 @@ where
 	// Check kernel exists
 	match client.get_kernel(&proof.excess, None, None) {
 		Err(e) => {
-			return Err(ErrorKind::PaymentProof(format!(
+			return Err(Error::PaymentProof(format!(
 				"Error retrieving kernel from chain: {}",
 				e
-			))
-			.into());
+			)));
 		}
 		Ok(None) => {
-			return Err(ErrorKind::PaymentProof(format!(
+			return Err(Error::PaymentProof(format!(
 				"Transaction kernel with excess {:?} not found on chain",
 				proof.excess
-			))
-			.into());
+			)));
 		}
 		Ok(Some(_)) => {}
 	};
@@ -1500,7 +1491,7 @@ where
 		&recipient_pubkey,
 		keychain.secp(),
 	)
-	.map_err(|e| ErrorKind::TxProofVerifySignature(format!("{}", e)))?;
+	.map_err(|e| Error::TxProofVerifySignature(format!("{}", e)))?;
 
 	let sender_pubkey = proof.sender_address.public_key()?;
 
@@ -1510,7 +1501,7 @@ where
 		&sender_pubkey,
 		keychain.secp(),
 	)
-	.map_err(|e| ErrorKind::TxProofVerifySignature(format!("{}", e)))?;
+	.map_err(|e| Error::TxProofVerifySignature(format!("{}", e)))?;
 
 	let my_address_pubkey = proofaddress::payment_proof_address_pubkey(&keychain)?;
 	let sender_mine = my_address_pubkey == sender_pubkey;

@@ -31,9 +31,9 @@ use crate::util::ToHex;
 
 use super::resp_types::*;
 use crate::client_utils::json_rpc::*;
-use failure::_core::sync::atomic::{AtomicU8, Ordering};
 use grin_wallet_util::grin_api::{Libp2pMessages, Libp2pPeers};
 use grin_wallet_util::RUNTIME;
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
 
@@ -154,7 +154,7 @@ impl HTTPNodeClient {
 				}
 				let report = format!("Error calling {}: {}", method, e);
 				error!("{}", report);
-				Err(libwallet::ErrorKind::ClientCallback(report).into())
+				Err(libwallet::Error::ClientCallback(report))
 			}
 			Ok(inner) => match inner.clone().into_result() {
 				Ok(r) => Ok(r),
@@ -169,7 +169,7 @@ impl HTTPNodeClient {
 					// error message is likely what user want to see...
 					let report = format!("{}", e);
 					error!("{}", report);
-					Err(libwallet::ErrorKind::ClientCallback(report).into())
+					Err(libwallet::Error::ClientCallback(report))
 				}
 			},
 		}
@@ -200,7 +200,7 @@ impl HTTPNodeClient {
 				}
 				let report = format!("Get connected peers error {}, {}", url, e);
 				error!("{}", report);
-				Err(libwallet::ErrorKind::ClientCallback(report).into())
+				Err(libwallet::Error::ClientCallback(report))
 			}
 			Ok(peer) => Ok(peer),
 		}
@@ -232,7 +232,7 @@ impl HTTPNodeClient {
 				}
 				let report = format!("Error calling {}: {}", method, e);
 				error!("{}", report);
-				Err(libwallet::ErrorKind::ClientCallback(report).into())
+				Err(libwallet::Error::ClientCallback(report))
 			}
 			Ok(inner) => match inner.clone().into_result::<LocatedTxKernel>() {
 				Ok(r) => Ok(Some((r.tx_kernel, r.height, r.mmr_index))),
@@ -243,7 +243,7 @@ impl HTTPNodeClient {
 					} else {
 						let report = format!("Unable to parse response for {}: {}", method, e);
 						error!("{}", report);
-						Err(libwallet::ErrorKind::ClientCallback(report).into())
+						Err(libwallet::Error::ClientCallback(report))
 					}
 				}
 			},
@@ -336,7 +336,7 @@ impl HTTPNodeClient {
 
 							let report = format!("Unable to parse response for get_outputs: {}", e);
 							error!("{}", report);
-							return Err(libwallet::ErrorKind::ClientCallback(report).into());
+							return Err(libwallet::Error::ClientCallback(report));
 						}
 					};
 				}
@@ -350,7 +350,7 @@ impl HTTPNodeClient {
 				}
 				let report = format!("Outputs by id failed: {}", e);
 				error!("{}", report);
-				return Err(libwallet::ErrorKind::ClientCallback(report).into());
+				return Err(libwallet::Error::ClientCallback(report));
 			}
 		};
 
@@ -362,7 +362,7 @@ impl HTTPNodeClient {
 				Some(h) => h,
 				None => {
 					let msg = format!("Missing block height for output {:?}", out.commit);
-					return Err(libwallet::ErrorKind::ClientCallback(msg).into());
+					return Err(libwallet::Error::ClientCallback(msg));
 				}
 			};
 			api_outputs.insert(
@@ -560,7 +560,7 @@ impl NodeClient for HTTPNodeClient {
 						out.commit, out, e
 					);
 					error!("{}", msg);
-					return Err(libwallet::ErrorKind::ClientCallback(msg).into());
+					return Err(libwallet::Error::ClientCallback(msg));
 				}
 			};
 			let block_height = match out.block_height {
@@ -571,7 +571,7 @@ impl NodeClient for HTTPNodeClient {
 						out.commit, out
 					);
 					error!("{}", msg);
-					return Err(libwallet::ErrorKind::ClientCallback(msg).into());
+					return Err(libwallet::Error::ClientCallback(msg));
 				}
 			};
 			api_outputs.push((
@@ -661,7 +661,7 @@ impl NodeClient for HTTPNodeClient {
 							e
 						);
 						error!("{}", report);
-						return Err(libwallet::ErrorKind::ClientCallback(report).into());
+						return Err(libwallet::Error::ClientCallback(report));
 					}
 				}
 			}
@@ -782,7 +782,7 @@ mod tests {
 			let node_list_clone = node_list.clone();
 			joins.push(thread::spawn(move || {
 				let client = HTTPNodeClient::new(node_list_clone, Some(api_secret.to_string()))
-					.map_err(|e| libwallet::ErrorKind::ClientCallback(format!("{}", e)))?;
+					.map_err(|e| libwallet::Error::ClientCallback(format!("{}", e)))?;
 
 				let total_time = Instant::now();
 

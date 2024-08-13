@@ -15,7 +15,7 @@
 use super::bitcoin::{BtcBuyerContext, BtcData, BtcSellerContext};
 use super::ethereum::{EthBuyerContext, EthData, EthSellerContext, EthereumAddress};
 use super::ser::*;
-use super::ErrorKind;
+use super::Error;
 use crate::grin_core::global::ChainTypes;
 use crate::grin_core::{global, ser};
 use crate::grin_keychain::Identifier;
@@ -38,16 +38,16 @@ pub enum Network {
 
 impl Network {
 	/// Construct from current chaintype
-	pub fn current_network() -> Result<Self, ErrorKind> {
+	pub fn current_network() -> Result<Self, Error> {
 		Ok(Self::from_chain_type(global::get_chain_type())?)
 	}
 
 	/// Constructor from mwc-node ChainTypes
-	pub fn from_chain_type(chain_type: ChainTypes) -> Result<Self, ErrorKind> {
+	pub fn from_chain_type(chain_type: ChainTypes) -> Result<Self, Error> {
 		match chain_type {
 			ChainTypes::Floonet => Ok(Network::Floonet),
 			ChainTypes::Mainnet => Ok(Network::Mainnet),
-			_ => Err(ErrorKind::UnexpectedNetwork(format!("{:?}", chain_type))),
+			_ => Err(Error::UnexpectedNetwork(format!("{:?}", chain_type))),
 		}
 	}
 	/// To mwc-node ChainType
@@ -190,9 +190,9 @@ impl Currency {
 	}
 
 	/// Convert string amount to Satoshi amount
-	pub fn amount_from_hr_string(&self, hr: &str) -> Result<u64, ErrorKind> {
+	pub fn amount_from_hr_string(&self, hr: &str) -> Result<u64, Error> {
 		if hr.find(",").is_some() {
-			return Err(ErrorKind::InvalidAmountString(hr.to_string()));
+			return Err(Error::InvalidAmountString(hr.to_string()));
 		}
 
 		let exp = self.exponent();
@@ -207,7 +207,7 @@ impl Currency {
 
 		let amount = characteristic * 10u64.pow(exp as u32) + mantissa;
 		if amount == 0 {
-			return Err(ErrorKind::InvalidAmountString("zero amoount".to_string()));
+			return Err(Error::InvalidAmountString("zero amoount".to_string()));
 		}
 
 		Ok(amount)
@@ -221,11 +221,11 @@ impl Currency {
 		}
 	}
 
-	fn validate_address_network(addr: &Address, coin_name: &str) -> Result<(), ErrorKind> {
+	fn validate_address_network(addr: &Address, coin_name: &str) -> Result<(), Error> {
 		match addr.network {
 			bitcoin::network::constants::Network::Bitcoin => {
 				if !global::is_mainnet() {
-					return Err(ErrorKind::Generic(format!(
+					return Err(Error::Generic(format!(
 						"Address is from main {} network, expected test network",
 						coin_name
 					)));
@@ -233,14 +233,14 @@ impl Currency {
 			}
 			bitcoin::network::constants::Network::Testnet => {
 				if global::is_mainnet() {
-					return Err(ErrorKind::Generic(format!(
+					return Err(Error::Generic(format!(
 						"Address is from test {} network, expected main network",
 						coin_name
 					)));
 				}
 			}
 			_ => {
-				return Err(ErrorKind::Generic(format!(
+				return Err(Error::Generic(format!(
 					"Address is from invalid {} network",
 					coin_name
 				)))
@@ -250,11 +250,11 @@ impl Currency {
 	}
 
 	/// Validate the secondary address
-	pub fn validate_address(&self, address: &String) -> Result<(), ErrorKind> {
+	pub fn validate_address(&self, address: &String) -> Result<(), Error> {
 		match self {
 			Currency::Btc => {
 				let addr = Address::new_btc().from_str(address).map_err(|e| {
-					ErrorKind::Generic(format!("Unable to parse BTC address {}, {}", address, e))
+					Error::Generic(format!("Unable to parse BTC address {}, {}", address, e))
 				})?;
 				Self::validate_address_network(&addr, "BTC")?;
 			}
@@ -266,7 +266,7 @@ impl Currency {
 						// Intentionally return error from first call. Legacy address error is not interesting much
 						let (hash, addr_type) = bch::address::legacyaddr_decode(&address, nw)
 							.map_err(|_| {
-								ErrorKind::Generic(format!(
+								Error::Generic(format!(
 									"Unable to parse BCH address {}, {}",
 									address, e
 								))
@@ -276,20 +276,20 @@ impl Currency {
 					Ok((v, addr_type)) => (v, addr_type),
 				};
 				if v.len() != 160 / 8 {
-					return Err(ErrorKind::Generic(
+					return Err(Error::Generic(
 						"Swap supports only Legacy of 160 bit BCH addresses".to_string(),
 					));
 				}
 			}
 			Currency::Ltc => {
 				let addr = Address::new_ltc().from_str(address).map_err(|e| {
-					ErrorKind::Generic(format!("Unable to parse LTC address {}, {}", address, e))
+					Error::Generic(format!("Unable to parse LTC address {}, {}", address, e))
 				})?;
 				Self::validate_address_network(&addr, "LTC")?;
 			}
 			Currency::Dash => {
 				let addr = Address::new_dash().from_str(address).map_err(|e| {
-					ErrorKind::Generic(format!("Unable to parse Dash address {}, {}", address, e))
+					Error::Generic(format!("Unable to parse Dash address {}, {}", address, e))
 				})?;
 				Self::validate_address_network(&addr, "Dash")?;
 
@@ -298,7 +298,7 @@ impl Currency {
 					| bitcoin::util::address::Payload::ScriptHash(_) => (),
 					_ => {
 						// Dash doesn't have Segwit
-						return Err(ErrorKind::Generic(
+						return Err(Error::Generic(
 							"Address is not supported by Dash".to_string(),
 						));
 					}
@@ -306,7 +306,7 @@ impl Currency {
 			}
 			Currency::ZCash => {
 				let addr = Address::new_zec().from_str(address).map_err(|e| {
-					ErrorKind::Generic(format!(
+					Error::Generic(format!(
 						"Unable to parse ZCash transparent address {}, {}",
 						address, e
 					))
@@ -318,7 +318,7 @@ impl Currency {
 					| bitcoin::util::address::Payload::ScriptHash(_) => (),
 					_ => {
 						// Dash doesn't have Segwit
-						return Err(ErrorKind::Generic(
+						return Err(Error::Generic(
 							"Address is not supported by ZCash".to_string(),
 						));
 					}
@@ -326,7 +326,7 @@ impl Currency {
 			}
 			Currency::Doge => {
 				let addr = Address::new_doge().from_str(address).map_err(|e| {
-					ErrorKind::Generic(format!(
+					Error::Generic(format!(
 						"Unable to parse Dogecoin address {}, {}",
 						address, e
 					))
@@ -338,7 +338,7 @@ impl Currency {
 					| bitcoin::util::address::Payload::ScriptHash(_) => (),
 					_ => {
 						// Dash doesn't have Segwit
-						return Err(ErrorKind::Generic(
+						return Err(Error::Generic(
 							"Address is not supported by DOgecoin".to_string(),
 						));
 					}
@@ -357,7 +357,7 @@ impl Currency {
 			| Currency::Trx
 			| Currency::Tst => {
 				EthereumAddress::from_str(address.as_str()).map_err(|e| {
-					ErrorKind::Generic(format!(
+					Error::Generic(format!(
 						"Unable to parse Ethereum address {}, {}",
 						address, e
 					))
@@ -368,7 +368,7 @@ impl Currency {
 	}
 
 	/// Generate a script for this address. Address MUST be Hash160
-	pub fn address_2_script_pubkey(&self, address: &String) -> Result<bitcoin::Script, ErrorKind> {
+	pub fn address_2_script_pubkey(&self, address: &String) -> Result<bitcoin::Script, Error> {
 		let addr_str = match self {
 			Currency::Btc => address.clone(),
 			Currency::Bch => {
@@ -382,13 +382,13 @@ impl Currency {
 					}
 					Ok((v, addr_type)) => {
 						if v.len() != 160 / 8 {
-							return Err(ErrorKind::Generic(
+							return Err(Error::Generic(
 								"Swap supporting only Legacy of 160 bit BCH addresses".to_string(),
 							));
 						}
 
 						let ba: Box<[u8; 20]> = v.into_boxed_slice().try_into().map_err(|_| {
-							ErrorKind::Generic(
+							Error::Generic(
 								"Internal error. Failed to convert address to hash".to_string(),
 							)
 						})?;
@@ -403,28 +403,28 @@ impl Currency {
 			Currency::Ltc => {
 				// Converting to BTC address
 				let addr = Address::new_ltc().from_str(&address).map_err(|e| {
-					ErrorKind::Generic(format!("Unable to parse LTC address {}, {}", address, e))
+					Error::Generic(format!("Unable to parse LTC address {}, {}", address, e))
 				})?;
 				addr.to_btc().to_string()
 			}
 			Currency::Dash => {
 				// Converting to BTC address
 				let addr = Address::new_dash().from_str(&address).map_err(|e| {
-					ErrorKind::Generic(format!("Unable to parse Dash address {}, {}", address, e))
+					Error::Generic(format!("Unable to parse Dash address {}, {}", address, e))
 				})?;
 				addr.to_btc().to_string()
 			}
 			Currency::ZCash => {
 				// Converting to BTC address
 				let addr = Address::new_zec().from_str(&address).map_err(|e| {
-					ErrorKind::Generic(format!("Unable to parse ZCash address {}, {}", address, e))
+					Error::Generic(format!("Unable to parse ZCash address {}, {}", address, e))
 				})?;
 				addr.to_btc().to_string()
 			}
 			Currency::Doge => {
 				// Converting to BTC address
 				let addr = Address::new_doge().from_str(&address).map_err(|e| {
-					ErrorKind::Generic(format!(
+					Error::Generic(format!(
 						"Unable to parse Dogecoin address {}, {}",
 						address, e
 					))
@@ -449,7 +449,7 @@ impl Currency {
 		};
 
 		let addr = Address::new_btc().from_str(&addr_str).map_err(|e| {
-			ErrorKind::Generic(format!("Unable to parse BTC address {}, {}", address, e))
+			Error::Generic(format!("Unable to parse BTC address {}, {}", address, e))
 		})?;
 		Ok(addr.script_pubkey())
 	}
@@ -648,7 +648,7 @@ impl Currency {
 	}
 
 	/// get erc20 token contract address
-	pub fn erc20_token_address(&self) -> Result<H160, ErrorKind> {
+	pub fn erc20_token_address(&self) -> Result<H160, Error> {
 		match self {
 			Currency::Usdt => {
 				Ok(H160::from_str("dac17f958d2ee523a2206206994597c13d831ec7").unwrap())
@@ -683,10 +683,7 @@ impl Currency {
 			Currency::Tst => {
 				Ok(H160::from_str("722dd3F80BAC40c951b51BdD28Dd19d435762180").unwrap())
 			}
-			_ => Err(ErrorKind::EthUnsupportedERC20TokenError(format!(
-				"{}",
-				self
-			))),
+			_ => Err(Error::EthUnsupportedERC20TokenError(format!("{}", self))),
 		}
 	}
 
@@ -733,7 +730,7 @@ impl fmt::Display for Currency {
 }
 
 impl TryFrom<&str> for Currency {
-	type Error = ErrorKind;
+	type Error = Error;
 
 	fn try_from(value: &str) -> Result<Self, Self::Error> {
 		match value.to_lowercase().as_str() {
@@ -755,22 +752,22 @@ impl TryFrom<&str> for Currency {
 			"usdc" => Ok(Currency::Usdc),
 			"trx" => Ok(Currency::Trx),
 			"tst" => Ok(Currency::Tst),
-			_ => Err(ErrorKind::InvalidCurrency(value.to_string())),
+			_ => Err(Error::InvalidCurrency(value.to_string())),
 		}
 	}
 }
 
-fn parse_characteristic(characteristic: &str) -> Result<u64, ErrorKind> {
+fn parse_characteristic(characteristic: &str) -> Result<u64, Error> {
 	if characteristic.len() == 0 {
 		return Ok(0);
 	}
 
 	characteristic
 		.parse()
-		.map_err(|_| ErrorKind::InvalidAmountString(characteristic.to_string()))
+		.map_err(|_| Error::InvalidAmountString(characteristic.to_string()))
 }
 
-fn parse_mantissa(mantissa: &str, exp: usize) -> Result<u64, ErrorKind> {
+fn parse_mantissa(mantissa: &str, exp: usize) -> Result<u64, Error> {
 	let mut m = format!("{:0<w$}", mantissa, w = exp);
 	m.truncate(exp);
 
@@ -779,7 +776,7 @@ fn parse_mantissa(mantissa: &str, exp: usize) -> Result<u64, ErrorKind> {
 		return Ok(0);
 	}
 	m.parse()
-		.map_err(|_| ErrorKind::InvalidAmountString(m.to_string()))
+		.map_err(|_| Error::InvalidAmountString(m.to_string()))
 }
 
 /// Secondary currency related data
@@ -795,31 +792,31 @@ pub enum SecondaryData {
 
 impl SecondaryData {
 	/// To BTC data
-	pub fn unwrap_btc(&self) -> Result<&BtcData, ErrorKind> {
+	pub fn unwrap_btc(&self) -> Result<&BtcData, Error> {
 		match self {
 			SecondaryData::Btc(d) => Ok(d),
-			_ => Err(ErrorKind::UnexpectedCoinType),
+			_ => Err(Error::UnexpectedCoinType),
 		}
 	}
 	/// To BTC data
-	pub fn unwrap_btc_mut(&mut self) -> Result<&mut BtcData, ErrorKind> {
+	pub fn unwrap_btc_mut(&mut self) -> Result<&mut BtcData, Error> {
 		match self {
 			SecondaryData::Btc(d) => Ok(d),
-			_ => Err(ErrorKind::UnexpectedCoinType),
+			_ => Err(Error::UnexpectedCoinType),
 		}
 	}
 	/// To ETH data
-	pub fn unwrap_eth(&self) -> Result<&EthData, ErrorKind> {
+	pub fn unwrap_eth(&self) -> Result<&EthData, Error> {
 		match self {
 			SecondaryData::Eth(d) => Ok(d),
-			_ => Err(ErrorKind::UnexpectedCoinType),
+			_ => Err(Error::UnexpectedCoinType),
 		}
 	}
 	/// To ETH data
-	pub fn unwrap_eth_mut(&mut self) -> Result<&mut EthData, ErrorKind> {
+	pub fn unwrap_eth_mut(&mut self) -> Result<&mut EthData, Error> {
 		match self {
 			SecondaryData::Eth(d) => Ok(d),
-			_ => Err(ErrorKind::UnexpectedCoinType),
+			_ => Err(Error::UnexpectedCoinType),
 		}
 	}
 }
@@ -847,19 +844,19 @@ pub struct Context {
 
 impl Context {
 	/// To Seller Context
-	pub fn unwrap_seller(&self) -> Result<&SellerContext, ErrorKind> {
+	pub fn unwrap_seller(&self) -> Result<&SellerContext, Error> {
 		match &self.role_context {
 			RoleContext::Seller(c) => Ok(c),
-			RoleContext::Buyer(_) => Err(ErrorKind::UnexpectedRole(
+			RoleContext::Buyer(_) => Err(Error::UnexpectedRole(
 				"Context Fn unwrap_seller()".to_string(),
 			)),
 		}
 	}
 
 	/// To Buyer Context
-	pub fn unwrap_buyer(&self) -> Result<&BuyerContext, ErrorKind> {
+	pub fn unwrap_buyer(&self) -> Result<&BuyerContext, Error> {
 		match &self.role_context {
-			RoleContext::Seller(_) => Err(ErrorKind::UnexpectedRole(
+			RoleContext::Seller(_) => Err(Error::UnexpectedRole(
 				"Context Fn unwrap_seller()".to_string(),
 			)),
 			RoleContext::Buyer(c) => Ok(c),
@@ -912,18 +909,18 @@ pub struct SellerContext {
 
 impl SellerContext {
 	/// Retreive BTC data
-	pub fn unwrap_btc(&self) -> Result<&BtcSellerContext, ErrorKind> {
+	pub fn unwrap_btc(&self) -> Result<&BtcSellerContext, Error> {
 		match &self.secondary_context {
 			SecondarySellerContext::Btc(c) => Ok(c),
-			_ => Err(ErrorKind::UnexpectedCoinType),
+			_ => Err(Error::UnexpectedCoinType),
 		}
 	}
 
 	/// Retreive ETH data
-	pub fn unwrap_eth(&self) -> Result<&EthSellerContext, ErrorKind> {
+	pub fn unwrap_eth(&self) -> Result<&EthSellerContext, Error> {
 		match &self.secondary_context {
 			SecondarySellerContext::Eth(c) => Ok(c),
-			_ => Err(ErrorKind::UnexpectedCoinType),
+			_ => Err(Error::UnexpectedCoinType),
 		}
 	}
 }
@@ -943,18 +940,18 @@ pub struct BuyerContext {
 
 impl BuyerContext {
 	/// To BTC context
-	pub fn unwrap_btc(&self) -> Result<&BtcBuyerContext, ErrorKind> {
+	pub fn unwrap_btc(&self) -> Result<&BtcBuyerContext, Error> {
 		match &self.secondary_context {
 			SecondaryBuyerContext::Btc(c) => Ok(c),
-			_ => Err(ErrorKind::UnexpectedCoinType),
+			_ => Err(Error::UnexpectedCoinType),
 		}
 	}
 
 	/// To ETH context
-	pub fn unwrap_eth(&self) -> Result<&EthBuyerContext, ErrorKind> {
+	pub fn unwrap_eth(&self) -> Result<&EthBuyerContext, Error> {
 		match &self.secondary_context {
 			SecondaryBuyerContext::Eth(c) => Ok(c),
-			_ => Err(ErrorKind::UnexpectedCoinType),
+			_ => Err(Error::UnexpectedCoinType),
 		}
 	}
 }

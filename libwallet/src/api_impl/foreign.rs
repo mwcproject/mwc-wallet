@@ -28,8 +28,8 @@ use crate::proof::proofaddress::ProvableAddress;
 use crate::slate_versions::SlateVersion;
 use crate::Context;
 use crate::{
-	BlockFees, CbData, Error, ErrorKind, NodeClient, Slate, SlatePurpose, TxLogEntryType,
-	VersionInfo, VersionedSlate, WalletBackend, WalletInst, WalletLCProvider,
+	BlockFees, CbData, Error, NodeClient, Slate, SlatePurpose, TxLogEntryType, VersionInfo,
+	VersionedSlate, WalletBackend, WalletInst, WalletLCProvider,
 };
 use ed25519_dalek::PublicKey as DalekPublicKey;
 use grin_wallet_util::OnionV3Address;
@@ -63,7 +63,7 @@ where
 	let keychain = w.keychain(keychain_mask)?;
 	let provable_address = proofaddress::payment_proof_address(&keychain, ProofAddressType::Onion)
 		.map_err(|e| {
-			ErrorKind::PaymentProofAddress(format!(
+			Error::PaymentProofAddress(format!(
 				"Error occurred in getting payment proof address, {}",
 				e
 			))
@@ -187,17 +187,16 @@ where
 	)?;
 	for t in &tx {
 		if t.tx_type == TxLogEntryType::TxReceived {
-			return Err(ErrorKind::TransactionAlreadyReceived(ret_slate.id.to_string()).into());
+			return Err(Error::TransactionAlreadyReceived(ret_slate.id.to_string()));
 		}
 		if let Some(offset) = t.kernel_offset {
 			let keychain = w.keychain(keychain_mask)?;
 			let offset_skey = slate.tx_or_err()?.offset.secret_key(keychain.secp())?;
 			let offset_commit = keychain.secp().commit(0, offset_skey)?;
 			if offset == offset_commit {
-				return Err(ErrorKind::TransactionWithSameOffsetAlreadyReceived(
+				return Err(Error::TransactionWithSameOffsetAlreadyReceived(
 					offset_commit.to_hex(),
-				)
-				.into());
+				));
 			}
 		}
 	}
@@ -331,12 +330,7 @@ where
 	C: NodeClient + 'a,
 	K: Keychain + 'a,
 {
-	owner_swap::swap_income_message(wallet_inst, keychain_mask, &message, None).map_err(|e| {
-		ErrorKind::SwapError(format!(
-			"Error occurred in receiving the swap message by TOR, {}",
-			e
-		))
-	})?;
+	owner_swap::swap_income_message(wallet_inst, keychain_mask, &message, None)?;
 	Ok(())
 }
 
@@ -352,13 +346,7 @@ where
 	C: NodeClient + 'a,
 	K: Keychain + 'a,
 {
-	let response =
-		owner_swap::marketplace_message(wallet_inst, keychain_mask, &message).map_err(|e| {
-			ErrorKind::SwapError(format!(
-				"Error occurred in receiving the swap message by TOR, {}",
-				e
-			))
-		})?;
+	let response = owner_swap::marketplace_message(wallet_inst, keychain_mask, &message)?;
 	Ok(response)
 }
 
@@ -387,7 +375,7 @@ where
 
 	let sec_key = proofaddress::payment_proof_address_dalek_secret(&keychain, address_index)
 		.map_err(|e| {
-			ErrorKind::SlatepackDecodeError(format!("Unable to build key to decrypt, {}", e))
+			Error::SlatepackDecodeError(format!("Unable to build key to decrypt, {}", e))
 		})?;
 	let (current_height, _, _) = w.w2n_client().get_chain_tip()?;
 	let sp = encrypted_slate.into_slatepack(&sec_key, current_height, keychain.secp())?;
@@ -441,10 +429,7 @@ where
 	} else {
 		// Plain slate format
 		let version = version.unwrap_or(slate.lowest_version());
-		Ok(
-			VersionedSlate::into_version_plain(slate.clone(), version).map_err(|e| {
-				ErrorKind::SlatepackEncodeError(format!("Unable to build a slate, {}", e))
-			})?,
-		)
+		Ok(VersionedSlate::into_version_plain(slate.clone(), version)
+			.map_err(|e| Error::SlatepackEncodeError(format!("Unable to build a slate, {}", e)))?)
 	}
 }

@@ -25,8 +25,7 @@ use crate::swap::ethereum::InfuraNodeClient;
 use crate::swap::ethereum::*;
 use crate::swap::trades;
 use crate::swap::types::Currency;
-use crate::swap::ErrorKind;
-use crate::Error;
+use crate::swap::Error;
 
 /// Show Wallet Info
 pub fn info<'a, L, C, K>(
@@ -91,7 +90,7 @@ pub fn transfer<'a, L, C, K>(
 	currency: Currency,
 	dest: Option<String>,
 	amount: Option<String>,
-) -> Result<(), ErrorKind>
+) -> Result<(), Error>
 where
 	L: WalletLCProvider<'a, C, K>,
 	C: NodeClient + 'a,

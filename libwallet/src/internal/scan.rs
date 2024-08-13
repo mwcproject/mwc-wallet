@@ -34,7 +34,7 @@ use crate::internal::tx;
 use crate::internal::{keys, updater};
 use crate::types::*;
 use crate::ReplayMitigationConfig;
-use crate::{wallet_lock, Error, ErrorKind};
+use crate::{wallet_lock, Error};
 use blake2_rfc::blake2b::blake2b;
 use std::cmp;
 use std::collections::{HashMap, HashSet};
@@ -300,12 +300,11 @@ where
 		// Scanning outputs
 		for output in outputs.iter() {
 			let (commit, proof, is_coinbase, height, mmr_index) = output;
-			let rewind_hash = from_hex(vw.rewind_hash.as_str()).map_err(|e| {
-				ErrorKind::RewindHash(format!("Unable to decode rewind hash: {}", e))
-			})?;
+			let rewind_hash = from_hex(vw.rewind_hash.as_str())
+				.map_err(|e| Error::RewindHash(format!("Unable to decode rewind hash: {}", e)))?;
 			let rewind_nonce = blake2b(32, &commit.0, &rewind_hash);
 			let nonce = SecretKey::from_slice(&secp, rewind_nonce.as_bytes())
-				.map_err(|e| ErrorKind::Nonce(format!("Unable to create nonce: {}", e)))?;
+				.map_err(|e| Error::Nonce(format!("Unable to create nonce: {}", e)))?;
 			let info = secp.rewind_bullet_proof(*commit, nonce.clone(), None, *proof);
 
 			if info.is_err() {
@@ -661,9 +660,7 @@ where
 				None => {
 					non_uuid_tx_counter += 1;
 					Uuid::from_fields(non_uuid_tx_counter, 0, 0, &temp_uuid_data)
-						.map_err(|e| {
-							ErrorKind::GenericError(format!("Unable to create UUID, {}", e))
-						})?
+						.map_err(|e| Error::GenericError(format!("Unable to create UUID, {}", e)))?
 						.to_string()
 				}
 			};
@@ -796,19 +793,19 @@ where
 			let mut block_heights: Vec<u64> = blocks.iter().map(|b| b.header.height).collect();
 			block_heights.sort();
 			if block_heights.len() as u64 != end_height - start_height + 1 {
-				return Err(ErrorKind::Node("Unable to get all blocks data".to_string()))?;
+				return Err(Error::Node("Unable to get all blocks data".to_string()))?;
 			}
 			if block_heights[0] != start_height
 				|| block_heights[block_heights.len() - 1] != end_height
 			{
-				return Err(ErrorKind::Node(
+				return Err(Error::Node(
 					"Get not expected blocks from the node".to_string(),
 				))?;
 			}
 			if block_heights.len() > 1 {
 				for i in 1..block_heights.len() {
 					if block_heights[i - 1] != block_heights[i] - 1 {
-						return Err(ErrorKind::Node(
+						return Err(Error::Node(
 							"Get duplicated blocks from the node".to_string(),
 						))?;
 					}
@@ -1113,11 +1110,9 @@ where
 				client.get_outputs_from_node(&wallet_outputs_to_check)?;
 
 			for (active_commit, _, _) in active_commits.values() {
-				let output = outputs
-					.get_mut(active_commit)
-					.ok_or(ErrorKind::GenericError(
-						"Node return unknown commit value".to_string(),
-					))?;
+				let output = outputs.get_mut(active_commit).ok_or(Error::GenericError(
+					"Node return unknown commit value".to_string(),
+				))?;
 				if output.output.status != OutputStatus::Locked {
 					output.output.status = OutputStatus::Locked;
 					output.updated = true;
@@ -2019,7 +2014,7 @@ where
 				let over_commit = secp.commit_value(w_out.output.value)?;
 				let commit = pedersen::Commitment::from_vec(
 					util::from_hex(w_out.output.commit.as_ref().unwrap()).map_err(|e| {
-						ErrorKind::GenericError(format!("Output commit parse error, {}", e))
+						Error::GenericError(format!("Output commit parse error, {}", e))
 					})?,
 				);
 				t.output_commits = vec![commit.clone()];

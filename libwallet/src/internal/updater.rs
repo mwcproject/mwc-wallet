@@ -18,7 +18,7 @@
 use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
 
-use crate::error::{Error, ErrorKind};
+use crate::error::Error;
 use crate::grin_core::consensus::reward;
 use crate::grin_core::core::{Output, TxKernel};
 use crate::grin_core::global;
@@ -104,7 +104,7 @@ where
 
 		let commit = match out.commit.clone() {
 			Some(c) => pedersen::Commitment::from_vec(util::from_hex(&c).map_err(|e| {
-				ErrorKind::GenericError(format!("Unable to parse HEX commit {}, {}", c, e))
+				Error::GenericError(format!("Unable to parse HEX commit {}, {}", c, e))
 			})?),
 			None => keychain // TODO: proper support for different switch commitment schemes
 				.commit(out.value, &out.key_id, SwitchCommitmentType::Regular)?,

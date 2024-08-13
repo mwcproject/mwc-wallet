@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::swap::ErrorKind;
+use crate::swap::Error;
 use native_tls::{TlsConnector, TlsStream};
 use serde::Serialize;
 use serde_json::Value;
@@ -31,18 +31,18 @@ pub struct LineStream {
 }
 
 impl LineStream {
-	pub fn new(address: String) -> Result<Self, ErrorKind> {
+	pub fn new(address: String) -> Result<Self, Error> {
 		match Self::create_as_ssl(&address) {
 			Ok(s) => Ok(s),
 			Err(_) => return Self::create_as_plain(&address),
 		}
 	}
 
-	fn create_tcp_stream(address: &String) -> Result<TcpStream, ErrorKind> {
+	fn create_tcp_stream(address: &String) -> Result<TcpStream, Error> {
 		let address = address
 			.to_socket_addrs()?
 			.next()
-			.ok_or(ErrorKind::Generic("Unable to parse address".into()))?;
+			.ok_or(Error::Generic("Unable to parse address".into()))?;
 
 		let timeout = Duration::from_secs(10);
 		let stream = TcpStream::connect_timeout(&address, timeout)?;
@@ -52,18 +52,18 @@ impl LineStream {
 	}
 
 	// If SSL failed, we can't reuse the tcp connection for the plain because the RPC feed is broken
-	fn create_as_ssl(address: &String) -> Result<Self, ErrorKind> {
+	fn create_as_ssl(address: &String) -> Result<Self, Error> {
 		// Trying to use SSL, in case of failure, will use plain connection
 		let host: Vec<&str> = address.split(':').collect();
 		let host = host[0];
 
 		let connector = TlsConnector::new().map_err(|e| {
-			ErrorKind::ElectrumNodeClient(format!("Unable to create TLS connector, {}", e))
+			Error::ElectrumNodeClient(format!("Unable to create TLS connector, {}", e))
 		})?;
 
 		let stream = Self::create_tcp_stream(address)?;
 		let tls_stream = connector.connect(host, stream.try_clone()?).map_err(|e| {
-			ErrorKind::ElectrumNodeClient(format!(
+			Error::ElectrumNodeClient(format!(
 				"Unable to establesh SSL connection with host {}, {}",
 				host, e
 			))
@@ -76,7 +76,7 @@ impl LineStream {
 	}
 
 	// If SSL failed, we can't reuse the tcp connection for the plain because the RPC feed is broken
-	fn create_as_plain(address: &String) -> Result<Self, ErrorKind> {
+	fn create_as_plain(address: &String) -> Result<Self, Error> {
 		let stream = Self::create_tcp_stream(address)?;
 		Ok(Self {
 			reader: StreamReader::PlainReader(Some(BufReader::new(stream.try_clone()?))),
@@ -88,7 +88,7 @@ impl LineStream {
 		self.connected
 	}
 
-	pub fn read_line(&mut self) -> Result<String, ErrorKind> {
+	pub fn read_line(&mut self) -> Result<String, Error> {
 		let mut line = String::new();
 
 		let read_res = match &mut self.reader {
@@ -109,7 +109,7 @@ impl LineStream {
 			}
 			Ok(c) if c == 0 => {
 				self.connected = false;
-				return Err(ErrorKind::Generic("Connection closed".into()));
+				return Err(Error::Generic("Connection closed".into()));
 			}
 			Ok(_) => {}
 		}
@@ -117,7 +117,7 @@ impl LineStream {
 		Ok(line)
 	}
 
-	pub fn write_line(&mut self, mut line: String) -> Result<(), ErrorKind> {
+	pub fn write_line(&mut self, mut line: String) -> Result<(), Error> {
 		line.push_str("\n");
 		let bytes = line.into_bytes();
 
@@ -145,7 +145,7 @@ impl LineStream {
 			}
 			Ok(c) if c == 0 => {
 				self.connected = false;
-				Err(ErrorKind::Generic("Connection closed".into()))
+				Err(Error::Generic("Connection closed".into()))
 			}
 			Ok(_) => Ok(()),
 		}
@@ -157,9 +157,9 @@ pub struct RpcClient {
 }
 
 impl RpcClient {
-	pub fn new(address: String) -> Result<Self, ErrorKind> {
+	pub fn new(address: String) -> Result<Self, Error> {
 		let inner = LineStream::new(address.clone())
-			.map_err(|e| ErrorKind::Rpc(format!("Unable connect to {}, {}", address, e)))?;
+			.map_err(|e| Error::Rpc(format!("Unable connect to {}, {}", address, e)))?;
 		Ok(Self { inner })
 	}
 
@@ -167,22 +167,22 @@ impl RpcClient {
 		self.inner.is_connected()
 	}
 
-	pub fn read(&mut self) -> Result<RpcResponse, ErrorKind> {
+	pub fn read(&mut self) -> Result<RpcResponse, Error> {
 		let line = self
 			.inner
 			.read_line()
-			.map_err(|e| ErrorKind::Rpc(format!("Unable to read line, {}", e)))?;
+			.map_err(|e| Error::Rpc(format!("Unable to read line, {}", e)))?;
 		let result: RpcResponse = serde_json::from_str(&line)
-			.map_err(|e| ErrorKind::Rpc(format!("Unable to deserialize '{}', {}", line, e)))?;
+			.map_err(|e| Error::Rpc(format!("Unable to deserialize '{}', {}", line, e)))?;
 		Ok(result)
 	}
 
-	pub fn write(&mut self, request: &RpcRequest) -> Result<(), ErrorKind> {
+	pub fn write(&mut self, request: &RpcRequest) -> Result<(), Error> {
 		let line = serde_json::to_string(request)
-			.map_err(|e| ErrorKind::Rpc(format!("Unable to serialize, {}", e)))?;
+			.map_err(|e| Error::Rpc(format!("Unable to serialize, {}", e)))?;
 		self.inner
 			.write_line(line)
-			.map_err(|e| ErrorKind::Rpc(format!("Unable to write line, {}", e)))?;
+			.map_err(|e| Error::Rpc(format!("Unable to write line, {}", e)))?;
 		Ok(())
 	}
 }
@@ -196,7 +196,7 @@ pub struct RpcRequest {
 }
 
 impl RpcRequest {
-	pub fn new<T: Serialize>(id: u32, method: &str, params: T) -> Result<Self, ErrorKind> {
+	pub fn new<T: Serialize>(id: u32, method: &str, params: T) -> Result<Self, Error> {
 		Ok(Self {
 			id: format!("{}", id),
 			jsonrpc: "2.0".into(),

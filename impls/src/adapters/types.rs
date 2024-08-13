@@ -1,5 +1,5 @@
 //The following is support mqs usage in mwc713
-use crate::error::{Error, ErrorKind};
+use crate::error::Error;
 use grin_wallet_libwallet::swap::message::Message;
 use grin_wallet_libwallet::Slate;
 use std::sync::mpsc::Sender;
@@ -119,7 +119,7 @@ impl Address for MWCMQSAddress {
 		let re = Regex::new(MWCMQ_ADDRESS_REGEX).unwrap();
 		let captures = re.captures(s);
 		if captures.is_none() {
-			Err(ErrorKind::MqsGenericError(format!(
+			Err(Error::MqsGenericError(format!(
 				"Unable to parse MWC address {}",
 				s
 			)))?;
@@ -128,7 +128,7 @@ impl Address for MWCMQSAddress {
 		let captures = captures.unwrap();
 		let public_key = captures
 			.name("public_key")
-			.ok_or(ErrorKind::MqsGenericError(format!(
+			.ok_or(Error::MqsGenericError(format!(
 				"Unable to parse MWC MQS address {}, public key part is not found",
 				s
 			)))?
@@ -138,15 +138,14 @@ impl Address for MWCMQSAddress {
 		let domain = captures.name("domain").map(|m| m.as_str().to_string());
 		let port = match captures.name("port") {
 			Some(m) => Some(u16::from_str_radix(m.as_str(), 10).map_err(|_| {
-				ErrorKind::MqsGenericError(format!("Unable to parse MWC MQS port value"))
+				Error::MqsGenericError(format!("Unable to parse MWC MQS port value"))
 			})?),
 			None => None,
 		};
 
 		Ok(MWCMQSAddress::new(
-			ProvableAddress::from_str(&public_key).map_err(|e| {
-				ErrorKind::MqsGenericError(format!("Invalid MQS address {}, {}", s, e))
-			})?,
+			ProvableAddress::from_str(&public_key)
+				.map_err(|e| Error::MqsGenericError(format!("Invalid MQS address {}, {}", s, e)))?,
 			domain,
 			port,
 		))
@@ -172,7 +171,7 @@ pub struct HttpsAddress {
 
 impl Address for HttpsAddress {
 	fn from_str(s: &str) -> Result<Self, Error> {
-		Url::parse(s).map_err(|_| ErrorKind::HttpsAddressParsingError(s.to_string()))?;
+		Url::parse(s).map_err(|_| Error::HttpsAddressParsingError(s.to_string()))?;
 
 		Ok(Self { uri: s.to_string() })
 	}
@@ -200,7 +199,7 @@ impl Display for HttpsAddress {
 impl dyn Address {
 	pub fn parse(address: &str) -> Result<Box<dyn Address>, Error> {
 		let re = Regex::new(ADDRESS_REGEX).map_err(|e| {
-			ErrorKind::AddressGenericError(format!("Unable to construct address parser, {}", e))
+			Error::AddressGenericError(format!("Unable to construct address parser, {}", e))
 		})?;
 		let captures = re.captures(address);
 		if captures.is_none() {
@@ -213,7 +212,7 @@ impl dyn Address {
 			"mwcmqs" => Box::new(MWCMQSAddress::from_str(address)?),
 			"https" => Box::new(HttpsAddress::from_str(address)?),
 			"http" => Box::new(HttpsAddress::from_str(address)?),
-			x => Err(ErrorKind::UnknownAddressType(x.to_string()))?,
+			x => Err(Error::UnknownAddressType(x.to_string()))?,
 		};
 		Ok(address)
 	}

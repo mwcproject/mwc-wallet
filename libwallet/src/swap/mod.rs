@@ -48,7 +48,7 @@ pub mod ser;
 /// Types used by swap library
 pub mod types;
 
-pub use self::error::ErrorKind;
+pub use self::error::Error;
 pub use self::swap::Swap;
 pub use self::types::Context;
 //pub use self::types::BtcSellerContext;
@@ -403,20 +403,20 @@ mod tests {
 		fn post_tx(&self, tx: &Transaction, _fluff: bool) -> Result<(), crate::Error> {
 			let (height, _, _) = self.get_chain_tip()?;
 			tx.validate(Weighting::AsTransaction, height)
-				.map_err(|e| crate::ErrorKind::Node(format!("Node failure, {}", e)))?;
+				.map_err(|e| crate::Error::Node(format!("Node failure, {}", e)))?;
 
 			let mut state = self.state.lock();
 			for input in tx.inputs_committed() {
 				// Output not unspent
 				if !state.outputs.contains_key(&input) {
-					return Err(crate::ErrorKind::Node("Node failure".to_string()).into());
+					return Err(crate::Error::Node("Node failure".to_string()));
 				}
 
 				// Double spend attempt
 				for tx_pending in state.pending.iter() {
 					for in_pending in tx_pending.inputs_committed() {
 						if in_pending == input {
-							return Err(crate::ErrorKind::Node("Node failure".to_string()).into());
+							return Err(crate::Error::Node("Node failure".to_string()));
 						}
 					}
 				}
@@ -424,13 +424,13 @@ mod tests {
 			// Check for duplicate output
 			for output in tx.outputs_committed() {
 				if state.outputs.contains_key(&output) {
-					return Err(crate::ErrorKind::Node("Node failure".to_string()).into());
+					return Err(crate::Error::Node("Node failure".to_string()));
 				}
 
 				for tx_pending in state.pending.iter() {
 					for out_pending in tx_pending.outputs_committed() {
 						if out_pending == output {
-							return Err(crate::ErrorKind::Node("Node failure".to_string()).into());
+							return Err(crate::Error::Node("Node failure".to_string()));
 						}
 					}
 				}
@@ -439,13 +439,13 @@ mod tests {
 			for kernel in tx.kernels() {
 				// Duplicate kernel
 				if state.kernels.contains_key(&kernel.excess) {
-					return Err(crate::ErrorKind::Node("Node failure".to_string()).into());
+					return Err(crate::Error::Node("Node failure".to_string()));
 				}
 
 				for tx_pending in state.pending.iter() {
 					for kernel_pending in tx_pending.kernels() {
 						if kernel_pending.excess == kernel.excess {
-							return Err(crate::ErrorKind::Node("Node failure".to_string()).into());
+							return Err(crate::Error::Node("Node failure".to_string()));
 						}
 					}
 				}
@@ -584,9 +584,7 @@ mod tests {
 
 		assert_eq!(
 			res.err().unwrap(),
-			ErrorKind::InvalidMessageData(
-				"Lock Slate inputs are not found at the chain".to_string()
-			)
+			Error::InvalidMessageData("Lock Slate inputs are not found at the chain".to_string())
 		); // Swap cannot be accepted
 	}
 
@@ -1637,13 +1635,13 @@ mod tests {
 			input: Input,
 			height: u64,
 			secp: &Secp256k1,
-		) -> Result<StateProcessRespond, ErrorKind> {
+		) -> Result<StateProcessRespond, Error> {
 			let tx_conf = self.api.request_tx_confirmations(&self.kc, &self.swap)?;
 			self.fsm
 				.process(input, &mut self.swap, &self.ctx, height, &tx_conf, secp)
 		}
 
-		pub fn _get_tx_conf(&self) -> Result<SwapTransactionsConfirmations, ErrorKind> {
+		pub fn _get_tx_conf(&self) -> Result<SwapTransactionsConfirmations, Error> {
 			self.api.request_tx_confirmations(&self.kc, &self.swap)
 		}
 
@@ -6791,9 +6789,7 @@ mod tests {
 
 		assert_eq!(
 			res.err().unwrap(),
-			ErrorKind::InvalidMessageData(
-				"Lock Slate inputs are not found at the chain".to_string()
-			)
+			Error::InvalidMessageData("Lock Slate inputs are not found at the chain".to_string())
 		); // Swap cannot be accepted
 	}
 

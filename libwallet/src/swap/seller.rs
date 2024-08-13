@@ -19,7 +19,7 @@ use super::multisig::{Builder as MultisigBuilder, ParticipantData as MultisigPar
 use super::swap;
 use super::swap::{signature_as_secret, tx_add_input, tx_add_output, Swap};
 use super::types::*;
-use super::{ErrorKind, Keychain, CURRENT_VERSION};
+use super::{Error, Keychain, CURRENT_VERSION};
 use crate::grin_core::libtx::{build, proof, tx_fee};
 use crate::grin_keychain::{BlindSum, BlindingFactor};
 use crate::grin_util::secp::aggsig;
@@ -66,7 +66,7 @@ impl SellApi {
 		eth_redirect_to_private_wallet: Option<bool>,
 		dry_run: bool,
 		tag: Option<String>,
-	) -> Result<Swap, ErrorKind> {
+	) -> Result<Swap, Error> {
 		#[cfg(test)]
 		let test_mode = is_test_mode();
 		let scontext = context.unwrap_seller()?;
@@ -172,10 +172,9 @@ impl SellApi {
 		refund_slate.fee = tx_fee(1, 1, 1);
 		if !(dry_run && primary_amount == 0) {
 			if primary_amount <= refund_slate.fee {
-				return Err(ErrorKind::Generic(
+				return Err(Error::Generic(
 					"MWC amount to trade is too low, it doesn't cover the fees".to_string(),
-				)
-				.into());
+				));
 			}
 		}
 
@@ -188,7 +187,7 @@ impl SellApi {
 		let max_lock_time = 1440 * 30;
 
 		if refund_slate.get_lock_height_check()? - refund_slate.height > max_lock_time {
-			return Err(ErrorKind::Generic(
+			return Err(Error::Generic(
 				"MWC locking time interval exceed 4 weeks. Is it a scam or mistake?".to_string(),
 			));
 		}
@@ -212,7 +211,7 @@ impl SellApi {
 		// TODO: no change output if amounts match up exactly
 		let change = if !(dry_run && primary_amount == 0) {
 			if sum_in <= primary_amount + lock_slate.fee {
-				return Err(ErrorKind::InsufficientFunds(
+				return Err(Error::InsufficientFunds(
 					primary_amount + lock_slate.fee + 1,
 					sum_in,
 				));
@@ -245,7 +244,7 @@ impl SellApi {
 		context: &Context,
 		accept_offer: AcceptOfferUpdate,
 		height: u64,
-	) -> Result<(), ErrorKind> {
+	) -> Result<(), Error> {
 		assert!(swap.is_seller());
 
 		// Finalize multisig proof
@@ -287,15 +286,14 @@ impl SellApi {
 		context: &Context,
 		init_redeem: InitRedeemUpdate,
 		height: u64,
-	) -> Result<(), ErrorKind> {
+	) -> Result<(), Error> {
 		assert!(swap.is_seller());
 
 		// This function should only be called once
 		if swap.adaptor_signature.is_some() {
-			return Err(ErrorKind::OneShot(
+			return Err(Error::OneShot(
 				"Seller Fn init_redeem() multisig is empty".to_string(),
-			)
-			.into());
+			));
 		}
 
 		let mut redeem_slate: Slate = init_redeem.redeem_slate.into_slate_plain(true)?;
@@ -313,12 +311,12 @@ impl SellApi {
 			Some(&pub_nonce_sum),
 			&redeem_slate.participant_data[swap.other_participant_id()].public_blind_excess,
 			Some(&pub_blind_sum),
-			Some(&swap.redeem_public.ok_or(ErrorKind::UnexpectedAction(
+			Some(&swap.redeem_public.ok_or(Error::UnexpectedAction(
 				"Seller Fn init_redeem() redeem pub key is empty".to_string(),
 			))?),
 			true,
 		) {
-			return Err(ErrorKind::InvalidAdaptorSignature);
+			return Err(Error::InvalidAdaptorSignature);
 		}
 
 		swap.redeem_slate = redeem_slate;
@@ -334,10 +332,10 @@ impl SellApi {
 	pub fn calculate_redeem_secret<K: Keychain>(
 		keychain: &K,
 		swap: &Swap,
-	) -> Result<SecretKey, ErrorKind> {
+	) -> Result<SecretKey, Error> {
 		let adaptor_signature = signature_as_secret(
 			keychain.secp(),
-			&swap.adaptor_signature.ok_or(ErrorKind::UnexpectedAction(
+			&swap.adaptor_signature.ok_or(Error::UnexpectedAction(
 				"Seller Fn calculate_redeem_secret() multisig is empty".to_string(),
 			))?,
 		)?;
@@ -347,7 +345,7 @@ impl SellApi {
 				.tx_or_err()?
 				.kernels()
 				.get(0)
-				.ok_or(ErrorKind::UnexpectedAction("Seller Fn calculate_redeem_secret() redeem slate is not initialized, no kernels found".to_string()))?
+				.ok_or(Error::UnexpectedAction("Seller Fn calculate_redeem_secret() redeem slate is not initialized, no kernels found".to_string()))?
 				.excess_sig,
 		)?;
 		let seller_signature = signature_as_secret( keychain.secp(),
@@ -355,9 +353,9 @@ impl SellApi {
 				.redeem_slate
 				.participant_data
 				.get(swap.participant_id)
-				.ok_or(ErrorKind::UnexpectedAction("Seller Fn calculate_redeem_secret() redeem slate is not initialized, participant not found".to_string()))?
+				.ok_or(Error::UnexpectedAction("Seller Fn calculate_redeem_secret() redeem slate is not initialized, participant not found".to_string()))?
 				.part_sig
-				.ok_or(ErrorKind::UnexpectedAction("Seller Fn calculate_redeem_secret() redeem slate is not initialized, participant signature not found".to_string()))?,
+				.ok_or(Error::UnexpectedAction("Seller Fn calculate_redeem_secret() redeem slate is not initialized, participant signature not found".to_string()))?,
 		)?;
 
 		let redeem = keychain
@@ -366,7 +364,7 @@ impl SellApi {
 		let redeem_pub = PublicKey::from_secret_key(keychain.secp(), &redeem)?;
 		if swap.redeem_public != Some(redeem_pub) {
 			// If this happens - mean that swap is broken, somewhere there is a security flaw. Probably didn't check something.
-			return Err(ErrorKind::Generic(
+			return Err(Error::Generic(
 				"Redeem secret doesn't match - this should never happen".into(),
 			));
 		}
@@ -376,10 +374,7 @@ impl SellApi {
 
 	/// Generate Offer message.
 	/// Note: from_address need to be update by the caller because only caller knows about communication layer.
-	pub fn offer_message(
-		swap: &Swap,
-		secondary_update: SecondaryUpdate,
-	) -> Result<Message, ErrorKind> {
+	pub fn offer_message(swap: &Swap, secondary_update: SecondaryUpdate) -> Result<Message, Error> {
 		assert!(swap.is_seller());
 		swap.message(
 			Update::Offer(OfferUpdate {
@@ -412,7 +407,7 @@ impl SellApi {
 	}
 
 	/// Generate redeem message
-	pub fn redeem_message(swap: &Swap) -> Result<Message, ErrorKind> {
+	pub fn redeem_message(swap: &Swap) -> Result<Message, Error> {
 		assert!(swap.is_seller());
 		swap.message(
 			Update::Redeem(RedeemUpdate {
@@ -430,7 +425,7 @@ impl SellApi {
 		keychain: &K,
 		swap: &mut Swap,
 		context: &Context,
-	) -> Result<(), ErrorKind> {
+	) -> Result<(), Error> {
 		let multisig_secret = swap.multisig_secret(keychain, context)?;
 		let multisig = &mut swap.multisig;
 
@@ -446,7 +441,7 @@ impl SellApi {
 		swap: &mut Swap,
 		context: &Context,
 		part: MultisigParticipant,
-	) -> Result<RangeProof, ErrorKind> {
+	) -> Result<RangeProof, Error> {
 		let sec_key = swap.multisig_secret(keychain, context)?;
 		let secp = keychain.secp();
 
@@ -471,7 +466,7 @@ impl SellApi {
 		keychain: &K,
 		swap: &Swap,
 		context: &Context,
-	) -> Result<SecretKey, ErrorKind> {
+	) -> Result<SecretKey, Error> {
 		let scontext = context.unwrap_seller()?;
 		let (_, change) = swap.unwrap_seller()?;
 		let mut sum = BlindSum::new();
@@ -497,17 +492,16 @@ impl SellApi {
 		keychain: &K,
 		swap: &mut Swap,
 		context: &Context,
-	) -> Result<(), ErrorKind> {
+	) -> Result<(), Error> {
 		let (_, change) = swap.unwrap_seller()?;
 		let scontext = context.unwrap_seller()?;
 
 		// This function should only be called once
 		let slate = &mut swap.lock_slate;
 		if slate.participant_data.len() > 0 {
-			return Err(ErrorKind::OneShot(
+			return Err(Error::OneShot(
 				"Seller Fn build_lock_slate() lock slate is already initialized".to_string(),
-			)
-			.into());
+			));
 		}
 
 		// Build lock slate
@@ -553,16 +547,15 @@ impl SellApi {
 		proof: RangeProof,
 		part: TxParticipant,
 		height: u64,
-	) -> Result<(), ErrorKind> {
+	) -> Result<(), Error> {
 		let sec_key = Self::lock_tx_secret(keychain, swap, context)?;
 
 		// This function should only be called once
 		let slate = &mut swap.lock_slate;
 		if slate.participant_data.len() > 1 {
-			return Err(ErrorKind::OneShot(
+			return Err(Error::OneShot(
 				"Seller Fn finalize_lock_slate() lock slate is already initialized".to_string(),
-			)
-			.into());
+			));
 		}
 
 		// Add participant to slate
@@ -588,7 +581,7 @@ impl SellApi {
 		keychain: &K,
 		swap: &Swap,
 		context: &Context,
-	) -> Result<SecretKey, ErrorKind> {
+	) -> Result<SecretKey, Error> {
 		let scontext = context.unwrap_seller()?;
 
 		// Partial multisig input, refund output, offset
@@ -607,14 +600,14 @@ impl SellApi {
 		keychain: &K,
 		swap: &mut Swap,
 		context: &Context,
-	) -> Result<(), ErrorKind> {
+	) -> Result<(), Error> {
 		let scontext = context.unwrap_seller()?;
 		let refund_amount = swap.refund_amount();
 
 		// This function should only be called once
 		let slate = &mut swap.refund_slate;
 		if slate.participant_data.len() > 0 {
-			return Err(ErrorKind::OneShot(
+			return Err(Error::OneShot(
 				"Seller Fn build_refund_slate() refund slate is already initialized".to_string(),
 			));
 		}
@@ -658,16 +651,15 @@ impl SellApi {
 		commit: Commitment,
 		part: TxParticipant,
 		height: u64,
-	) -> Result<(), ErrorKind> {
+	) -> Result<(), Error> {
 		let sec_key = Self::refund_tx_secret(keychain, swap, context)?;
 
 		// This function should only be called once
 		let slate = &mut swap.refund_slate;
 		if slate.participant_data.len() > 1 {
-			return Err(ErrorKind::OneShot(
+			return Err(Error::OneShot(
 				"Seller Fn finalize_refund_slate() refund slate is already initialized".to_string(),
-			)
-			.into());
+			));
 		}
 
 		// Add participant to slate
@@ -693,7 +685,7 @@ impl SellApi {
 		keychain: &K,
 		swap: &Swap,
 		context: &Context,
-	) -> Result<SecretKey, ErrorKind> {
+	) -> Result<SecretKey, Error> {
 		// Partial multisig input
 		let sum = BlindSum::new().sub_blinding_factor(BlindingFactor::from_secret_key(
 			swap.multisig_secret(keychain, context)?,
@@ -707,13 +699,13 @@ impl SellApi {
 		keychain: &K,
 		swap: &mut Swap,
 		context: &Context,
-	) -> Result<(), ErrorKind> {
+	) -> Result<(), Error> {
 		let sec_key = Self::redeem_tx_secret(keychain, swap, context)?;
 
 		// This function should only be called once
 		let slate = &mut swap.redeem_slate;
 		if slate.participant_data.len() > 0 {
-			return Err(ErrorKind::OneShot(
+			return Err(Error::OneShot(
 				"Seller Fn build_redeem_participant() redeem slate is already initialized"
 					.to_string(),
 			));
@@ -737,7 +729,7 @@ impl SellApi {
 		keychain: &K,
 		redeem_slate: &mut Slate,
 		height: u64,
-	) -> Result<Commitment, ErrorKind> {
+	) -> Result<Commitment, Error> {
 		let excess = redeem_slate.calc_excess(keychain.secp(), Some(keychain), height)?;
 		redeem_slate.tx_or_err_mut()?.body.kernels[0].excess = excess.clone();
 		Ok(excess)
@@ -747,14 +739,14 @@ impl SellApi {
 		keychain: &K,
 		swap: &mut Swap,
 		context: &Context,
-	) -> Result<(), ErrorKind> {
+	) -> Result<(), Error> {
 		let id = swap.participant_id;
 		let sec_key = Self::redeem_tx_secret(keychain, swap, context)?;
 
 		// This function should only be called once
 		let slate = &mut swap.redeem_slate;
 		if slate.participant_data[id].is_complete() {
-			return Err(ErrorKind::OneShot("Seller Fn sign_redeem_slate() redeem slate participant data is already initilaized".to_string()));
+			return Err(Error::OneShot("Seller Fn sign_redeem_slate() redeem slate participant data is already initilaized".to_string()));
 		}
 
 		// Sign slate

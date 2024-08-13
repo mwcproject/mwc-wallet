@@ -50,9 +50,7 @@ fn output_slatepack(
 ) -> Result<(), libwallet::Error> {
 	PathToSlatePutter::build_encrypted(Some(file_name.into()), content, sender, recipients, true)
 		.put_tx(&slate, Some(&sender_secret), true, secp)
-		.map_err(|e| {
-			libwallet::ErrorKind::GenericError(format!("Unable to store the slate, {}", e))
-		})?;
+		.map_err(|e| libwallet::Error::GenericError(format!("Unable to store the slate, {}", e)))?;
 	Ok(())
 }
 
@@ -64,12 +62,11 @@ fn slate_from_packed(
 ) -> Result<Slatepacker, libwallet::Error> {
 	match PathToSlateGetter::build_form_path(file.into())
 		.get_tx(Some(dec_key), height, secp)
-		.map_err(|e| {
-			libwallet::ErrorKind::GenericError(format!("Unable to read the slate, {}", e))
-		})? {
+		.map_err(|e| libwallet::Error::GenericError(format!("Unable to read the slate, {}", e)))?
+	{
 		// Plain slate, V2 or V3
 		SlateGetData::PlainSlate(_) => {
-			return Err(libwallet::ErrorKind::GenericError(
+			return Err(libwallet::Error::GenericError(
 				"Not found expected encrypted slatepack, found in plain format only".to_string(),
 			)
 			.into())
@@ -498,7 +495,7 @@ fn slatepack_exchange() {
 	setup(test_dir);
 	// Json output
 	if let Err(e) = slatepack_exchange_test_impl(test_dir) {
-		panic!("Libwallet Error: {} - {}", e, e.backtrace().unwrap());
+		panic!("Libwallet Error: {}", e);
 	}
 	clean_output_dir(test_dir);
 }

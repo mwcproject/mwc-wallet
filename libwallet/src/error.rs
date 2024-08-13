@@ -17,30 +17,15 @@
 use crate::grin_core::core::{committed, transaction};
 use crate::grin_core::libtx;
 use crate::grin_keychain;
-use crate::grin_store;
 use crate::grin_util::secp;
-use crate::swap::error::ErrorKind as SwapErrorKind;
-use crate::util;
-use failure::{Backtrace, Context, Fail};
-use std::env;
-use std::error::Error as StdError;
-use std::fmt::{self, Display};
+use crate::util::{self, grin_store};
 use std::io;
 
-/// Error definition
-#[derive(Debug, Fail)]
-pub struct Error {
-	inner: Context<ErrorKind>,
-}
-
 /// Wallet errors, mostly wrappers around underlying crypto or I/O errors.
-#[derive(Clone, Eq, PartialEq, Debug, Fail, Serialize, Deserialize)]
-pub enum ErrorKind {
+#[derive(Clone, Eq, PartialEq, Debug, thiserror::Error, Serialize, Deserialize)]
+pub enum Error {
 	/// Not enough funds
-	#[fail(
-		display = "Not enough funds. Required: {}, Available: {}",
-		needed_disp, available_disp
-	)]
+	#[error("Not enough funds. Required: {needed_disp:?}, Available: {available_disp:?}")]
 	NotEnoughFunds {
 		/// available funds
 		available: u64,
@@ -53,256 +38,247 @@ pub enum ErrorKind {
 	},
 
 	/// Too large slate
-	#[fail(
-		display = "Slate inputs and outputs number is more then {}. Please reduce number of outputs or reduce sending amount",
-		_0
-	)]
+	#[error("Slate inputs and outputs number is more then {0}. Please reduce number of outputs or reduce sending amount")]
 	TooLargeSlate(usize),
 
 	/// Fee error
-	#[fail(display = "Fee Error: {}", _0)]
+	#[error("Fee Error: {0}")]
 	Fee(String),
 
 	/// LibTX Error
-	#[fail(display = "LibTx Error, {}", _0)]
-	LibTX(crate::grin_core::libtx::Error),
+	#[error("LibTx Error, {0}")]
+	LibTX(#[from] libtx::Error),
 
 	/// Keychain error
-	#[fail(display = "Keychain error, {}", _0)]
-	Keychain(grin_keychain::Error),
+	#[error("Keychain error, {0}")]
+	Keychain(#[from] grin_keychain::Error),
 
 	/// Transaction Error
-	#[fail(display = "Transaction error, {}", _0)]
-	Transaction(transaction::Error),
+	#[error("Transaction error, {0}")]
+	Transaction(#[from] transaction::Error),
 
 	/// API Error
-	#[fail(display = "Client Callback Error, {}", _0)]
+	#[error("Client Callback Error, {0}")]
 	ClientCallback(String),
 
 	/// Secp Error
-	#[fail(display = "Secp error, {}", _0)]
+	#[error("Secp error, {0}")]
 	Secp(String),
 
 	/// Onion V3 Address Error
-	#[fail(display = "Onion V3 Address Error, {}", _0)]
-	OnionV3Address(util::OnionV3AddressError),
+	#[error("Onion V3 Address Error, {0}")]
+	OnionV3Address(#[from] util::OnionV3AddressError),
 
 	/// Callback implementation error conversion
-	#[fail(display = "Trait Implementation error, {}", _0)]
+	#[error("Trait Implementation error, {0}")]
 	CallbackImpl(String),
 
 	/// Wallet backend error
-	#[fail(display = "Wallet store error, {}", _0)]
+	#[error("Wallet store error, {0}")]
 	Backend(String),
 
 	/// Callback implementation error conversion
-	#[fail(display = "Restore Error")]
+	#[error("Restore Error")]
 	Restore,
 
 	/// An error in the format of the JSON structures exchanged by the wallet
-	#[fail(display = "JSON format error, {}", _0)]
+	#[error("JSON format error, {0}")]
 	Format(String),
 
 	/// Other serialization errors
-	#[fail(display = "Ser/Deserialization error, {}", _0)]
-	Deser(crate::grin_core::ser::Error),
+	#[error("Ser/Deserialization error, {0}")]
+	Deser(#[from] crate::grin_core::ser::Error),
 
 	/// IO Error
-	#[fail(display = "I/O error, {}", _0)]
+	#[error("I/O error, {0}")]
 	IO(String),
 
 	/// Error when contacting a node through its API
-	#[fail(display = "Node API error: {}", _0)]
+	#[error("Node API error: {0}")]
 	Node(String),
 
 	/// Error when not found ready to process sync data node
-	#[fail(display = "Node not ready or not available")]
+	#[error("Node not ready or not available")]
 	NodeNotReady,
 
 	/// Error originating from hyper.
-	#[fail(display = "Hyper error, {}", _0)]
+	#[error("Hyper error, {0}")]
 	Hyper(String),
 
 	/// Error originating from hyper uri parsing.
-	#[fail(display = "Uri parsing error")]
+	#[error("Uri parsing error")]
 	Uri,
 
 	/// Signature error
-	#[fail(display = "Signature error: {}", _0)]
+	#[error("Signature error: {0}")]
 	Signature(String),
 
 	/// OwnerAPIEncryption
-	#[fail(display = "API encryption error, {}", _0)]
+	#[error("API encryption error, {0}")]
 	APIEncryption(String),
 
 	/// Attempt to use duplicate transaction id in separate transactions
-	#[fail(display = "Duplicate transaction ID error")]
+	#[error("Duplicate transaction ID error")]
 	DuplicateTransactionId,
 
 	/// Wallet seed already exists
-	#[fail(display = "Wallet seed exists error: {}", _0)]
+	#[error("Wallet seed exists error: {0}")]
 	WalletSeedExists(String),
 
 	/// Wallet seed doesn't exist
-	#[fail(display = "Wallet seed doesn't exist error")]
+	#[error("Wallet seed doesn't exist error")]
 	WalletSeedDoesntExist,
 
 	/// Wallet seed doesn't exist
-	#[fail(display = "Wallet seed decryption error")]
+	#[error("Wallet seed decryption error")]
 	WalletSeedDecryption,
 
 	/// Transaction doesn't exist
-	#[fail(display = "Transaction {} doesn't exist", _0)]
+	#[error("Transaction {0} doesn't exist")]
 	TransactionDoesntExist(String),
 
 	/// Transaction already rolled back
-	#[fail(display = "Transaction {} cannot be cancelled", _0)]
+	#[error("Transaction {0} cannot be cancelled")]
 	TransactionNotCancellable(String),
 
 	/// Cancellation error
-	#[fail(display = "Cancellation Error: {}", _0)]
+	#[error("Cancellation Error: {0}")]
 	TransactionCancellationError(&'static str),
 
 	/// Cancellation error
-	#[fail(display = "Tx dump Error: {}", _0)]
+	#[error("Tx dump Error: {0}")]
 	TransactionDumpError(&'static str),
 
 	/// Attempt to repost a transaction that's already confirmed
-	#[fail(display = "Transaction already confirmed error")]
+	#[error("Transaction already confirmed error")]
 	TransactionAlreadyConfirmed,
 
 	/// Transaction has already been received
-	#[fail(display = "Transaction {} has already been received", _0)]
+	#[error("Transaction {0} has already been received")]
 	TransactionAlreadyReceived(String),
 
 	/// Transaction with same offset has already been received
-	#[fail(
-		display = "Transaction  with offset hex string {} has already been received",
-		_0
-	)]
+	#[error("Transaction  with offset hex string {0} has already been received")]
 	TransactionWithSameOffsetAlreadyReceived(String),
 
 	/// Attempt to repost a transaction that's not completed and stored
-	#[fail(display = "Transaction building not completed: {}", _0)]
+	#[error("Transaction building not completed: {0}")]
 	TransactionBuildingNotCompleted(u32),
 
 	/// Invalid BIP-32 Depth
-	#[fail(display = "Invalid BIP32 Depth (must be 1 or greater)")]
+	#[error("Invalid BIP32 Depth (must be 1 or greater)")]
 	InvalidBIP32Depth,
 
 	/// Attempt to add an account that exists
-	#[fail(display = "Account Label '{}' already exists", _0)]
+	#[error("Account Label '{0}' already exists")]
 	AccountLabelAlreadyExists(String),
 
 	/// Try to rename/delete unknown account
-	#[fail(display = "error: Account label {} doesn't exist!", _0)]
+	#[error("error: Account label {0} doesn't exist!")]
 	AccountLabelNotExists(String),
 
 	/// Account with can't be renamed
-	#[fail(display = "error: default account cannot be renamed!")]
+	#[error("error: default account cannot be renamed!")]
 	AccountDefaultCannotBeRenamed,
 
 	/// Reference unknown account label
-	#[fail(display = "Unknown Account Label '{}'", _0)]
+	#[error("Unknown Account Label '{0}'")]
 	UnknownAccountLabel(String),
 
 	/// Error from summing commitments via committed trait.
-	#[fail(display = "Committed Error, {}", _0)]
-	Committed(committed::Error),
+	#[error("Committed Error, {0}")]
+	Committed(#[from] committed::Error),
 
 	/// Can't parse slate version
-	#[fail(display = "Can't parse slate version, {}", _0)]
+	#[error("Can't parse slate version, {0}")]
 	SlateVersionParse(String),
 
 	/// Unknown Kernel Feature
-	#[fail(display = "Unknown Kernel Feature: {}", _0)]
+	#[error("Unknown Kernel Feature: {0}")]
 	UnknownKernelFeatures(u8),
 
 	/// Invalid Kernel Feature
-	#[fail(display = "Invalid Kernel Feature: {}", _0)]
+	#[error("Invalid Kernel Feature: {0}")]
 	InvalidKernelFeatures(String),
 
 	/// Can't serialize slate
-	#[fail(display = "Can't Serialize slate, {}", _0)]
+	#[error("Can't Serialize slate, {0}")]
 	SlateSer(String),
 
 	/// Can't deserialize slate
-	#[fail(display = "Can't Deserialize slate, {}", _0)]
+	#[error("Can't Deserialize slate, {0}")]
 	SlateDeser(String),
 
 	/// Unknown slate version
-	#[fail(display = "Unknown Slate Version: {}", _0)]
+	#[error("Unknown Slate Version: {0}")]
 	SlateVersion(u16),
 
 	/// Slate Validation error
-	#[fail(display = "Unable to validate slate, {}", _0)]
+	#[error("Unable to validate slate, {0}")]
 	SlateValidation(String),
 
 	/// Attempt to use slate transaction data that doesn't exists
-	#[fail(display = "Get empty slate, Slate transaction required in this context")]
+	#[error("Get empty slate, Slate transaction required in this context")]
 	SlateTransactionRequired,
 
 	/// Attempt to downgrade slate that can't be downgraded
-	#[fail(display = "Can't downgrade slate: {}", _0)]
+	#[error("Can't downgrade slate: {0}")]
 	SlateInvalidDowngrade(String),
 
 	/// Compatibility error between incoming slate versions and what's expected
-	#[fail(display = "Compatibility Error: {}", _0)]
+	#[error("Compatibility Error: {0}")]
 	Compatibility(String),
 
 	/// Keychain doesn't exist (wallet not openend)
-	#[fail(display = "Keychain doesn't exist (has wallet been opened?)")]
+	#[error("Keychain doesn't exist (has wallet been opened?)")]
 	KeychainDoesntExist,
 
 	/// Lifecycle Error
-	#[fail(display = "Lifecycle Error: {}", _0)]
+	#[error("Lifecycle Error: {0}")]
 	Lifecycle(String),
 
 	/// Invalid Keychain Mask Error
-	#[fail(display = "Supplied Keychain Mask Token is incorrect")]
+	#[error("Supplied Keychain Mask Token is incorrect")]
 	InvalidKeychainMask,
 
 	/// Generating ED25519 Public Key
-	#[fail(display = "Error generating ed25519 secret key: {}", _0)]
+	#[error("Error generating ed25519 secret key: {0}")]
 	ED25519Key(String),
 
 	/// Generating Payment Proof
-	#[fail(display = "Payment Proof generation error: {}", _0)]
+	#[error("Payment Proof generation error: {0}")]
 	PaymentProof(String),
 
 	/// Retrieving Payment Proof
-	#[fail(display = "Payment Proof retrieval error: {}", _0)]
+	#[error("Payment Proof retrieval error: {0}")]
 	PaymentProofRetrieval(String),
 
 	/// Retrieving Payment Proof
-	#[fail(display = "Payment Proof parsing error: {}", _0)]
+	#[error("Payment Proof parsing error: {0}")]
 	PaymentProofParsing(String),
 
 	/// Can't convert payment proof message
-	#[fail(display = "Can't convert payment proof message, {}", _0)]
+	#[error("Can't convert payment proof message, {0}")]
 	PaymentProofMessageSer(String),
 
 	/// Payment Proof address
-	#[fail(display = "Payment Proof address error: {}", _0)]
+	#[error("Payment Proof address error: {0}")]
 	PaymentProofAddress(String),
 
 	/// Decoding OnionV3 addresses to payment proof addresses
-	#[fail(display = "Proof Address decoding: {}", _0)]
+	#[error("Proof Address decoding: {0}")]
 	AddressDecoding(String),
 
 	/// Transaction has expired it's TTL
-	#[fail(display = "Transaction Expired")]
+	#[error("Transaction Expired")]
 	TransactionExpired,
 
 	/// Stored Transaction issues
-	#[fail(display = "Stored transaction error, {}", _0)]
+	#[error("Stored transaction error, {0}")]
 	StoredTransactionError(String),
 
 	/// Claim prepare call with wrong amount value
-	#[fail(
-		display = "error: Amount specified does not match slate! slate = {} / sum = {}",
-		amount, sum
-	)]
+	#[error("error: Amount specified does not match slate! slate = {amount} / sum = {sum}")]
 	AmountMismatch {
 		/// Amount that pass as a prameter
 		amount: u64,
@@ -311,201 +287,90 @@ pub enum ErrorKind {
 	},
 
 	/// Other
-	#[fail(display = "Generic error, {}", _0)]
+	#[error("Generic error, {0}")]
 	GenericError(String),
 
 	/// Fail to parse any type of proofable address
-	#[fail(display = "Unable to parse address {}", _0)]
+	#[error("Unable to parse address {0}")]
 	ProofableAddressParsingError(String),
 
 	/// Tx Proof error
-	#[fail(display = "Tx Proof error, {}", _0)]
+	#[error("Tx Proof error, {0}")]
 	TxProofGenericError(String),
 
 	/// Unable to verify signature for the proof
-	#[fail(display = "Tx Proof unable to verify signature, {}", _0)]
+	#[error("Tx Proof unable to verify signature, {0}")]
 	TxProofVerifySignature(String),
 
 	/// Expected destinatin address doesn't match expected value
-	#[fail(
-		display = "Tx Proof unable to verify destination address. Expected {}, found {}",
-		_0, _1
-	)]
+	#[error("Tx Proof unable to verify destination address. Expected {0}, found {1}")]
 	TxProofVerifyDestination(String, String),
 
 	/// Expected sender address doesn't match expected value
-	#[fail(
-		display = "Tx Proof unable to verify sender address. Expected {}, found {}",
-		_0, _1
-	)]
+	#[error("Tx Proof unable to verify sender address. Expected {0}, found {1}")]
 	TxProofVerifySender(String, String),
 
 	/// Not found Tx Proof file
-	#[fail(display = "transaction doesn't have a proof, file {} not found", _0)]
+	#[error("transaction doesn't have a proof, file {0} not found")]
 	TransactionHasNoProof(String),
 
 	/// Base58 generic error
-	#[fail(display = "Base58 error, {}", _0)]
+	#[error("Base58 error, {0}")]
 	Base58Error(String),
 
 	/// Hex conversion error
-	#[fail(display = "Hex conversion error, {}", _0)]
+	#[error("Hex conversion error, {0}")]
 	HexError(String),
 
 	/// Derive key error
-	#[fail(display = "Derive key error, {}", _0)]
+	#[error("Derive key error, {0}")]
 	DeriveKeyError(String),
 
 	/// Swap error
-	#[fail(display = "Swap Error , {}", _0)]
+	#[error("Swap Error, {0}")]
 	SwapError(String),
 
 	/// Slatepack Decoding Error
-	#[fail(display = "Slatepack decode error, {}", _0)]
+	#[error("Slatepack decode error, {0}")]
 	SlatepackDecodeError(String),
 
 	/// Slatepack Encoding Error
-	#[fail(display = "Slatepack encode error, {}", _0)]
+	#[error("Slatepack encode error, {0}")]
 	SlatepackEncodeError(String),
 
 	/// Ethereum Wallet Error
-	#[fail(display = "Ethereum wallet error, {}", _0)]
+	#[error("Ethereum wallet error, {0}")]
 	EthereumWalletError(String),
 
 	/// Rewind Hash parsing error
-	#[fail(display = "Rewind Hash error: {}", _0)]
+	#[error("Rewind Hash error: {0}")]
 	RewindHash(String),
 
 	/// Nonce creation error
-	#[fail(display = "Nonce error: {}", _0)]
+	#[error("Nonce error: {0}")]
 	Nonce(String),
-}
-
-impl Display for Error {
-	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		let show_bt = match env::var("RUST_BACKTRACE") {
-			Ok(r) => r == "1",
-			Err(_) => false,
-		};
-		let backtrace = match self.backtrace() {
-			Some(b) => format!("{}", b),
-			None => String::from("Unknown"),
-		};
-		let inner_output = format!("{}", self.inner,);
-		let backtrace_output = format!("\n Backtrace: {}", backtrace);
-		let mut output = inner_output;
-		if show_bt {
-			output.push_str(&backtrace_output);
-		}
-		Display::fmt(&output, f)
-	}
-}
-
-impl Error {
-	/// get kind
-	pub fn kind(&self) -> ErrorKind {
-		self.inner.get_context().clone()
-	}
-	/// get cause
-	pub fn cause(&self) -> Option<&dyn Fail> {
-		self.inner.cause()
-	}
-	/// get backtrace
-	pub fn backtrace(&self) -> Option<&Backtrace> {
-		self.inner.backtrace()
-	}
-}
-
-impl From<ErrorKind> for Error {
-	fn from(kind: ErrorKind) -> Error {
-		Error {
-			inner: Context::new(kind),
-		}
-	}
-}
-
-impl From<Context<ErrorKind>> for Error {
-	fn from(inner: Context<ErrorKind>) -> Error {
-		Error { inner: inner }
-	}
 }
 
 impl From<io::Error> for Error {
 	fn from(error: io::Error) -> Error {
-		Error {
-			inner: Context::new(ErrorKind::IO(format!("{}", error))),
-		}
+		Error::IO(format!("{}", error))
 	}
 }
-
-impl From<grin_keychain::Error> for Error {
-	fn from(error: grin_keychain::Error) -> Error {
-		Error {
-			inner: Context::new(ErrorKind::Keychain(error)),
-		}
-	}
-}
-
-impl From<libtx::Error> for Error {
-	fn from(error: crate::grin_core::libtx::Error) -> Error {
-		Error {
-			inner: Context::new(ErrorKind::LibTX(error)),
-		}
-	}
-}
-
-impl From<transaction::Error> for Error {
-	fn from(error: transaction::Error) -> Error {
-		Error {
-			inner: Context::new(ErrorKind::Transaction(error)),
-		}
-	}
-}
-
-impl From<crate::grin_core::ser::Error> for Error {
-	fn from(error: crate::grin_core::ser::Error) -> Error {
-		Error {
-			inner: Context::new(ErrorKind::Deser(error)),
-		}
-	}
-}
-
-// we have to use e.description  because of the bug at rust-secp256k1-zkp
-#[allow(deprecated)]
 
 impl From<secp::Error> for Error {
 	fn from(error: secp::Error) -> Error {
-		Error {
-			// secp::Error to_string is broken, in past biilds.
-			inner: Context::new(ErrorKind::Secp(format!("{}", error.description()))),
-		}
-	}
-}
-
-#[warn(deprecated)]
-
-impl From<committed::Error> for Error {
-	fn from(error: committed::Error) -> Error {
-		Error {
-			inner: Context::new(ErrorKind::Committed(error)),
-		}
+		Error::Secp(format!("{}", error))
 	}
 }
 
 impl From<grin_store::Error> for Error {
 	fn from(error: grin_store::Error) -> Error {
-		Error::from(ErrorKind::Backend(format!("{}", error)))
+		Error::Backend(format!("{}", error))
 	}
 }
 
-impl From<util::OnionV3AddressError> for Error {
-	fn from(error: util::OnionV3AddressError) -> Error {
-		Error::from(ErrorKind::OnionV3Address(error))
-	}
-}
-
-impl From<SwapErrorKind> for Error {
-	fn from(error: SwapErrorKind) -> Error {
-		Error::from(ErrorKind::SwapError(format!("{}", error)))
+impl From<crate::swap::error::Error> for Error {
+	fn from(error: crate::swap::error::Error) -> Error {
+		Error::Backend(format!("{}", error))
 	}
 }

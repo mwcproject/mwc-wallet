@@ -20,7 +20,7 @@ use crate::swap::message::SecondaryUpdate;
 use crate::swap::ser::*;
 use crate::swap::swap;
 use crate::swap::types::{Currency, Network, SecondaryData};
-use crate::swap::{ErrorKind, Keychain};
+use crate::swap::{Error, Keychain};
 use bitcoin::blockdata::opcodes::{all::*, OP_FALSE, OP_TRUE};
 use bitcoin::blockdata::script::Builder;
 use bitcoin::consensus::Encodable;
@@ -73,7 +73,7 @@ impl BtcData {
 	pub(crate) fn new<K>(
 		keychain: &K,               // Private key
 		context: &BtcSellerContext, // Derivarive index
-	) -> Result<Self, ErrorKind>
+	) -> Result<Self, Error>
 	where
 		K: Keychain,
 	{
@@ -96,7 +96,7 @@ impl BtcData {
 		keychain: &K,
 		offer: BtcOfferUpdate,
 		context: &BtcBuyerContext,
-	) -> Result<Self, ErrorKind>
+	) -> Result<Self, Error>
 	where
 		K: Keychain,
 	{
@@ -115,7 +115,7 @@ impl BtcData {
 	pub(crate) fn accepted_offer(
 		&mut self,
 		accepted_offer: BtcAcceptOfferUpdate,
-	) -> Result<(), ErrorKind> {
+	) -> Result<(), Error> {
 		self.refund = Some(accepted_offer.refund);
 		Ok(())
 	}
@@ -130,17 +130,17 @@ impl BtcData {
 		redeem: &PublicKey,
 		btc_lock_time: u64,
 		secp: &Secp256k1,
-	) -> Result<Script, ErrorKind> {
+	) -> Result<Script, Error> {
 		// Don't lock for more than 4 weeks. 4 weeks + 2 day, because max locking is expecting 2 weeks and 1 day to do the swap and 1 extra day for Byer
 		if btc_lock_time > (swap::get_cur_time() + 3600 * 24 * (7 * 4 + 2)) as u64 {
-			return Err(ErrorKind::Generic(
+			return Err(Error::Generic(
 				"BTC locking time interval is larger than 4 weeks. Rejecting, looks like a scam."
 					.to_string(),
 			));
 		}
 
 		if btc_lock_time >= u32::MAX as u64 {
-			return Err(ErrorKind::Generic(
+			return Err(Error::Generic(
 				"BTC locking time is out of range. Rejecting, looks like a scam.".to_string(),
 			));
 		}
@@ -153,7 +153,7 @@ impl BtcData {
 
 		let refund = self
 			.refund
-			.ok_or(ErrorKind::SecondaryDataIncomplete)?
+			.ok_or(Error::SecondaryDataIncomplete)?
 			.serialize_vec(secp, true);
 		let cosign = self.cosign.serialize_vec(secp, true);
 		let redeem = redeem.serialize_vec(secp, true);
@@ -182,7 +182,7 @@ impl BtcData {
 		currency: Currency,
 		script: &Script,
 		network: Network,
-	) -> Result<Vec<String>, ErrorKind> {
+	) -> Result<Vec<String>, Error> {
 		match currency {
 			Currency::Btc => {
 				let address = Address::new_btc().p2sh(script, btc_network(network));
@@ -197,7 +197,7 @@ impl BtcData {
 					bch_network(network),
 				)
 				.map_err(|e| {
-					ErrorKind::BchError(format!(
+					Error::BchError(format!(
 						"Unable to encode BCH address from script hash, {}",
 						e
 					))
@@ -249,7 +249,7 @@ impl BtcData {
 				let address = Address::new_doge().p2sh(script, btc_network(network));
 				Ok(vec![address.to_string()])
 			}
-			_ => return Err(ErrorKind::UnexpectedCoinType),
+			_ => return Err(Error::UnexpectedCoinType),
 		}
 	}
 
@@ -259,7 +259,7 @@ impl BtcData {
 		currency: &Currency,
 		redeem_address: &String,
 		conf_outputs: &Vec<Output>,
-	) -> Result<(Vec<(TxIn, u64)>, Vec<TxOut>, u64), ErrorKind> {
+	) -> Result<(Vec<(TxIn, u64)>, Vec<TxOut>, u64), Error> {
 		// Input(s)
 		let mut input = Vec::with_capacity(conf_outputs.len());
 		let mut total_amount = 0;
@@ -277,7 +277,7 @@ impl BtcData {
 		}
 
 		if input.is_empty() {
-			return Err(ErrorKind::Generic(
+			return Err(Error::Generic(
 				"Unable to build refund transaction, no inputs are found".to_string(),
 			));
 		}
@@ -337,7 +337,7 @@ impl BtcData {
 		cosign_signature: &mut Signature,
 		redeem_signature: &mut Signature,
 		secp: &Secp256k1,
-	) -> Result<Script, ErrorKind> {
+	) -> Result<Script, Error> {
 		let (cosign_ser, redeem_ser) = match currency {
 			Currency::Btc | Currency::Ltc | Currency::Dash | Currency::ZCash | Currency::Doge => {
 				let mut cosign_ser = cosign_signature.serialize_der(secp);
@@ -371,7 +371,7 @@ impl BtcData {
 			| Currency::Usdc
 			| Currency::Trx
 			| Currency::Tst => {
-				return Err(ErrorKind::Generic(
+				return Err(Error::Generic(
 					"Ether/Erc20-token is not supported".to_string(),
 				));
 			}
@@ -399,7 +399,7 @@ impl BtcData {
 		fee: f32,
 		btc_lock_time: i64,
 		conf_outputs: &Vec<Output>,
-		script_sig: impl Fn(&Message) -> Result<Script, ErrorKind>,
+		script_sig: impl Fn(&Message) -> Result<Script, Error>,
 	) -> Result<
 		(
 			BtcTtansaction,
@@ -407,7 +407,7 @@ impl BtcData {
 			Option<usize>,
 			Option<usize>,
 		),
-		ErrorKind,
+		Error,
 	> {
 		let (input, output, total_amount) =
 			Self::build_input_outputs(currency, address, conf_outputs)?;
@@ -450,7 +450,7 @@ impl BtcData {
 
 					tx.input
 						.get_mut(idx)
-						.ok_or(ErrorKind::Generic("Not found expected input".to_string()))?
+						.ok_or(Error::Generic("Not found expected input".to_string()))?
 						.script_sig = script_sig(&msg)?;
 				}
 			}
@@ -472,13 +472,13 @@ impl BtcData {
 						sighash_type,
 						&mut cache,
 					)
-					.map_err(|e| ErrorKind::BchError(format!("sighash failed, {}", e)))?;
+					.map_err(|e| Error::BchError(format!("sighash failed, {}", e)))?;
 
 					let msg = Message::from_slice(&hash.0)?;
 
 					tx.input
 						.get_mut(idx)
-						.ok_or(ErrorKind::Generic("Not found expected input".to_string()))?
+						.ok_or(Error::Generic("Not found expected input".to_string()))?
 						.script_sig = script_sig(&msg)?;
 				}
 			}
@@ -504,7 +504,7 @@ impl BtcData {
 				for out in &tx.output {
 					zcash_tx_data.vout.push(zcash_tx::components::TxOut {
 						value: zcash_tx::components::Amount::from_u64(out.value).map_err(|_| {
-							ErrorKind::Generic("Unable convert amount for ZCash".to_string())
+							Error::Generic("Unable convert amount for ZCash".to_string())
 						})?,
 						script_pubkey: zcash_primitives::legacy::Script(
 							out.script_pubkey.to_bytes(),
@@ -522,9 +522,8 @@ impl BtcData {
 						zcash_tx::SignableInput::transparent(
 							idx,
 							&zcash_primitives::legacy::Script(input_script.to_bytes()),
-							zcash_tx::components::Amount::from_u64(input[idx].1).map_err(|_| {
-								ErrorKind::Generic("Invalid input amount".to_string())
-							})?,
+							zcash_tx::components::Amount::from_u64(input[idx].1)
+								.map_err(|_| Error::Generic("Invalid input amount".to_string()))?,
 						),
 					));
 
@@ -541,10 +540,7 @@ impl BtcData {
 				return Ok((
 					BtcTtansaction {
 						txid: sha256d::Hash::from_slice(&zcash_tx.txid().0).map_err(|e| {
-							ErrorKind::Generic(format!(
-								"Unable to convert Hash data for ZCash, {}",
-								e
-							))
+							Error::Generic(format!("Unable to convert Hash data for ZCash, {}", e))
 						})?,
 						tx: raw_tx,
 					},
@@ -565,7 +561,7 @@ impl BtcData {
 			| Currency::Usdc
 			| Currency::Trx
 			| Currency::Tst => {
-				return Err(ErrorKind::Generic(
+				return Err(Error::Generic(
 					"Ether/Erc20-tonken is not supported".to_string(),
 				));
 			}
@@ -574,7 +570,7 @@ impl BtcData {
 		let mut cursor = Cursor::new(Vec::with_capacity(tx_size));
 		let actual_size = tx
 			.consensus_encode(&mut cursor)
-			.map_err(|e| ErrorKind::Generic(format!("Unable to encode redeem tx, {}", e)))?;
+			.map_err(|e| Error::Generic(format!("Unable to encode redeem tx, {}", e)))?;
 
 		// By some reasons length is floating, probably encoding can do some optimization . Let'e keep an eye on it, we don't want to calcucate fee badly.
 		debug_assert!(actual_size <= tx_size + 4);
@@ -596,7 +592,7 @@ impl BtcData {
 		signature: &mut Signature,
 		input_script: &Script,
 		secp: &Secp256k1,
-	) -> Result<Script, ErrorKind> {
+	) -> Result<Script, Error> {
 		let sign_ser = match currency {
 			Currency::Bch => {
 				signature.normalize_s(secp);
@@ -621,7 +617,7 @@ impl BtcData {
 			| Currency::Usdc
 			| Currency::Trx
 			| Currency::Tst => {
-				return Err(ErrorKind::Generic(
+				return Err(Error::Generic(
 					"Ether/Erc20-token is not supported".to_string(),
 				));
 			}
@@ -679,20 +675,20 @@ pub enum BtcUpdate {
 
 impl BtcUpdate {
 	/// Unwrap BtcOfferUpdate  with data type verification
-	pub fn unwrap_offer(self) -> Result<BtcOfferUpdate, ErrorKind> {
+	pub fn unwrap_offer(self) -> Result<BtcOfferUpdate, Error> {
 		match self {
 			BtcUpdate::Offer(u) => Ok(u),
-			_ => Err(ErrorKind::UnexpectedMessageType(
+			_ => Err(Error::UnexpectedMessageType(
 				"Fn unwrap_offer() expecting BtcUpdate::Offer".to_string(),
 			)),
 		}
 	}
 
 	/// Unwrap BtcAcceptOfferUpdate  with data type verification
-	pub fn unwrap_accept_offer(self) -> Result<BtcAcceptOfferUpdate, ErrorKind> {
+	pub fn unwrap_accept_offer(self) -> Result<BtcAcceptOfferUpdate, Error> {
 		match self {
 			BtcUpdate::AcceptOffer(u) => Ok(u),
-			_ => Err(ErrorKind::UnexpectedMessageType(
+			_ => Err(Error::UnexpectedMessageType(
 				"Fn unwrap_accept_offer() expecting BtcUpdate::AcceptOffer".to_string(),
 			)),
 		}

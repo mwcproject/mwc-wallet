@@ -18,7 +18,7 @@ use crate::api::TLSConfig;
 use crate::apiwallet::Owner;
 use crate::config::{MQSConfig, TorConfig, WalletConfig, WALLET_CONFIG_FILE_NAME};
 use crate::core::{core, global};
-use crate::error::{Error, ErrorKind};
+use crate::error::Error;
 use crate::impls::{create_sender, SlateGetter as _};
 use crate::impls::{PathToSlateGetter, PathToSlatePutter, SlatePutter};
 use crate::keychain;
@@ -213,7 +213,6 @@ where
 			}
 			Err(e) => {
 				error!("View wallet check failed: {}", e);
-				error!("Backtrace: {}", e.backtrace().unwrap());
 				Err(e.into())
 			}
 		}
@@ -271,7 +270,7 @@ where
 					let r = t.join();
 					if let Err(_) = r {
 						error!("Error starting http listener");
-						return Err(ErrorKind::ListenerError.into());
+						return Err(Error::ListenerError);
 					}
 				}
 			}
@@ -287,13 +286,14 @@ where
 			)
 			.map_err(|e| {
 				error!("Unable to start mwcmqs listener, {}", e);
-				Error::from(ErrorKind::ListenerError)
+				Error::from(Error::ListenerError)
 			})?;
 		}
 		method => {
-			return Err(
-				ErrorKind::ArgumentError(format!("No listener for method '{}'", method)).into(),
-			);
+			return Err(Error::ArgumentError(format!(
+				"No listener for method '{}'",
+				method
+			)));
 		}
 	};
 	Ok(())
@@ -337,7 +337,7 @@ where
 		config.owner_api_include_foreign,
 		Some(tor_config.clone()),
 	)
-	.map_err(|e| ErrorKind::LibWallet(format!("Unable to start Listener, {}", e)))?;
+	.map_err(|e| Error::LibWallet(format!("Unable to start Listener, {}", e)))?;
 	Ok(())
 }
 
@@ -367,7 +367,7 @@ where
 		if let Err(e) = res {
 			let err_str = format!("Error listing accounts: {}", e);
 			error!("{}", err_str);
-			return Err(ErrorKind::LibWallet(err_str).into());
+			return Err(Error::LibWallet(err_str));
 		}
 	} else {
 		let label = args.create.unwrap();
@@ -381,7 +381,7 @@ where
 			thread::sleep(Duration::from_millis(200));
 			let err_str = format!("Error creating account '{}': {}", label, e);
 			error!("{}", err_str);
-			return Err(ErrorKind::LibWallet(err_str).into());
+			return Err(Error::LibWallet(err_str));
 		}
 	}
 	Ok(())
@@ -501,7 +501,7 @@ where
 								mqs_config_unwrapped = s;
 							}
 							None => {
-								return Err(ErrorKind::MQSConfig(format!("NO MQS config!")).into());
+								return Err(Error::MQSConfig(format!("NO MQS config!")));
 							}
 						}
 
@@ -551,11 +551,10 @@ where
 				}
 				Err(e) => {
 					info!("Tx not created: {}", e);
-					return Err(ErrorKind::LibWallet(format!(
+					return Err(Error::LibWallet(format!(
 						"Unable to create send slate , {}",
 						e
-					))
-					.into());
+					)));
 				}
 			};
 
@@ -584,10 +583,9 @@ where
 				"file" | "slatepack" => {
 					let dest: Option<PathBuf> = if args.dest.is_empty() {
 						if args.method == "file" {
-							return Err(ErrorKind::ArgumentError(
+							return Err(Error::ArgumentError(
 								"Please specify destination for file".to_string(),
-							)
-							.into());
+							));
 						}
 						None
 					} else {
@@ -604,7 +602,7 @@ where
 					)
 					.put_tx(&slate, Some(&slatepack_secret), false, &secp)
 					.map_err(|e| {
-						ErrorKind::IO(format!("Unable to store the file at {}, {}", args.dest, e))
+						Error::IO(format!("Unable to store the file at {}, {}", args.dest, e))
 					})?;
 					api.tx_lock_outputs(m, &slate, Some(String::from("file")), 0)?;
 
@@ -648,10 +646,9 @@ where
 				}
 				_ => {
 					if sender_info.is_none() {
-						return Err(ErrorKind::GenericError(
+						return Err(Error::GenericError(
 							"Internal error. Sender not created".to_string(),
-						)
-						.into());
+						));
 					}
 					let (sender, wallet_info) = sender_info.unwrap();
 
@@ -688,7 +685,7 @@ where
 				}
 				Err(e) => {
 					error!("Tx sent fail: {}", e);
-					return Err(ErrorKind::LibWallet(format!("Unable to post slate, {}", e)).into());
+					return Err(Error::LibWallet(format!("Unable to post slate, {}", e)));
 				}
 			}
 		}
@@ -726,19 +723,19 @@ where
 	);
 
 	let mut output = File::create(out_file_name.clone()).map_err(|e| {
-		ErrorKind::IO(format!(
+		Error::IO(format!(
 			"Unable to create slate backup file {}, {}",
 			out_file_name, e
 		))
 	})?;
 	output.write_all(&slate_str.as_bytes()).map_err(|e| {
-		ErrorKind::IO(format!(
+		Error::IO(format!(
 			"Unable to store slate backup data into file {}, {}",
 			out_file_name, e
 		))
 	})?;
 	output.sync_all().map_err(|e| {
-		ErrorKind::IO(format!(
+		Error::IO(format!(
 			"Unable to sync data for file {}, {}",
 			out_file_name, e
 		))
@@ -822,10 +819,9 @@ where
 					&secp,
 				)?,
 				None => {
-					return Err(ErrorKind::ArgumentError(
+					return Err(Error::ArgumentError(
 						"Please specify 'file' or 'content' argument".to_string(),
-					)
-					.into())
+					))
 				}
 			},
 		};
@@ -833,18 +829,18 @@ where
 		let (mut slate, sender, _recipient, content, slatepack_format) = slate_pkg.to_slate()?;
 
 		if !(content == SlatePurpose::FullSlate || content == SlatePurpose::SendInitial) {
-			return Err(ErrorKind::ArgumentError(format!(
+			return Err(Error::ArgumentError(format!(
 				"Wrong slate content. Expecting SendInitial, get {:?}",
 				content
-			))
-			.into());
+			)));
 		}
 
 		if let Err(e) = api.verify_slate_messages(&slate) {
 			error!("Error validating participant messages: {}", e);
-			return Err(
-				ErrorKind::LibWallet(format!("Unable to validate slate messages, {}", e)).into(),
-			);
+			return Err(Error::LibWallet(format!(
+				"Unable to validate slate messages, {}",
+				e
+			)));
 		}
 		slate = api.receive_tx(
 			&slate,
@@ -928,10 +924,9 @@ where
 					&secp,
 				)?,
 				None => {
-					return Err(ErrorKind::ArgumentError(
+					return Err(Error::ArgumentError(
 						"Please specify 'file' or 'content' argument".to_string(),
-					)
-					.into())
+					))
 				}
 			},
 		};
@@ -1006,7 +1001,7 @@ where
 			let keychain = w.keychain(m)?;
 			let slatepack_secret = proofaddress::payment_proof_address_secret(&keychain, None)?;
 			let slatepack_secret = DalekSecretKey::from_bytes(&slatepack_secret.0)
-				.map_err(|e| ErrorKind::GenericError(format!("Unable to build secret, {}", e)))?;
+				.map_err(|e| Error::GenericError(format!("Unable to build secret, {}", e)))?;
 			let (height, _, _) = w.w2n_client().get_chain_tip()?;
 			(slatepack_secret, height, keychain.secp().clone())
 		};
@@ -1024,10 +1019,9 @@ where
 					&secp,
 				)?,
 				None => {
-					return Err(ErrorKind::ArgumentError(
+					return Err(Error::ArgumentError(
 						"Please specify 'file' or 'content' argument".to_string(),
-					)
-					.into())
+					))
 				}
 			},
 		};
@@ -1048,11 +1042,10 @@ where
 
 	if is_invoice {
 		if !(content == SlatePurpose::FullSlate || content == SlatePurpose::InvoiceResponse) {
-			return Err(ErrorKind::ArgumentError(format!(
+			return Err(Error::ArgumentError(format!(
 				"Wrong slate content. Expecting InvoiceResponse, get {:?}",
 				content
-			))
-			.into());
+			)));
 		}
 
 		let km = match keychain_mask.as_ref() {
@@ -1062,32 +1055,29 @@ where
 		controller::foreign_single_use(owner_api.wallet_inst.clone(), km, |api| {
 			if let Err(e) = api.verify_slate_messages(&slate) {
 				error!("Error validating participant messages: {}", e);
-				return Err(ErrorKind::LibWallet(format!(
+				return Err(Error::LibWallet(format!(
 					"Unable to validate slate messages, {}",
 					e
-				))
-				.into());
+				)));
 			}
 			slate = api.finalize_invoice_tx(&slate)?;
 			Ok(())
 		})?;
 	} else {
 		if !(content == SlatePurpose::FullSlate || content == SlatePurpose::SendResponse) {
-			return Err(ErrorKind::ArgumentError(format!(
+			return Err(Error::ArgumentError(format!(
 				"Wrong slate content. Expecting SendResponse, get {:?}",
 				content
-			))
-			.into());
+			)));
 		}
 
 		controller::owner_single_use(None, keychain_mask, Some(owner_api), |api, m| {
 			if let Err(e) = api.verify_slate_messages(m, &slate) {
 				error!("Error validating participant messages: {}", e);
-				return Err(ErrorKind::LibWallet(format!(
+				return Err(Error::LibWallet(format!(
 					"Unable to validate slate messages, {}",
 					e
-				))
-				.into());
+				)));
 			}
 			slate = api.finalize_tx(m, &slate)?;
 			Ok(())
@@ -1106,7 +1096,7 @@ where
 				}
 				Err(e) => {
 					error!("Tx not sent: {}", e);
-					return Err(ErrorKind::LibWallet(format!("Unable to post slate, {}", e)).into());
+					return Err(Error::LibWallet(format!("Unable to post slate, {}", e)));
 				}
 			}
 		})?;
@@ -1119,10 +1109,8 @@ where
 				let w = w_lock.lc_provider()?.wallet_inst()?;
 				let keychain = w.keychain(m)?;
 				let slatepack_secret = proofaddress::payment_proof_address_secret(&keychain, None)?;
-				let slatepack_secret =
-					DalekSecretKey::from_bytes(&slatepack_secret.0).map_err(|e| {
-						ErrorKind::GenericError(format!("Unable to build secret, {}", e))
-					})?;
+				let slatepack_secret = DalekSecretKey::from_bytes(&slatepack_secret.0)
+					.map_err(|e| Error::GenericError(format!("Unable to build secret, {}", e)))?;
 				(slatepack_secret, keychain.secp().clone())
 			};
 
@@ -1277,11 +1265,10 @@ where
 	let (slate, sender_pk, _recepient, content, _encrypted) = slate_pkg.to_slate()?;
 
 	if !(content == SlatePurpose::FullSlate || content == SlatePurpose::InvoiceInitial) {
-		return Err(ErrorKind::ArgumentError(format!(
+		return Err(Error::ArgumentError(format!(
 			"Wrong slate content. Expecting InvoiceInitial, get {:?}",
 			content
-		))
-		.into());
+		)));
 	}
 
 	let wallet_inst = owner_api.wallet_inst.clone();
@@ -1318,11 +1305,10 @@ where
 			};
 			if let Err(e) = api.verify_slate_messages(m, &slate) {
 				error!("Error validating participant messages: {}", e);
-				return Err(ErrorKind::LibWallet(format!(
+				return Err(Error::LibWallet(format!(
 					"Unable to validate slate messages, {}",
 					e
-				))
-				.into());
+				)));
 			}
 			let result = api.process_invoice_tx(m, &slate, &init_args);
 			let mut slate = match result {
@@ -1337,9 +1323,10 @@ where
 				}
 				Err(e) => {
 					info!("Tx not created: {}", e);
-					return Err(
-						ErrorKind::LibWallet(format!("Unable to process invoice, {}", e)).into(),
-					);
+					return Err(Error::LibWallet(format!(
+						"Unable to process invoice, {}",
+						e
+					)));
 				}
 			};
 
@@ -1643,16 +1630,16 @@ where
 			}
 			Some(f) => {
 				let mut tx_file = File::create(f.clone()).map_err(|e| {
-					ErrorKind::IO(format!("Unable to create tx dump file {}, {}", f, e))
+					Error::IO(format!("Unable to create tx dump file {}, {}", f, e))
 				})?;
 				let tx_as_str = json::to_string(&stored_tx).map_err(|e| {
-					ErrorKind::GenericError(format!("Unable convert Tx to Json, {}", e))
+					Error::GenericError(format!("Unable convert Tx to Json, {}", e))
 				})?;
 				tx_file.write_all(tx_as_str.as_bytes()).map_err(|e| {
-					ErrorKind::IO(format!("Unable to save tx to the file {}, {}", f, e))
+					Error::IO(format!("Unable to save tx to the file {}, {}", f, e))
 				})?;
 				tx_file.sync_all().map_err(|e| {
-					ErrorKind::IO(format!("Unable to save tx to the file {}, {}", f, e))
+					Error::IO(format!("Unable to save tx to the file {}, {}", f, e))
 				})?;
 				info!("Dumped transaction data for tx {} to {}", args.id, f);
 				return Ok(());
@@ -1688,11 +1675,10 @@ where
 			}
 			Err(e) => {
 				error!("TX Cancellation failed: {}", e);
-				Err(ErrorKind::LibWallet(format!(
+				Err(Error::LibWallet(format!(
 					"Unable to cancel Transaction {}, {}",
 					args.tx_id_string, e
-				))
-				.into())
+				)))
 			}
 		}
 	})?;
@@ -1734,8 +1720,7 @@ where
 			}
 			Err(e) => {
 				error!("Wallet check failed: {}", e);
-				error!("Backtrace: {}", e.backtrace().unwrap());
-				Err(ErrorKind::LibWallet(format!("Wallet check failed, {}", e)).into())
+				Err(Error::LibWallet(format!("Wallet check failed, {}", e)))
 			}
 		}
 	})?;
@@ -1793,7 +1778,7 @@ where
 			Ok(p) => {
 				// actually export proof
 				let mut proof_file = File::create(args.output_file.clone()).map_err(|e| {
-					ErrorKind::GenericError(format!(
+					Error::GenericError(format!(
 						"Unable to create file {}, {}",
 						args.output_file, e
 					))
@@ -1801,27 +1786,23 @@ where
 				proof_file
 					.write_all(json::to_string_pretty(&p).unwrap().as_bytes())
 					.map_err(|e| {
-						ErrorKind::GenericError(format!(
+						Error::GenericError(format!(
 							"Unable to save the proof file {}, {}",
 							args.output_file, e
 						))
 					})?;
 				proof_file.sync_all().map_err(|e| {
-					ErrorKind::GenericError(format!(
-						"Unable to save file {}, {}",
-						args.output_file, e
-					))
+					Error::GenericError(format!("Unable to save file {}, {}", args.output_file, e))
 				})?;
 				warn!("Payment proof exported to {}", args.output_file);
 				Ok(())
 			}
 			Err(e) => {
 				error!("Proof export failed: {}", e);
-				return Err(ErrorKind::GenericError(format!(
+				return Err(Error::GenericError(format!(
 					"Unable to retrieve payment proof, {}",
 					e
-				))
-				.into());
+				)));
 			}
 		}
 	})?;
@@ -1856,15 +1837,15 @@ where
 	if !path.exists() {
 		let msg = format!("Unable to open payment proof file at {}", args.input_file);
 		error!("{}", msg);
-		return Err(ErrorKind::LibWallet(msg).into());
+		return Err(Error::LibWallet(msg));
 	}
 	let mut file = File::open(path)
-		.map_err(|e| ErrorKind::LibWallet(format!("Unable to open proof data, {}", e)))?;
+		.map_err(|e| Error::LibWallet(format!("Unable to open proof data, {}", e)))?;
 	let mut proof = String::new();
 	file.read_to_string(&mut proof)
-		.map_err(|e| ErrorKind::LibWallet(format!("Unable to read proof data, {}", e)))?;
+		.map_err(|e| Error::LibWallet(format!("Unable to read proof data, {}", e)))?;
 	let tx_pf: TxProof = serde_json::from_str(&proof)
-		.map_err(|e| ErrorKind::LibWallet(format!("Unable to deserialize proof data, {}", e)))?;
+		.map_err(|e| Error::LibWallet(format!("Unable to deserialize proof data, {}", e)))?;
 
 	let secp_inst = static_secp_instance();
 	let secp = secp_inst.lock();
@@ -1878,7 +1859,7 @@ where
 		}
 		Err(e) => {
 			error!("Unable to verify proof. {}", e);
-			Err(ErrorKind::LibWallet(format!("Proof not valid: {}", e)).into())
+			Err(Error::LibWallet(format!("Proof not valid: {}", e)))
 		}
 	}
 }
@@ -1902,7 +1883,7 @@ where
 			}
 			Err(e) => {
 				error!("Wallet Data dump failed: {}", e);
-				Err(ErrorKind::LibWallet(format!("Wallet Data dump failed, {}", e)).into())
+				Err(Error::LibWallet(format!("Wallet Data dump failed, {}", e)))
 			}
 		}
 	})?;
@@ -1922,22 +1903,19 @@ where
 	match args.buyer_communication_method.as_str() {
 		"mwcmqs" => {
 			// Validating destination address
-			let _ = MWCMQSAddress::from_str(&args.buyer_communication_address).map_err(|e| {
-				ErrorKind::ArgumentError(format!("Invalid destination address, {}", e))
-			})?;
+			let _ = MWCMQSAddress::from_str(&args.buyer_communication_address)
+				.map_err(|e| Error::ArgumentError(format!("Invalid destination address, {}", e)))?;
 		}
 		"tor" => {
-			let _ = validate_tor_address(&args.buyer_communication_address).map_err(|e| {
-				ErrorKind::ArgumentError(format!("Invalid destination address, {}", e))
-			})?;
+			let _ = validate_tor_address(&args.buyer_communication_address)
+				.map_err(|e| Error::ArgumentError(format!("Invalid destination address, {}", e)))?;
 		}
 		"file" => (), // not validating the fine name. Files are secondary and testing method.
 		_ => {
-			return Err(ErrorKind::ArgumentError(format!(
+			return Err(Error::ArgumentError(format!(
 				"Invalid communication method '{}'. Valid methods: mwcmqs, tor, file",
 				args.buyer_communication_method
-			))
-			.into())
+			)))
 		}
 	}
 
@@ -1950,7 +1928,10 @@ where
 			}
 			Err(e) => {
 				error!("Unable to start Swap trade: {}", e);
-				Err(ErrorKind::LibWallet(format!("Unable to start Swap trade: {}", e)).into())
+				Err(Error::LibWallet(format!(
+					"Unable to start Swap trade: {}",
+					e
+				)))
 			}
 		}
 	})?;
@@ -1976,11 +1957,10 @@ where
 			}
 			Err(e) => {
 				error!("Unable to create a Swap trade from message {}: {}", file, e);
-				Err(ErrorKind::LibWallet(format!(
+				Err(Error::LibWallet(format!(
 					"Unable to create a Swap trade from message {}: {}",
 					file, e
-				))
-				.into())
+				)))
 			}
 		}
 	})?;
@@ -2258,12 +2238,15 @@ where
 				}
 				Err(e) => {
 					error!("Unable to List Swap trades: {}", e);
-					Err(ErrorKind::LibWallet(format!("Unable to List Swap trades: {}", e)).into())
+					Err(Error::LibWallet(format!(
+						"Unable to List Swap trades: {}",
+						e
+					)))
 				}
 			}
 		}
 		SwapSubcommand::Delete => {
-			let swap_id = args.swap_id.ok_or(ErrorKind::ArgumentError(
+			let swap_id = args.swap_id.ok_or(Error::ArgumentError(
 				"Not found expected 'swap_id' argument".to_string(),
 			))?;
 			let result = owner_swap::swap_delete(wallet_inst, keychain_mask, &swap_id);
@@ -2274,43 +2257,42 @@ where
 				}
 				Err(e) => {
 					error!("Unable to delete Swap {}: {}", swap_id, e);
-					Err(
-						ErrorKind::LibWallet(format!("Unable to delete Swap {}: {}", swap_id, e))
-							.into(),
-					)
+					Err(Error::LibWallet(format!(
+						"Unable to delete Swap {}: {}",
+						swap_id, e
+					)))
 				}
 			}
 		}
 		SwapSubcommand::Adjust => {
-			let swap_id = args.swap_id.ok_or(ErrorKind::ArgumentError(
+			let swap_id = args.swap_id.ok_or(Error::ArgumentError(
 				"Not found expected 'swap_id' argument".to_string(),
 			))?;
 
 			// Checking parameters here. We can't do that at libwallet side
 			if let Some(method) = args.method.clone() {
-				let destination = args.destination.clone().ok_or(ErrorKind::ArgumentError(
+				let destination = args.destination.clone().ok_or(Error::ArgumentError(
 					"Please specify '--dest' parameter as well".to_string(),
 				))?;
 				match method.as_str() {
 					"mwcmqs" => {
 						// Validating destination address
 						let _ = MWCMQSAddress::from_str(&destination).map_err(|e| {
-							ErrorKind::ArgumentError(format!("Invalid destination address, {}", e))
+							Error::ArgumentError(format!("Invalid destination address, {}", e))
 						})?;
 					}
 					"tor" => {
 						// Validating tor address
 						let _ = validate_tor_address(&destination).map_err(|e| {
-							ErrorKind::ArgumentError(format!("Invalid destination address, {}", e))
+							Error::ArgumentError(format!("Invalid destination address, {}", e))
 						})?;
 					}
 					"file" => (),
 					_ => {
-						return Err(ErrorKind::ArgumentError(format!(
+						return Err(Error::ArgumentError(format!(
 							"Unknown communication method value '{}'",
 							method
-						))
-						.into());
+						)));
 					}
 				}
 			}
@@ -2345,11 +2327,10 @@ where
 					}
 					Err(e) => {
 						error!("Unable to adjust the Swap {}: {}", swap_id, e);
-						return Err(ErrorKind::LibWallet(format!(
+						return Err(Error::LibWallet(format!(
 							"Unable to adjust Swap {}: {}",
 							swap_id, e
-						))
-						.into());
+						)));
 					}
 				}
 			}
@@ -2361,7 +2342,7 @@ where
 			Ok(())
 		}
 		SwapSubcommand::Check => {
-			let swap_id = args.swap_id.ok_or(ErrorKind::ArgumentError(
+			let swap_id = args.swap_id.ok_or(Error::ArgumentError(
 				"Not found expected 'swap_id' argument".to_string(),
 			))?;
 			let result = owner_swap::swap_get(wallet_inst.clone(), keychain_mask, &swap_id);
@@ -2424,7 +2405,7 @@ where
 								println!("JSON: {}", item.to_string());
 								return Ok(());
 							} else {
-								return Err(Error::from(e));
+								return Err(e.into());
 							}
 						}
 					};
@@ -2533,21 +2514,21 @@ where
 				}
 				Err(e) => {
 					error!("Unable to retrieve Swap {}: {}", swap_id, e);
-					Err(
-						ErrorKind::LibWallet(format!("Unable to retrieve Swap {}: {}", swap_id, e))
-							.into(),
-					)
+					Err(Error::LibWallet(format!(
+						"Unable to retrieve Swap {}: {}",
+						swap_id, e
+					)))
 				}
 			}
 		}
 		SwapSubcommand::Process => {
-			let swap_id = args.swap_id.ok_or(ErrorKind::ArgumentError(
+			let swap_id = args.swap_id.ok_or(Error::ArgumentError(
 				"Not found expected 'swap_id' argument".to_string(),
 			))?;
 
 			if args.method.is_some() || args.destination.is_some() {
-				return Err(ErrorKind::ArgumentError(
-					"swap --process doesn't accept 'method' or 'dest' parameters, instead it is using parameters associated with this swap trade.".to_string()).into());
+				return Err(Error::ArgumentError(
+					"swap --process doesn't accept 'method' or 'dest' parameters, instead it is using parameters associated with this swap trade.".to_string()));
 			}
 
 			// Creating message delivery transport as a closure
@@ -2558,7 +2539,10 @@ where
 			let message_sender = move |swap_message: message::Message,
 			                           method: String,
 			                           dest: String|
-			      -> Result<(bool, String), crate::libwallet::Error> {
+			      -> Result<
+				(bool, String),
+				grin_wallet_libwallet::swap::Error,
+			> {
 				let destination_str = format!("{} {}", method, dest);
 				let from_address;
 
@@ -2575,7 +2559,7 @@ where
 								true,
 							)
 							.map_err(|e| {
-								crate::libwallet::ErrorKind::SwapError(format!(
+								grin_wallet_libwallet::swap::Error::MessageSender(format!(
 									"Unable to start mwcmqs listener, {}",
 									e
 								))
@@ -2583,13 +2567,13 @@ where
 							thread::sleep(Duration::from_millis(2000));
 						}
 						from_address = grin_wallet_impls::adapters::get_mwcmqs_brocker()
-							.ok_or(crate::libwallet::ErrorKind::SwapError(
+							.ok_or(grin_wallet_libwallet::swap::Error::MessageSender(
 								"Unable to start mwcmqs listener".to_string(),
 							))?
 							.0
 							.get_publisher_address()
 							.map_err(|e| {
-								crate::libwallet::ErrorKind::SwapError(format!(
+								grin_wallet_libwallet::swap::Error::MessageSender(format!(
 									"Unable to get publisher address {}",
 									e
 								))
@@ -2621,7 +2605,7 @@ where
 							thread::sleep(Duration::from_millis(2000));
 						}
 						from_address = tor::status::get_tor_address().ok_or(
-							crate::libwallet::ErrorKind::GenericError(
+							grin_wallet_libwallet::swap::Error::MessageSender(
 								"Tor is not running".to_string(),
 							),
 						)?;
@@ -2629,9 +2613,14 @@ where
 					"file" => {
 						// File, let's process it here
 						let msg_str = swap_message.to_json()?;
-						let mut file = File::create(dest.clone())?;
+						let mut file = File::create(dest.clone()).map_err(|e| {
+							grin_wallet_libwallet::swap::Error::MessageSender(format!(
+								"Unable to create file {}, {}",
+								dest, e
+							))
+						})?;
 						file.write_all(msg_str.as_bytes()).map_err(|e| {
-							crate::libwallet::ErrorKind::SwapError(format!(
+							grin_wallet_libwallet::swap::Error::MessageSender(format!(
 								"Unable to store message data to the destination file, {}",
 								e
 							))
@@ -2641,10 +2630,8 @@ where
 					}
 					_ => {
 						error!("Please specify a method (mwcmqs, tor, or file) for transporting swap messages to the other party with whom you're doing the swap!");
-						return Err(crate::libwallet::Error::from(
-							crate::libwallet::ErrorKind::SwapError(
-								"Expected 'method' argument is not found".to_string(),
-							),
+						return Err(grin_wallet_libwallet::swap::Error::MessageSender(
+							"Expected 'method' argument is not found".to_string(),
 						));
 					}
 				}
@@ -2657,7 +2644,7 @@ where
 					&tor_config2,
 				)
 				.map_err(|e| {
-					crate::libwallet::ErrorKind::SwapError(format!(
+					grin_wallet_libwallet::swap::Error::MessageSender(format!(
 						"Unable to create message sender, {}",
 						e
 					))
@@ -2671,13 +2658,13 @@ where
 				let ack = sender
 					.send_swap_message(&swap_message, &secp)
 					.map_err(|e| {
-						ErrorKind::LibWallet(format!(
+						grin_wallet_libwallet::swap::Error::MessageSender(format!(
 							"Failure in sending swap message {} by {}: {}",
 							swap_id2, method, e
 						))
 					})
 					.map_err(|e| {
-						crate::libwallet::ErrorKind::SwapError(format!(
+						grin_wallet_libwallet::swap::Error::MessageSender(format!(
 							"Unable to deliver the message, {}",
 							e
 						))
@@ -2712,10 +2699,10 @@ where
 				}
 				Err(e) => {
 					error!("Unable to process Swap {}: {}", swap_id, e);
-					Err(
-						ErrorKind::LibWallet(format!("Unable to process Swap {}: {}", swap_id, e))
-							.into(),
-					)
+					Err(Error::LibWallet(format!(
+						"Unable to process Swap {}: {}",
+						swap_id, e
+					)))
 				}
 			}
 		}
@@ -2724,13 +2711,13 @@ where
 			// For auto swap --json_format is a trigger for a one shot action.
 			let one_shot = args.json_format;
 
-			let swap_id = args.swap_id.ok_or(ErrorKind::ArgumentError(
+			let swap_id = args.swap_id.ok_or(Error::ArgumentError(
 				"Not found expected 'swap_id' argument".to_string(),
 			))?;
 
 			if args.method.is_some() || args.destination.is_some() {
-				return Err(ErrorKind::ArgumentError(
-					"swap --autoswap doesn't accept 'method' or 'dest' parameters, instead it is using parameters associated with this swap trade.".to_string()).into());
+				return Err(Error::ArgumentError(
+					"swap --autoswap doesn't accept 'method' or 'dest' parameters, instead it is using parameters associated with this swap trade.".to_string()));
 			}
 
 			let swap = owner_swap::swap_get(wallet_inst.clone(), keychain_mask, &swap_id)?;
@@ -2746,7 +2733,7 @@ where
 				match swap.communication_method.as_str() {
 					"mwcmqs" => {
 						if grin_wallet_impls::adapters::get_mwcmqs_brocker().is_some() {
-							return Err(ErrorKind::GenericError("mwcmqs listener is already running, there is no need to specify '--start_listener' parameter".to_string()).into());
+							return Err(Error::GenericError("mwcmqs listener is already running, there is no need to specify '--start_listener' parameter".to_string()));
 						}
 
 						// Startting MQS
@@ -2758,14 +2745,14 @@ where
 							true,
 						)
 						.map_err(|e| {
-							ErrorKind::LibWallet(format!("Unable to start mwcmqs listener, {}", e))
+							Error::LibWallet(format!("Unable to start mwcmqs listener, {}", e))
 						})?;
 						thread::sleep(Duration::from_millis(2000));
 					}
 					"tor" => {
 						// Checking is foreign API is running. It dont't important if it is tor or http.
 						if controller::is_foreign_api_running() {
-							return Err(ErrorKind::GenericError("tor or http listener is already running, there is no need to specify '--start_listener' parameter".to_string()).into());
+							return Err(Error::GenericError("tor or http listener is already running, there is no need to specify '--start_listener' parameter".to_string()));
 						}
 
 						// Starting tor
@@ -2792,11 +2779,10 @@ where
 						thread::sleep(Duration::from_millis(2000));
 					}
 					_ => {
-						return Err(ErrorKind::ArgumentError(format!(
+						return Err(Error::ArgumentError(format!(
 							"Auto Swap doesn't support communication method {}",
 							swap.communication_method
-						))
-						.into());
+						)));
 					}
 				}
 			}
@@ -2807,48 +2793,43 @@ where
 				"mwcmqs" => {
 					// Validating destination address
 					let _ = MWCMQSAddress::from_str(&swap.communication_address).map_err(|e| {
-						ErrorKind::ArgumentError(format!("Invalid destination address, {}", e))
+						Error::ArgumentError(format!("Invalid destination address, {}", e))
 					})?;
 
 					if grin_wallet_impls::adapters::get_mwcmqs_brocker().is_none() {
-						return Err(ErrorKind::GenericError("mqcmqs listener is not running. Please start it with 'listen' command or '--start_listener' argument".to_string()).into());
+						return Err(Error::GenericError("mqcmqs listener is not running. Please start it with 'listen' command or '--start_listener' argument".to_string()));
 					}
 					from_address = grin_wallet_impls::adapters::get_mwcmqs_brocker()
-						.ok_or(ErrorKind::GenericError(
+						.ok_or(Error::GenericError(
 							"Unable to start mwcmqs listener".to_string(),
 						))?
 						.0
 						.get_publisher_address()
 						.map_err(|e| {
-							ErrorKind::GenericError(format!(
-								"Unable to get publisher address {}",
-								e
-							))
+							Error::GenericError(format!("Unable to get publisher address {}", e))
 						})?
 						.get_full_name();
 				}
 				"tor" => {
 					// Validating tor address
 					let _ = validate_tor_address(&swap.communication_address).map_err(|e| {
-						ErrorKind::ArgumentError(format!("Invalid destination address, {}", e))
+						Error::ArgumentError(format!("Invalid destination address, {}", e))
 					})?;
 
 					if !controller::is_foreign_api_running() {
-						return Err(ErrorKind::GenericError(
+						return Err(Error::GenericError(
 							"Foreign API is not active and tor listener is not running."
 								.to_string(),
-						)
-						.into());
+						));
 					}
 					from_address = tor::status::get_tor_address()
-						.ok_or(ErrorKind::GenericError("Tor is not running".to_string()))?;
+						.ok_or(Error::GenericError("Tor is not running".to_string()))?;
 				}
 				_ => {
-					return Err(ErrorKind::ArgumentError(format!(
+					return Err(Error::ArgumentError(format!(
 						"Auto Swap doesn't support communication method {}",
 						swap.communication_method
-					))
-					.into());
+					)));
 				}
 			}
 
@@ -2856,39 +2837,40 @@ where
 			let apisecret = args.apisecret.clone();
 			let swap_id2 = swap_id.clone();
 			let tor_config2 = tor_config.clone();
-			let message_sender = move |swap_message: message::Message,
-			                           method: String,
-			                           destination: String|
-			      -> Result<(bool, String), crate::libwallet::Error> {
-				// File is processed, the online send will be handled here
-				let sender = create_swap_message_sender(
-					method.as_str(),
-					destination.as_str(),
-					&apisecret,
-					&tor_config2,
-				)
-				.map_err(|e| {
-					crate::libwallet::ErrorKind::SwapError(format!(
-						"Unable to create message sender, {}",
-						e
-					))
-				})?;
-
-				let mut swap_message = swap_message;
-				if let message::Update::Offer(offer_update) = &mut swap_message.inner {
-					offer_update.from_address = from_address;
-				}
-
-				let ack = sender
-					.send_swap_message(&swap_message, &secp)
+			let message_sender =
+				move |swap_message: message::Message,
+				      method: String,
+				      destination: String|
+				      -> Result<(bool, String), grin_wallet_libwallet::swap::Error> {
+					// File is processed, the online send will be handled here
+					let sender = create_swap_message_sender(
+						method.as_str(),
+						destination.as_str(),
+						&apisecret,
+						&tor_config2,
+					)
 					.map_err(|e| {
-						crate::libwallet::ErrorKind::SwapError(format!(
-							"Unable to deliver the message {} by {}: {}",
-							swap_id2, method, e
+						grin_wallet_libwallet::swap::Error::MessageSender(format!(
+							"Unable to create message sender, {}",
+							e
 						))
 					})?;
-				Ok((ack, format!("{} {}", method, destination)))
-			};
+
+					let mut swap_message = swap_message;
+					if let message::Update::Offer(offer_update) = &mut swap_message.inner {
+						offer_update.from_address = from_address;
+					}
+
+					let ack = sender
+						.send_swap_message(&swap_message, &secp)
+						.map_err(|e| {
+							grin_wallet_libwallet::swap::Error::MessageSender(format!(
+								"Unable to deliver the message {} by {}: {}",
+								swap_id2, method, e
+							))
+						})?;
+					Ok((ack, format!("{} {}", method, destination)))
+				};
 
 			// Calling mostly for params and environment validation. Also it is a nice chance to print the status of the deal that will be started
 			let (mut prev_state, mut prev_action, mut prev_journal_len) = {
@@ -2937,7 +2919,7 @@ where
 							swap.secondary_currency
 								.validate_address(addr)
 								.map_err(|e| {
-									ErrorKind::ArgumentError(format!(
+									Error::ArgumentError(format!(
 										"Invalid secondary currency address {}, {}",
 										addr, e
 									))
@@ -2947,11 +2929,10 @@ where
 							if swap.get_secondary_address().is_empty()
 								&& swap.secondary_currency.is_btc_family()
 							{
-								return Err(ErrorKind::GenericError(
+								return Err(Error::GenericError(
 									"Please define buyer_refund_address for automated swap"
 										.to_string(),
-								)
-								.into());
+								));
 							}
 						}
 					}
@@ -3174,11 +3155,10 @@ where
 					let r = t.join();
 					if let Err(_) = r {
 						error!("Error during running autoswap thread for {}", swap_id);
-						return Err(ErrorKind::LibWallet(format!(
+						return Err(Error::LibWallet(format!(
 							"Error during running autoswap thread for {}",
 							swap_id
-						))
-						.into());
+						)));
 					}
 				}
 			}
@@ -3190,7 +3170,7 @@ where
 			println!("This command is going to stop all the ongoing auto-swap threads. You can continue with the swap manually by entering commands step by step.");
 			println!("Do you want to continue? Please answer Yes/No");
 			input.read_line(&mut answer).map_err(|e| {
-				ErrorKind::LibWallet(format!(
+				Error::LibWallet(format!(
 					"Invalid answer to terminating the auto swap threads, {}",
 					e
 				))
@@ -3203,7 +3183,7 @@ where
 			Ok(())
 		}
 		SwapSubcommand::Dump => {
-			let swap_id = args.swap_id.ok_or(ErrorKind::ArgumentError(
+			let swap_id = args.swap_id.ok_or(Error::ArgumentError(
 				"Not found expected 'swap_id' argument".to_string(),
 			))?;
 			let result = owner_swap::swap_dump(wallet_inst, keychain_mask, &swap_id);
@@ -3217,31 +3197,30 @@ where
 						"Unable to dump the content of the swap file {}.swap: {}",
 						swap_id, e
 					);
-					Err(ErrorKind::LibWallet(format!(
+					Err(Error::LibWallet(format!(
 						"Unable to dump the content of the swap file {}.swap: {}",
 						swap_id, e
-					))
-					.into())
+					)))
 				}
 			}
 		}
 		SwapSubcommand::TradeExport => {
-			let swap_id = args.swap_id.ok_or(ErrorKind::ArgumentError(
+			let swap_id = args.swap_id.ok_or(Error::ArgumentError(
 				"Not found expected 'swap_id' argument".to_string(),
 			))?;
 
-			let file_name = args.destination.ok_or(ErrorKind::ArgumentError(
+			let file_name = args.destination.ok_or(Error::ArgumentError(
 				"Not found expected file name for the exported data".to_string(),
 			))?;
 
 			trades::export_trade(swap_id.as_str(), file_name.as_str())
-				.map_err(|e| ErrorKind::LibWallet(format!("Unable to export trade data, {}", e)))?;
+				.map_err(|e| Error::LibWallet(format!("Unable to export trade data, {}", e)))?;
 
 			println!("Swap trade is exported to {}", file_name);
 			Ok(())
 		}
 		SwapSubcommand::TradeImport => {
-			let trade_file_name = args.destination.ok_or(ErrorKind::ArgumentError(
+			let trade_file_name = args.destination.ok_or(Error::ArgumentError(
 				"Not found expected file name for the exported data".to_string(),
 			))?;
 
@@ -3277,10 +3256,9 @@ where
 					return Ok(());
 				}
 				_ => {
-					return Err(ErrorKind::LibWallet(
+					return Err(Error::LibWallet(
 						"Ethereum Get Wallet Info failed!".to_string(),
-					)
-					.into());
+					));
 				}
 			}
 		}
@@ -3306,19 +3284,16 @@ where
 					return Ok(());
 				}
 				Err(e) => match e {
-					grin_wallet_libwallet::swap::ErrorKind::EthBalanceNotEnough => Err(
-						ErrorKind::LibWallet("Not Enough Ether to transfer/gas".to_string()).into(),
+					grin_wallet_libwallet::swap::Error::EthBalanceNotEnough => Err(
+						Error::LibWallet("Not Enough Ether to transfer/gas".to_string()),
 					),
-					grin_wallet_libwallet::swap::ErrorKind::ERC20TokenBalanceNotEnough(_error) => {
-						Err(ErrorKind::LibWallet(format!(
+					grin_wallet_libwallet::swap::Error::ERC20TokenBalanceNotEnough(_error) => {
+						Err(Error::LibWallet(format!(
 							"Not Enough ERC-20 Token: {} to transfer",
 							currency
-						))
-						.into())
+						)))
 					}
-					_ => {
-						Err(ErrorKind::LibWallet("Unknown Ethereum Chain Error".to_string()).into())
-					}
+					_ => Err(Error::LibWallet("Unknown Ethereum Chain Error".to_string())),
 				},
 			}
 		}
@@ -3405,22 +3380,20 @@ where
 		}
 		IntegritySubcommand::Create => {
 			if args.fee.is_empty() {
-				return Err(ErrorKind::ArgumentError(
+				return Err(Error::ArgumentError(
 					"Please specify comma separated integrity fee that you need to activate"
 						.to_string(),
-				)
-				.into());
+				));
 			}
 
 			let min_fee = args.fee.iter().min().unwrap_or(&0);
 			let min_integrity_fee =
 				global::get_accept_fee_base() * libp2p_connection::INTEGRITY_FEE_MIN_X;
 			if *min_fee < min_integrity_fee {
-				return Err(ErrorKind::ArgumentError(format!(
+				return Err(Error::ArgumentError(format!(
 					"The minimal accepted integrity fee is {} MWC",
 					amount_to_hr_string(min_integrity_fee, true)
-				))
-				.into());
+				)));
 			}
 
 			let max_fee = args.fee.iter().max().unwrap_or(&0);
@@ -3570,10 +3543,7 @@ where
 						for addr in libp2p_peers.libp2p_peers {
 							libp2p_connection::add_new_peer(&PeerAddr::Onion(addr.clone()))
 								.map_err(|e| {
-									ErrorKind::GenericError(format!(
-										"Failed to add libp2p peer, {}",
-										e
-									))
+									Error::GenericError(format!("Failed to add libp2p peer, {}", e))
 								})?;
 							if !args.json {
 								println!("Joining the node peer at {}", addr);
@@ -3583,10 +3553,7 @@ where
 						for addr in libp2p_peers.node_peers {
 							libp2p_connection::add_new_peer(&PeerAddr::Onion(addr.clone()))
 								.map_err(|e| {
-									ErrorKind::GenericError(format!(
-										"Failed to add libp2p peer, {}",
-										e
-									))
+									Error::GenericError(format!("Failed to add libp2p peer, {}", e))
 								})?;
 							if !args.json {
 								println!("Joining the node peer at {}", addr);
@@ -3612,7 +3579,7 @@ where
 					if seed.ends_with("onion") {
 						libp2p_connection::add_new_peer(&PeerAddr::Onion(seed.to_string()))
 							.map_err(|e| {
-								ErrorKind::GenericError(format!("Failed to add libp2p peer, {}", e))
+								Error::GenericError(format!("Failed to add libp2p peer, {}", e))
 							})?;
 					}
 				}
@@ -3744,26 +3711,24 @@ where
 
 	if args.publish_message.is_some() {
 		let publish_message = args.publish_message.unwrap();
-		let publish_topic = args.publish_topic.ok_or(ErrorKind::ArgumentError(
+		let publish_topic = args.publish_topic.ok_or(Error::ArgumentError(
 			"Please specify publish topic".to_string(),
 		))?;
-		let publish_interval = args.publish_interval.ok_or(ErrorKind::ArgumentError(
+		let publish_interval = args.publish_interval.ok_or(Error::ArgumentError(
 			"Please specify message publishing interval value".to_string(),
 		))?;
 		if publish_interval < 60 {
-			return Err(ErrorKind::ArgumentError(
+			return Err(Error::ArgumentError(
 				"Message publishing interval minimal value is 60 seconds".to_string(),
-			)
-			.into());
+			));
 		}
 		let min_fee = global::get_accept_fee_base() * libp2p_connection::INTEGRITY_FEE_MIN_X;
 		let fee = args.fee.unwrap_or(min_fee);
 		if fee < min_fee {
-			return Err(ErrorKind::ArgumentError(format!(
+			return Err(Error::ArgumentError(format!(
 				"Please specify fee higher than minimal integrity fee {}",
 				amount_to_hr_string(min_fee, true)
-			))
-			.into());
+			)));
 		}
 
 		// Let's check if message already running, so we can reuse integrity context
@@ -3802,11 +3767,10 @@ where
 			context = if args.fee_uuid.is_some() {
 				let fee_uuid = args.fee_uuid.clone().unwrap();
 				if used_ctx_uuid.contains(&fee_uuid) {
-					return Err(ErrorKind::GenericError(format!(
+					return Err(Error::GenericError(format!(
 						"Fee uuid {} is already used for another transaction",
 						fee_uuid
-					))
-					.into());
+					)));
 				}
 				fee_transaction
 					.iter()
@@ -3827,20 +3791,19 @@ where
 		}
 
 		if context.is_none() {
-			return Err(ErrorKind::GenericError(
+			return Err(Error::GenericError(
 				"Not found integrity context with paid fee".to_string(),
-			)
-			.into());
+			));
 		}
 
 		let mkt_message =
 			serde_json::from_str::<serde_json::Value>(&publish_message).map_err(|e| {
-				ErrorKind::GenericError(format!(
+				Error::GenericError(format!(
 					"Unable to parse the message {}, {}",
 					publish_message, e
 				))
 			})?;
-		let offer_id = mkt_message["id"].as_str().ok_or(ErrorKind::GenericError(
+		let offer_id = mkt_message["id"].as_str().ok_or(Error::GenericError(
 			"Not found expected offer id".to_string(),
 		))?;
 
@@ -3867,11 +3830,10 @@ where
 		let uuid = match Uuid::parse_str(&withdraw_message_id) {
 			Ok(uuid) => uuid,
 			Err(e) => {
-				return Err(ErrorKind::ArgumentError(format!(
+				return Err(Error::ArgumentError(format!(
 					"Unable to parse withdraw_message_id UUID value, {}",
 					e
-				))
-				.into())
+				)))
 			}
 		};
 		owner_swap::remove_published_offer(&uuid);
@@ -3990,10 +3952,9 @@ where
 	K: keychain::Keychain + 'static,
 {
 	if !controller::is_foreign_api_running() {
-		return Err(ErrorKind::GenericError(
+		return Err(Error::GenericError(
 			"TOR is not running. Please start tor listener for your wallet".to_string(),
-		)
-		.into());
+		));
 	}
 
 	let dest = validate_tor_address(&args.tor_address)?;
@@ -4008,7 +3969,7 @@ where
 		tor_config.bridge.clone(),
 		tor_config.proxy.clone(),
 	)
-	.map_err(|e| ErrorKind::GenericError(format!("Unable to create HTTP client to send, {}", e)))?;
+	.map_err(|e| Error::GenericError(format!("Unable to create HTTP client to send, {}", e)))?;
 
 	let tor_pk = owner::get_wallet_public_address(wallet_inst.clone(), keychain_mask)?;
 	let tor_addr = ProvableAddress::from_tor_pub_key(&tor_pk);
@@ -4037,10 +3998,9 @@ where
 	K: keychain::Keychain + 'static,
 {
 	if !controller::is_foreign_api_running() {
-		return Err(ErrorKind::GenericError(
+		return Err(Error::GenericError(
 			"TOR is not running. Please start tor listener for your wallet".to_string(),
-		)
-		.into());
+		));
 	}
 
 	let tor_pk = owner::get_wallet_public_address(wallet_inst.clone(), keychain_mask)?;

@@ -22,8 +22,8 @@ use crate::slate_versions::v2::{CoinbaseV2, SlateV2};
 use crate::slate_versions::v3::{CoinbaseV3, SlateV3};
 use crate::slatepack::SlatePurpose;
 use crate::types::CbData;
+use crate::Error;
 use crate::Slatepacker;
-use crate::{Error, ErrorKind};
 use ed25519_dalek::PublicKey as DalekPublicKey;
 use ed25519_dalek::SecretKey as DalekSecretKey;
 use grin_wallet_util::grin_util::secp::Secp256k1;
@@ -135,9 +135,7 @@ impl VersionedSlate {
 		version: SlateVersion,
 	) -> Result<VersionedSlate, Error> {
 		match version {
-			SlateVersion::SP => {
-				return Err(ErrorKind::GenericError("Slate is encrypted".to_string()).into())
-			}
+			SlateVersion::SP => return Err(Error::GenericError("Slate is encrypted".to_string())),
 			SlateVersion::V3B | SlateVersion::V3 => Ok(VersionedSlate::V3(slate.into())),
 			// Left here as a reminder of what needs to be inserted on
 			// the release of a new slate
@@ -178,7 +176,7 @@ impl VersionedSlate {
 	pub fn into_slate_plain(&self, fix_kernel: bool) -> Result<Slate, Error> {
 		match self {
 			VersionedSlate::SP(_) => {
-				return Err(ErrorKind::GenericError("Slate is encrypted".to_string()).into())
+				return Err(Error::GenericError("Slate is encrypted".to_string()))
 			}
 			VersionedSlate::V3(s) => Ok(s.clone().to_slate(fix_kernel)?),
 			VersionedSlate::V2(s) => {
@@ -193,10 +191,10 @@ impl VersionedSlate {
 		let str = match self {
 			VersionedSlate::SP(s) => s.clone(),
 			VersionedSlate::V3(s) => serde_json::to_string(&s).map_err(|e| {
-				ErrorKind::GenericError(format!("Failed convert SlateV3 to Json, {}", e))
+				Error::GenericError(format!("Failed convert SlateV3 to Json, {}", e))
 			})?,
 			VersionedSlate::V2(s) => serde_json::to_string(&s).map_err(|e| {
-				ErrorKind::GenericError(format!("Failed convert SlateV2 to Json, {}", e))
+				Error::GenericError(format!("Failed convert SlateV2 to Json, {}", e))
 			})?,
 		};
 		Ok(str)

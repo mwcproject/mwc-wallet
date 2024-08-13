@@ -15,7 +15,7 @@
 use crate::swap::message::Message;
 use crate::swap::swap::SwapJournalRecord;
 use crate::swap::types::{Action, SwapTransactionsConfirmations};
-use crate::swap::{Context, ErrorKind, Swap};
+use crate::swap::{Context, Error, Swap};
 use grin_wallet_util::grin_util::secp::Secp256k1;
 use std::fmt;
 
@@ -258,7 +258,7 @@ impl StateId {
 	}
 
 	/// Convert string name to State instance
-	pub fn from_cmd_str(str: &str) -> Result<Self, ErrorKind> {
+	pub fn from_cmd_str(str: &str) -> Result<Self, Error> {
 		match str {
 			"SellerOfferCreated" => Ok(StateId::SellerOfferCreated),
 			"SellerSendingOffer" => Ok(StateId::SellerSendingOffer),
@@ -300,7 +300,7 @@ impl StateId {
 			"BuyerWaitingForRefundConfirmations" => Ok(StateId::BuyerWaitingForRefundConfirmations),
 			"BuyerCancelledRefunded" => Ok(StateId::BuyerCancelledRefunded),
 			"BuyerCancelled" => Ok(StateId::BuyerCancelled),
-			_ => Err(ErrorKind::Generic(format!("Unknown state value {}", str))),
+			_ => Err(Error::Generic(format!("Unknown state value {}", str))),
 		}
 	}
 }
@@ -443,7 +443,7 @@ pub trait State {
 		height: u64,
 		tx_conf: &SwapTransactionsConfirmations,
 		secp: &Secp256k1,
-	) -> Result<StateProcessRespond, ErrorKind>;
+	) -> Result<StateProcessRespond, Error>;
 
 	/// Get the prev happy path State.
 	fn get_prev_swap_state(&self) -> Option<StateId>;

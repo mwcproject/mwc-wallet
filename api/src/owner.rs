@@ -33,7 +33,7 @@ use crate::libwallet::swap::fsm::state::{StateEtaInfo, StateId, StateProcessResp
 use crate::libwallet::swap::types::{Action, Currency, SwapTransactionsConfirmations};
 use crate::libwallet::swap::{message::Message, swap::Swap, swap::SwapJournalRecord};
 use crate::libwallet::{
-	AcctPathMapping, BuiltOutput, Error, ErrorKind, InitTxArgs, IssueInvoiceTxArgs, NodeClient,
+	AcctPathMapping, BuiltOutput, Error, InitTxArgs, IssueInvoiceTxArgs, NodeClient,
 	NodeHeightResult, OutputCommitMapping, PaymentProof, Slate, SlatePurpose, SlateVersion,
 	SwapStartArgs, TxLogEntry, VersionedSlate, ViewWallet, WalletInfo, WalletInst,
 	WalletLCProvider,
@@ -704,19 +704,17 @@ where
 		//minimum_confirmations cannot be zero.
 		let minimum_confirmations = args.minimum_confirmations.clone();
 		if minimum_confirmations < 1 {
-			return Err(ErrorKind::ClientCallback(
+			return Err(Error::ClientCallback(
 				"Minimum_confirmations can not be smaller than 1".to_owned(),
-			)
-			.into());
+			));
 		}
 
 		match args.send_args.clone() {
 			Some(sa) => {
 				if sa.post_tx && !sa.finalize {
-					return Err(ErrorKind::ClientCallback(
+					return Err(Error::ClientCallback(
 						"Transcations can not be posted without being finalized!".to_owned(),
-					)
-					.into());
+					));
 				}
 			}
 			None => {}
@@ -738,16 +736,13 @@ where
 					let comm_adapter =
 						create_sender(&sa.method, &sa.dest, &sa.apisecret, tor_config_lock.clone())
 							.map_err(|e| {
-								ErrorKind::GenericError(format!("Unable to create a sender, {}", e))
+								Error::GenericError(format!("Unable to create a sender, {}", e))
 							})?;
 
 					let other_wallet_version = comm_adapter
 						.check_other_wallet_version(&sa.dest)
 						.map_err(|e| {
-							ErrorKind::GenericError(format!(
-								"Unable to get other wallet info, {}",
-								e
-							))
+							Error::GenericError(format!("Unable to get other wallet info, {}", e))
 						})?;
 
 					if let Some(other_wallet_version) = &other_wallet_version {
@@ -797,7 +792,7 @@ where
 								&secp,
 							)
 							.map_err(|e| {
-								ErrorKind::ClientCallback(format!(
+								Error::ClientCallback(format!(
 									"Unable to send slate {} with {}, {}",
 									slate.id, sa.method, e
 								))
@@ -805,10 +800,9 @@ where
 					}
 					None => {
 						error!("unsupported payment method: {}", sa.method);
-						return Err(ErrorKind::ClientCallback(
+						return Err(Error::ClientCallback(
 							"unsupported payment method".to_owned(),
-						)
-						.into());
+						));
 					}
 				};
 
@@ -960,10 +954,9 @@ where
 		//minimum_confirmations cannot be zero.
 		let minimum_confirmations = args.minimum_confirmations.clone();
 		if minimum_confirmations < 1 {
-			return Err(ErrorKind::ClientCallback(
+			return Err(Error::ClientCallback(
 				"minimum_confirmations can not smaller than 1".to_owned(),
-			)
-			.into());
+			));
 		}
 		let mut w_lock = self.wallet_inst.lock();
 		let w = w_lock.lc_provider()?.wallet_inst()?;
@@ -2443,6 +2436,7 @@ where
 		// Updating wallet state first because we need to select outputs.
 		owner::update_wallet_state(self.wallet_inst.clone(), keychain_mask, &None)?;
 		owner_swap::swap_start(self.wallet_inst.clone(), keychain_mask, params)
+			.map_err(|e| e.into())
 	}
 
 	pub fn swap_create_from_offer(
@@ -2455,6 +2449,7 @@ where
 			keychain_mask,
 			message_filename,
 		)
+		.map_err(|e| e.into())
 	}
 
 	/// List all available swap operations. SwapId & Status
@@ -2464,6 +2459,7 @@ where
 		do_check: bool,
 	) -> Result<(Vec<owner_swap::SwapListInfo>, Vec<Swap>), Error> {
 		owner_swap::swap_list(self.wallet_inst.clone(), keychain_mask, do_check)
+			.map_err(|e| e.into())
 	}
 
 	/// Delete swap trade
@@ -2473,6 +2469,7 @@ where
 		swap_id: String,
 	) -> Result<(), Error> {
 		owner_swap::swap_delete(self.wallet_inst.clone(), keychain_mask, &swap_id)
+			.map_err(|e| e.into())
 	}
 	/// Retrieve swap trade
 	pub fn swap_get(
@@ -2481,6 +2478,7 @@ where
 		swap_id: String,
 	) -> Result<Swap, Error> {
 		owner_swap::swap_get(self.wallet_inst.clone(), keychain_mask, &swap_id)
+			.map_err(|e| e.into())
 	}
 
 	/// Adjust the sate of swap trade.
@@ -2513,6 +2511,7 @@ where
 			eth_infura_project_id,
 			tag,
 		)
+		.map_err(|e| e.into())
 	}
 
 	/// Dump swap file content
@@ -2522,11 +2521,12 @@ where
 		swap_id: String,
 	) -> Result<String, Error> {
 		owner_swap::swap_dump(self.wallet_inst.clone(), keychain_mask, &swap_id)
+			.map_err(|e| e.into())
 	}
 
 	/// dump ethereum info
 	pub fn eth_info(&self, currency: Currency) -> Result<(String, String, String), Error> {
-		owner_eth::info(self.wallet_inst.clone(), currency)
+		owner_eth::info(self.wallet_inst.clone(), currency).map_err(|e| e.into())
 	}
 
 	/// ethereum transfer
@@ -2535,7 +2535,7 @@ where
 		dest: Option<String>,
 		currency: Currency,
 		amount: Option<String>,
-	) -> Result<(), libwallet::swap::ErrorKind> {
+	) -> Result<(), libwallet::swap::Error> {
 		owner_eth::transfer(self.wallet_inst.clone(), currency, dest, amount)
 	}
 
@@ -2574,6 +2574,7 @@ where
 			eth_infura_project_id,
 			false,
 		)
+		.map_err(|e| e.into())
 	}
 
 	/// Get a status of the transactions that involved into the swap.
@@ -2597,6 +2598,7 @@ where
 			erc20_swap_contract_address,
 			eth_infura_project_id,
 		)
+		.map_err(|e| e.into())
 	}
 
 	pub fn swap_process<F>(
@@ -2613,7 +2615,7 @@ where
 		eth_infura_project_id: Option<String>,
 	) -> Result<(StateProcessRespond, Vec<Swap>), Error>
 	where
-		F: FnOnce(Message, String, String) -> Result<(bool, String), crate::libwallet::Error>
+		F: FnOnce(Message, String, String) -> Result<(bool, String), libwallet::swap::Error>
 			+ 'static,
 	{
 		owner_swap::swap_process(
@@ -2630,6 +2632,7 @@ where
 			eth_infura_project_id,
 			false,
 		)
+		.map_err(|e| e.into())
 	}
 
 	/// Process swap income message
@@ -2639,6 +2642,7 @@ where
 		message: String,
 	) -> Result<Option<Message>, Error> {
 		owner_swap::swap_income_message(self.wallet_inst.clone(), keychain_mask, &message, None)
+			.map_err(|e| e.into())
 	}
 
 	// decryipt income slate. It is the common routine for most API calls that accept the slates
@@ -2652,11 +2656,11 @@ where
 			let (slate_from, content, sender, _receiver) = self
 				.decrypt_slatepack(keychain_mask, in_slate, None)
 				.map_err(|e| {
-					ErrorKind::SlatepackDecodeError(format!("Unable to decrypt a slatepack, {}", e))
+					Error::SlatepackDecodeError(format!("Unable to decrypt a slatepack, {}", e))
 				})?;
 			(slate_from, Some(content), sender)
 		} else {
-			let slate_from = in_slate.into_slate_plain(false).map_err(|e| e.kind())?;
+			let slate_from = in_slate.into_slate_plain(false)?;
 			(slate_from, None, None)
 		};
 		Ok((slate_from, content, sender))

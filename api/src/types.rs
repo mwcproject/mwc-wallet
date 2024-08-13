@@ -14,7 +14,7 @@
 use crate::core::libtx::secp_ser;
 use crate::keychain::Identifier;
 use crate::libwallet::dalek_ser;
-use crate::libwallet::{Error, ErrorKind};
+use crate::libwallet::Error;
 use crate::libwallet::{
 	ParticipantMessages, StoredProofInfo, TxLogEntry, TxLogEntryType, VersionedSlate,
 };
@@ -86,7 +86,7 @@ impl EncryptedBody {
 	pub fn from_json(json_in: &Value, enc_key: &SecretKey) -> Result<Self, Error> {
 		let mut to_encrypt = serde_json::to_string(&json_in)
 			.map_err(|e| {
-				ErrorKind::APIEncryption(format!("EncryptedBody Enc: Unable to encode JSON, {}", e))
+				Error::APIEncryption(format!("EncryptedBody Enc: Unable to encode JSON, {}", e))
 			})?
 			.as_bytes()
 			.to_vec();
@@ -102,11 +102,10 @@ impl EncryptedBody {
 			&mut to_encrypt,
 		);
 		if let Err(e) = res {
-			return Err(ErrorKind::APIEncryption(format!(
+			return Err(Error::APIEncryption(format!(
 				"EncryptedBody: encryption failed, {}",
 				e
-			))
-			.into());
+			)));
 		}
 
 		Ok(EncryptedBody {
@@ -118,7 +117,7 @@ impl EncryptedBody {
 	/// return serialize JSON self
 	pub fn as_json_value(&self) -> Result<Value, Error> {
 		let res = serde_json::to_value(self).map_err(|e| {
-			ErrorKind::APIEncryption(format!("EncryptedBody: JSON serialization failed, {}", e))
+			Error::APIEncryption(format!("EncryptedBody: JSON serialization failed, {}", e))
 		})?;
 		Ok(res)
 	}
@@ -127,7 +126,7 @@ impl EncryptedBody {
 	pub fn as_json_str(&self) -> Result<String, Error> {
 		let res = self.as_json_value()?;
 		let res = serde_json::to_string(&res).map_err(|e| {
-			ErrorKind::APIEncryption(format!(
+			Error::APIEncryption(format!(
 				"EncryptedBody: JSON String serialization failed, {}",
 				e
 			))
@@ -138,24 +137,23 @@ impl EncryptedBody {
 	/// Return original request
 	pub fn decrypt(&self, dec_key: &SecretKey) -> Result<Value, Error> {
 		let mut to_decrypt = base64::decode(&self.body_enc).map_err(|e| {
-			ErrorKind::APIEncryption(format!(
+			Error::APIEncryption(format!(
 				"EncryptedBody Dec: Encrypted request contains invalid Base64, {}",
 				e
 			))
 		})?;
 
 		let nonce = from_hex(&self.nonce).map_err(|e| {
-			ErrorKind::APIEncryption(format!(
+			Error::APIEncryption(format!(
 				"EncryptedBody Dec: Encrypted request contains invalid nonce, {}",
 				e
 			))
 		})?;
 
 		if nonce.len() < 12 {
-			return Err(ErrorKind::APIEncryption(
+			return Err(Error::APIEncryption(
 				"EncryptedBody Dec: Invalid Nonce length".to_string(),
-			)
-			.into());
+			));
 		}
 		let mut n = [0u8; 12];
 		n.copy_from_slice(&nonce[0..12]);
@@ -165,20 +163,18 @@ impl EncryptedBody {
 		opening_key
 			.open_in_place(aead::Nonce::assume_unique_for_key(n), aad, &mut to_decrypt)
 			.map_err(|e| {
-				ErrorKind::APIEncryption(format!("EncryptedBody: decryption failed, {}", e))
+				Error::APIEncryption(format!("EncryptedBody: decryption failed, {}", e))
 			})?;
 
 		for _ in 0..aead::AES_256_GCM.tag_len() {
 			to_decrypt.pop();
 		}
 
-		let decrypted = String::from_utf8(to_decrypt).map_err(|_| {
-			ErrorKind::APIEncryption("EncryptedBody Dec: Invalid UTF-8".to_string())
-		})?;
+		let decrypted = String::from_utf8(to_decrypt)
+			.map_err(|_| Error::APIEncryption("EncryptedBody Dec: Invalid UTF-8".to_string()))?;
 
-		Ok(serde_json::from_str(&decrypted).map_err(|e| {
-			ErrorKind::APIEncryption(format!("EncryptedBody Dec: Invalid JSON, {}", e))
-		})?)
+		Ok(serde_json::from_str(&decrypted)
+			.map_err(|e| Error::APIEncryption(format!("EncryptedBody Dec: Invalid JSON, {}", e)))?)
 	}
 }
 
@@ -209,7 +205,7 @@ impl EncryptedRequest {
 	/// return serialize JSON self
 	pub fn as_json_value(&self) -> Result<Value, Error> {
 		let res = serde_json::to_value(self).map_err(|e| {
-			ErrorKind::APIEncryption(format!(
+			Error::APIEncryption(format!(
 				"EncryptedRequest: JSON serialization failed, {}",
 				e
 			))
@@ -221,7 +217,7 @@ impl EncryptedRequest {
 	pub fn as_json_str(&self) -> Result<String, Error> {
 		let res = self.as_json_value()?;
 		let res = serde_json::to_string(&res).map_err(|e| {
-			ErrorKind::APIEncryption(format!(
+			Error::APIEncryption(format!(
 				"EncryptedRequest: JSON String serialization failed, {}",
 				e
 			))
@@ -264,7 +260,7 @@ impl EncryptedResponse {
 	/// return serialize JSON self
 	pub fn as_json_value(&self) -> Result<Value, Error> {
 		let res = serde_json::to_value(self).map_err(|e| {
-			ErrorKind::APIEncryption(format!(
+			Error::APIEncryption(format!(
 				"EncryptedResponse: JSON serialization failed, {}",
 				e
 			))
@@ -276,7 +272,7 @@ impl EncryptedResponse {
 	pub fn as_json_str(&self) -> Result<String, Error> {
 		let res = self.as_json_value()?;
 		let res = serde_json::to_string(&res).map_err(|e| {
-			ErrorKind::APIEncryption(format!(
+			Error::APIEncryption(format!(
 				"EncryptedResponse: JSON String serialization failed, {}",
 				e
 			))
@@ -288,8 +284,8 @@ impl EncryptedResponse {
 	pub fn decrypt(&self, dec_key: &SecretKey) -> Result<Value, Error> {
 		self.result
 			.get("Ok")
-			.ok_or(ErrorKind::GenericError(format!(
-				"Not found expetced 'OK' value at result"
+			.ok_or(Error::GenericError(format!(
+				"Not found expetced 'OK' value at response"
 			)))?
 			.decrypt(dec_key)
 	}
@@ -332,7 +328,7 @@ impl EncryptionErrorResponse {
 	/// return serialized JSON self
 	pub fn as_json_value(&self) -> Value {
 		let res = serde_json::to_value(self).map_err(|e| {
-			ErrorKind::APIEncryption(format!(
+			Error::APIEncryption(format!(
 				"EncryptedResponse: JSON serialization failed, {}",
 				e
 			))

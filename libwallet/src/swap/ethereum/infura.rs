@@ -20,7 +20,7 @@ use crate::swap::is_test_mode;
 #[cfg(test)]
 use crate::swap::set_test_mode;
 use crate::swap::types::Currency;
-use crate::swap::ErrorKind;
+use crate::swap::Error;
 use crossbeam_utils::thread::scope;
 use rand::thread_rng;
 use secp256k1::SecretKey;
@@ -76,7 +76,7 @@ impl InfuraNodeClient {
 		wallet: EthereumWallet,
 		contract_addr: String,
 		erc20_contract_addr: String,
-	) -> Result<Self, ErrorKind> {
+	) -> Result<Self, Error> {
 		let client = Self {
 			project_id,
 			chain,
@@ -89,7 +89,7 @@ impl InfuraNodeClient {
 	}
 
 	/// get ether balance
-	pub fn ether_balance(&self) -> Result<(String, u64), ErrorKind> {
+	pub fn ether_balance(&self) -> Result<(String, u64), Error> {
 		let task = async move {
 			let account = to_eth_address(self.wallet.address.clone().unwrap()).unwrap();
 			let url = format!("wss://{}.infura.io/ws/v3/{}", self.chain, self.project_id);
@@ -122,22 +122,22 @@ impl InfuraNodeClient {
 						let balance = to_norm(balance_gwei.to_string().as_str(), "9");
 						Ok((format!("{}", balance.with_scale(6)), balance_gwei.as_u64()))
 					}
-					_ => Err(ErrorKind::EthContractCallError(
+					_ => Err(Error::EthContractCallError(
 						"Get Ether Balance Failed!".to_string(),
 					)),
 				},
-				_ => Err(ErrorKind::EthContractCallError(
+				_ => Err(Error::EthContractCallError(
 					"Get Ether Balance Failed!".to_string(),
 				)),
 			},
-			_ => Err(ErrorKind::EthContractCallError(
+			_ => Err(Error::EthContractCallError(
 				"Get Ether Balance Failed!".to_string(),
 			)),
 		}
 	}
 
 	/// get erc20 token balance
-	pub fn erc20_balance(&self, currency: Currency) -> Result<(String, u64), ErrorKind> {
+	pub fn erc20_balance(&self, currency: Currency) -> Result<(String, u64), Error> {
 		let token_address = currency.erc20_token_address()?;
 		let task = async move {
 			let url = format!("wss://{}.infura.io/ws/v3/{}", self.chain, self.project_id);
@@ -197,22 +197,22 @@ impl InfuraNodeClient {
 						);
 						Ok((format!("{}", balance_norm), balance.as_u64()))
 					}
-					_ => Err(ErrorKind::EthContractCallError(
+					_ => Err(Error::EthContractCallError(
 						"Get ERC20 Token Balance Of Failed!".to_string(),
 					)),
 				},
-				_ => Err(ErrorKind::EthContractCallError(
+				_ => Err(Error::EthContractCallError(
 					"Get ERC20 Token Balance Of Failed!".to_string(),
 				)),
 			},
-			_ => Err(ErrorKind::EthContractCallError(
+			_ => Err(Error::EthContractCallError(
 				"Get ERC20 Token Balance Of Failed!".to_string(),
 			)),
 		}
 	}
 
 	/// ether transfer
-	fn ether_transfer(&self, to: Address, value: U256, gas_limit: U256) -> Result<H256, ErrorKind> {
+	fn ether_transfer(&self, to: Address, value: U256, gas_limit: U256) -> Result<H256, Error> {
 		let task = async move {
 			// get web3 handle
 			let url = format!("wss://{}.infura.io/ws/v3/{}", self.chain, self.project_id);
@@ -268,22 +268,22 @@ impl InfuraNodeClient {
 				Ok(res) => match res {
 					Ok(res) => match res {
 						Ok(tx_hash) => Ok(tx_hash),
-						_ => Err(ErrorKind::EthContractCallError(
+						_ => Err(Error::EthContractCallError(
 							"eth transfer failure!".to_string(),
 						)),
 					},
-					_ => Err(ErrorKind::EthContractCallError(
+					_ => Err(Error::EthContractCallError(
 						"eth transfer failure!".to_string(),
 					)),
 				},
 				Err(e) => {
 					warn!("transfer error: --- {:?}", e);
-					Err(ErrorKind::EthContractCallError(
+					Err(Error::EthContractCallError(
 						"eth transfer failure!".to_string(),
 					))
 				}
 			},
-			_ => Err(ErrorKind::EthContractCallError(
+			_ => Err(Error::EthContractCallError(
 				"eth transfer failure!".to_string(),
 			)),
 		}
@@ -296,7 +296,7 @@ impl InfuraNodeClient {
 		to: Address,
 		value: U256,
 		gas_limit: U256,
-	) -> Result<H256, ErrorKind> {
+	) -> Result<H256, Error> {
 		let token_address = currency.erc20_token_address()?;
 		let task = async move {
 			let url = format!("wss://{}.infura.io/ws/v3/{}", self.chain, self.project_id);
@@ -355,16 +355,16 @@ impl InfuraNodeClient {
 					Ok(tx_hash) => Ok(tx_hash),
 					Err(e) => {
 						warn!("erc20_transfer error: --- {:?}", e);
-						Err(ErrorKind::EthContractCallError(
+						Err(Error::EthContractCallError(
 							"ERC20 Transfer Failed!".to_string(),
 						))
 					}
 				},
-				_ => Err(ErrorKind::EthContractCallError(
+				_ => Err(Error::EthContractCallError(
 					"ERC20 Transfer Failed!".to_string(),
 				)),
 			},
-			_ => Err(ErrorKind::EthContractCallError(
+			_ => Err(Error::EthContractCallError(
 				"ERC20 Transfer Failed!".to_string(),
 			)),
 		}
@@ -378,7 +378,7 @@ impl InfuraNodeClient {
 		participant: Address,
 		value: U256,
 		gas_limit: U256,
-	) -> Result<H256, ErrorKind> {
+	) -> Result<H256, Error> {
 		let task = async move {
 			let url = format!("wss://{}.infura.io/ws/v3/{}", self.chain, self.project_id);
 			let transport = web3::transports::WebSocket::new(url.as_str()).await;
@@ -443,16 +443,16 @@ impl InfuraNodeClient {
 					Ok(tx_hash) => Ok(tx_hash),
 					Err(e) => {
 						warn!("ether initiate error: --- {:?}", e);
-						Err(ErrorKind::EthContractCallError(
+						Err(Error::EthContractCallError(
 							"Buyer Initiate Ether Swap Trade Failed!".to_string(),
 						))
 					}
 				},
-				_ => Err(ErrorKind::EthContractCallError(
+				_ => Err(Error::EthContractCallError(
 					"Buyer Initiate Ether Swap Trade Failed!".to_string(),
 				)),
 			},
-			_ => Err(ErrorKind::EthContractCallError(
+			_ => Err(Error::EthContractCallError(
 				"Buyer Initiate Ether Swap Trade Failed!".to_string(),
 			)),
 		}
@@ -467,7 +467,7 @@ impl InfuraNodeClient {
 		participant: Address,
 		value: U256,
 		gas_limit: U256,
-	) -> Result<H256, ErrorKind> {
+	) -> Result<H256, Error> {
 		let token_address = currency.erc20_token_address()?;
 		let task = async move {
 			let url = format!("wss://{}.infura.io/ws/v3/{}", self.chain, self.project_id);
@@ -539,18 +539,18 @@ impl InfuraNodeClient {
 					Ok(tx_hash) => Ok(tx_hash),
 					Err(e) => {
 						warn!("erc20 initiate error: --- {:?}", e);
-						Err(ErrorKind::EthContractCallError(format!(
+						Err(Error::EthContractCallError(format!(
 							"Buyer Initiate {} Swap Trade Failed!",
 							Currency::Btc
 						)))
 					}
 				},
-				_ => Err(ErrorKind::EthContractCallError(format!(
+				_ => Err(Error::EthContractCallError(format!(
 					"Buyer Initiate {} Swap Trade Failed!",
 					Currency::Ether
 				))),
 			},
-			_ => Err(ErrorKind::EthContractCallError(format!(
+			_ => Err(Error::EthContractCallError(format!(
 				"Buyer Initiate {} Swap Trade Failed!",
 				Currency::Usdc
 			))),
@@ -563,7 +563,7 @@ impl InfuraNodeClient {
 		address_from_secret: Address,
 		secret_key: SecretKey,
 		gas_limit: U256,
-	) -> Result<H256, ErrorKind> {
+	) -> Result<H256, Error> {
 		let task = async move {
 			let url = format!("wss://{}.infura.io/ws/v3/{}", self.chain, self.project_id);
 			let transport = web3::transports::WebSocket::new(url.as_str()).await;
@@ -682,16 +682,16 @@ impl InfuraNodeClient {
 					Ok(tx_hash) => Ok(tx_hash),
 					Err(e) => {
 						warn!("redeem error: --- {:?}", e);
-						Err(ErrorKind::EthContractCallError(
+						Err(Error::EthContractCallError(
 							"Seller Redeem Ether Failed!".to_string(),
 						))
 					}
 				},
-				_ => Err(ErrorKind::EthContractCallError(
+				_ => Err(Error::EthContractCallError(
 					"Seller Redeem Ether Failed!".to_string(),
 				)),
 			},
-			_ => Err(ErrorKind::EthContractCallError(
+			_ => Err(Error::EthContractCallError(
 				"Seller Redeem Ether Failed!".to_string(),
 			)),
 		}
@@ -703,7 +703,7 @@ impl InfuraNodeClient {
 		address_from_secret: Address,
 		secret_key: SecretKey,
 		gas_limit: U256,
-	) -> Result<H256, ErrorKind> {
+	) -> Result<H256, Error> {
 		// let token_address = currency.erc20_token_address()?;
 		let task = async move {
 			let url = format!("wss://{}.infura.io/ws/v3/{}", self.chain, self.project_id);
@@ -823,16 +823,16 @@ impl InfuraNodeClient {
 					Ok(tx_hash) => Ok(tx_hash),
 					Err(e) => {
 						warn!("redeem error: --- {:?}", e);
-						Err(ErrorKind::EthContractCallError(
+						Err(Error::EthContractCallError(
 							"Seller Redeem ERC20-Token Failed!".to_string(),
 						))
 					}
 				},
-				_ => Err(ErrorKind::EthContractCallError(
+				_ => Err(Error::EthContractCallError(
 					"Seller Redeem ERC20-Token Failed!".to_string(),
 				)),
 			},
-			_ => Err(ErrorKind::EthContractCallError(
+			_ => Err(Error::EthContractCallError(
 				"Seller Redeem ERC20-Token Failed!".to_string(),
 			)),
 		}
@@ -846,7 +846,7 @@ impl EthNodeClient for InfuraNodeClient {
 	}
 
 	/// Fetch the current chain height
-	fn height(&self) -> Result<u64, ErrorKind> {
+	fn height(&self) -> Result<u64, Error> {
 		let task = async move {
 			let url = format!("wss://{}.infura.io/ws/v3/{}", self.chain, self.project_id);
 			let transport = web3::transports::WebSocket::new(url.as_str()).await;
@@ -874,22 +874,22 @@ impl EthNodeClient for InfuraNodeClient {
 			Ok(res) => match res {
 				Ok(res) => match res {
 					Ok(block_number) => Ok(block_number.as_u64()),
-					_ => Err(ErrorKind::EthContractCallError(
+					_ => Err(Error::EthContractCallError(
 						"Get Ethereum Height Failed!".to_string(),
 					)),
 				},
-				_ => Err(ErrorKind::EthContractCallError(
+				_ => Err(Error::EthContractCallError(
 					"Get Ethereum Height Failed!".to_string(),
 				)),
 			},
-			_ => Err(ErrorKind::EthContractCallError(
+			_ => Err(Error::EthContractCallError(
 				"Get Ethereum Height Failed!".to_string(),
 			)),
 		}
 	}
 
 	/// get wallet balance
-	fn balance(&self, currency: Currency) -> Result<(String, u64), ErrorKind> {
+	fn balance(&self, currency: Currency) -> Result<(String, u64), Error> {
 		if !currency.is_erc20() {
 			self.ether_balance()
 		} else {
@@ -898,7 +898,7 @@ impl EthNodeClient for InfuraNodeClient {
 	}
 
 	/// Retrieve transaction receipt
-	fn retrieve_receipt(&self, tx_hash: H256) -> Result<TransactionReceipt, ErrorKind> {
+	fn retrieve_receipt(&self, tx_hash: H256) -> Result<TransactionReceipt, Error> {
 		let task = async move {
 			let url = format!("wss://{}.infura.io/ws/v3/{}", self.chain, self.project_id);
 			let transport = web3::transports::WebSocket::new(url.as_str()).await;
@@ -928,20 +928,20 @@ impl EthNodeClient for InfuraNodeClient {
 					Some(res) => match res {
 						Ok(res) => match res {
 							Some(receipt) => Ok(receipt),
-							_ => Err(ErrorKind::EthRetrieveTransReciptError),
+							_ => Err(Error::EthRetrieveTransReciptError),
 						},
-						_ => Err(ErrorKind::EthRetrieveTransReciptError),
+						_ => Err(Error::EthRetrieveTransReciptError),
 					},
-					_ => Err(ErrorKind::EthRetrieveTransReciptError),
+					_ => Err(Error::EthRetrieveTransReciptError),
 				},
-				_ => Err(ErrorKind::EthRetrieveTransReciptError),
+				_ => Err(Error::EthRetrieveTransReciptError),
 			},
-			_ => Err(ErrorKind::EthRetrieveTransReciptError),
+			_ => Err(Error::EthRetrieveTransReciptError),
 		}
 	}
 
 	/// Send coins
-	fn transfer(&self, currency: Currency, to: Address, value: u64) -> Result<H256, ErrorKind> {
+	fn transfer(&self, currency: Currency, to: Address, value: u64) -> Result<H256, Error> {
 		let gas_limit = U256::from(TRANSACTION_DEFAULT_GAS_LIMIT * 1000_000_000u64);
 		let balance_ether = self.balance(Currency::Ether)?;
 		let balance_ether = U256::from(balance_ether.1) * U256::exp10(9);
@@ -949,12 +949,12 @@ impl EthNodeClient for InfuraNodeClient {
 		if !currency.is_erc20() {
 			let value = U256::from(value) * U256::exp10(9);
 			if balance_ether < gas_limit + value {
-				return Err(ErrorKind::EthBalanceNotEnough);
+				return Err(Error::EthBalanceNotEnough);
 			}
 			self.ether_transfer(to, value, gas_limit)
 		} else {
 			if balance_ether < gas_limit {
-				return Err(ErrorKind::EthBalanceNotEnough);
+				return Err(Error::EthBalanceNotEnough);
 			}
 
 			let balance_token = self.balance(currency)?;
@@ -969,10 +969,7 @@ impl EthNodeClient for InfuraNodeClient {
 			};
 
 			if balance_token < value {
-				return Err(ErrorKind::ERC20TokenBalanceNotEnough(format!(
-					"{}",
-					currency
-				)));
+				return Err(Error::ERC20TokenBalanceNotEnough(format!("{}", currency)));
 			}
 
 			self.erc20_transfer(currency, to, value, gas_limit)
@@ -980,13 +977,13 @@ impl EthNodeClient for InfuraNodeClient {
 	}
 
 	/// erc20 approve swap offer
-	fn erc20_approve(&self, currency: Currency, value: u64, gas: f32) -> Result<H256, ErrorKind> {
+	fn erc20_approve(&self, currency: Currency, value: u64, gas: f32) -> Result<H256, Error> {
 		let gas_limit = U256::from(gas as u64) * 1000_000_000u64;
 		let balance_ether = self.balance(Currency::Ether)?;
 		let balance_ether = U256::from(balance_ether.1) * U256::exp10(9);
 
 		if balance_ether < gas_limit {
-			return Err(ErrorKind::EthBalanceNotEnough);
+			return Err(Error::EthBalanceNotEnough);
 		}
 
 		let balance_token = self.balance(currency)?;
@@ -1002,10 +999,7 @@ impl EthNodeClient for InfuraNodeClient {
 		};
 
 		if balance_token < value {
-			return Err(ErrorKind::ERC20TokenBalanceNotEnough(format!(
-				"{}",
-				currency
-			)));
+			return Err(Error::ERC20TokenBalanceNotEnough(format!("{}", currency)));
 		}
 
 		let token_address = currency.erc20_token_address()?;
@@ -1073,18 +1067,18 @@ impl EthNodeClient for InfuraNodeClient {
 					Ok(tx_hash) => Ok(tx_hash),
 					Err(e) => {
 						warn!("erc20 approve error: --- {:?}", e);
-						Err(ErrorKind::EthContractCallError(format!(
+						Err(Error::EthContractCallError(format!(
 							"{}:  ERC20 ApproveFailed!",
 							currency
 						)))
 					}
 				},
-				_ => Err(ErrorKind::EthContractCallError(format!(
+				_ => Err(Error::EthContractCallError(format!(
 					"{}:  ERC20 ApproveFailed!",
 					currency
 				))),
 			},
-			_ => Err(ErrorKind::EthContractCallError(format!(
+			_ => Err(Error::EthContractCallError(format!(
 				"{}:  ERC20 ApproveFailed!",
 				currency
 			))),
@@ -1100,7 +1094,7 @@ impl EthNodeClient for InfuraNodeClient {
 		participant: Address,
 		value: u64,
 		gas: f32,
-	) -> Result<H256, ErrorKind> {
+	) -> Result<H256, Error> {
 		let gas_limit = U256::from(gas as u64) * 1000_000_000u64;
 		let balance_ether = self.balance(Currency::Ether)?;
 		let balance_ether = U256::from(balance_ether.1) * U256::exp10(9);
@@ -1108,7 +1102,7 @@ impl EthNodeClient for InfuraNodeClient {
 		if !currency.is_erc20() {
 			let value = U256::from(value) * U256::exp10(9);
 			if balance_ether < gas_limit + value {
-				return Err(ErrorKind::EthBalanceNotEnough);
+				return Err(Error::EthBalanceNotEnough);
 			}
 
 			self.ether_initiate(
@@ -1121,7 +1115,7 @@ impl EthNodeClient for InfuraNodeClient {
 		} else {
 			// one gas_limit for approve, the other one for initiate
 			if balance_ether < gas_limit {
-				return Err(ErrorKind::EthBalanceNotEnough);
+				return Err(Error::EthBalanceNotEnough);
 			}
 
 			let value = match currency.is_expo_shrinked18to9() {
@@ -1147,12 +1141,12 @@ impl EthNodeClient for InfuraNodeClient {
 		address_from_secret: Address,
 		secret_key: SecretKey,
 		gas_limit: f32,
-	) -> Result<H256, ErrorKind> {
+	) -> Result<H256, Error> {
 		let gas_limit = U256::from(gas_limit as u64) * 1000_000_000u64;
 		let balance_ether = self.balance(Currency::Ether)?;
 		let balance_ether = U256::from(balance_ether.1) * U256::exp10(9);
 		if balance_ether < gas_limit {
-			return Err(ErrorKind::EthBalanceNotEnough);
+			return Err(Error::EthBalanceNotEnough);
 		}
 
 		if !currency.is_erc20() {
@@ -1168,12 +1162,12 @@ impl EthNodeClient for InfuraNodeClient {
 		currency: Currency,
 		address_from_secret: Address,
 		gas_limit: f32,
-	) -> Result<H256, ErrorKind> {
+	) -> Result<H256, Error> {
 		let gas_limit = U256::from(gas_limit as u64) * U256::exp10(9);
 		let balance_ether = self.balance(Currency::Ether)?;
 		let balance_ether = U256::from(balance_ether.1) * U256::exp10(9);
 		if balance_ether < gas_limit {
-			return Err(ErrorKind::EthBalanceNotEnough);
+			return Err(Error::EthBalanceNotEnough);
 		}
 
 		let height = self.height()?;
@@ -1184,7 +1178,7 @@ impl EthNodeClient for InfuraNodeClient {
 			height, refund_time_blocks
 		);
 		if height < refund_time_blocks {
-			return Err(ErrorKind::EthRefundTimeNotArrived);
+			return Err(Error::EthRefundTimeNotArrived);
 		}
 
 		let task = async move {
@@ -1262,18 +1256,18 @@ impl EthNodeClient for InfuraNodeClient {
 					Ok(tx_hash) => Ok(tx_hash),
 					Err(e) => {
 						warn!("refund error: --- {:?}", e);
-						Err(ErrorKind::EthContractCallError(format!(
+						Err(Error::EthContractCallError(format!(
 							"Buyer Refund {} Failed!",
 							currency
 						)))
 					}
 				},
-				_ => Err(ErrorKind::EthContractCallError(format!(
+				_ => Err(Error::EthContractCallError(format!(
 					"Buyer Refund {} Failed!",
 					currency
 				))),
 			},
-			_ => Err(ErrorKind::EthContractCallError(format!(
+			_ => Err(Error::EthContractCallError(format!(
 				"Buyer Refund {} Failed!",
 				currency
 			))),
@@ -1285,7 +1279,7 @@ impl EthNodeClient for InfuraNodeClient {
 		&self,
 		currency: Currency,
 		address_from_secret: Address,
-	) -> Result<(u64, Option<Address>, Address, Address, u64), ErrorKind> {
+	) -> Result<(u64, Option<Address>, Address, Address, u64), Error> {
 		let task = async move {
 			let url = format!("wss://{}.infura.io/ws/v3/{}", self.chain, self.project_id);
 			let transport = web3::transports::WebSocket::new(url.as_str()).await;
@@ -1372,22 +1366,22 @@ impl EthNodeClient for InfuraNodeClient {
 								balance.as_u64(),
 							))
 						}
-						_ => Err(ErrorKind::InfuraNodeClient(format!(
+						_ => Err(Error::InfuraNodeClient(format!(
 							"Get Swap Details {} Failed!",
 							currency
 						))),
 					},
-					_ => Err(ErrorKind::InfuraNodeClient(format!(
+					_ => Err(Error::InfuraNodeClient(format!(
 						"Get Swap Details {} Failed!",
 						currency
 					))),
 				},
-				_ => Err(ErrorKind::InfuraNodeClient(format!(
+				_ => Err(Error::InfuraNodeClient(format!(
 					"Get Swap Details {} Failed!",
 					currency
 				))),
 			},
-			_ => Err(ErrorKind::InfuraNodeClient(format!(
+			_ => Err(Error::InfuraNodeClient(format!(
 				"Get Swap Details {} Failed!",
 				currency
 			))),

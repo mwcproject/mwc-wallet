@@ -27,15 +27,11 @@ use grin_wallet_util::grin_api;
 use grin_wallet_util::grin_core;
 use grin_wallet_util::grin_keychain;
 use grin_wallet_util::grin_p2p;
-use grin_wallet_util::grin_store;
 use grin_wallet_util::grin_util;
 
 use grin_wallet_util as util;
 
 use blake2_rfc as blake2;
-
-use failure;
-extern crate failure_derive;
 
 #[macro_use]
 extern crate serde_derive;
@@ -73,7 +69,7 @@ pub use crate::slatepack::{SlatePurpose, Slatepack, SlatepackArmor, Slatepacker}
 
 pub use bitcoin::Address as BitcoinAddress;
 
-pub use crate::error::{Error, ErrorKind};
+pub use crate::error::Error;
 pub use crate::slate::{ParticipantData, ParticipantMessageData, ParticipantMessages, Slate};
 pub use crate::slate_versions::{
 	SlateVersion, VersionedCoinbase, VersionedSlate, CURRENT_SLATE_VERSION,

@@ -165,7 +165,7 @@ fn wallet_self_spend() {
 	let test_dir = "test_output/self_spend";
 	setup(test_dir);
 	if let Err(e) = self_spend_impl(test_dir) {
-		panic!("Libwallet Error: {} - {}", e, e.backtrace().unwrap());
+		panic!("Libwallet Error: {}", e);
 	}
 	clean_output_dir(test_dir);
 }

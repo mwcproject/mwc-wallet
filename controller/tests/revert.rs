@@ -369,7 +369,7 @@ fn tx_revert_reconfirm() {
 	global::set_global_chain_type(global::ChainTypes::AutomatedTesting);
 	setup(test_dir);
 	if let Err(e) = revert_reconfirm_impl(test_dir) {
-		panic!("Libwallet Error: {} - {}", e, e.backtrace().unwrap());
+		panic!("Libwallet Error: {}", e);
 	}
 	clean_output_dir(test_dir);
 }
@@ -380,7 +380,7 @@ fn tx_revert_cancel() {
 	global::set_global_chain_type(global::ChainTypes::AutomatedTesting);
 	setup(test_dir);
 	if let Err(e) = revert_cancel_impl(test_dir) {
-		panic!("Libwallet Error: {} - {}", e, e.backtrace().unwrap());
+		panic!("Libwallet Error: {}", e);
 	}
 	clean_output_dir(test_dir);
 }

@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::error::ErrorKind;
+use super::error::Error;
 use super::swap::Swap;
 use super::types::{Context, Currency};
 use super::Keychain;
@@ -38,7 +38,7 @@ pub trait SwapApi<K: Keychain>: Sync + Send {
 		_keychain: &K,
 		secondary_currency: Currency,
 		is_seller: bool,
-	) -> Result<usize, ErrorKind>;
+	) -> Result<usize, Error>;
 
 	/// Creating buyer/seller context. Keys are used to generate this session secrets.
 	/// Number of them defined by context_key_count
@@ -52,7 +52,7 @@ pub trait SwapApi<K: Keychain>: Sync + Send {
 		change_amount: u64,
 		keys: Vec<Identifier>,
 		parent_key_id: Identifier,
-	) -> Result<Context, ErrorKind>;
+	) -> Result<Context, Error>;
 
 	/// Seller creates a swap offer and creates the core Swap Object.
 	/// It is a starting point for Seller swap workflow
@@ -79,7 +79,7 @@ pub trait SwapApi<K: Keychain>: Sync + Send {
 		eth_redirect_out_wallet: Option<bool>,
 		dry_run: bool,
 		tag: Option<String>,
-	) -> Result<Swap, ErrorKind>;
+	) -> Result<Swap, Error>;
 
 	/// get state machine fro this trade.
 	fn get_fsm(&self, keychain: &K, swap: &Swap) -> StateMachine;
@@ -89,7 +89,7 @@ pub trait SwapApi<K: Keychain>: Sync + Send {
 		&self,
 		_keychain: &K,
 		swap: &Swap,
-	) -> Result<SwapTransactionsConfirmations, ErrorKind>;
+	) -> Result<SwapTransactionsConfirmations, Error>;
 
 	/// Check How much BTC coins are locked on the chain
 	/// Return output with at least 1 confirmations because it is needed for refunds or redeems. Both party want to take everything
@@ -99,7 +99,7 @@ pub trait SwapApi<K: Keychain>: Sync + Send {
 		swap: &Swap,
 		confirmations_needed: u64,
 		secp: &Secp256k1,
-	) -> Result<(u64, u64, u64), ErrorKind>;
+	) -> Result<(u64, u64, u64), Error>;
 
 	/// Build secondary update part of the offer message
 	fn build_offer_message_secondary_update(
@@ -123,7 +123,7 @@ pub trait SwapApi<K: Keychain>: Sync + Send {
 		swap: &mut Swap,
 		context: &Context,
 		post_tx: bool,
-	) -> Result<(), ErrorKind>;
+	) -> Result<(), Error>;
 
 	/// Get a secondary addresses for the lock account
 	/// We can have several addresses because of different formats
@@ -131,11 +131,11 @@ pub trait SwapApi<K: Keychain>: Sync + Send {
 		&self,
 		swap: &Swap,
 		secp: &Secp256k1,
-	) -> Result<Vec<String>, ErrorKind>;
+	) -> Result<Vec<String>, Error>;
 
 	/// Check if tx fee for the secondary is different from the posted. compare swap.secondary_fee with
 	/// posted BTC secondary_fee
-	fn is_secondary_tx_fee_changed(&self, swap: &Swap) -> Result<bool, ErrorKind>;
+	fn is_secondary_tx_fee_changed(&self, swap: &Swap) -> Result<bool, Error>;
 
 	/// Post Refund transaction.
 	fn post_secondary_refund_tx(
@@ -145,16 +145,16 @@ pub trait SwapApi<K: Keychain>: Sync + Send {
 		swap: &mut Swap,
 		refund_address: Option<String>,
 		post_tx: bool,
-	) -> Result<(), ErrorKind>;
+	) -> Result<(), Error>;
 
 	/// deposit secondary currecny to lock account.
-	fn post_secondary_lock_tx(&self, swap: &mut Swap) -> Result<(), ErrorKind>;
+	fn post_secondary_lock_tx(&self, swap: &mut Swap) -> Result<(), Error>;
 
 	/// transfer amount to dedicated address.
-	fn transfer_scondary(&self, swap: &mut Swap) -> Result<(), ErrorKind>;
+	fn transfer_scondary(&self, swap: &mut Swap) -> Result<(), Error>;
 
 	/// Validate clients. We want to be sure that the clients able to acceess the servers
-	fn test_client_connections(&self) -> Result<(), ErrorKind>;
+	fn test_client_connections(&self) -> Result<(), Error>;
 }
 
 /// Create an appropriate instance for the Currency
@@ -165,7 +165,7 @@ pub fn create_btc_instance<'a, C, K>(
 	node_client: C,
 	electrum_node_uri1: String,
 	electrum_node_uri2: String,
-) -> Result<Box<dyn SwapApi<K> + 'a>, ErrorKind>
+) -> Result<Box<dyn SwapApi<K> + 'a>, Error>
 where
 	C: NodeClient + 'a,
 	K: Keychain + 'a,
@@ -193,7 +193,7 @@ where
 				Arc::new(Mutex::new(secondary_currency_node_client2)),
 			)))
 		}
-		_ => Err(ErrorKind::InvalidCurrency(
+		_ => Err(Error::InvalidCurrency(
 			"unknow btc family coins".to_string(),
 		)),
 	}
@@ -209,7 +209,7 @@ pub fn create_eth_instance<'a, C, K>(
 	eth_swap_contract_addr: String,
 	erc20_swap_contract_addr: String,
 	eth_infura_project_id: String,
-) -> Result<Box<dyn SwapApi<K> + 'a>, ErrorKind>
+) -> Result<Box<dyn SwapApi<K> + 'a>, Error>
 where
 	C: NodeClient + 'a,
 	K: Keychain + 'a,
@@ -247,7 +247,7 @@ where
 				Arc::new(Mutex::new(secondary_currency_node_client)),
 			)))
 		}
-		_ => Err(ErrorKind::InvalidCurrency(
+		_ => Err(Error::InvalidCurrency(
 			"unknow ethereum family coins".to_string(),
 		)),
 	}

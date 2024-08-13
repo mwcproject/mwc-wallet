@@ -16,7 +16,7 @@
 //! around during an interactive wallet exchange
 
 use crate::blake2::blake2b::blake2b;
-use crate::error::{Error, ErrorKind};
+use crate::error::Error;
 use crate::grin_core::core::amount_to_hr_string;
 use crate::grin_core::core::committed::Committed;
 use crate::grin_core::core::transaction::{
@@ -281,7 +281,7 @@ impl Slate {
 	pub fn tx_or_err(&self) -> Result<&Transaction, Error> {
 		match &self.tx {
 			Some(t) => Ok(t),
-			None => Err(ErrorKind::SlateTransactionRequired.into()),
+			None => Err(Error::SlateTransactionRequired),
 		}
 	}
 
@@ -289,7 +289,7 @@ impl Slate {
 	pub fn tx_or_err_mut(&mut self) -> Result<&mut Transaction, Error> {
 		match &mut self.tx {
 			Some(t) => Ok(t),
-			None => Err(ErrorKind::SlateTransactionRequired.into()),
+			None => Err(Error::SlateTransactionRequired),
 		}
 	}
 
@@ -315,11 +315,10 @@ impl Slate {
 	pub fn get_lock_height_check(&self) -> Result<u64, Error> {
 		match self.kernel_features {
 			2 => Ok(self.lock_height),
-			_ => Err(ErrorKind::InvalidKernelFeatures(format!(
+			_ => Err(Error::InvalidKernelFeatures(format!(
 				"Expected legit Lock kernel, but get kernel {} and lock_height {}",
 				self.kernel_features, self.lock_height
-			))
-			.into()),
+			))),
 		}
 	}
 
@@ -338,16 +337,15 @@ impl Slate {
 	/// Set lock height and LockHeight Kernel type
 	pub fn set_lock_height(&mut self, lock_height: u64) -> Result<(), Error> {
 		if lock_height == 0 {
-			return Err(
-				ErrorKind::InvalidKernelFeatures(format!("Setting zero lock height")).into(),
-			);
+			return Err(Error::InvalidKernelFeatures(format!(
+				"Setting zero lock height"
+			)));
 		}
 		if lock_height <= self.height {
-			return Err(ErrorKind::InvalidKernelFeatures(format!(
+			return Err(Error::InvalidKernelFeatures(format!(
 				"Lock height {} is lower then slate height {}",
 				lock_height, self.height
-			))
-			.into());
+			)));
 		}
 		self.lock_height = lock_height;
 		self.kernel_features = 2;
@@ -359,11 +357,10 @@ impl Slate {
 	/// Currently nobody expectign to call it
 	pub fn set_related_height(&mut self, lock_height: u64) -> Result<(), Error> {
 		if lock_height == 0 || lock_height >= WEEK_HEIGHT {
-			return Err(ErrorKind::InvalidKernelFeatures(format!(
+			return Err(Error::InvalidKernelFeatures(format!(
 				"Setting wrong related height {}",
 				lock_height
-			))
-			.into());
+			)));
 		}
 		self.lock_height = lock_height;
 		self.kernel_features = 3;
@@ -373,7 +370,7 @@ impl Slate {
 	/// Attempt to find slate version
 	pub fn parse_slate_version(slate_json: &str) -> Result<u16, Error> {
 		let probe: SlateVersionProbe = serde_json::from_str(slate_json).map_err(|e| {
-			ErrorKind::SlateVersionParse(format!(
+			Error::SlateVersionParse(format!(
 				"Unable to find slate version at {}, {}",
 				slate_json, e
 			))
@@ -417,14 +414,14 @@ impl Slate {
 
 		let v3: SlateV3 = match version {
 			3 => serde_json::from_str(slate_json).map_err(|e| {
-				ErrorKind::SlateDeser(format!(
+				Error::SlateDeser(format!(
 					"Json to SlateV3 conversion failed for {}, {}",
 					slate_json, e
 				))
 			})?,
 			2 => {
 				let v2: SlateV2 = serde_json::from_str(slate_json).map_err(|e| {
-					ErrorKind::SlateDeser(format!(
+					Error::SlateDeser(format!(
 						"Json to SlateV2 conversion failed for {}, {}",
 						slate_json, e
 					))
@@ -433,7 +430,7 @@ impl Slate {
 				ret.ttl_cutoff_height = ttl_cutoff_height;
 				ret
 			}
-			_ => return Err(ErrorKind::SlateVersion(version).into()),
+			_ => return Err(Error::SlateVersion(version)),
 		};
 		Ok(v3.to_slate(true)?)
 	}
@@ -474,54 +471,55 @@ impl Slate {
 	/// Compare two slates for send: sended and responded. Just want to check if sender didn't mess with slate
 	pub fn compare_slates_send(send_slate: &Self, respond_slate: &Self) -> Result<(), Error> {
 		if send_slate.id != respond_slate.id {
-			return Err(ErrorKind::SlateValidation("uuid mismatch".to_string()).into());
+			return Err(Error::SlateValidation("uuid mismatch".to_string()));
 		}
 		if !send_slate.compact_slate {
 			if send_slate.amount != respond_slate.amount {
-				return Err(ErrorKind::SlateValidation("amount mismatch".to_string()).into());
+				return Err(Error::SlateValidation("amount mismatch".to_string()));
 			}
 			if send_slate.fee != respond_slate.fee {
-				return Err(ErrorKind::SlateValidation("fee mismatch".to_string()).into());
+				return Err(Error::SlateValidation("fee mismatch".to_string()));
 			}
 			// Checking transaction...
 			// Inputs must match exactly
 			if send_slate.tx_or_err()?.body.inputs != respond_slate.tx_or_err()?.body.inputs {
-				return Err(ErrorKind::SlateValidation("inputs mismatch".to_string()).into());
+				return Err(Error::SlateValidation("inputs mismatch".to_string()));
 			}
 
 			// Checking if participant data match each other
 			for pat_data in &send_slate.participant_data {
 				if !respond_slate.participant_data.contains(&pat_data) {
-					return Err(ErrorKind::SlateValidation(
+					return Err(Error::SlateValidation(
 						"participant data mismatch".to_string(),
-					)
-					.into());
+					));
 				}
 			}
 
 			// Respond outputs must include send_slate's. Expected that some was added
 			for output in &send_slate.tx_or_err()?.body.outputs {
 				if !respond_slate.tx_or_err()?.body.outputs.contains(&output) {
-					return Err(ErrorKind::SlateValidation("outputs mismatch".to_string()).into());
+					return Err(Error::SlateValidation("outputs mismatch".to_string()));
 				}
 			}
 
 			// Kernels must match exactly
 			if send_slate.tx_or_err()?.body.kernels != respond_slate.tx_or_err()?.body.kernels {
-				return Err(ErrorKind::SlateValidation("kernels mismatch".to_string()).into());
+				return Err(Error::SlateValidation("kernels mismatch".to_string()));
 			}
 		}
 		if send_slate.kernel_features != respond_slate.kernel_features {
-			return Err(ErrorKind::SlateValidation("kernel_features mismatch".to_string()).into());
+			return Err(Error::SlateValidation(
+				"kernel_features mismatch".to_string(),
+			));
 		}
 		if send_slate.lock_height != respond_slate.lock_height {
-			return Err(ErrorKind::SlateValidation("lock_height mismatch".to_string()).into());
+			return Err(Error::SlateValidation("lock_height mismatch".to_string()));
 		}
 		if send_slate.height != respond_slate.height {
-			return Err(ErrorKind::SlateValidation("height mismatch".to_string()).into());
+			return Err(Error::SlateValidation("height mismatch".to_string()));
 		}
 		if send_slate.ttl_cutoff_height != respond_slate.ttl_cutoff_height {
-			return Err(ErrorKind::SlateValidation("ttl_cutoff mismatch".to_string()).into());
+			return Err(Error::SlateValidation("ttl_cutoff mismatch".to_string()));
 		}
 
 		Ok(())
@@ -530,30 +528,30 @@ impl Slate {
 	/// Compare two slates for invoice: sended and responded. Just want to check if sender didn't mess with slate
 	pub fn compare_slates_invoice(invoice_slate: &Self, respond_slate: &Self) -> Result<(), Error> {
 		if invoice_slate.id != respond_slate.id {
-			return Err(ErrorKind::SlateValidation("uuid mismatch".to_string()).into());
+			return Err(Error::SlateValidation("uuid mismatch".to_string()));
 		}
 		if invoice_slate.amount != respond_slate.amount {
-			return Err(ErrorKind::SlateValidation("amount mismatch".to_string()).into());
+			return Err(Error::SlateValidation("amount mismatch".to_string()));
 		}
 		if invoice_slate.height != respond_slate.height {
-			return Err(ErrorKind::SlateValidation("height mismatch".to_string()).into());
+			return Err(Error::SlateValidation("height mismatch".to_string()));
 		}
 		if invoice_slate.ttl_cutoff_height != respond_slate.ttl_cutoff_height {
-			return Err(ErrorKind::SlateValidation("ttl_cutoff mismatch".to_string()).into());
+			return Err(Error::SlateValidation("ttl_cutoff mismatch".to_string()));
 		}
 		assert!(invoice_slate.tx_or_err()?.body.inputs.is_empty());
 		// Respond outputs must include original ones. Expected that some was added
 		for output in &invoice_slate.tx_or_err()?.body.outputs {
 			if !respond_slate.tx_or_err()?.body.outputs.contains(&output) {
-				return Err(ErrorKind::SlateValidation("outputs mismatch".to_string()).into());
+				return Err(Error::SlateValidation("outputs mismatch".to_string()));
 			}
 		}
 		// Checking if participant data match each other
 		for pat_data in &invoice_slate.participant_data {
 			if !respond_slate.participant_data.contains(&pat_data) {
-				return Err(
-					ErrorKind::SlateValidation("participant data mismatch".to_string()).into(),
-				);
+				return Err(Error::SlateValidation(
+					"participant data mismatch".to_string(),
+				));
 			}
 		}
 
@@ -648,26 +646,24 @@ impl Slate {
 		match self.kernel_features {
 			0 => {
 				if self.lock_height != 0 {
-					return Err(ErrorKind::SlateValidation(format!("Invalid lock_height for Plain kernel feature. lock_height expected to be zero, but has {}", self.lock_height)).into());
+					return Err(Error::SlateValidation(format!("Invalid lock_height for Plain kernel feature. lock_height expected to be zero, but has {}", self.lock_height)));
 				}
 				Ok(KernelFeatures::Plain {
 					fee: self.build_fee()?,
 				})
 			}
-			1 => Err(ErrorKind::InvalidKernelFeatures(
+			1 => Err(Error::InvalidKernelFeatures(
 				"Coinbase feature is not expected at Slate".into(),
-			)
-			.into()),
+			)),
 			2 => Ok(KernelFeatures::HeightLocked {
 				fee: self.build_fee()?,
 				lock_height: if self.lock_height > self.height && self.height > 0 {
 					self.lock_height
 				} else {
-					return Err(ErrorKind::SlateValidation(format!(
+					return Err(Error::SlateValidation(format!(
 						"Invalid lock_height, height value is {}, but lock_height is {}",
 						self.height, self.lock_height
-					))
-					.into());
+					)));
 				},
 			}),
 			3 => Ok(KernelFeatures::NoRecentDuplicate {
@@ -675,14 +671,13 @@ impl Slate {
 				relative_height: if self.lock_height < WEEK_HEIGHT {
 					NRDRelativeHeight::new(self.lock_height)?
 				} else {
-					return Err(ErrorKind::SlateValidation(format!(
+					return Err(Error::SlateValidation(format!(
 						"Invalid NRD relative_height, height value is {}, limit is {}",
 						self.lock_height, WEEK_HEIGHT
-					))
-					.into());
+					)));
 				},
 			}),
-			n => Err(ErrorKind::UnknownKernelFeatures(n).into()),
+			n => Err(Error::UnknownKernelFeatures(n)),
 		}
 	}
 
@@ -762,9 +757,9 @@ impl Slate {
 			.map(|p| &p.public_nonce)
 			.collect();
 		if pub_nonces.len() == 0 {
-			return Err(
-				ErrorKind::GenericError(format!("Participant nonces cannot be empty")).into(),
-			);
+			return Err(Error::GenericError(format!(
+				"Participant nonces cannot be empty"
+			)));
 		}
 		match PublicKey::from_combination(&secp, pub_nonces) {
 			Ok(k) => Ok(k),
@@ -780,9 +775,9 @@ impl Slate {
 			.map(|p| &p.public_blind_excess)
 			.collect();
 		if pub_blinds.len() == 0 {
-			return Err(
-				ErrorKind::GenericError(format!("Participant Blind sums cannot be empty")).into(),
-			);
+			return Err(Error::GenericError(format!(
+				"Participant Blind sums cannot be empty"
+			)));
 		}
 		match PublicKey::from_combination(secp, pub_blinds) {
 			Ok(k) => Ok(k),
@@ -964,9 +959,11 @@ impl Slate {
 		let fee = tx_fee(tx.inputs().len(), tx.outputs().len(), tx.kernels().len());
 
 		if fee > tx.fee(height) {
-			return Err(
-				ErrorKind::Fee(format!("Fee Dispute Error: {}, {}", tx.fee(height), fee,)).into(),
-			);
+			return Err(Error::Fee(format!(
+				"Fee Dispute Error: {}, {}",
+				tx.fee(height),
+				fee,
+			)));
 		}
 
 		if fee > self.amount + self.fee {
@@ -976,7 +973,7 @@ impl Slate {
 				amount_to_hr_string(self.amount + self.fee, false)
 			);
 			info!("{}", reason);
-			return Err(ErrorKind::Fee(reason).into());
+			return Err(Error::Fee(reason));
 		}
 
 		Ok(())
@@ -1012,10 +1009,9 @@ impl Slate {
 					None => {
 						error!("verify_messages - participant message doesn't have signature. Message: \"{}\"",
 						   String::from_utf8_lossy(&msg.as_bytes()[..]));
-						return Err(ErrorKind::Signature(
+						return Err(Error::Signature(
 							"Optional participant messages doesn't have signature".to_owned(),
-						)
-						.into());
+						));
 					}
 					Some(s) => s,
 				};
@@ -1030,10 +1026,9 @@ impl Slate {
 				) {
 					error!("verify_messages - participant message doesn't match signature. Message: \"{}\"",
 						   String::from_utf8_lossy(&msg.as_bytes()[..]));
-					return Err(ErrorKind::Signature(
+					return Err(Error::Signature(
 						"Optional participant messages do not match signatures".to_owned(),
-					)
-					.into());
+					));
 				} else {
 					info!(
 						"verify_messages - signature verified ok. Participant message: \"{}\"",

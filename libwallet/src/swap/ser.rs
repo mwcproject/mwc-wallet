@@ -15,8 +15,8 @@
 use crate::grin_util::secp::key::{PublicKey, SecretKey};
 use crate::grin_util::secp::pedersen::Commitment;
 use crate::grin_util::secp::Signature;
+use crate::swap::Error;
 use crate::{Slate, VersionedSlate};
-use failure::Error;
 use grin_wallet_util::grin_util::secp::{ContextFlag, Secp256k1};
 use grin_wallet_util::grin_util::ToHex;
 use hex::{self, FromHex};
@@ -62,7 +62,8 @@ where
 
 /// Deserialize Commitment from HEX string
 fn commit_from_hex_string(s: String) -> Result<Commitment, Error> {
-	let v = Vec::from_hex(&s)?;
+	let v = Vec::from_hex(&s)
+		.map_err(|e| Error::Generic(format!("Unable to parse commit {} from HEX, {}", s, e)))?;
 	Ok(Commitment::from_vec(v))
 }
 
@@ -102,7 +103,8 @@ where
 }
 
 fn pubkey_from_hex_string(s: String) -> Result<PublicKey, Error> {
-	let v = Vec::from_hex(&s)?;
+	let v = Vec::from_hex(&s)
+		.map_err(|e| Error::Generic(format!("Unable to parse public key {} from HEX, {}", s, e)))?;
 	let secp = Secp256k1::with_caps(ContextFlag::None);
 	let p = PublicKey::from_slice(&secp, &v[..])?;
 	Ok(p)
@@ -153,7 +155,8 @@ where
 }
 
 fn seckey_from_hex_string(s: String) -> Result<SecretKey, Error> {
-	let v = Vec::from_hex(&s)?;
+	let v = Vec::from_hex(&s)
+		.map_err(|e| Error::Generic(format!("Unable to parse sec key {} from HEX, {}", s, e)))?;
 	let secp = Secp256k1::with_caps(ContextFlag::None);
 	let sk = SecretKey::from_slice(&secp, &v[..])?;
 	Ok(sk)
@@ -205,7 +208,8 @@ where
 }
 
 fn sig_from_hex_string(secp: &Secp256k1, s: String) -> Result<Signature, Error> {
-	let v = Vec::from_hex(&s)?;
+	let v = Vec::from_hex(&s)
+		.map_err(|e| Error::Generic(format!("Unable to parse signature {} from HEX, {}", s, e)))?;
 	let sig = Signature::from_compact(secp, &v[..])?;
 	Ok(sig)
 }

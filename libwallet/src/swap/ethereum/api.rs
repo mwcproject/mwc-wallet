@@ -27,11 +27,11 @@ use crate::swap::types::{
 	BuyerContext, Context, Currency, RoleContext, SecondaryBuyerContext, SecondarySellerContext,
 	SellerContext, SwapTransactionsConfirmations,
 };
-use crate::swap::{ErrorKind, SellApi, Swap, SwapApi};
+use crate::swap::{Error, SellApi, Swap, SwapApi};
 use crate::{NodeClient, Slate};
-use failure::_core::marker::PhantomData;
 use grin_wallet_util::grin_core::core::Committed;
 use grin_wallet_util::grin_util::secp::Secp256k1;
+use std::marker::PhantomData;
 use std::sync::Arc;
 use web3::types::{Address, H256};
 
@@ -92,7 +92,7 @@ where
 	}
 
 	/// Get Eth Chain Height.
-	pub(crate) fn eth_height(&self) -> Result<u64, ErrorKind> {
+	pub(crate) fn eth_height(&self) -> Result<u64, Error> {
 		let c = self.eth_node_client.lock();
 		c.height()
 	}
@@ -102,25 +102,21 @@ where
 		&self,
 		swap: &Swap,
 		address_from_secret: Option<Address>,
-	) -> Result<(u64, Option<Address>, Address, Address, u64), ErrorKind> {
+	) -> Result<(u64, Option<Address>, Address, Address, u64), Error> {
 		if address_from_secret.is_none() {
-			return Err(ErrorKind::InvalidEthSwapTradeIndex);
+			return Err(Error::InvalidEthSwapTradeIndex);
 		}
 
 		let c = self.eth_node_client.lock();
 		let res = c.get_swap_details(swap.secondary_currency, address_from_secret.unwrap());
 		match res {
 			Ok((_refund_time, _contract_address, _initiator, _participant, _value)) => res,
-			_ => Err(ErrorKind::InvalidEthSwapTradeIndex),
+			_ => Err(Error::InvalidEthSwapTradeIndex),
 		}
 	}
 
 	/// Seller call contract function to redeem their Ethers, Status::Redeem
-	fn seller_post_redeem_tx<K: Keychain>(
-		&self,
-		keychain: &K,
-		swap: &Swap,
-	) -> Result<H256, ErrorKind> {
+	fn seller_post_redeem_tx<K: Keychain>(&self, keychain: &K, swap: &Swap) -> Result<H256, Error> {
 		let c = self.eth_node_client.lock();
 		let eth_data = swap.secondary_data.unwrap_eth()?;
 		let redeem_secret = SellApi::calculate_redeem_secret(keychain, swap)?;
@@ -135,7 +131,7 @@ where
 	}
 
 	/// Seller transfer eth from internal wallet to users' wallet
-	fn seller_transfer_secondary(&self, swap: &Swap) -> Result<H256, ErrorKind> {
+	fn seller_transfer_secondary(&self, swap: &Swap) -> Result<H256, Error> {
 		let c = self.eth_node_client.lock();
 		let address = swap.unwrap_seller().unwrap().0;
 		c.transfer(
@@ -152,7 +148,7 @@ where
 		_context: &Context,
 		swap: &mut Swap,
 		_post_tx: bool,
-	) -> Result<H256, ErrorKind> {
+	) -> Result<H256, Error> {
 		let c = self.eth_node_client.lock();
 		let eth_data = swap.secondary_data.unwrap_eth()?;
 		c.refund(
@@ -163,7 +159,7 @@ where
 	}
 
 	/// buyer deposit eth to contract address
-	fn erc20_approve(&self, swap: &mut Swap) -> Result<H256, ErrorKind> {
+	fn erc20_approve(&self, swap: &mut Swap) -> Result<H256, Error> {
 		let nc = self.eth_node_client.lock();
 		nc.erc20_approve(
 			swap.secondary_currency,
@@ -173,18 +169,18 @@ where
 	}
 
 	/// buyer deposit eth to contract address
-	fn buyer_deposit(&self, swap: &mut Swap) -> Result<H256, ErrorKind> {
+	fn buyer_deposit(&self, swap: &mut Swap) -> Result<H256, Error> {
 		let eth_lock_time = swap.get_time_secondary_lock_script() as u64;
 		// Don't lock for more than 4 weeks. 4 weeks + 2 day, because max locking is expecting 2 weeks and 1 day to do the swap and 1 extra day for Buyer
 		if eth_lock_time > (swap::get_cur_time() + 3600 * 24 * (7 * 4 + 2)) as u64 {
-			return Err(ErrorKind::Generic(
+			return Err(Error::Generic(
 				"ETH locking time interval is larger than 4 weeks. Rejecting, looks like a scam."
 					.to_string(),
 			));
 		}
 
 		if eth_lock_time >= u32::MAX as u64 {
-			return Err(ErrorKind::Generic(
+			return Err(Error::Generic(
 				"ETH locking time is out of range. Rejecting, looks like a scam.".to_string(),
 			));
 		}
@@ -221,7 +217,7 @@ where
 		mwc_tip: &u64,
 		slate: &Slate,
 		outputs_ok: bool,
-	) -> Result<Option<u64>, ErrorKind> {
+	) -> Result<Option<u64>, Error> {
 		let result: Option<u64> = if slate.tx_or_err()?.kernels().is_empty() {
 			None
 		} else {
@@ -259,12 +255,9 @@ where
 	}
 
 	/// Check transaction confirm status
-	pub(crate) fn check_eth_transaction_status(
-		&self,
-		tx_id: Option<H256>,
-	) -> Result<u64, ErrorKind> {
+	pub(crate) fn check_eth_transaction_status(&self, tx_id: Option<H256>) -> Result<u64, Error> {
 		if tx_id.is_none() {
-			return Err(ErrorKind::InvalidTxHash);
+			return Err(Error::InvalidTxHash);
 		}
 
 		let c = self.eth_node_client.lock();
@@ -281,14 +274,14 @@ where
 					}
 					_ => Ok(0),
 				},
-				_ => Err(ErrorKind::EthTransactionInPending),
+				_ => Err(Error::EthTransactionInPending),
 			},
-			_ => Err(ErrorKind::EthRetrieveTransReciptError),
+			_ => Err(Error::EthRetrieveTransReciptError),
 		}
 	}
 
 	/// check deposit transaction status
-	fn get_eth_initiate_tx_status(&self, swap: &Swap) -> Result<u64, ErrorKind> {
+	fn get_eth_initiate_tx_status(&self, swap: &Swap) -> Result<u64, Error> {
 		let eth_data = swap.secondary_data.unwrap_eth()?;
 		let eth_tip = self.eth_height()?;
 		match self.eth_swap_details(swap, eth_data.address_from_secret.clone()) {
@@ -357,7 +350,7 @@ where
 		_keychain: &K,
 		secondary_currency: Currency,
 		_is_seller: bool,
-	) -> Result<usize, ErrorKind> {
+	) -> Result<usize, Error> {
 		match secondary_currency {
 			Currency::Ether
 			| Currency::Busd
@@ -371,7 +364,7 @@ where
 			| Currency::Usdc
 			| Currency::Trx
 			| Currency::Tst => Ok(3),
-			_ => return Err(ErrorKind::UnexpectedCoinType),
+			_ => return Err(Error::UnexpectedCoinType),
 		}
 	}
 
@@ -385,7 +378,7 @@ where
 		change_amount: u64,
 		keys: Vec<Identifier>,
 		parent_key_id: Identifier,
-	) -> Result<Context, ErrorKind> {
+	) -> Result<Context, Error> {
 		match secondary_currency {
 			Currency::Ether
 			| Currency::Busd
@@ -399,7 +392,7 @@ where
 			| Currency::Usdc
 			| Currency::Trx
 			| Currency::Tst => (),
-			_ => return Err(ErrorKind::UnexpectedCoinType),
+			_ => return Err(Error::UnexpectedCoinType),
 		}
 
 		let secp = keychain.secp();
@@ -408,7 +401,7 @@ where
 			let eth_address = to_eth_address(ethereum_wallet.unwrap().address.clone().unwrap())?;
 			RoleContext::Seller(SellerContext {
 				parent_key_id: parent_key_id,
-				inputs: inputs.ok_or(ErrorKind::UnexpectedRole(
+				inputs: inputs.ok_or(Error::UnexpectedRole(
 					"Fn create_context() for seller not found inputs".to_string(),
 				))?,
 				change_output: keys.next().unwrap(),
@@ -471,7 +464,7 @@ where
 		eth_redirect_out_wallet: Option<bool>,
 		dry_run: bool,
 		tag: Option<String>,
-	) -> Result<Swap, ErrorKind> {
+	) -> Result<Swap, Error> {
 		match secondary_currency {
 			Currency::Ether
 			| Currency::Busd
@@ -485,7 +478,7 @@ where
 			| Currency::Usdc
 			| Currency::Trx
 			| Currency::Tst => (),
-			_ => return Err(ErrorKind::UnexpectedCoinType),
+			_ => return Err(Error::UnexpectedCoinType),
 		}
 
 		let height = self.node_client.get_chain_tip()?.0;
@@ -552,7 +545,7 @@ where
 		swap: &mut Swap,
 		_context: &Context,
 		_post_tx: bool,
-	) -> Result<(), ErrorKind> {
+	) -> Result<(), Error> {
 		assert!(swap.is_seller());
 		let eth_data = swap.secondary_data.unwrap_eth()?;
 		if eth_data.redeem_tx.is_some() {
@@ -574,7 +567,7 @@ where
 		&self,
 		_keychain: &K, // keychain is kept for Type. Compiler need to understand all types
 		swap: &Swap,
-	) -> Result<SwapTransactionsConfirmations, ErrorKind> {
+	) -> Result<SwapTransactionsConfirmations, Error> {
 		let mwc_tip = self.node_client.get_chain_tip()?.0;
 
 		let is_seller = swap.is_seller();
@@ -637,7 +630,7 @@ where
 		swap: &Swap,
 		_confirmations_needed: u64,
 		_secp: &Secp256k1,
-	) -> Result<(u64, u64, u64), ErrorKind> {
+	) -> Result<(u64, u64, u64), Error> {
 		// check eth transaction status
 		let amount = self.get_eth_initiate_tx_status(swap)?;
 		Ok((0, amount, 0))
@@ -732,7 +725,7 @@ where
 		&self,
 		swap: &Swap,
 		_secp: &Secp256k1,
-	) -> Result<Vec<String>, ErrorKind> {
+	) -> Result<Vec<String>, Error> {
 		let eth_data = swap.secondary_data.unwrap_eth()?;
 
 		match eth_data.address_from_secret {
@@ -742,7 +735,7 @@ where
 	}
 
 	/// Check if tx fee for the secondary is different from the posted
-	fn is_secondary_tx_fee_changed(&self, swap: &Swap) -> Result<bool, ErrorKind> {
+	fn is_secondary_tx_fee_changed(&self, swap: &Swap) -> Result<bool, Error> {
 		Ok(swap.secondary_data.unwrap_eth()?.tx_fee != Some(swap.secondary_fee))
 	}
 
@@ -754,7 +747,7 @@ where
 		swap: &mut Swap,
 		_refund_address: Option<String>,
 		post_tx: bool,
-	) -> Result<(), ErrorKind> {
+	) -> Result<(), Error> {
 		assert!(!swap.is_seller());
 		let eth_data = swap.secondary_data.unwrap_eth()?;
 
@@ -774,7 +767,7 @@ where
 	}
 
 	/// deposit secondary currecny to lock account.
-	fn post_secondary_lock_tx(&self, swap: &mut Swap) -> Result<(), ErrorKind> {
+	fn post_secondary_lock_tx(&self, swap: &mut Swap) -> Result<(), Error> {
 		assert!(!swap.is_seller());
 		let eth_data = swap.secondary_data.unwrap_eth()?;
 
@@ -794,7 +787,7 @@ where
 					let eth_data = swap.secondary_data.unwrap_eth_mut()?;
 					eth_data.lock_tx = Some(eth_tx);
 				} else {
-					return Err(ErrorKind::EthERC20TokenApproveError);
+					return Err(Error::EthERC20TokenApproveError);
 				}
 			} else {
 				let erc20_approve_tx = self.erc20_approve(swap)?;
@@ -811,19 +804,19 @@ where
 	}
 
 	/// transfer amount to dedicated address.
-	fn transfer_scondary(&self, swap: &mut Swap) -> Result<(), ErrorKind> {
+	fn transfer_scondary(&self, swap: &mut Swap) -> Result<(), Error> {
 		assert!(swap.is_seller());
 
 		self.seller_transfer_secondary(swap)?;
 		Ok(())
 	}
 
-	fn test_client_connections(&self) -> Result<(), ErrorKind> {
+	fn test_client_connections(&self) -> Result<(), Error> {
 		{
 			let c = self.eth_node_client.lock();
 			let name = c.name();
 			let _ = c.height().map_err(|e| {
-				ErrorKind::InfuraNodeClient(format!(
+				Error::InfuraNodeClient(format!(
 					"Unable to contact Ethereum client {}, {}",
 					name, e
 				))

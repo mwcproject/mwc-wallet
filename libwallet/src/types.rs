@@ -17,7 +17,7 @@
 
 use super::swap::ethereum::EthereumWallet;
 use crate::config::{MQSConfig, TorConfig, WalletConfig};
-use crate::error::{Error, ErrorKind};
+use crate::error::Error;
 use crate::grin_api::{Libp2pMessages, Libp2pPeers};
 use crate::grin_core::core::hash::Hash;
 use crate::grin_core::core::Committed;
@@ -876,7 +876,7 @@ impl BlockIdentifier {
 	/// convert to hex string
 	pub fn from_hex(hex: &str) -> Result<BlockIdentifier, Error> {
 		let hash = Hash::from_hex(hex).map_err(|e| {
-			ErrorKind::GenericError(format!("BlockIdentifier Invalid hex {}, {}", hex, e))
+			Error::GenericError(format!("BlockIdentifier Invalid hex {}, {}", hex, e))
 		})?;
 		Ok(BlockIdentifier(hash))
 	}

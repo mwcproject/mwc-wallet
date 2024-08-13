@@ -20,7 +20,7 @@ use crate::libwallet::{
 };
 use crate::util::secp::key::SecretKey;
 use crate::util::{from_hex, to_base64, Mutex};
-use crate::{Error, ErrorKind};
+use crate::Error;
 use futures::channel::oneshot;
 use grin_wallet_api::JsonId;
 use grin_wallet_config::types::{TorBridgeConfig, TorProxyConfig};
@@ -102,7 +102,7 @@ fn check_middleware(
 			}
 			if let Some(s) = slate {
 				if bhv > 3 && s.version_info.block_header_version < GRIN_BLOCK_HEADER_VERSION {
-					Err(crate::libwallet::ErrorKind::Compatibility(
+					Err(crate::libwallet::Error::Compatibility(
 						"Incoming Slate is not compatible with this wallet. \
 						 Please upgrade the node or use a different one."
 							.into(),
@@ -130,11 +130,10 @@ where
 	let lc = w_lock.lc_provider()?;
 	let w_inst = lc.wallet_inst()?;
 	let k = w_inst.keychain((&mask).as_ref())?;
-	let sec_key = proofaddress::payment_proof_address_dalek_secret(&k, None).map_err(|e| {
-		ErrorKind::TorConfig(format!("Unable to build key for onion address, {}", e))
-	})?;
+	let sec_key = proofaddress::payment_proof_address_dalek_secret(&k, None)
+		.map_err(|e| Error::TorConfig(format!("Unable to build key for onion address, {}", e)))?;
 	let onion_addr = OnionV3Address::from_private(sec_key.as_bytes())
-		.map_err(|e| ErrorKind::GenericError(format!("Unable to build Onion address, {}", e)))?;
+		.map_err(|e| Error::GenericError(format!("Unable to build Onion address, {}", e)))?;
 	Ok(format!("{}", onion_addr))
 }
 
@@ -168,30 +167,29 @@ where
 		format!("{}/tor/listener", lc.get_top_level_directory()?)
 	};
 
-	let sec_key = proofaddress::payment_proof_address_secret(&k, None).map_err(|e| {
-		ErrorKind::TorConfig(format!("Unable to build key for onion address, {}", e))
-	})?;
+	let sec_key = proofaddress::payment_proof_address_secret(&k, None)
+		.map_err(|e| Error::TorConfig(format!("Unable to build key for onion address, {}", e)))?;
 	let onion_address = OnionV3Address::from_private(&sec_key.0)
-		.map_err(|e| ErrorKind::TorConfig(format!("Unable to build onion address, {}", e)))?;
+		.map_err(|e| Error::TorConfig(format!("Unable to build onion address, {}", e)))?;
 
 	let mut hm_tor_bridge: HashMap<String, String> = HashMap::new();
 	let mut tor_timeout = 200;
 	if bridge.bridge_line.is_some() {
 		tor_timeout = 300;
 		let bridge_config = tor_bridge::TorBridge::try_from(bridge)
-			.map_err(|e| ErrorKind::TorConfig(format!("{}", e).into()))?;
+			.map_err(|e| Error::TorConfig(format!("{}", e)))?;
 		hm_tor_bridge = bridge_config
 			.to_hashmap()
-			.map_err(|e| ErrorKind::TorConfig(format!("{}", e).into()))?;
+			.map_err(|e| Error::TorConfig(format!("{}", e)))?;
 	}
 
 	let mut hm_tor_poxy: HashMap<String, String> = HashMap::new();
 	if tor_proxy.transport.is_some() || tor_proxy.allowed_port.is_some() {
 		let proxy_config = tor_proxy::TorProxy::try_from(tor_proxy)
-			.map_err(|e| ErrorKind::TorConfig(format!("{}", e).into()))?;
+			.map_err(|e| Error::TorConfig(format!("{}", e)))?;
 		hm_tor_poxy = proxy_config
 			.to_hashmap()
-			.map_err(|e| ErrorKind::TorConfig(format!("{}", e.kind()).into()))?;
+			.map_err(|e| Error::TorConfig(format!("{}", e)))?;
 	}
 
 	warn!(
@@ -209,7 +207,7 @@ where
 		hm_tor_bridge,
 		hm_tor_poxy,
 	)
-	.map_err(|e| ErrorKind::TorConfig(format!("Failed to configure tor, {}", e).into()))?;
+	.map_err(|e| Error::TorConfig(format!("Failed to configure tor, {}", e)))?;
 	// Start TOR process
 	let tor_path = format!("{}/torrc", tor_dir);
 	process
@@ -218,9 +216,7 @@ where
 		.timeout(tor_timeout)
 		.completion_percent(100)
 		.launch()
-		.map_err(|e| {
-			ErrorKind::TorProcess(format!("Unable to start tor at {}, {}", tor_path, e).into())
-		})?;
+		.map_err(|e| Error::TorProcess(format!("Unable to start tor at {}, {}", tor_path, e)))?;
 
 	tor::status::set_tor_address(Some(format!("{}", onion_address)));
 
@@ -247,10 +243,9 @@ where
 			let wallet = match wallet {
 				Some(w) => w,
 				None => {
-					return Err(ErrorKind::GenericError(format!(
+					return Err(Error::GenericError(format!(
 						"Instantiated wallet or Owner API context must be provided"
-					))
-					.into())
+					)))
 				}
 			};
 			f(&mut Owner::new(wallet, None, None), keychain_mask)?
@@ -384,16 +379,16 @@ where
 			//TODO: this needs to be changed to properly figure out if this slate is an invoice or a send
 			if slate.tx_or_err()?.inputs().len() == 0 {
 				// mwc-wallet doesn't support invoices
-				Err(ErrorKind::DoesNotAcceptInvoices)?;
+				Err(Error::DoesNotAcceptInvoices)?;
 
 				// reject by default unless wallet is set to auto accept invoices under a certain threshold
 
 				let max_auto_accept_invoice = self
 					.max_auto_accept_invoice
-					.ok_or(ErrorKind::DoesNotAcceptInvoices)?;
+					.ok_or(Error::DoesNotAcceptInvoices)?;
 
 				if slate.amount > max_auto_accept_invoice {
-					Err(ErrorKind::InvoiceAmountTooBig(slate.amount))?;
+					Err(Error::InvoiceAmountTooBig(slate.amount))?;
 				}
 
 				if global::is_mainnet() {
@@ -456,7 +451,7 @@ where
 				let s = foreign_api
 					.receive_tx(slate, Some(from.get_full_name()), dest_acct_name, None)
 					.map_err(|e| {
-						ErrorKind::LibWallet(format!(
+						Error::LibWallet(format!(
 							"Unable to process incoming slate, receive_tx failed, {}",
 							e
 						))
@@ -509,7 +504,7 @@ where
 		let mask = self.keychain_mask.lock().clone();
 
 		let msg_str = serde_json::to_string(&swapmessage).map_err(|e| {
-			ErrorKind::ProcessSwapMessageError(format!(
+			Error::ProcessSwapMessageError(format!(
 				"Error in processing incoming swap message from mqs, {}",
 				e
 			))
@@ -640,7 +635,7 @@ where
 
 	//start mwcmqs listener
 	start_mwcmqs_listener(wallet, mqs_config, wait_for_thread, keychain_mask, true)
-		.map_err(|e| ErrorKind::GenericError(format!("cannot start mqs listener, {}", e)).into())
+		.map_err(|e| Error::GenericError(format!("cannot start mqs listener, {}", e)))
 }
 
 /// Start the mqs listener
@@ -657,9 +652,9 @@ where
 	K: Keychain + 'static,
 {
 	if grin_wallet_impls::adapters::get_mwcmqs_brocker().is_some() {
-		return Err(
-			ErrorKind::GenericError("mwcmqs listener is already running".to_string()).into(),
-		);
+		return Err(Error::GenericError(
+			"mwcmqs listener is already running".to_string(),
+		));
 	}
 
 	// make sure wallet is not locked, if it is try to unlock with no passphrase
@@ -720,7 +715,7 @@ where
 				panic!("{}", err_str);
 			}
 		})
-		.map_err(|e| ErrorKind::GenericError(format!("Unable to start mwcmqs broker, {}", e)))?;
+		.map_err(|e| Error::GenericError(format!("Unable to start mwcmqs broker, {}", e)))?;
 
 	// Publishing this running MQS service
 	crate::impls::init_mwcmqs_access_data(mwcmqs_publisher.clone(), mwcmqs_subscriber.clone());
@@ -756,14 +751,14 @@ where
 	}
 
 	if *OWNER_API_RUNNING.read().unwrap() {
-		return Err(
-			ErrorKind::GenericError("Owner API is already up and running".to_string()).into(),
-		);
+		return Err(Error::GenericError(
+			"Owner API is already up and running".to_string(),
+		));
 	}
 	if running_foreign && *FOREIGN_API_RUNNING.read().unwrap() {
-		return Err(
-			ErrorKind::GenericError("Foreign API is already up and running".to_string()).into(),
-		);
+		return Err(Error::GenericError(
+			"Foreign API is already up and running".to_string(),
+		));
 	}
 
 	//I don't know why but it seems the warn message in controller.rs will get printed to console.
@@ -790,15 +785,11 @@ where
 
 	router
 		.add_route("/v2/owner", Arc::new(api_handler_v2))
-		.map_err(|e| {
-			ErrorKind::GenericError(format!("Router failed to add route /v2/owner, {}", e))
-		})?;
+		.map_err(|e| Error::GenericError(format!("Router failed to add route /v2/owner, {}", e)))?;
 
 	router
 		.add_route("/v3/owner", Arc::new(api_handler_v3))
-		.map_err(|e| {
-			ErrorKind::GenericError(format!("Router failed to add route /v3/owner, {}", e))
-		})?;
+		.map_err(|e| Error::GenericError(format!("Router failed to add route /v3/owner, {}", e)))?;
 
 	// If so configured, add the foreign API to the same port
 	if running_foreign {
@@ -807,7 +798,7 @@ where
 		router
 			.add_route("/v2/foreign", Arc::new(foreign_api_handler_v2))
 			.map_err(|e| {
-				ErrorKind::GenericError(format!("Router failed to add route /v2/foreign, {}", e))
+				Error::GenericError(format!("Router failed to add route /v2/foreign, {}", e))
 			})?;
 	}
 	let api_chan: &'static mut (oneshot::Sender<()>, oneshot::Receiver<()>) =
@@ -817,7 +808,7 @@ where
 	let socket_addr: SocketAddr = addr.parse().expect("unable to parse socket address");
 	let api_thread = apis
 		.start(socket_addr, router, tls_config, api_chan)
-		.map_err(|e| ErrorKind::GenericError(format!("API thread failed to start, {}", e)))?;
+		.map_err(|e| Error::GenericError(format!("API thread failed to start, {}", e)))?;
 	warn!("HTTP Owner listener started.");
 
 	*OWNER_API_RUNNING.write().unwrap() = true;
@@ -827,7 +818,7 @@ where
 
 	let res = api_thread
 		.join()
-		.map_err(|e| ErrorKind::GenericError(format!("API thread panicked :{:?}", e)).into());
+		.map_err(|e| Error::GenericError(format!("API thread panicked :{:?}", e)));
 
 	*OWNER_API_RUNNING.write().unwrap() = false;
 	if running_foreign {
@@ -857,7 +848,7 @@ where
 	};
 
 	let tor_addr: SocketAddrV4 = socks_proxy_addr.parse().map_err(|e| {
-		ErrorKind::GenericError(format!(
+		Error::GenericError(format!(
 			"Unable to parse tor socks address {}, {}",
 			socks_proxy_addr, e
 		))
@@ -959,9 +950,7 @@ where
 				}
 			}
 		})
-		.map_err(|e| {
-			ErrorKind::GenericError(format!("Unable to start libp2p_node server, {}", e))
-		})?;
+		.map_err(|e| Error::GenericError(format!("Unable to start libp2p_node server, {}", e)))?;
 
 	Ok(())
 }
@@ -986,9 +975,9 @@ where
 	K: Keychain + 'static,
 {
 	if *FOREIGN_API_RUNNING.read().unwrap() {
-		return Err(
-			ErrorKind::GenericError("Foreign API is already up and running".to_string()).into(),
-		);
+		return Err(Error::GenericError(
+			"Foreign API is already up and running".to_string(),
+		));
 	}
 
 	// Check if wallet has been opened first, get slatepack public key
@@ -1031,7 +1020,7 @@ where
 	router
 		.add_route("/v2/foreign", Arc::new(api_handler_v2))
 		.map_err(|e| {
-			ErrorKind::GenericError(format!("Router failed to add route /v2/foreign, {}", e))
+			Error::GenericError(format!("Router failed to add route /v2/foreign, {}", e))
 		})?;
 
 	let api_chan: &'static mut (oneshot::Sender<()>, oneshot::Receiver<()>) =
@@ -1042,7 +1031,7 @@ where
 	let api_thread = apis
 		// Assuming you have a variable `channel_pair` of the required type
 		.start(socket_addr, router, tls_config, api_chan)
-		.map_err(|e| ErrorKind::GenericError(format!("API thread failed to start, {}", e)))?;
+		.map_err(|e| Error::GenericError(format!("API thread failed to start, {}", e)))?;
 
 	warn!("HTTP Foreign listener started.");
 
@@ -1078,7 +1067,7 @@ where
 
 	let res = api_thread
 		.join()
-		.map_err(|e| ErrorKind::GenericError(format!("API thread panicked :{:?}", e)).into());
+		.map_err(|e| Error::GenericError(format!("API thread panicked :{:?}", e)));
 
 	*FOREIGN_API_RUNNING.write().unwrap() = false;
 
@@ -1292,7 +1281,7 @@ impl OwnerV3Helpers {
 		})?;
 		let id = enc_req.id.clone();
 		let res = enc_req.decrypt(&shared_key).map_err(|e| {
-			EncryptionErrorResponse::new(1, -32002, &format!("Decryption error: {}", e.kind()))
+			EncryptionErrorResponse::new(1, -32002, &format!("Decryption error: {}", e))
 				.as_json_value()
 		})?;
 		Ok((id, res))
@@ -1315,7 +1304,7 @@ impl OwnerV3Helpers {
 		}
 		let shared_key = share_key_ref.as_ref().unwrap();
 		let enc_res = EncryptedResponse::from_json(id, res, &shared_key).map_err(|e| {
-			EncryptionErrorResponse::new(1, -32003, &format!("Encryption Error: {}", e.kind()))
+			EncryptionErrorResponse::new(1, -32003, &format!("Encryption Error: {}", e))
 				.as_json_value()
 		})?;
 		let res = enc_res.as_json_value().map_err(|e| {
@@ -1705,8 +1694,8 @@ where
 {
 	let body = body::to_bytes(req.into_body())
 		.await
-		.map_err(|e| ErrorKind::GenericError(format!("Failed to read request, {}", e)))?;
+		.map_err(|e| Error::GenericError(format!("Failed to read request, {}", e)))?;
 
 	serde_json::from_reader(&body[..])
-		.map_err(|e| ErrorKind::GenericError(format!("Invalid request body, {}", e)).into())
+		.map_err(|e| Error::GenericError(format!("Invalid request body, {}", e)))
 }

@@ -22,7 +22,7 @@ pub use self::file::{PathToSlateGetter, PathToSlatePutter};
 pub use self::http::HttpDataSender;
 
 use crate::config::{TorConfig, WalletConfig};
-use crate::error::{Error, ErrorKind};
+use crate::error::Error;
 use crate::libwallet::swap::message::Message;
 use crate::libwallet::Slate;
 use crate::tor::config::complete_tor_address;
@@ -168,7 +168,7 @@ pub fn create_sender(
 	tor_config: Option<TorConfig>,
 ) -> Result<Box<dyn SlateSender>, Error> {
 	let invalid = |e| {
-		ErrorKind::WalletComms(format!(
+		Error::WalletComms(format!(
 			"Invalid wallet comm type and destination. method: {}, dest: {}, error: {}",
 			method, dest, e
 		))
@@ -192,9 +192,7 @@ pub fn create_sender(
 		),
 		"tor" => match tor_config {
 			None => {
-				return Err(
-					ErrorKind::WalletComms("Tor Configuration required".to_string()).into(),
-				);
+				return Err(Error::WalletComms("Tor Configuration required".to_string()));
 			}
 			Some(tc) => {
 				let dest = validate_tor_address(dest)?;
@@ -228,7 +226,7 @@ pub fn create_swap_message_sender(
 	tor_config: &TorConfig,
 ) -> Result<Box<dyn SwapMessageSender>, Error> {
 	let invalid = |e| {
-		ErrorKind::WalletComms(format!(
+		Error::WalletComms(format!(
 			"Invalid wallet comm type and destination. method: {}, dest: {}, error: {}",
 			method, dest, e
 		))
@@ -270,21 +268,18 @@ pub fn validate_tor_address(dest: &str) -> Result<String, Error> {
 pub fn handle_unsupported_types(method: &str) -> Error {
 	match method {
 		"file" => {
-			return ErrorKind::WalletComms(
+			return Error::WalletComms(
 				"File based transactions must be performed asynchronously.".to_string(),
-			)
-			.into();
+			);
 		}
 		"self" => {
-			return ErrorKind::WalletComms("No sender implementation for \"self\".".to_string())
-				.into();
+			return Error::WalletComms("No sender implementation for \"self\".".to_string());
 		}
 		_ => {
-			return ErrorKind::WalletComms(format!(
+			return Error::WalletComms(format!(
 				"Wallet comm method \"{}\" does not exist.",
 				method
-			))
-			.into();
+			));
 		}
 	}
 }

@@ -458,7 +458,7 @@ fn command_line_test_impl(test_dir: &str) -> Result<(), grin_wallet_controller::
 		&file_name,
 	];
 	if let Err(err) = execute_command(&app, test_dir, "wallet2", &client2, arg_vec) {
-		assert_eq!( String::from("Impls Error, LibWallet Error, Slatepack decode error, Unable to decrypt, ring::error::Unspecified"),
+		assert_eq!( String::from("Impls Error, LibWallet Error, Unable to deserialize slatepack, Slatepack decode error, Unable to decrypt, ring::error::Unspecified"),
 					err.to_string() );
 	} else {
 		panic!("Expected to fail because of another recipient")
@@ -670,7 +670,7 @@ fn command_line_test_impl(test_dir: &str) -> Result<(), grin_wallet_controller::
 		out_file_name.as_str(),
 	];
 	if let Err(err) = execute_command(&app, test_dir, "wallet1", &client1, arg_vec) {
-		assert_eq!( String::from("Impls Error, LibWallet Error, Slatepack decode error, Unable to decrypt, ring::error::Unspecified"), err.to_string() );
+		assert_eq!( String::from("Impls Error, LibWallet Error, Unable to deserialize slatepack, Slatepack decode error, Unable to decrypt, ring::error::Unspecified"), err.to_string() );
 	} else {
 		panic!("Expected to fail because of another recipient")
 	}
@@ -893,6 +893,6 @@ fn wallet_command_line() {
 
 	let test_dir = "target/test_output/command_line";
 	if let Err(e) = command_line_test_impl(test_dir) {
-		panic!("Libwallet Error: {} - {}", e, e.backtrace().unwrap());
+		panic!("Libwallet Error: {}", e);
 	}
 }

@@ -13,53 +13,41 @@
 // limitations under the License.
 
 use crate::grin_util::secp;
-use failure::Fail;
-use std::error::Error as StdError;
 
 /// Multisig error
-#[derive(Clone, Eq, PartialEq, Debug, Fail)]
-pub enum ErrorKind {
+#[derive(Clone, Eq, PartialEq, Debug, thiserror::Error)]
+pub enum Error {
 	/// Reveal phase error
-	#[fail(display = "Multisig Invalid reveal")]
+	#[error("Multisig Invalid reveal")]
 	Reveal,
 	/// Not expected hash length, expected is 32
-	#[fail(display = "Multisig Invalid hash length")]
+	#[error("Multisig Invalid hash length")]
 	HashLength,
 	/// Participant already exists
-	#[fail(display = "Multisig Participant already exists")]
+	#[error("Multisig Participant already exists")]
 	ParticipantExists,
 	/// Expected participant doesn't exist
-	#[fail(display = "Multisig Participant doesn't exist")]
+	#[error("Multisig Participant doesn't exist")]
 	ParticipantDoesntExist,
 	/// Participant created in the wrong order
-	#[fail(display = "Multisig Participant created in the wrong order")]
+	#[error("Multisig Participant created in the wrong order")]
 	ParticipantOrdering,
 	/// Participant invalid
-	#[fail(display = "Multisig Participant invalid")]
+	#[error("Multisig Participant invalid")]
 	ParticipantInvalid,
 	/// Multisig incomplete
-	#[fail(display = "Multisig incomplete")]
+	#[error("Multisig incomplete")]
 	MultiSigIncomplete,
 	/// Common nonce missing
-	#[fail(display = "Multisig Common nonce missing")]
+	#[error("Multisig Common nonce missing")]
 	CommonNonceMissing,
 	/// Round 1 missing field
-	#[fail(display = "Multisig Round 1 missing field")]
+	#[error("Multisig Round 1 missing field")]
 	Round1Missing,
 	/// Round 2 missing field
-	#[fail(display = "Multisig Round 2 missing field")]
+	#[error("Multisig Round 2 missing field")]
 	Round2Missing,
 	/// Secp error
-	#[fail(display = "Multisig Secp: {}", _0)]
-	Secp(String),
-}
-
-// we have to use e.description  because of the bug at rust-secp256k1-zkp
-#[allow(deprecated)]
-
-impl From<secp::Error> for ErrorKind {
-	fn from(error: secp::Error) -> ErrorKind {
-		// secp::Error to_string is broken, in past biilds.
-		ErrorKind::Secp(format!("{}", error.description()))
-	}
+	#[error("Multisig Secp: {0}")]
+	Secp(#[from] secp::Error),
 }

@@ -24,11 +24,11 @@ use crate::swap::fsm::state::{Input, State, StateEtaInfo, StateId, StateProcessR
 use crate::swap::message::Message;
 use crate::swap::swap;
 use crate::swap::types::{check_txs_confirmed, Action, SwapTransactionsConfirmations};
-use crate::swap::{BuyApi, Context, ErrorKind, Swap, SwapApi};
+use crate::swap::{BuyApi, Context, Error, Swap, SwapApi};
 use crate::NodeClient;
 use chrono::{Local, TimeZone};
-use failure::_core::marker::PhantomData;
 use grin_wallet_util::grin_util::secp::Secp256k1;
+use std::marker::PhantomData;
 use std::sync::Arc;
 
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -63,7 +63,7 @@ impl State for BuyerOfferCreated {
 		_height: u64,
 		_tx_conf: &SwapTransactionsConfirmations,
 		_secp: &Secp256k1,
-	) -> Result<StateProcessRespond, ErrorKind> {
+	) -> Result<StateProcessRespond, Error> {
 		match input {
 			Input::Cancel => {
 				swap.add_journal_message(JOURNAL_CANCELLED_BY_USER.to_string());
@@ -72,7 +72,7 @@ impl State for BuyerOfferCreated {
 			Input::Check => Ok(StateProcessRespond::new(
 				StateId::BuyerSendingAcceptOfferMessage,
 			)),
-			_ => Err(ErrorKind::InvalidSwapStateInput(format!(
+			_ => Err(Error::InvalidSwapStateInput(format!(
 				"BuyerOfferCreated get {:?}",
 				input
 			))),
@@ -138,7 +138,7 @@ where
 		_height: u64,
 		tx_conf: &SwapTransactionsConfirmations,
 		_secp: &Secp256k1,
-	) -> Result<StateProcessRespond, ErrorKind> {
+	) -> Result<StateProcessRespond, Error> {
 		match input {
 			Input::Cancel => {
 				swap.add_journal_message(JOURNAL_CANCELLED_BY_USER.to_string());
@@ -194,7 +194,7 @@ where
 					StateId::BuyerWaitingForSellerToLock,
 				))
 			}
-			_ => Err(ErrorKind::InvalidSwapStateInput(format!(
+			_ => Err(Error::InvalidSwapStateInput(format!(
 				"BuyerSendingAcceptOfferMessage get {:?}",
 				input
 			))),
@@ -246,7 +246,7 @@ impl State for BuyerWaitingForSellerToLock {
 		_height: u64,
 		tx_conf: &SwapTransactionsConfirmations,
 		_secp: &Secp256k1,
-	) -> Result<StateProcessRespond, ErrorKind> {
+	) -> Result<StateProcessRespond, Error> {
 		match input {
 			Input::Cancel => {
 				swap.add_journal_message(JOURNAL_CANCELLED_BY_USER.to_string());
@@ -317,7 +317,7 @@ impl State for BuyerWaitingForSellerToLock {
 					}
 				}
 			}
-			_ => Err(ErrorKind::InvalidSwapStateInput(format!(
+			_ => Err(Error::InvalidSwapStateInput(format!(
 				"BuyerWaitingForSellerToLock get {:?}",
 				input
 			))),
@@ -389,7 +389,7 @@ where
 		_height: u64,
 		tx_conf: &SwapTransactionsConfirmations,
 		secp: &Secp256k1,
-	) -> Result<StateProcessRespond, ErrorKind> {
+	) -> Result<StateProcessRespond, Error> {
 		match input {
 			Input::Cancel => {
 				swap.add_journal_message(JOURNAL_CANCELLED_BY_USER.to_string());
@@ -487,7 +487,7 @@ where
 			Input::Execute => {
 				// for btc family, buyer should deposit secondary currency manually.
 				if swap.secondary_currency.is_btc_family() {
-					return Err(ErrorKind::InvalidSwapStateInput(format!(
+					return Err(Error::InvalidSwapStateInput(format!(
 						"BuyerPostingSecondaryToMultisigAccount get {:?}",
 						input
 					)));
@@ -497,7 +497,7 @@ where
 					StateId::BuyerPostingSecondaryToMultisigAccount,
 				))
 			}
-			_ => Err(ErrorKind::InvalidSwapStateInput(format!(
+			_ => Err(Error::InvalidSwapStateInput(format!(
 				"BuyerPostingSecondaryToMultisigAccount get {:?}",
 				input
 			))),
@@ -557,7 +557,7 @@ where
 		_height: u64,
 		tx_conf: &SwapTransactionsConfirmations,
 		secp: &Secp256k1,
-	) -> Result<StateProcessRespond, ErrorKind> {
+	) -> Result<StateProcessRespond, Error> {
 		match input {
 			Input::Cancel => {
 				swap.add_journal_message(JOURNAL_CANCELLED_BY_USER.to_string());
@@ -657,7 +657,7 @@ where
 					StateId::BuyerSendingInitRedeemMessage,
 				))
 			}
-			_ => Err(ErrorKind::InvalidSwapStateInput(format!(
+			_ => Err(Error::InvalidSwapStateInput(format!(
 				"BuyerWaitingForLockConfirmations get {:?}",
 				input
 			))),
@@ -702,7 +702,7 @@ impl State for BuyerSendingInitRedeemMessage {
 		_height: u64,
 		tx_conf: &SwapTransactionsConfirmations,
 		_secp: &Secp256k1,
-	) -> Result<StateProcessRespond, ErrorKind> {
+	) -> Result<StateProcessRespond, Error> {
 		match input {
 			Input::Cancel => {
 				swap.add_journal_message(JOURNAL_CANCELLED_BY_USER.to_string());
@@ -764,7 +764,7 @@ impl State for BuyerSendingInitRedeemMessage {
 					StateId::BuyerWaitingForRespondRedeemMessage,
 				))
 			}
-			_ => Err(ErrorKind::InvalidSwapStateInput(format!(
+			_ => Err(Error::InvalidSwapStateInput(format!(
 				"BuyerSendingInitRedeemMessage get {:?}",
 				input
 			))),
@@ -813,7 +813,7 @@ impl<K: Keychain> State for BuyerWaitingForRespondRedeemMessage<K> {
 		height: u64,
 		tx_conf: &SwapTransactionsConfirmations,
 		_secp: &Secp256k1,
-	) -> Result<StateProcessRespond, ErrorKind> {
+	) -> Result<StateProcessRespond, Error> {
 		match input {
 			Input::Cancel => {
 				swap.add_journal_message(JOURNAL_CANCELLED_BY_USER.to_string());
@@ -891,7 +891,7 @@ impl<K: Keychain> State for BuyerWaitingForRespondRedeemMessage<K> {
 					.is_ok());
 				Ok(StateProcessRespond::new(StateId::BuyerRedeemMwc))
 			}
-			_ => Err(ErrorKind::InvalidSwapStateInput(format!(
+			_ => Err(Error::InvalidSwapStateInput(format!(
 				"BuyerWaitingForRespondRedeemMessage get {:?}",
 				input
 			))),
@@ -952,7 +952,7 @@ where
 		_height: u64,
 		tx_conf: &SwapTransactionsConfirmations,
 		_secp: &Secp256k1,
-	) -> Result<StateProcessRespond, ErrorKind> {
+	) -> Result<StateProcessRespond, Error> {
 		let time_limit = swap.get_time_mwc_redeem();
 		match input {
 			Input::Cancel => {
@@ -1030,7 +1030,7 @@ where
 				Ok(StateProcessRespond::new(
 					StateId::BuyerWaitForRedeemMwcConfirmations,
 				))
-			} /*_ => Err(ErrorKind::InvalidSwapStateInput(format!(
+			} /*_ => Err(Error::InvalidSwapStateInput(format!(
 				  "BuyerRedeemMwc get {:?}",
 				  input
 			  ))),*/
@@ -1075,7 +1075,7 @@ impl State for BuyerWaitForRedeemMwcConfirmations {
 		_height: u64,
 		tx_conf: &SwapTransactionsConfirmations,
 		_secp: &Secp256k1,
-	) -> Result<StateProcessRespond, ErrorKind> {
+	) -> Result<StateProcessRespond, Error> {
 		match input {
 			Input::Check => {
 				// Check the deadline for locking
@@ -1117,7 +1117,7 @@ impl State for BuyerWaitForRedeemMwcConfirmations {
 					StateId::BuyerWaitForRedeemMwcConfirmations,
 				))
 			}
-			_ => Err(ErrorKind::InvalidSwapStateInput(format!(
+			_ => Err(Error::InvalidSwapStateInput(format!(
 				"BuyerWaitForRedeemMwcConfirmations get {:?}",
 				input
 			))),
@@ -1163,10 +1163,10 @@ impl State for BuyerSwapComplete {
 		_height: u64,
 		_tx_conf: &SwapTransactionsConfirmations,
 		_secp: &Secp256k1,
-	) -> Result<StateProcessRespond, ErrorKind> {
+	) -> Result<StateProcessRespond, Error> {
 		match input {
 			Input::Check => Ok(StateProcessRespond::new(StateId::BuyerSwapComplete)),
-			_ => Err(ErrorKind::InvalidSwapStateInput(format!(
+			_ => Err(Error::InvalidSwapStateInput(format!(
 				"BuyerSwapComplete get {:?}",
 				input
 			))),
@@ -1213,10 +1213,10 @@ impl State for BuyerCancelled {
 		_height: u64,
 		_tx_conf: &SwapTransactionsConfirmations,
 		_secp: &Secp256k1,
-	) -> Result<StateProcessRespond, ErrorKind> {
+	) -> Result<StateProcessRespond, Error> {
 		match input {
 			Input::Check => Ok(StateProcessRespond::new(StateId::BuyerCancelled)),
-			_ => Err(ErrorKind::InvalidSwapStateInput(format!(
+			_ => Err(Error::InvalidSwapStateInput(format!(
 				"BuyerCancelled get {:?}",
 				input
 			))),
@@ -1271,7 +1271,7 @@ impl State for BuyerWaitingForRefundTime {
 		_height: u64,
 		tx_conf: &SwapTransactionsConfirmations,
 		_secp: &Secp256k1,
-	) -> Result<StateProcessRespond, ErrorKind> {
+	) -> Result<StateProcessRespond, Error> {
 		match input {
 			Input::Check => {
 				// Just chilling. MWC redeem was never posted, so Seller can't get BTC. But still checking for what if
@@ -1302,7 +1302,7 @@ impl State for BuyerWaitingForRefundTime {
 					})
 					.time_limit(time_limit))
 			}
-			_ => Err(ErrorKind::InvalidSwapStateInput(format!(
+			_ => Err(Error::InvalidSwapStateInput(format!(
 				"BuyerWaitingForRefundTime get {:?}",
 				input
 			))),
@@ -1373,7 +1373,7 @@ where
 		_height: u64,
 		tx_conf: &SwapTransactionsConfirmations,
 		_secp: &Secp256k1,
-	) -> Result<StateProcessRespond, ErrorKind> {
+	) -> Result<StateProcessRespond, Error> {
 		match input {
 			Input::Check => {
 				let cur_time = swap::get_cur_time();
@@ -1420,7 +1420,7 @@ where
 					StateId::BuyerWaitingForRefundConfirmations,
 				))
 			}
-			_ => Err(ErrorKind::InvalidSwapStateInput(format!(
+			_ => Err(Error::InvalidSwapStateInput(format!(
 				"BuyerPostingRefundForSecondary get {:?}",
 				input
 			))),
@@ -1486,7 +1486,7 @@ where
 		_height: u64,
 		tx_conf: &SwapTransactionsConfirmations,
 		_secp: &Secp256k1,
-	) -> Result<StateProcessRespond, ErrorKind> {
+	) -> Result<StateProcessRespond, Error> {
 		match input {
 			Input::Check => {
 				if let Some(conf) = tx_conf.secondary_refund_conf {
@@ -1537,7 +1537,7 @@ where
 					),
 				)
 			}
-			_ => Err(ErrorKind::InvalidSwapStateInput(format!(
+			_ => Err(Error::InvalidSwapStateInput(format!(
 				"BuyerWaitingForRefundConfirmations get {:?}",
 				input
 			))),
@@ -1584,10 +1584,10 @@ impl State for BuyerCancelledRefunded {
 		_height: u64,
 		_tx_conf: &SwapTransactionsConfirmations,
 		_secp: &Secp256k1,
-	) -> Result<StateProcessRespond, ErrorKind> {
+	) -> Result<StateProcessRespond, Error> {
 		match input {
 			Input::Check => Ok(StateProcessRespond::new(StateId::BuyerCancelledRefunded)),
-			_ => Err(ErrorKind::InvalidSwapStateInput(format!(
+			_ => Err(Error::InvalidSwapStateInput(format!(
 				"BuyerCancelledRefunded get {:?}",
 				input
 			))),

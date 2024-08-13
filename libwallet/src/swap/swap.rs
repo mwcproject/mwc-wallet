@@ -16,7 +16,7 @@ use super::message::*;
 use super::multisig::{Builder as MultisigBuilder, Hashed};
 use super::ser::*;
 use super::types::*;
-use super::{ErrorKind, Keychain};
+use super::{Error, Keychain};
 use crate::grin_core::core::{
 	transaction as tx, CommitWrapper, Inputs, KernelFeatures, OutputIdentifier, TxKernel, Weighting,
 };
@@ -190,7 +190,7 @@ impl Swap {
 		&self,
 		keychain: &K,
 		context: &Context,
-	) -> Result<(Identifier, u64, Commitment), ErrorKind> {
+	) -> Result<(Identifier, u64, Commitment), Error> {
 		assert!(self.is_seller());
 		let scontext = context.unwrap_seller()?;
 
@@ -206,7 +206,7 @@ impl Swap {
 	}
 
 	/// Return Seller specific data
-	pub fn unwrap_seller(&self) -> Result<(String, u64), ErrorKind> {
+	pub fn unwrap_seller(&self) -> Result<(String, u64), Error> {
 		match &self.role {
 			Role::Seller(address, change) => {
 				match address == "0x0000000000000000000000000000000000000000" {
@@ -214,14 +214,12 @@ impl Swap {
 					_ => Ok((address.clone(), *change)),
 				}
 			}
-			_ => Err(ErrorKind::UnexpectedRole(
-				"Swap call unwrap_seller".to_string(),
-			)),
+			_ => Err(Error::UnexpectedRole("Swap call unwrap_seller".to_string())),
 		}
 	}
 
 	/// Return buyer specific data
-	pub fn unwrap_buyer(&self) -> Result<Option<String>, ErrorKind> {
+	pub fn unwrap_buyer(&self) -> Result<Option<String>, Error> {
 		match &self.role {
 			Role::Buyer(address) => match address {
 				Some(address) => match address == "0x0000000000000000000000000000000000000000" {
@@ -230,9 +228,7 @@ impl Swap {
 				},
 				_ => Ok(address.clone()),
 			},
-			_ => Err(ErrorKind::UnexpectedRole(
-				"Swap call unwrap_buyer".to_string(),
-			)),
+			_ => Err(Error::UnexpectedRole("Swap call unwrap_buyer".to_string())),
 		}
 	}
 
@@ -267,7 +263,7 @@ impl Swap {
 		&self,
 		inner: Update,
 		inner_secondary: SecondaryUpdate,
-	) -> Result<Message, ErrorKind> {
+	) -> Result<Message, Error> {
 		Ok(Message::new(self.id.clone(), inner, inner_secondary))
 	}
 
@@ -275,7 +271,7 @@ impl Swap {
 		&self,
 		keychain: &K,
 		context: &Context,
-	) -> Result<SecretKey, ErrorKind> {
+	) -> Result<SecretKey, Error> {
 		let sec_key = keychain.derive_key(
 			self.primary_amount,
 			&context.multisig_key,
@@ -293,7 +289,7 @@ impl Swap {
 		&self,
 		redeem_slate: &Slate,
 		secp: &Secp256k1,
-	) -> Result<(PublicKey, PublicKey, SecpMessage), ErrorKind> {
+	) -> Result<(PublicKey, PublicKey, SecpMessage), Error> {
 		let pub_nonces = redeem_slate
 			.participant_data
 			.iter()
@@ -311,11 +307,11 @@ impl Swap {
 			fee: redeem_slate
 				.fee
 				.try_into()
-				.map_err(|e| ErrorKind::Generic(format!("Invalid fee, {}", e)))?,
+				.map_err(|e| Error::Generic(format!("Invalid fee, {}", e)))?,
 		};
 		let message = features
 			.kernel_sig_msg()
-			.map_err(|e| ErrorKind::Generic(format!("Unable to generate message, {}", e)))?;
+			.map_err(|e| Error::Generic(format!("Unable to generate message, {}", e)))?;
 
 		Ok((pub_nonce_sum, pub_blind_sum, message))
 	}
@@ -323,13 +319,13 @@ impl Swap {
 	pub(super) fn find_redeem_kernel<C: NodeClient>(
 		&self,
 		node_client: &C,
-	) -> Result<Option<(TxKernel, u64)>, ErrorKind> {
+	) -> Result<Option<(TxKernel, u64)>, Error> {
 		let excess = &self
 			.redeem_slate
 			.tx_or_err()?
 			.kernels()
 			.get(0)
-			.ok_or(ErrorKind::UnexpectedAction(
+			.ok_or(Error::UnexpectedAction(
 				"Swap Fn find_redeem_kernel() redeem slate is not initialized, not found kernel"
 					.to_string(),
 			))?
@@ -347,7 +343,7 @@ impl Swap {
 	}
 
 	/// Common nonce for the BulletProof is sum_i H(C_i) where C_i is the commitment of participant i
-	pub(super) fn common_nonce(&self, secp: &Secp256k1) -> Result<SecretKey, ErrorKind> {
+	pub(super) fn common_nonce(&self, secp: &Secp256k1) -> Result<SecretKey, Error> {
 		let hashed_nonces: Vec<SecretKey> = self
 			.multisig
 			.participants
@@ -357,7 +353,7 @@ impl Swap {
 			.filter_map(|s| s.ok())
 			.collect();
 		if hashed_nonces.len() != 2 {
-			return Err(super::multisig::ErrorKind::MultiSigIncomplete.into());
+			return Err(super::multisig::Error::MultiSigIncomplete.into());
 		}
 		let sec_key = secp.blind_sum(hashed_nonces, Vec::new())?;
 
@@ -530,7 +526,7 @@ impl ser::Readable for Swap {
 }*/
 
 /// Add an input to a tx at the appropriate position
-pub fn tx_add_input(slate: &mut Slate, commit: Commitment) -> Result<(), ErrorKind> {
+pub fn tx_add_input(slate: &mut Slate, commit: Commitment) -> Result<(), Error> {
 	match &mut slate.tx_or_err_mut()?.body.inputs {
 		Inputs::FeaturesAndCommit(inputs) => {
 			let input = tx::Input {
@@ -558,7 +554,7 @@ pub fn tx_add_output(
 	slate: &mut Slate,
 	commit: Commitment,
 	proof: RangeProof,
-) -> Result<(), ErrorKind> {
+) -> Result<(), Error> {
 	let output = tx::Output {
 		identifier: OutputIdentifier {
 			features: tx::OutputFeatures::Plain,
@@ -575,10 +571,7 @@ pub fn tx_add_output(
 }
 
 /// Interpret the final 32 bytes of the signature as a secret key
-pub fn signature_as_secret(
-	secp: &Secp256k1,
-	signature: &Signature,
-) -> Result<SecretKey, ErrorKind> {
+pub fn signature_as_secret(secp: &Secp256k1, signature: &Signature) -> Result<SecretKey, Error> {
 	let ser = signature.to_raw_data();
 	let key = SecretKey::from_slice(secp, &ser[32..])?;
 	Ok(key)
@@ -589,10 +582,10 @@ pub fn publish_transaction<C: NodeClient>(
 	node_client: &C,
 	tx: &tx::Transaction,
 	fluff: bool,
-) -> Result<(), ErrorKind> {
+) -> Result<(), Error> {
 	let (height, _, _) = node_client.get_chain_tip()?;
 	tx.validate(Weighting::AsTransaction, height)
-		.map_err(|e| ErrorKind::UnexpectedAction(format!("slate is not valid, {}", e)))?;
+		.map_err(|e| Error::UnexpectedAction(format!("slate is not valid, {}", e)))?;
 
 	node_client.post_tx(tx, fluff)?;
 	Ok(())

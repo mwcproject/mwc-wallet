@@ -18,7 +18,7 @@ use crate::grin_util::secp::Secp256k1;
 use rand::{thread_rng, Rng};
 
 use super::proofaddress;
-use crate::error::{Error, ErrorKind};
+use crate::error::Error;
 
 use ring::aead;
 use ring::pbkdf2;
@@ -50,9 +50,9 @@ impl EncryptedMessage {
 		secp: &Secp256k1,
 	) -> Result<EncryptedMessage, Error> {
 		let mut common_secret = receiver_public_key.clone();
-		common_secret.mul_assign(&secp, secret_key).map_err(|e| {
-			ErrorKind::TxProofGenericError(format!("Unable to encrypt message, {}", e))
-		})?;
+		common_secret
+			.mul_assign(&secp, secret_key)
+			.map_err(|e| Error::TxProofGenericError(format!("Unable to encrypt message, {}", e)))?;
 		let common_secret_ser = common_secret.serialize_vec(secp, true);
 		let common_secret_slice = &common_secret_ser[1..33];
 
@@ -68,7 +68,7 @@ impl EncryptedMessage {
 		);
 		let mut enc_bytes = message.as_bytes().to_vec();
 		let unbound_key = aead::UnboundKey::new(&aead::CHACHA20_POLY1305, &key)
-			.map_err(|e| ErrorKind::TxProofGenericError(format!("Unable to build a key, {}", e)))?;
+			.map_err(|e| Error::TxProofGenericError(format!("Unable to build a key, {}", e)))?;
 		let sealing_key: aead::LessSafeKey = aead::LessSafeKey::new(unbound_key);
 		let aad = aead::Aad::from(&[]);
 		sealing_key
@@ -77,7 +77,7 @@ impl EncryptedMessage {
 				aad,
 				&mut enc_bytes,
 			)
-			.map_err(|e| ErrorKind::TxProofGenericError(format!("Unable to encrypt, {}", e)))?;
+			.map_err(|e| Error::TxProofGenericError(format!("Unable to encrypt, {}", e)))?;
 
 		Ok(EncryptedMessage {
 			destination: destination.clone(),
@@ -95,16 +95,16 @@ impl EncryptedMessage {
 		secp: &Secp256k1,
 	) -> Result<[u8; 32], Error> {
 		let salt = util::from_hex(&self.salt).map_err(|e| {
-			ErrorKind::TxProofGenericError(format!(
+			Error::TxProofGenericError(format!(
 				"Unable to decode salt from HEX {}, {}",
 				self.salt, e
 			))
 		})?;
 
 		let mut common_secret = sender_public_key.clone();
-		common_secret.mul_assign(&secp, secret_key).map_err(|e| {
-			ErrorKind::TxProofGenericError(format!("Key manipulation error, {}", e))
-		})?;
+		common_secret
+			.mul_assign(&secp, secret_key)
+			.map_err(|e| Error::TxProofGenericError(format!("Key manipulation error, {}", e)))?;
 		let common_secret_ser = common_secret.serialize_vec(secp, true);
 		let common_secret_slice = &common_secret_ser[1..33];
 
@@ -122,13 +122,13 @@ impl EncryptedMessage {
 	/// Decrypt/verify message with a key
 	pub fn decrypt_with_key(&self, key: &[u8; 32]) -> Result<String, Error> {
 		let mut encrypted_message = util::from_hex(&self.encrypted_message).map_err(|e| {
-			ErrorKind::TxProofGenericError(format!(
+			Error::TxProofGenericError(format!(
 				"Unable decode message from HEX {}, {}",
 				self.encrypted_message, e
 			))
 		})?;
 		let nonce = util::from_hex(&self.nonce).map_err(|e| {
-			ErrorKind::TxProofGenericError(format!(
+			Error::TxProofGenericError(format!(
 				"Unable decode nonce from HEX {}, {}",
 				self.nonce, e
 			))
@@ -137,7 +137,7 @@ impl EncryptedMessage {
 		n.copy_from_slice(&nonce[0..12]);
 
 		let unbound_key = aead::UnboundKey::new(&aead::CHACHA20_POLY1305, key)
-			.map_err(|e| ErrorKind::TxProofGenericError(format!("Unable to build a key, {}", e)))?;
+			.map_err(|e| Error::TxProofGenericError(format!("Unable to build a key, {}", e)))?;
 		let opening_key: aead::LessSafeKey = aead::LessSafeKey::new(unbound_key);
 		let aad = aead::Aad::from(&[]);
 		let decrypted_data = opening_key
@@ -147,11 +147,11 @@ impl EncryptedMessage {
 				&mut encrypted_message,
 			)
 			.map_err(|e| {
-				ErrorKind::TxProofGenericError(format!("Unable to decrypt the message, {}", e))
+				Error::TxProofGenericError(format!("Unable to decrypt the message, {}", e))
 			})?;
 
 		let res_msg = String::from_utf8(decrypted_data.to_vec()).map_err(|e| {
-			ErrorKind::TxProofGenericError(format!("Decrypted message is corrupted, {}", e))
+			Error::TxProofGenericError(format!("Decrypted message is corrupted, {}", e))
 		})?;
 		Ok(res_msg)
 	}

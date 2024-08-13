@@ -23,12 +23,10 @@ use crate::util::{Mutex, ZeroingString};
 /// Argument parsing and error handling for wallet commands
 use clap::ArgMatches;
 use ed25519_dalek::SecretKey as DalekSecretKey;
-use failure::Fail;
 use grin_wallet_api::Owner;
 use grin_wallet_config::parse_node_address_string;
 use grin_wallet_config::{MQSConfig, TorConfig, WalletConfig};
-use grin_wallet_controller::command;
-use grin_wallet_controller::{Error, ErrorKind};
+use grin_wallet_controller::{command, Error};
 use grin_wallet_impls::tor::config::is_tor_address;
 use grin_wallet_impls::{DefaultLCProvider, DefaultWalletImpl};
 use grin_wallet_impls::{PathToSlateGetter, SlateGetter};
@@ -59,23 +57,23 @@ macro_rules! arg_parse {
 		match $r {
 			Ok(res) => res,
 			Err(e) => {
-				return Err(ErrorKind::ArgumentError(format!("{}", e)).into());
+				return Err(Error::ArgumentError(format!("{}", e)));
 			}
 		}
 	};
 }
 /// Simple error definition, just so we can return errors from all commands
 /// and let the caller figure out what to do
-#[derive(Clone, Eq, PartialEq, Debug, Fail)]
+#[derive(Clone, Eq, PartialEq, Debug, thiserror::Error)]
 
 pub enum ParseError {
-	#[fail(display = "Invalid Arguments: {}", _0)]
+	#[error("Invalid Arguments: {0}")]
 	ArgumentError(String),
-	#[fail(display = "Parsing IO error: {}", _0)]
+	#[error("Parsing IO error: {0}")]
 	IOError(String),
-	#[fail(display = "Wallet configuration already exists: {}", _0)]
+	#[error("Wallet configuration already exists: {0}")]
 	WalletExists(String),
-	#[fail(display = "User Cancelled")]
+	#[error("User Cancelled")]
 	CancelledError,
 }
 
@@ -632,8 +630,7 @@ pub fn parse_send_args(args: &ArgMatches) -> Result<command::SendArgs, ParseErro
 			if addr.tor_public_key().is_err() {
 				return Err(ParseError::ArgumentError(
 					"Expecting tor PK address as a slatepack recipient value".to_string(),
-				)
-				.into());
+				));
 			}
 			Some(addr)
 		}
@@ -789,8 +786,7 @@ pub fn parse_issue_invoice_args(
 			if addr.tor_public_key().is_err() {
 				return Err(ParseError::ArgumentError(
 					"Expecting tor PK address as a slatepack recipient value".to_string(),
-				)
-				.into());
+				));
 			}
 			Some(addr)
 		}
@@ -1860,11 +1856,10 @@ where
 			command::eth(owner_api.wallet_inst.clone(), a)
 		}
 		(cmd, _) => {
-			return Err(ErrorKind::ArgumentError(format!(
+			return Err(Error::ArgumentError(format!(
 				"Unknown wallet command '{}', use 'mwc help wallet' for details",
 				cmd
-			))
-			.into());
+			)));
 		}
 	}
 }

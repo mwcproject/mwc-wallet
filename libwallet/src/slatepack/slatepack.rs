@@ -18,8 +18,7 @@ use std::convert::TryInto;
 
 use crate::grin_util::secp::key::PublicKey;
 
-use crate::{Error, ErrorKind};
-use crate::{ParticipantData, Slate, SlateVersion};
+use crate::{Error, ParticipantData, Slate, SlateVersion};
 
 use crate::proof::proofaddress::ProvableAddress;
 use std::io;
@@ -85,11 +84,10 @@ impl SlatePurpose {
 			3 => SlatePurpose::InvoiceResponse,
 			4 => SlatePurpose::FullSlate,
 			_ => {
-				return Err(ErrorKind::SlatepackDecodeError(format!(
+				return Err(Error::SlatepackDecodeError(format!(
 					"SlatePackPurpose wrong value {}",
 					i
-				))
-				.into())
+				)))
 			}
 		};
 		Ok(res)
@@ -132,9 +130,9 @@ impl Slatepack {
 		secp: &Secp256k1,
 	) -> Result<Self, Error> {
 		if encrypted && data.len() < SLATE_PACK_PLAIN_DATA_SIZE {
-			return Err(
-				ErrorKind::SlatepackDecodeError("Slatapack data is too short".to_string()).into(),
-			);
+			return Err(Error::SlatepackDecodeError(
+				"Slatapack data is too short".to_string(),
+			));
 		}
 		let mut digest = crc32::Digest::new(crc32::IEEE);
 
@@ -145,9 +143,9 @@ impl Slatepack {
 		let mut r = BitReader::endian(data.as_slice(), BigEndian);
 		let version: u8 = r.read(8)?;
 		if version != 0 {
-			return Err(
-				ErrorKind::SlatepackDecodeError("Wrong slatepack version".to_string()).into(),
-			);
+			return Err(Error::SlatepackDecodeError(
+				"Wrong slatepack version".to_string(),
+			));
 		}
 
 		let (payload, sender, recipient) = if encrypted {
@@ -156,19 +154,13 @@ impl Slatepack {
 			let mut data: [u8; 32] = [0; 32];
 			r.read_bytes(&mut data)?;
 			let sender = DalekPublicKey::from_bytes(&data).map_err(|e| {
-				ErrorKind::SlatepackDecodeError(format!(
-					"Unable to read a sender public key, {}",
-					e
-				))
+				Error::SlatepackDecodeError(format!("Unable to read a sender public key, {}", e))
 			})?;
 			// Receiver address, so this wallet open the message if it is in the archive
 			let mut data: [u8; 32] = [0; 32];
 			r.read_bytes(&mut data)?;
 			let recipient = DalekPublicKey::from_bytes(&data).map_err(|e| {
-				ErrorKind::SlatepackDecodeError(format!(
-					"Unable to read a sender public key, {}",
-					e
-				))
+				Error::SlatepackDecodeError(format!("Unable to read a sender public key, {}", e))
 			})?;
 
 			let mut nonce: [u8; 12] = [0; 12];
@@ -202,10 +194,9 @@ impl Slatepack {
 				let read_crc32: u32 = crc_reader.read(32)?;
 				let data_crc32 = digest.sum32();
 				if read_crc32 != data_crc32 {
-					return Err(ErrorKind::SlatepackDecodeError(
+					return Err(Error::SlatepackDecodeError(
 						"Slatepack content is not consistent".to_string(),
-					)
-					.into());
+					));
 				}
 			}
 
@@ -261,16 +252,15 @@ impl Slatepack {
 		secp: &Secp256k1,
 	) -> Result<(Vec<u8>, bool), Error> {
 		if !self.slate.compact_slate {
-			return Err(ErrorKind::SlatepackEncodeError(
+			return Err(Error::SlatepackEncodeError(
 				"Slatepack expecting only compact model".to_string(),
-			)
-			.into());
+			));
 		}
 
 		// Here we can calculate the version of the slatepack that it needed. Currently there is no choices, just a single version.
 		match slate_version {
 			SlateVersion::SP => (),
-			_ => return Err(ErrorKind::SlatepackEncodeError("Slate is plain".to_string()).into()),
+			_ => return Err(Error::SlatepackEncodeError("Slate is plain".to_string())),
 		}
 
 		let mut encrypted_data = Vec::new();
@@ -378,10 +368,9 @@ impl Slatepack {
 			// recipient is define, so we can do encryption
 
 			if self.sender.is_none() {
-				return Err(ErrorKind::SlatepackEncodeError(
+				return Err(Error::SlatepackEncodeError(
 					"Not found expected sender value".to_string(),
-				)
-				.into());
+				));
 			}
 			let sender = self.sender.clone().unwrap();
 			// Sender address, so other party can open the message
@@ -416,10 +405,9 @@ impl Slatepack {
 
 			let enc_len = encrypted_data.len();
 			if enc_len > 65534 {
-				return Err(ErrorKind::SlatepackEncodeError(
+				return Err(Error::SlatepackEncodeError(
 					"Slate too large for encoding".to_string(),
-				)
-				.into());
+				));
 			}
 			w_pack.write(16, enc_len as u32)?; // Need to keep byte aligned
 			w_pack.write_bytes(&encrypted_data)?;
@@ -432,10 +420,9 @@ impl Slatepack {
 
 			let enc_len = encrypted_data.len();
 			if enc_len > 65534 {
-				return Err(ErrorKind::SlatepackEncodeError(
+				return Err(Error::SlatepackEncodeError(
 					"Slate too large for encoding".to_string(),
-				)
-				.into());
+				));
 			}
 			w_pack.write(16, enc_len as u32)?; // Need to keep byte aligned
 			w_pack.write_bytes(&encrypted_data)?;
@@ -511,10 +498,9 @@ impl Slatepack {
 					let sig_dt = sig.serialize_compact(secp);
 					w.write_bytes(&sig_dt)?;
 				} else {
-					return Err(ErrorKind::GenericError(
+					return Err(Error::GenericError(
 						"Not found message signature at participant data".to_string(),
-					)
-					.into());
+					));
 				}
 			}
 			None => w.write::<u8>(1, 0)?,
@@ -675,10 +661,9 @@ impl Slatepack {
 						Self::write_u64(fee.into(), true, w)?;
 					}
 					_ => {
-						return Err(ErrorKind::SlatepackEncodeError(
+						return Err(Error::SlatepackEncodeError(
 							"Slatepack expecting only Plain Kernels".to_string(),
-						)
-						.into())
+						))
 					}
 				}
 				w.write_bytes(&kernel.excess.0)?;
@@ -691,7 +676,7 @@ impl Slatepack {
 		if write_participan_data_0 {
 			let part_data = slate
 				.participant_with_id(0)
-				.ok_or(ErrorKind::SlatepackEncodeError(
+				.ok_or(Error::SlatepackEncodeError(
 					"Not found slate participant data".to_string(),
 				))?;
 			Self::write_participant_data(&part_data, w, secp)?;
@@ -699,7 +684,7 @@ impl Slatepack {
 		if write_participan_data_1 {
 			let part_data = slate
 				.participant_with_id(1)
-				.ok_or(ErrorKind::SlatepackEncodeError(
+				.ok_or(Error::SlatepackEncodeError(
 					"Not found slate participant data".to_string(),
 				))?;
 			Self::write_participant_data(&part_data, w, secp)?;
@@ -725,23 +710,19 @@ impl Slatepack {
 					let sign_str =
 						pp.receiver_signature
 							.clone()
-							.ok_or(ErrorKind::SlatepackEncodeError(
+							.ok_or(Error::SlatepackEncodeError(
 								"Not found expected payment proof signature".to_string(),
 							))?;
 					let sign_v = from_hex(&sign_str).map_err(|e| {
-						ErrorKind::SlatepackEncodeError(format!(
-							"Wrong signature at slate data, {}",
-							e
-						))
+						Error::SlatepackEncodeError(format!("Wrong signature at slate data, {}", e))
 					})?;
 					// Signature length can be different (so far it is 64 bytes or 70) because the PK might be from different families.
 					// That is why let's save the size
 					let sign_len = sign_v.len();
 					if sign_len < 64 || sign_len >= 64 + 16 {
-						return Err(ErrorKind::SlatepackEncodeError(
+						return Err(Error::SlatepackEncodeError(
 							"Invalid Signature length".to_string(),
-						)
-						.into());
+						));
 					}
 					let sign_len: u32 = sign_len as u32 - 64;
 					w.write(4, sign_len)?;
@@ -791,13 +772,13 @@ impl Slatepack {
 			let mut msg: Vec<u8> = vec![0; sz as usize];
 			r.read_bytes(&mut msg)?;
 			let msg = smaz::decompress(&msg).map_err(|e| {
-				ErrorKind::SlatepackDecodeError(format!("Unable to decode message, {}", e))
+				Error::SlatepackDecodeError(format!("Unable to decode message, {}", e))
 			})?;
 			let mut sig_dt: [u8; 64] = [0; 64];
 			r.read_bytes(&mut sig_dt)?;
 			(
 				Some(String::from_utf8(msg).map_err(|e| {
-					ErrorKind::SlatepackDecodeError(format!("Unable to decode message, {}", e))
+					Error::SlatepackDecodeError(format!("Unable to decode message, {}", e))
 				})?),
 				Some(Signature::from_compact(secp, &sig_dt)?),
 			)
@@ -838,7 +819,7 @@ impl Slatepack {
 			let mut pk: [u8; PUBLIC_KEY_LENGTH] = [0; PUBLIC_KEY_LENGTH];
 			r.read_bytes(&mut pk)?;
 			let dalek_pk = DalekPublicKey::from_bytes(&pk).map_err(|e| {
-				ErrorKind::SlatepackDecodeError(format!("Unable decode Public Key data, {}", e))
+				Error::SlatepackDecodeError(format!("Unable decode Public Key data, {}", e))
 			})?;
 
 			ProvableAddress::from_tor_pub_key(&dalek_pk)
@@ -865,15 +846,13 @@ impl Slatepack {
 		let mut slate_id: [u8; 16] = [0; 16];
 		r.read_bytes(&mut slate_id)?;
 		slate.id = Uuid::from_slice(&slate_id).map_err(|e| {
-			ErrorKind::SlatepackDecodeError(format!("Unable to encode UUID data, {}", e))
+			Error::SlatepackDecodeError(format!("Unable to encode UUID data, {}", e))
 		})?;
 
 		let network: u8 = r.read(1)?;
 
 		if (network == 1) ^ global::is_mainnet() {
-			return Err(
-				ErrorKind::SlatepackDecodeError("Slate from wrong network".to_string()).into(),
-			);
+			return Err(Error::SlatepackDecodeError("Slate from wrong network".to_string()).into());
 		}
 
 		if read_amount {
@@ -1076,9 +1055,7 @@ impl Slatepack {
 		let mut enc_bytes = payload;
 
 		let unbound_key = aead::UnboundKey::new(&aead::CHACHA20_POLY1305, shared_secret.as_bytes())
-			.map_err(|e| {
-				ErrorKind::SlatepackEncodeError(format!("Unable to build a key, {}", e))
-			})?;
+			.map_err(|e| Error::SlatepackEncodeError(format!("Unable to build a key, {}", e)))?;
 		let sealing_key: aead::LessSafeKey = aead::LessSafeKey::new(unbound_key);
 		let aad = aead::Aad::from(&[]);
 		sealing_key
@@ -1087,7 +1064,7 @@ impl Slatepack {
 				aad,
 				&mut enc_bytes,
 			)
-			.map_err(|e| ErrorKind::SlatepackEncodeError(format!("Unable to encrypt, {}", e)))?;
+			.map_err(|e| Error::SlatepackEncodeError(format!("Unable to encrypt, {}", e)))?;
 
 		Ok((enc_bytes, nonce))
 	}
@@ -1107,9 +1084,7 @@ impl Slatepack {
 		let shared_secret = secret.diffie_hellman(&sender);
 
 		let unbound_key = aead::UnboundKey::new(&aead::CHACHA20_POLY1305, shared_secret.as_bytes())
-			.map_err(|e| {
-				ErrorKind::SlatepackDecodeError(format!("Unable to build a key, {}", e))
-			})?;
+			.map_err(|e| Error::SlatepackDecodeError(format!("Unable to build a key, {}", e)))?;
 		let opening_key: aead::LessSafeKey = aead::LessSafeKey::new(unbound_key);
 		let aad = aead::Aad::from(&[]);
 
@@ -1121,7 +1096,7 @@ impl Slatepack {
 				aad,
 				&mut encrypted_message,
 			)
-			.map_err(|e| ErrorKind::SlatepackDecodeError(format!("Unable to decrypt, {}", e)))?;
+			.map_err(|e| Error::SlatepackDecodeError(format!("Unable to decrypt, {}", e)))?;
 
 		Ok(decrypted_data.to_vec())
 	}

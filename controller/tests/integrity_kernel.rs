@@ -337,7 +337,7 @@ fn wallet_integrity_kernel() {
 	let test_dir = "test_output/integrity_kernel";
 	setup(test_dir);
 	if let Err(e) = integrity_kernel_impl(test_dir) {
-		panic!("Libwallet Error: {} - {}", e, e.backtrace().unwrap());
+		panic!("Libwallet Error: {}", e);
 	}
 	clean_output_dir(test_dir);
 }
