@@ -175,7 +175,7 @@ fn file_repost_test_impl(test_dir: &'static str) -> Result<(), wallet::Error> {
 
 	// Now repost from cached
 	wallet::controller::owner_single_use(Some(wallet1.clone()), mask1, None, |api, m| {
-		let (_, txs) = api.retrieve_txs(m, true, None, Some(slate.id))?;
+		let (_, txs) = api.retrieve_txs(m, true, None, Some(slate.id), None)?;
 		let stored_tx = api.get_stored_tx(m, &txs[0])?;
 		api.post_tx(m, &stored_tx.unwrap(), false)?;
 		bh += 1;
@@ -243,7 +243,7 @@ fn file_repost_test_impl(test_dir: &'static str) -> Result<(), wallet::Error> {
 
 	// Now repost from cached
 	wallet::controller::owner_single_use(Some(wallet1.clone()), mask1, None, |api, m| {
-		let (_, txs) = api.retrieve_txs(m, true, None, Some(slate.id))?;
+		let (_, txs) = api.retrieve_txs(m, true, None, Some(slate.id), None)?;
 		let stored_tx = api.get_stored_tx(m, &txs[0])?;
 		api.post_tx(m, &stored_tx.unwrap(), false)?;
 		bh += 1;

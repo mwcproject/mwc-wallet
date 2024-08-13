@@ -2835,14 +2835,16 @@ where
 		tx_id: Option<u32>,
 		tx_slate_id: Option<Uuid>,
 	) -> Result<(bool, Vec<TxLogEntryAPI>), Error> {
-		Owner::retrieve_txs(self, None, refresh_from_node, tx_id, tx_slate_id).map(|(b, tx)| {
-			(
-				b,
-				tx.iter()
-					.map(|t| TxLogEntryAPI::from_txlogemtry(t))
-					.collect(),
-			)
-		})
+		Owner::retrieve_txs(self, None, refresh_from_node, tx_id, tx_slate_id, None).map(
+			|(b, tx)| {
+				(
+					b,
+					tx.iter()
+						.map(|t| TxLogEntryAPI::from_txlogemtry(t))
+						.collect(),
+				)
+			},
+		)
 	}
 
 	fn retrieve_summary_info(

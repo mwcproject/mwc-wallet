@@ -130,7 +130,7 @@ fn payment_proofs_test_impl(test_dir: &'static str) -> Result<(), wallet::Error>
 		sender_api.tx_lock_outputs(m, &slate, None, 0)?;
 
 		// Ensure what's stored in TX log for payment proof is correct
-		let (_, txs) = sender_api.retrieve_txs(m, true, None, Some(slate.id))?;
+		let (_, txs) = sender_api.retrieve_txs(m, true, None, Some(slate.id), None)?;
 		assert!(txs[0].payment_proof.is_some());
 		let pp = txs[0].clone().payment_proof.unwrap();
 		assert_eq!(

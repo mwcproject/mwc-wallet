@@ -36,6 +36,7 @@ use crate::{ECDHPubkey, Owner, Token};
 use easy_jsonrpc_mw;
 use ed25519_dalek::PublicKey as DalekPublicKey;
 use grin_wallet_libwallet::proof::proofaddress::ProvableAddress;
+use libwallet::RetrieveTxQueryArgs;
 use rand::thread_rng;
 use std::convert::TryFrom;
 use std::time::Duration;
@@ -329,6 +330,7 @@ pub trait OwnerRpcV3 {
 		refresh_from_node: bool,
 		tx_id: Option<u32>,
 		tx_slate_id: Option<Uuid>,
+		query_args: Option<RetrieveTxQueryArgs>,
 	) -> Result<(bool, Vec<TxLogEntryAPI>), Error>;
 
 	/**
@@ -3488,6 +3490,7 @@ where
 		refresh_from_node: bool,
 		tx_id: Option<u32>,
 		tx_slate_id: Option<Uuid>,
+		query_args: Option<RetrieveTxQueryArgs>,
 	) -> Result<(bool, Vec<TxLogEntryAPI>), Error> {
 		Owner::retrieve_txs(
 			self,
@@ -3495,6 +3498,7 @@ where
 			refresh_from_node,
 			tx_id,
 			tx_slate_id,
+			query_args,
 		)
 		.map(|(b, tx)| {
 			(

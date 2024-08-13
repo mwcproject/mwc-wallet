@@ -36,8 +36,8 @@ use crate::types::{
 use crate::Error;
 use crate::{
 	wallet_lock, BuiltOutput, InitTxArgs, IssueInvoiceTxArgs, NodeHeightResult,
-	OutputCommitMapping, PaymentProof, ScannedBlockInfo, TxLogEntryType, ViewWallet, WalletInst,
-	WalletLCProvider,
+	OutputCommitMapping, PaymentProof, RetrieveTxQueryArgs, ScannedBlockInfo, TxLogEntryType,
+	ViewWallet, WalletInst, WalletLCProvider,
 };
 
 use crate::proof::tx_proof::{pop_proof_for_slate, TxProof};
@@ -216,6 +216,7 @@ pub fn retrieve_txs<'a, L, C, K>(
 	refresh_from_node: bool,
 	tx_id: Option<u32>,
 	tx_slate_id: Option<Uuid>,
+	query_args: Option<RetrieveTxQueryArgs>,
 ) -> Result<(bool, Vec<TxLogEntry>), Error>
 where
 	L: WalletLCProvider<'a, C, K>,
@@ -300,6 +301,7 @@ where
 		refresh_from_node,
 		tx_id,
 		tx_slate_id,
+		None,
 	)?;
 	if txs.1.len() != 1 {
 		return Err(Error::PaymentProofRetrieval(

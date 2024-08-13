@@ -43,6 +43,7 @@ use crate::util::secp::key::SecretKey;
 use crate::util::{from_hex, Mutex, ZeroingString};
 use grin_wallet_util::grin_util::secp::key::PublicKey;
 use grin_wallet_util::grin_util::static_secp_instance;
+use libwallet::RetrieveTxQueryArgs;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, Sender};
 use std::sync::Arc;
@@ -508,7 +509,7 @@ where
 	/// let tx_slate_id = None;
 	///
 	/// // Return all TxLogEntries
-	/// let result = api_owner.retrieve_txs(None, update_from_node, tx_id, tx_slate_id);
+	/// let result = api_owner.retrieve_txs(None, update_from_node, tx_id, tx_slate_id, None);
 	///
 	/// if let Ok((was_updated, tx_log_entries)) = result {
 	///     //...
@@ -521,6 +522,7 @@ where
 		refresh_from_node: bool,
 		tx_id: Option<u32>,
 		tx_slate_id: Option<Uuid>,
+		query_args: Option<RetrieveTxQueryArgs>,
 	) -> Result<(bool, Vec<TxLogEntry>), Error> {
 		let tx = {
 			let t = self.status_tx.lock();
@@ -537,6 +539,7 @@ where
 			refresh_from_node,
 			tx_id,
 			tx_slate_id,
+			query_args,
 		)?;
 		if self.doctest_mode {
 			res.1 = res
