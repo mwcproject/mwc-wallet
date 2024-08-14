@@ -58,7 +58,7 @@ use std::path::{Path, MAIN_SEPARATOR};
 use std::process::{Child, ChildStdout, Command, Stdio};
 use std::sync::mpsc::channel;
 use std::thread;
-use sysinfo::{Process, ProcessExt, Signal};
+use sysinfo::{Process, ProcessExt, System, SystemExt};
 
 #[cfg(windows)]
 const TOR_EXE_NAME: &str = "tor.exe";
@@ -87,16 +87,6 @@ pub enum Error {
 	Timeout,
 }
 
-#[cfg(windows)]
-fn get_process(pid: i32) -> Process {
-	Process::new(pid as usize, None, 0)
-}
-
-#[cfg(not(windows))]
-fn get_process(pid: i32) -> Process {
-	Process::new(pid, None, 0)
-}
-
 pub struct TorProcess {
 	tor_cmd: String,
 	args: Vec<String>,
@@ -106,6 +96,7 @@ pub struct TorProcess {
 	working_dir: Option<String>,
 	pub stdout: Option<BufReader<ChildStdout>>,
 	pub process: Option<Child>,
+	sys: System,
 }
 
 impl TorProcess {
@@ -119,6 +110,7 @@ impl TorProcess {
 			working_dir: None,
 			stdout: None,
 			process: None,
+			sys: System::new(),
 		}
 	}
 
@@ -136,6 +128,11 @@ impl TorProcess {
 			Ok(val) => Some(val),
 			Err(_) => None,
 		}
+	}
+
+	fn get_process(&mut self, pid: i32) -> Option<&Process> {
+		self.sys.refresh_all();
+		self.sys.process((pid as usize).into())
 	}
 
 	pub fn tor_cmd(&mut self, tor_cmd: &str) -> &mut Self {
@@ -194,8 +191,9 @@ impl TorProcess {
 				let pid = pid.parse::<i32>().map_err(|err| {
 					Error::PID(format!("Pid value {} is invalid, {:?}", pid, err))
 				})?;
-				let process = get_process(pid);
-				let _ = process.kill(Signal::Kill);
+				if let Some(p) = self.get_process(pid) {
+					let _ = p.kill();
+				}
 			}
 		}
 		if let Some(ref torrc_path) = self.torrc_path {
@@ -213,7 +211,7 @@ impl TorProcess {
 			})?;
 
 		if let Some(ref d) = self.working_dir {
-			// split out the process id, so if we don't exit cleanly
+			// Split out the process id, so if we don't exit cleanly
 			// we can take it down on the next run
 			let pid_file_name = format!("{}{}pid", d, MAIN_SEPARATOR);
 			let mut file = File::create(pid_file_name.clone()).map_err(|err| {
