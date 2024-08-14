@@ -675,6 +675,9 @@ where
 		if t.tx_type == TxLogEntryType::TxSent {
 			return Err(Error::TransactionAlreadyReceived(ret_slate.id.to_string()));
 		}
+		if t.tx_type == TxLogEntryType::TxSentCancelled {
+			return Err(Error::TransactionWasCancelled(ret_slate.id.to_string()));
+		}
 	}
 
 	let message = match &args.message {

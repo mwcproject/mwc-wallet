@@ -161,6 +161,10 @@ pub enum Error {
 	#[error("Transaction  with offset hex string {0} has already been received")]
 	TransactionWithSameOffsetAlreadyReceived(String),
 
+	/// Transaction has been cancelled
+	#[error("Transaction {0} has been cancelled")]
+	TransactionWasCancelled(String),
+
 	/// Attempt to repost a transaction that's not completed and stored
 	#[error("Transaction building not completed: {0}")]
 	TransactionBuildingNotCompleted(u32),
