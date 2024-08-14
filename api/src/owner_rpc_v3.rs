@@ -220,6 +220,7 @@ pub trait OwnerRpcV3 {
 	# , true, 2, false, false, false, false, true);
 	```
 	*/
+
 	fn retrieve_outputs(
 		&self,
 		token: Token,
@@ -323,26 +324,36 @@ pub trait OwnerRpcV3 {
 	# , true, 2, false, false, false, false, true);
 	```
 
-	# JSON-RPC Example, with advanced query arguments - See  (../grin_wallet_libwallet/types.struct.RetrieveTxQueryArgs.html)
+	 */
+
+	fn retrieve_txs(
+		&self,
+		token: Token,
+		refresh_from_node: bool,
+		tx_id: Option<u32>,
+		tx_slate_id: Option<Uuid>,
+	) -> Result<(bool, Vec<TxLogEntryAPI>), Error>;
+
+	/**
+	Networked version of [Owner::retrieve_txs](struct.Owner.html#method.retrieve_txs), which passes only the `tx_query_args`
+	parameter. See  (../grin_wallet_libwallet/types.struct.RetrieveTxQueryArgs.html)
 
 	```
 		# grin_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
 		# r#"
 		{
 			"jsonrpc": "2.0",
-			"method": "retrieve_txs",
+			"method": "query_txs",
 			"params": {
 				"token": "d202964900000000d302964900000000d402964900000000d502964900000000",
 				"refresh_from_node": true,
-				"tx_id": null,
-				"tx_slate_id": null,
-				"tx_query_args": {
+				"query": {
 					"min_id_inc": 0,
 					"max_id_inc": 100,
 					"min_amount_inc": "0",
-					"max_amount_inc": "6000000000",
+					"max_amount_inc": "60000000000",
 					"sort_field": "Id",
-					"sort_order": "Desc"
+					"sort_order": "Asc"
 				}
 			},
 			"id": 1
@@ -407,13 +418,11 @@ pub trait OwnerRpcV3 {
 
 	*/
 
-	fn retrieve_txs(
+	fn query_txs(
 		&self,
 		token: Token,
 		refresh_from_node: bool,
-		tx_id: Option<u32>,
-		tx_slate_id: Option<Uuid>,
-		tx_query_args: Option<RetrieveTxQueryArgs>,
+		query: RetrieveTxQueryArgs,
 	) -> Result<(bool, Vec<TxLogEntryAPI>), Error>;
 
 	/**
@@ -3573,7 +3582,6 @@ where
 		refresh_from_node: bool,
 		tx_id: Option<u32>,
 		tx_slate_id: Option<Uuid>,
-		tx_query_args: Option<RetrieveTxQueryArgs>,
 	) -> Result<(bool, Vec<TxLogEntryAPI>), Error> {
 		Owner::retrieve_txs(
 			self,
@@ -3581,7 +3589,31 @@ where
 			refresh_from_node,
 			tx_id,
 			tx_slate_id,
-			tx_query_args,
+			None,
+		)
+		.map(|(b, tx)| {
+			(
+				b,
+				tx.iter()
+					.map(|t| TxLogEntryAPI::from_txlogemtry(t))
+					.collect(),
+			)
+		})
+	}
+
+	fn query_txs(
+		&self,
+		token: Token,
+		refresh_from_node: bool,
+		query: RetrieveTxQueryArgs,
+	) -> Result<(bool, Vec<TxLogEntryAPI>), Error> {
+		Owner::retrieve_txs(
+			self,
+			(&token.keychain_mask).as_ref(),
+			refresh_from_node,
+			None,
+			None,
+			Some(query),
 		)
 		.map(|(b, tx)| {
 			(
