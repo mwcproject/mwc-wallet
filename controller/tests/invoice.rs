@@ -202,12 +202,9 @@ fn invoice_tx_impl(test_dir: &'static str) -> Result<(), wallet::Error> {
 		Ok(())
 	})?;
 
-	let _ = test_framework::award_blocks_to_wallet(&chain, wallet1.clone(), mask1, 3, false);
-	//bh += 3;
-
 	// test that payee can only cancel once
 	let _ = test_framework::award_blocks_to_wallet(&chain, wallet1.clone(), mask1, 3, false);
-	bh += 3;
+	//bh += 3;
 
 	wallet::controller::owner_single_use(Some(wallet2.clone()), mask2, None, |api, m| {
 		// Wallet 2 inititates an invoice transaction, requesting payment

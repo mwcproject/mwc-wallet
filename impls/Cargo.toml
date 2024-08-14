@@ -1,6 +1,6 @@
 [package]
 name = "grin_wallet_impls"
-version = "5.1.0"
+version = "5.3.1"
 authors = ["Grin Developers <mimblewimble@lists.launchpad.net>"]
 description = "Concrete types derived from libwallet traits"
 license = "Apache-2.0"
@@ -41,9 +41,9 @@ url = "2.1"
 libp2p = { git = "https://github.com/mwcproject/rust-libp2p", branch = "master", default-features = false, features = [ "noise", "yamux", "mplex", "dns", "tcp-tokio", "ping", "gossipsub"] }
 #libp2p = { path = "../../rust-libp2p", default-features = false, features = [ "noise", "yamux", "mplex", "dns", "tcp-tokio", "ping", "gossipsub"] }
 
-grin_wallet_util = { path = "../util", version = "5.1.0" }
-grin_wallet_config = { path = "../config", version = "5.1.0" }
-grin_wallet_libwallet = { path = "../libwallet", version = "5.1.0" }
+grin_wallet_util = { path = "../util", version = "5.3.1" }
+grin_wallet_config = { path = "../config", version = "5.3.1" }
+grin_wallet_libwallet = { path = "../libwallet", version = "5.3.1" }
 
 [dev-dependencies]
 "remove_dir_all" = "0.7"
