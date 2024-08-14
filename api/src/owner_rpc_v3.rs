@@ -362,58 +362,74 @@ pub trait OwnerRpcV3 {
 		# ,
 		# r#"
 		{
-		"id": 1,
-		"jsonrpc": "2.0",
-	  "result": {
-		"Ok": [
-		  true,
-		  [
-			{
-			  "amount_credited": "60000000000",
-			  "amount_debited": "0",
-			  "confirmation_ts": "2019-01-15T16:01:26Z",
-			  "confirmed": true,
-			  "creation_ts": "2019-01-15T16:01:26Z",
-			  "fee": null,
-			  "id": 0,
-			  "kernel_excess": "0838e19c490038b10f051c9c190a9b1f96d59bbd242f5d3143f50630deb74342ed",
-			  "kernel_lookup_min_height": 1,
-			  "num_inputs": 0,
-			  "num_outputs": 1,
-			  "parent_key_id": "0200000000000000000000000000000000",
-			  "stored_tx": null,
-			  "ttl_cutoff_height": null,
-			  "tx_slate_id": null,
-			  "payment_proof": null,
-			  "reverted_after": null,
-			  "tx_type": "ConfirmedCoinbase"
-			},
-			{
-			  "amount_credited": "60000000000",
-			  "amount_debited": "0",
-			  "confirmation_ts": "2019-01-15T16:01:26Z",
-			  "confirmed": true,
-			  "creation_ts": "2019-01-15T16:01:26Z",
-			  "fee": null,
-			  "id": 1,
-			  "kernel_excess": "08cd9d890c0b6a004f700aa5939a1ce0488fe2a11fa33cf096b50732ceab0be1df",
-			  "kernel_lookup_min_height": 2,
-			  "num_inputs": 0,
-			  "num_outputs": 1,
-			  "parent_key_id": "0200000000000000000000000000000000",
-			  "stored_tx": null,
-			  "ttl_cutoff_height": null,
-			  "payment_proof": null,
-			  "reverted_after": null,
-			  "tx_slate_id": null,
-			  "tx_type": "ConfirmedCoinbase"
-			}
-		  ]
-		]
-	  }
-	}
+		  "id": 1,
+		  "jsonrpc": "2.0",
+		  "result": {
+			"Ok": [
+			  true,
+			  [
+				{
+				  "address": null,
+				  "amount_credited": "2380952380",
+				  "amount_debited": "0",
+				  "confirmation_ts": "2019-01-15T16:01:26Z",
+				  "confirmed": true,
+				  "creation_ts": "2019-01-15T16:01:26Z",
+				  "fee": null,
+				  "id": 0,
+				  "input_commits": [],
+				  "kernel_excess": "099beea8f814120ac8c559027e55cb26986ae40e279e3093a7d4a52d827a23f0e7",
+				  "kernel_lookup_min_height": 1,
+				  "kernel_offset": null,
+				  "messages": null,
+				  "num_inputs": 0,
+				  "num_outputs": 1,
+				  "output_commits": [
+					"0910c1752100733bae49e877286835aab76d5856ef8139b6c6e3f51798aa461b03"
+				  ],
+				  "output_height": 1,
+				  "parent_key_id": "0200000000000000000000000000000000",
+				  "payment_proof": null,
+				  "reverted_after": null,
+				  "stored_tx": null,
+				  "ttl_cutoff_height": null,
+				  "tx_slate_id": null,
+				  "tx_type": "ConfirmedCoinbase"
+				},
+				{
+				  "address": null,
+				  "amount_credited": "2380952380",
+				  "amount_debited": "0",
+				  "confirmation_ts": "2019-01-15T16:01:26Z",
+				  "confirmed": true,
+				  "creation_ts": "2019-01-15T16:01:26Z",
+				  "fee": null,
+				  "id": 1,
+				  "input_commits": [],
+				  "kernel_excess": "09f7677adc7caf8bb44a4ee27d27dfe9ffa1010847a18b182bbb7100bb02f9259e",
+				  "kernel_lookup_min_height": 2,
+				  "kernel_offset": null,
+				  "messages": null,
+				  "num_inputs": 0,
+				  "num_outputs": 1,
+				  "output_commits": [
+					"098778ce2243fa34e5876c8cb7f6dbbbd6a5649c1561973a807a6811941c12363c"
+				  ],
+				  "output_height": 2,
+				  "parent_key_id": "0200000000000000000000000000000000",
+				  "payment_proof": null,
+				  "reverted_after": null,
+				  "stored_tx": null,
+				  "ttl_cutoff_height": null,
+				  "tx_slate_id": null,
+				  "tx_type": "ConfirmedCoinbase"
+				}
+			  ]
+			]
+		  }
+		}
 	# "#
-	# , 2, false, false, false, false);
+	# , true, 2, false, false, false, false, true);
 	```
 
 	*/

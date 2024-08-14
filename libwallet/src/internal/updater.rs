@@ -154,7 +154,7 @@ where
 	K: Keychain + 'a,
 {
 	// Apply simple bool, GTE or LTE fields
-	let mut txs_iter: Box<dyn Iterator<Item = TxLogEntry>> = Box::new(
+	let txs_iter: Box<dyn Iterator<Item = TxLogEntry>> = Box::new(
 		wallet
 			.tx_log_iter()
 			.filter(|tx_entry| {
@@ -323,11 +323,6 @@ where
 			}),
 	);
 
-	// Apply limit if requested
-	if let Some(l) = query_args.limit {
-		txs_iter = Box::new(txs_iter.take(l as usize));
-	}
-
 	let mut return_txs: Vec<TxLogEntry> = txs_iter.collect();
 
 	// Now apply requested sorting
@@ -369,6 +364,11 @@ where
 			RetrieveTxQuerySortOrder::Desc => return_txs.reverse(),
 			_ => {}
 		}
+	}
+
+	// Apply limit if requested
+	if let Some(l) = query_args.limit {
+		return_txs = return_txs.into_iter().take(l as usize).collect()
 	}
 
 	return_txs
