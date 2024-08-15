@@ -711,7 +711,7 @@ mod tests {
 	use std::time::Instant;
 
 	// Let's do a stress test for the Node.
-	// Normally test is ignoting because the point of that test to run it manually and review the results.
+	// Normally test is ignoring because the point of that test to run it manually and review the results.
 	#[test]
 	#[ignore]
 	fn run_node_stress_test() -> Result<(), libwallet::Error> {
