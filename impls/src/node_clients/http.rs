@@ -105,7 +105,7 @@ impl HTTPNodeClient {
 		node_url_list: Vec<String>,
 		node_api_secret: Option<String>,
 	) -> Result<HTTPNodeClient, Error> {
-		let client = Client::new(false, None)
+		let client = Client::new(false, None, None)
 			.map_err(|e| Error::GenericError(format!("Unable to create a client, {}", e)))?;
 
 		Ok(HTTPNodeClient {
