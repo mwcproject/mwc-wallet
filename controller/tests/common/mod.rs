@@ -75,7 +75,14 @@ macro_rules! open_wallet_and_add {
 pub fn clean_output_dir(test_dir: &str) {
 	let path = std::path::Path::new(test_dir);
 	if path.is_dir() {
-		remove_dir_all::remove_dir_all(test_dir).unwrap();
+		#[cfg(target_os = "windows")]
+		{
+			let _ = remove_dir_all::remove_dir_all(test_dir);
+		}
+		#[cfg(not(target_os = "windows"))]
+		{
+			remove_dir_all::remove_dir_all(test_dir).unwrap();
+		}
 	}
 }
 
