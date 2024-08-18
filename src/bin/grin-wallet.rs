@@ -23,7 +23,7 @@ extern crate log;
 use crate::config::ConfigError;
 use crate::core::global;
 use crate::util::init_logger;
-use clap::App;
+use clap::{App, AppSettings};
 use grin_wallet_config as config;
 use grin_wallet_impls::HTTPNodeClient;
 use grin_wallet_util::grin_core as core;
@@ -74,6 +74,7 @@ fn real_main() -> i32 {
 	let yml = load_yaml!("mwc-wallet.yml");
 	let args = App::from_yaml(yml)
 		.version(built_info::PKG_VERSION)
+		.setting(AppSettings::VersionlessSubcommands)
 		.get_matches();
 
 	let chain_type = if args.is_present("floonet") {
