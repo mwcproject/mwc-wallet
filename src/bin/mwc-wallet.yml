@@ -45,7 +45,7 @@ args:
       takes_value: true
 subcommands:
   - cli:
-      about: Start the wallet in interactive CLI mode (EXPERIMENTAL and UNDER DEVELOPMENT)
+      about: Start the wallet in interactive CLI mode
   - account:
       about: List wallet accounts or create a new account
       args:
