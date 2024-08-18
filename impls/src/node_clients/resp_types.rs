@@ -19,7 +19,8 @@
 pub struct GetTipResp {
 	pub height: u64,
 	pub last_block_pushed: String,
-	pub _prev_block_to_last: String,
+	#[allow(dead_code)]
+	pub prev_block_to_last: String,
 	pub total_difficulty: u64,
 }
 
