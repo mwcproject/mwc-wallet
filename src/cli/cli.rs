@@ -15,7 +15,7 @@
 use crate::cmd::wallet_args;
 use crate::util::secp::key::SecretKey;
 use crate::util::Mutex;
-use clap::App;
+use clap::{App, AppSettings};
 //use colored::Colorize;
 use grin_wallet_api::Owner;
 use grin_wallet_config::{MQSConfig, TorConfig, WalletConfig};
@@ -123,7 +123,9 @@ where
 	}*/
 
 	let yml = load_yaml!("../bin/mwc-wallet.yml");
-	let mut app = App::from_yaml(yml).version(crate_version!());
+	let mut app = App::from_yaml(yml)
+		.version(crate_version!())
+		.setting(AppSettings::VersionlessSubcommands);
 	let mut keychain_mask = keychain_mask;
 
 	// catch updater messages
