@@ -1028,4 +1028,4 @@ subcommands:
             long: tor_address
             takes_value: true
   - check_tor_connection:
-      about: check this wallet tor connection
+      about: check this wallet tor connection (for CLI mode)
