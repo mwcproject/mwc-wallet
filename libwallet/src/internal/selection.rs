@@ -958,22 +958,32 @@ where
 	)?;
 
 	let mut parts = vec![];
-	for (id, _, value) in &context.get_inputs() {
-		let input = wallet.iter().find(|out| out.key_id == *id);
-		if let Some(i) = input {
-			if i.is_coinbase {
-				parts.push(build::coinbase_input(*value, i.key_id.clone()));
+	let inputs_data: HashMap<Identifier, u64> = context
+		.get_inputs()
+		.iter()
+		.map(|(id, _, value)| (id.clone(), value.clone()))
+		.collect();
+
+	wallet.iter().for_each(|out| {
+		if let Some(value) = inputs_data.get(&out.key_id) {
+			if out.is_coinbase {
+				parts.push(build::coinbase_input(*value, out.key_id.clone()));
 			} else {
-				parts.push(build::input(*value, i.key_id.clone()));
+				parts.push(build::input(*value, out.key_id.clone()));
 			}
 		}
-	}
-	for (id, _, value) in &context.get_outputs() {
-		let output = wallet.iter().find(|out| out.key_id == *id);
-		if let Some(i) = output {
-			parts.push(build::output(*value, i.key_id.clone()));
+	});
+
+	let output_data: HashMap<Identifier, u64> = context
+		.get_outputs()
+		.iter()
+		.map(|(id, _, value)| (id.clone(), value.clone()))
+		.collect();
+	wallet.iter().for_each(|out| {
+		if let Some(value) = output_data.get(&out.key_id) {
+			parts.push(build::output(*value, out.key_id.clone()));
 		}
-	}
+	});
 	slate.add_transaction_elements(&keychain, &ProofBuilder::new(&keychain), parts)?;
 	// restore the original offset
 	slate.tx_or_err_mut()?.offset = slate.offset.clone();
