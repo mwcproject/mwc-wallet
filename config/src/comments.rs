@@ -40,7 +40,7 @@ fn comments() -> HashMap<String, String> {
 	retval.insert(
 		"api_listen_interface".to_string(),
 		"
-#host IP for wallet listener, change to \"0.0.0.0\" to receive grins
+#host IP for wallet listener, change to \"0.0.0.0\" to receive mwc coins
 "
 		.to_string(),
 	);
