@@ -1398,33 +1398,23 @@ where
 		has_reorg,
 	)?;
 
-	// Checking if tip was changed. In this case we need to retry. Retry will be handles naturally optimal
-	let mut tip_was_changed = false;
+	// Note: retry logic, if tip was changed, is not needed, Problem that for busy wallet, like miner it could take a while.
+	// Try to make optional, goes through the code and found that for all branches it is not critical.
 	{
 		wallet_lock!(wallet_inst, w);
 
-		if let Ok((after_tip_height, after_tip_hash, _)) = w.w2n_client().get_chain_tip() {
+		// checking if node is online
+		if w.w2n_client().get_chain_tip().is_ok() {
 			// Since we are still online, we can save the scan status
 			{
 				let mut batch = w.batch(keychain_mask)?;
 				batch.save_last_scanned_blocks(last_scanned_block.height, &blocks)?;
 				batch.commit()?;
 			}
-
-			if after_tip_height == tip_height && after_tip_hash == tip_hash {
-				return Ok(true);
-			} else {
-				tip_was_changed = true;
-			}
+			return Ok(true);
 		}
 	}
 
-	if tip_was_changed {
-		// Since head was chaged, we need to update it
-		return update_wallet_state(wallet_inst, keychain_mask, &status_send_channel);
-	}
-
-	// wasn't be able to confirm the tip. Scan is failed, scan height not updated.
 	Ok(false)
 }
 
