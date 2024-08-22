@@ -120,8 +120,6 @@ where
 		wallet_data_dir.clone(),
 	)?;
 
-	let m = p.get_mnemonic(None, args.password, wallet_data_dir)?;
-	grin_wallet_impls::lifecycle::show_recovery_phrase(m);
 	Ok(())
 }
 
