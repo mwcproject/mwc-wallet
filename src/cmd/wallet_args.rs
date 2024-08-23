@@ -570,9 +570,7 @@ pub fn parse_send_args(args: &ArgMatches) -> Result<command::SendArgs, ParseErro
 	};
 
 	let payment_proof_address = {
-		match args.is_present("request_payment_proof")
-			|| (args.is_present("proof") && method != "file")
-		{
+		match args.is_present("proof") {
 			true => {
 				// if the destination address is a TOR address, we don't need the address
 				// separately

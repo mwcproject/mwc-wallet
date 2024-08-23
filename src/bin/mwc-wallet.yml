@@ -86,7 +86,7 @@ subcommands:
             long: libp2p_port
             takes_value: true
         - method:
-            help: Which method to use for communication. Please note, http can trigger tor and libp2p listeners if they are configured
+            help: Which method to use for communication. Please note, http triggering tor and libp2p listeners if they are configured
             short: m
             long: method
             possible_values:
@@ -166,7 +166,7 @@ subcommands:
             long: min_fee
             takes_value: true
         - method:
-            help: Method for sending this transaction
+            help: Method for sending this transaction. Please use http method to send data through tor
             short: m
             long: method
             possible_values:
@@ -187,12 +187,9 @@ subcommands:
             short: a
             long: apisecret
             takes_value: true
-        - request_payment_proof:
-            help: Request a payment proof from the recipient. If sending to a Tor address, the address will be filled automatically.
-            short: y
-            long: request_payment_proof
         - proof:
             help: Request a payment proof from the recipient. If sending to a Tor address, the address will be filled automatically.
+            short: y
             long: proof
         - proof_address:
             help: Recipient proof address. If not using Tor, must be provided separately by the recipient
