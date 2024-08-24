@@ -20,6 +20,7 @@ use crate::util::file::get_first_line;
 use crate::util::secp::key::SecretKey;
 use crate::util::{Mutex, ZeroingString};
 
+use crate::cmd::wallet::MIN_COMPAT_NODE_VERSION;
 /// Argument parsing and error handling for wallet commands
 use clap::ArgMatches;
 use ed25519_dalek::SecretKey as DalekSecretKey;
@@ -44,6 +45,7 @@ use grin_wallet_util::grin_util::secp::Secp256k1;
 use linefeed::terminal::Signal;
 use linefeed::{Interface, ReadResult};
 use rpassword;
+use semver::Version;
 use std::sync::Arc;
 use std::{
 	convert::TryFrom,
@@ -1483,6 +1485,19 @@ where
 			mqs
 		}
 	};
+
+	// This will also cache the node version info for calls to foreign API check middleware
+	if let Some(v) = node_client.clone().get_version_info() {
+		if Version::parse(&v.node_version) < Version::parse(MIN_COMPAT_NODE_VERSION) {
+			println!("The MWC Node in use (version {}) is outdated and incompatible with this wallet version.", v.node_version);
+			println!(
+				"Please update the node to version {} or later and try again.",
+				MIN_COMPAT_NODE_VERSION
+			);
+			return Err(Error::GenericError(format!("The MWC Node in use (version {}) is outdated and incompatible with this wallet version. Please update the node to version {} or later and try again.", v.node_version, MIN_COMPAT_NODE_VERSION)));
+		}
+	}
+	// ... if node isn't available, allow offline functions
 
 	// Instantiate wallet (doesn't open the wallet)
 	let wallet =

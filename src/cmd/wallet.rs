@@ -16,11 +16,10 @@ use crate::cmd::wallet_args;
 use crate::config::GlobalWalletConfig;
 use clap::ArgMatches;
 use grin_wallet_libwallet::NodeClient;
-use semver::Version;
 use std::thread;
 use std::time::Duration;
 
-const MIN_COMPAT_NODE_VERSION: &str = "5.3.0";
+pub(crate) const MIN_COMPAT_NODE_VERSION: &str = "5.3.0";
 
 pub fn wallet_command<C>(
 	wallet_args: &ArgMatches<'_>,
@@ -41,18 +40,8 @@ where
 		.expect("Can't read configuration file");
 	node_client.set_node_api_secret(global_wallet_args.node_api_secret.clone());
 
-	// This will also cache the node version info for calls to foreign API check middleware
-	if let Some(v) = node_client.clone().get_version_info() {
-		if Version::parse(&v.node_version) < Version::parse(MIN_COMPAT_NODE_VERSION) {
-			println!("The Grin Node in use (version {}) is outdated and incompatible with this wallet version.", v.node_version);
-			println!(
-				"Please update the node to version {} or later and try again.",
-				MIN_COMPAT_NODE_VERSION
-			);
-			return 1;
-		}
-	}
-	// ... if node isn't available, allow offline functions
+	// Note, we can't use node here because 'api_server_address' argument needs to be applied first.
+	// That happens inside wallet_command
 
 	let res = wallet_args::wallet_command(
 		wallet_args,
