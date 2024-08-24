@@ -39,7 +39,7 @@ const GRIN_HOME: &str = ".mwc";
 /// Wallet data directory
 pub const GRIN_WALLET_DIR: &str = "wallet_data";
 /// Node API secret
-pub const API_SECRET_FILE_NAME: &str = ".foreign_api_secret";
+pub const NODE_API_SECRET_FILE_NAME: &str = ".foreign_api_secret";
 /// Owner API secret
 pub const OWNER_API_SECRET_FILE_NAME: &str = ".owner_api_secret";
 
@@ -182,7 +182,7 @@ pub fn initial_setup_wallet(
 	};
 
 	check_api_secret_file(chain_type, Some(path.clone()), OWNER_API_SECRET_FILE_NAME)?;
-	check_api_secret_file(chain_type, Some(path), API_SECRET_FILE_NAME)?;
+	check_api_secret_file(chain_type, Some(path), NODE_API_SECRET_FILE_NAME)?;
 	Ok(config)
 }
 
@@ -282,7 +282,7 @@ impl GlobalWalletConfig {
 		self.members.as_mut().unwrap().wallet.api_secret_path =
 			Some(secret_path.to_str().unwrap().to_owned());
 		let mut node_secret_path = wallet_home.clone();
-		node_secret_path.push(API_SECRET_FILE_NAME);
+		node_secret_path.push(NODE_API_SECRET_FILE_NAME);
 		self.members.as_mut().unwrap().wallet.node_api_secret_path =
 			Some(node_secret_path.to_str().unwrap().to_owned());
 		let mut log_path = wallet_home.clone();

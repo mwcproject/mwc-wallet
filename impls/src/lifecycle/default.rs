@@ -175,7 +175,7 @@ where
 		);
 
 		let mut api_secret_path = PathBuf::from(self.data_dir.clone());
-		api_secret_path.push(PathBuf::from(config::API_SECRET_FILE_NAME));
+		api_secret_path.push(PathBuf::from(config::NODE_API_SECRET_FILE_NAME));
 		if !api_secret_path.exists() {
 			config::init_api_secret(&api_secret_path)
 				.map_err(|e| Error::GenericError(format!("Unable to init api secret, {}", e)))?;
