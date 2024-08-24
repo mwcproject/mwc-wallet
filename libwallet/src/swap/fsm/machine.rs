@@ -32,7 +32,7 @@ impl<'a> StateMachine<'a> {
 			let _ = state_map.insert(st.get_state_id(), st);
 		}
 
-		#[cfg(build = "debug")]
+		#[cfg(debug_assertions)]
 		for st in state_map.values() {
 			assert!(state_map.contains_key(&st.get_state_id()));
 			if let Some(state) = st.get_prev_swap_state() {
