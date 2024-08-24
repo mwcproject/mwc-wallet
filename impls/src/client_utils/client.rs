@@ -290,6 +290,11 @@ impl Client {
 		for<'de> T: Deserialize<'de>,
 	{
 		let data = self.send_request(req)?;
+		if data.is_empty() {
+			return Err(Error::ResponseError(format!(
+				"Access denied, foreign_api_secret is invalid or not set"
+			)));
+		}
 		serde_json::from_str(&data)
 			.map_err(|e| Error::ResponseError(format!("Cannot parse response {}, {}", data, e)))
 	}
@@ -299,6 +304,11 @@ impl Client {
 		for<'de> T: Deserialize<'de> + Send + 'static,
 	{
 		let data = self.send_request_async(req).await?;
+		if data.is_empty() {
+			return Err(Error::ResponseError(format!(
+				"Access denied, foreign_api_secret is invalid or not set"
+			)));
+		}
 		let ser = serde_json::from_str(&data)
 			.map_err(|e| Error::ResponseError(format!("Cannot parse response {}, {}", data, e)))?;
 		Ok(ser)
@@ -312,7 +322,7 @@ impl Client {
 		let text = resp
 			.text()
 			.await
-			.map_err(|e| Error::ResponseError(format!("Cannot parse response: {}", e)))?;
+			.map_err(|e| Error::ResponseError(format!("Cannot get response: {}", e)))?;
 		Ok(text)
 	}
 

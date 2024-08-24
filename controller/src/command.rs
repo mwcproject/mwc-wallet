@@ -1846,8 +1846,11 @@ where
 	let tx_pf: TxProof = serde_json::from_str(&proof)
 		.map_err(|e| Error::LibWallet(format!("Unable to deserialize proof data, {}", e)))?;
 
-	let secp_inst = static_secp_instance();
-	let secp = secp_inst.lock();
+	let secp = {
+		let secp_inst = static_secp_instance();
+		let secp = secp_inst.lock().clone();
+		secp
+	};
 
 	match grin_wallet_libwallet::proof::tx_proof::verify_tx_proof_wrapper(&tx_pf, &secp) {
 		Ok((sender, receiver, amount, outputs, kernel)) => {

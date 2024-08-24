@@ -563,11 +563,13 @@ where
 			));
 		};
 
-		let result = {
+		let secp = {
 			let secp_inst = static_secp_instance();
-			let secp = secp_inst.lock();
-			self.process_incoming_slate(from, slate, None, &secp)
+			let secp = secp_inst.lock().clone();
+			secp
 		};
+
+		let result = self.process_incoming_slate(from, slate, None, &secp);
 
 		//send the message back
 		match result {

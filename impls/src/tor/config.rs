@@ -219,6 +219,7 @@ pub fn output_torrc(
 	let mut props = TorRcConfig::new();
 	props.add_item("SocksPort", socks_port);
 	props.add_item("DataDirectory", &tor_data_dir);
+	//	props.add_item("Log", format!("notice file {}{}{}", tor_config_directory, MAIN_SEPARATOR, "tor_log.txt").as_ref());
 
 	for dir in service_dirs {
 		let service_file_name = format!("./{}{}{}", HIDDEN_SERVICES_DIR, MAIN_SEPARATOR, dir);

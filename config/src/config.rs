@@ -39,7 +39,7 @@ const GRIN_HOME: &str = ".mwc";
 /// Wallet data directory
 pub const GRIN_WALLET_DIR: &str = "wallet_data";
 /// Node API secret
-pub const API_SECRET_FILE_NAME: &str = ".api_secret";
+pub const API_SECRET_FILE_NAME: &str = ".foreign_api_secret";
 /// Owner API secret
 pub const OWNER_API_SECRET_FILE_NAME: &str = ".owner_api_secret";
 
