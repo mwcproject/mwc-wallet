@@ -314,10 +314,6 @@ subcommands:
             short: d
             long: dest
             takes_value: true
-        - slatepack_qr:
-            help: Show slatepack data as QR code
-            short: q
-            long: slatepack_qr
   - invoice:
       about: Initialize an invoice transaction.
       args:

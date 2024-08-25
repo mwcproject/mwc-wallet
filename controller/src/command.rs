@@ -987,7 +987,8 @@ pub struct FinalizeArgs {
 	pub fluff: bool,
 	pub nopost: bool,
 	pub dest: Option<String>,
-	pub slatepack_qr: bool,
+	// Finalize can't show slatepack because it is too large
+	// pub slatepack_qr: bool,
 }
 
 pub fn finalize<L, C, K>(
@@ -1150,7 +1151,7 @@ where
 					&SlatePurpose::FullSlate,
 					sender.is_some(),
 					true,
-					args.slatepack_qr,
+					false,
 				)?;
 			}
 

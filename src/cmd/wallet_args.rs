@@ -734,15 +734,12 @@ pub fn parse_finalize_args(args: &ArgMatches) -> Result<command::FinalizeArgs, P
 		false => None,
 	};
 
-	let slatepack_qr = args.is_present("slatepack_qr");
-
 	Ok(command::FinalizeArgs {
 		input_file,
 		input_slatepack_message: args.value_of("content").map(|s| s.to_string()),
 		fluff: args.is_present("fluff"),
 		nopost: args.is_present("nopost"),
 		dest: args.value_of("dest").map(|s| s.to_string()),
-		slatepack_qr: slatepack_qr,
 	})
 }
 
