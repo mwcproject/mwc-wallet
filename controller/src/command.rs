@@ -862,7 +862,10 @@ where
 		.put_tx(&slate, Some(&slatepack_secret), false, &secp)?;
 
 		if let Some(response_file) = &response_file {
-			println!("Response file {}.response generated, and can be sent back to the transaction originator.", response_file);
+			println!(
+				"Response file {} generated, and can be sent back to the transaction originator.",
+				response_file
+			);
 			println!();
 		}
 
