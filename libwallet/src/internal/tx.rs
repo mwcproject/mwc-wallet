@@ -453,7 +453,7 @@ where
 		None,
 		None,
 	)?;
-	if tx_vec.len() == 1 {
+	if tx_vec.is_empty() {
 		return Err(Error::TransactionDoesntExist(tx_id_string));
 	}
 	// there are can be several transactions with a same txid (send file to self).
