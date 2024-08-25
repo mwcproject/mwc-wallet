@@ -388,7 +388,7 @@ pub trait NodeClient: Send + Sync + Clone {
 	fn get_node_index(&self) -> u8;
 
 	/// Return the node api secret
-	fn node_api_secret(&self) -> Option<String>;
+	fn node_api_secret(&self) -> &Option<String>;
 
 	/// Change the API secret
 	fn set_node_api_secret(&mut self, node_api_secret: Option<String>);

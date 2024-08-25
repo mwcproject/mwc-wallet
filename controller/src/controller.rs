@@ -1072,6 +1072,7 @@ where
 		.map_err(|e| Error::GenericError(format!("API thread panicked :{:?}", e)));
 
 	*FOREIGN_API_RUNNING.write().unwrap() = false;
+	tor::status::set_tor_address(None);
 
 	// Stopping tor, we failed to start in any case
 	if let Some(mut tor_process) = tor_process {

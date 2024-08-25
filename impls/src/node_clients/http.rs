@@ -307,11 +307,7 @@ impl HTTPNodeClient {
 
 			let mut tasks = Vec::with_capacity(params.len());
 			for req in &reqs {
-				tasks.push(cl.post_async::<Request, Response>(
-					url.as_str(),
-					api_secret.clone(),
-					req,
-				));
+				tasks.push(cl.post_async::<Request, Response>(url.as_str(), api_secret, req));
 			}
 
 			let task: FuturesUnordered<_> = tasks.into_iter().collect();
@@ -387,8 +383,8 @@ impl NodeClient for HTTPNodeClient {
 		let index = self.current_node_index.load(Ordering::Relaxed);
 		&self.node_url_list.get(index as usize).unwrap()
 	}
-	fn node_api_secret(&self) -> Option<String> {
-		self.node_api_secret.clone()
+	fn node_api_secret(&self) -> &Option<String> {
+		&self.node_api_secret
 	}
 
 	fn set_node_url(&mut self, node_url_list: Vec<String>) {

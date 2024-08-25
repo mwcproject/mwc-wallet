@@ -519,6 +519,16 @@ where
 				_ => {}
 			}
 
+			let tor_config = match tor_config {
+				Some(mut c) => {
+					if let Some(b) = args.bridge.clone() {
+						c.bridge.bridge_line = Some(b);
+					}
+					Some(c)
+				}
+				None => None,
+			};
+
 			// Creating sender because we need to request other wallet version first
 			let sender_info = match args.method.as_str() {
 				"http" | "mwcmqs" => {
@@ -3980,7 +3990,7 @@ where
 
 	let dest = validate_tor_address(&args.tor_address)?;
 
-	let sender = HttpDataSender::with_socks_proxy(
+	let sender = HttpDataSender::tor_through_socks_proxy(
 		&dest,
 		None, // It is foreign API, no secret
 		&tor_config.socks_proxy_addr,

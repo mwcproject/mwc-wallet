@@ -28,6 +28,7 @@ use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::net::SocketAddr;
 use std::path::MAIN_SEPARATOR;
+use std::rc::Rc;
 
 use crate::adapters::MarketplaceMessageSender;
 use crate::tor;
@@ -47,22 +48,21 @@ pub struct HttpDataSender {
 	apisecret: Option<String>,
 	pub use_socks: bool,
 	socks_proxy_addr: Option<SocketAddr>,
-	tor_config_dir: String,
-	socks_running: bool,
-	tor_log_file: Option<String>,
-	bridge: TorBridgeConfig,
-	proxy: TorProxyConfig,
+	// tor_process instance is needed. The process is alive until this instance is not dropped.
+	tor_process: Rc<Option<tor_process::TorProcess>>,
+}
+
+impl Drop for HttpDataSender {
+	fn drop(&mut self) {
+		if self.tor_process.is_some() {
+			tor::status::set_tor_sender_running(false);
+		}
+	}
 }
 
 impl HttpDataSender {
 	/// Create, return Err if scheme is not "http"
-	pub fn new(
-		base_url: &str,
-		apisecret: Option<String>,
-		tor_config_dir: Option<String>,
-		socks_running: bool,
-		tor_log_file: Option<String>,
-	) -> Result<HttpDataSender, Error> {
+	pub fn plain_http(base_url: &str, apisecret: Option<String>) -> Result<HttpDataSender, Error> {
 		if !base_url.starts_with("http") && !base_url.starts_with("https") {
 			Err(Error::GenericError(format!(
 				"Invalid http url: {}",
@@ -74,17 +74,13 @@ impl HttpDataSender {
 				apisecret,
 				use_socks: false,
 				socks_proxy_addr: None,
-				tor_config_dir: tor_config_dir.unwrap_or(String::from("")),
-				socks_running: socks_running,
-				tor_log_file,
-				bridge: TorBridgeConfig::default(),
-				proxy: TorProxyConfig::default(),
+				tor_process: Rc::new(None),
 			})
 		}
 	}
 
 	/// Switch to using socks proxy
-	pub fn with_socks_proxy(
+	pub fn tor_through_socks_proxy(
 		base_url: &str,
 		apisecret: Option<String>,
 		proxy_addr: &str,
@@ -94,28 +90,34 @@ impl HttpDataSender {
 		tor_bridge: TorBridgeConfig,
 		tor_proxy: TorProxyConfig,
 	) -> Result<HttpDataSender, Error> {
-		let mut ret = Self::new(
-			base_url,
-			apisecret,
-			tor_config_dir.clone(),
-			socks_running,
-			tor_log_file,
-		)?;
-		ret.use_socks = true;
 		let addr = proxy_addr.parse().map_err(|e| {
 			Error::GenericError(format!("Unable to parse address {}, {}", proxy_addr, e))
 		})?;
-		ret.socks_proxy_addr = Some(SocketAddr::V4(addr));
-		ret.tor_config_dir = tor_config_dir.unwrap_or(String::from(""));
-		ret.bridge = tor_bridge;
-		ret.proxy = tor_proxy;
-		Ok(ret)
+		let socks_proxy_addr = SocketAddr::V4(addr);
+		let tor_config_dir = tor_config_dir.unwrap_or(String::from(""));
+
+		let (base_url, tor_process) = Self::set_up_tor_sender_process(
+			base_url,
+			&tor_config_dir,
+			socks_running,
+			&socks_proxy_addr,
+			&tor_bridge,
+			&tor_proxy,
+			&tor_log_file,
+		)?;
+
+		Ok(HttpDataSender {
+			base_url,
+			apisecret,
+			use_socks: true,
+			socks_proxy_addr: Some(socks_proxy_addr),
+			tor_process: Rc::new(Some(tor_process)),
+		})
 	}
 
 	/// Check version of the listening wallet
 	pub fn check_other_version(
 		&self,
-		url: &str,
 		timeout: Option<u128>,
 		destination_address: &String,
 	) -> Result<(SlateVersion, Option<String>), Error> {
@@ -131,7 +133,7 @@ impl HttpDataSender {
 				"params": []
 			});
 
-			let res = self.post(url, self.apisecret.clone(), req);
+			let res = self.post(req);
 
 			let diff_time = start_time.elapsed().as_millis();
 			trace!("elapsed time check version = {}", diff_time);
@@ -218,7 +220,7 @@ impl HttpDataSender {
 					})?),
 					Err(_) => {
 						// Destination is not tor address, so making foreign API request for get an address
-						Some(self.check_receiver_proof_address(url, timeout.clone())?)
+						Some(self.check_receiver_proof_address(timeout.clone())?)
 					}
 				}
 			} else {
@@ -241,11 +243,7 @@ impl HttpDataSender {
 	}
 
 	/// Check proof address of the listening wallet
-	pub fn check_receiver_proof_address(
-		&self,
-		url: &str,
-		timeout: Option<u128>,
-	) -> Result<String, Error> {
+	pub fn check_receiver_proof_address(&self, timeout: Option<u128>) -> Result<String, Error> {
 		let res_str: String;
 		let start_time = std::time::Instant::now();
 		trace!("starting now check proof address of listening wallet");
@@ -258,7 +256,7 @@ impl HttpDataSender {
 				"params": []
 			});
 
-			let res = self.post(url, self.apisecret.clone(), req);
+			let res = self.post(req);
 
 			let diff_time = start_time.elapsed().as_millis();
 			trace!("elapsed time check proof address = {}", diff_time);
@@ -325,12 +323,7 @@ impl HttpDataSender {
 		Err(Error::ClientCallback(report))
 	}
 
-	fn post<IN>(
-		&self,
-		url: &str,
-		api_secret: Option<String>,
-		input: IN,
-	) -> Result<String, ClientError>
+	fn post<IN>(&self, input: IN) -> Result<String, ClientError>
 	where
 		IN: Serialize,
 	{
@@ -345,39 +338,45 @@ impl HttpDataSender {
 		}
 		.map_err(|err| ClientError::Internal(format!("Unable to create http client, {}", err)))?;
 
-		let req = client.create_post_request(url, Some("mwc".to_string()), api_secret, &input)?;
+		let req = client.create_post_request(
+			&self.base_url,
+			Some("mwc".to_string()),
+			&self.apisecret,
+			&input,
+		)?;
 		let res = client.send_request(req)?;
 		Ok(res)
 	}
 
-	fn set_up_tor_send_process(&self) -> Result<(String, tor_process::TorProcess), Error> {
-		let trailing = match self.base_url.ends_with('/') {
+	fn set_up_tor_sender_process(
+		base_url: &str,
+		tor_config_dir: &String,
+		socks_running: bool,
+		socks_proxy_addr: &SocketAddr,
+		bridge: &TorBridgeConfig,
+		proxy: &TorProxyConfig,
+		tor_log_file: &Option<String>,
+	) -> Result<(String, tor_process::TorProcess), Error> {
+		let trailing = match base_url.ends_with('/') {
 			true => "",
 			false => "/",
 		};
-		let url_str = format!("{}{}v2/foreign", self.base_url, trailing);
+		let url_str = format!("{}{}v2/foreign", base_url, trailing);
 
 		// set up tor send process if needed
 		let mut tor = tor_process::TorProcess::new();
 		// We are checking the tor address because we are using the same Socks port. If listener is running,
 		// we don't need the sender.
-		if self.use_socks
-			&& !self.socks_running
+		if !socks_running
 			&& tor::status::get_tor_address().is_none()
 			&& !tor::status::get_tor_sender_running()
 		{
-			let tor_dir = format!(
-				"{}{}{}",
-				&self.tor_config_dir, MAIN_SEPARATOR, TOR_CONFIG_PATH
-			);
-			warn!(
-				"Starting TOR Process for send at {:?}",
-				self.socks_proxy_addr
-			);
+			let tor_dir = format!("{}{}{}", &tor_config_dir, MAIN_SEPARATOR, TOR_CONFIG_PATH);
+			warn!("Starting TOR Process for send at {}", socks_proxy_addr);
 
 			let mut hm_tor_bridge: HashMap<String, String> = HashMap::new();
-			if self.bridge.bridge_line.is_some() {
-				let bridge_struct = TorBridge::try_from(self.bridge.clone())
+			if bridge.bridge_line.is_some() {
+				let bridge_struct = TorBridge::try_from(bridge.clone())
 					.map_err(|e| Error::TorConfig(format!("{:?}", e)))?;
 				hm_tor_bridge = bridge_struct
 					.to_hashmap()
@@ -385,8 +384,8 @@ impl HttpDataSender {
 			}
 
 			let mut hm_tor_proxy: HashMap<String, String> = HashMap::new();
-			if self.proxy.transport.is_some() || self.proxy.allowed_port.is_some() {
-				let proxy = TorProxy::try_from(self.proxy.clone())
+			if proxy.transport.is_some() || proxy.allowed_port.is_some() {
+				let proxy = TorProxy::try_from(proxy.clone())
 					.map_err(|e| Error::TorConfig(format!("{:?}", e)))?;
 				hm_tor_proxy = proxy
 					.to_hashmap()
@@ -395,13 +394,8 @@ impl HttpDataSender {
 
 			tor_config::output_tor_sender_config(
 				&tor_dir,
-				&self
-					.socks_proxy_addr
-					.ok_or(Error::GenericError(
-						"Not found socks_proxy_addr value".to_string(),
-					))?
-					.to_string(),
-				&self.tor_log_file,
+				socks_proxy_addr.to_string().as_str(),
+				tor_log_file,
 				hm_tor_bridge,
 				hm_tor_proxy,
 			)
@@ -428,12 +422,7 @@ impl SlateSender for HttpDataSender {
 		destination_address: &String,
 	) -> Result<Option<(SlateVersion, Option<String>)>, Error> {
 		// we need to keep _tor in scope so that the process is not killed by drop.
-		let (url_str, _tor) = self.set_up_tor_send_process()?;
-		Ok(Some(self.check_other_version(
-			&url_str,
-			None,
-			destination_address,
-		)?))
+		Ok(Some(self.check_other_version(None, destination_address)?))
 	}
 
 	fn send_tx(
@@ -446,9 +435,6 @@ impl SlateSender for HttpDataSender {
 		height: u64,
 		secp: &Secp256k1,
 	) -> Result<Slate, Error> {
-		// we need to keep _tor in scope so that the process is not killed by drop.
-		let (url_str, _tor) = self.set_up_tor_send_process()?;
-
 		if other_wallet_version.is_none() {
 			return Err(Error::GenericError(
 				"Internal error, http based send_tx get empty value for other_wallet_version"
@@ -543,7 +529,7 @@ impl SlateSender for HttpDataSender {
 			});
 			trace!("Sending receive_tx request: {}", req);
 
-			let res = self.post(&url_str, self.apisecret.clone(), req);
+			let res = self.post(req);
 
 			let diff_time = start_time.elapsed().as_millis();
 			trace!("diff time slate send = {}", diff_time);
@@ -641,7 +627,6 @@ impl SwapMessageSender for HttpDataSender {
 	/// Send a swap message. Return true is message delivery acknowledge can be set (message was delivered and processed)
 	fn send_swap_message(&self, swap_message: &Message, _secp: &Secp256k1) -> Result<bool, Error> {
 		// we need to keep _tor in scope so that the process is not killed by drop.
-		let (url_str, _tor) = self.set_up_tor_send_process()?;
 		let message_ser = &serde_json::to_string(&swap_message).map_err(|e| {
 			Error::SwapMessageGenericError(format!(
 				"Failed to convert swap message to json in preparation for Tor request, {}",
@@ -662,7 +647,7 @@ impl SwapMessageSender for HttpDataSender {
 			});
 			trace!("Sending receive_swap_message request: {}", req);
 
-			let res = self.post(&url_str, self.apisecret.clone(), req);
+			let res = self.post(req);
 
 			let diff_time = start_time.elapsed().as_millis();
 			if !res.is_err() {
@@ -700,7 +685,6 @@ impl SwapMessageSender for HttpDataSender {
 impl MarketplaceMessageSender for HttpDataSender {
 	fn send_swap_marketplace_message(&self, json_str: &String) -> Result<String, Error> {
 		// we need to keep _tor in scope so that the process is not killed by drop.
-		let (url_str, _tor) = self.set_up_tor_send_process()?;
 		let res_str: String;
 		let start_time = std::time::Instant::now();
 
@@ -715,7 +699,7 @@ impl MarketplaceMessageSender for HttpDataSender {
 			});
 			trace!("Sending marketplace_message request: {}", req);
 
-			let res = self.post(&url_str, self.apisecret.clone(), req);
+			let res = self.post(req);
 
 			let diff_time = start_time.elapsed().as_millis();
 			if !res.is_err() {

@@ -364,7 +364,7 @@ mod tests {
 		fn get_node_index(&self) -> u8 {
 			0
 		}
-		fn node_api_secret(&self) -> Option<String> {
+		fn node_api_secret(&self) -> &Option<String> {
 			unimplemented!()
 		}
 		fn set_node_api_secret(&mut self, _node_api_secret: Option<String>) {

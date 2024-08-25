@@ -77,7 +77,7 @@ impl Client {
 				timeout = 30;
 			}
 		} else {
-			connect_timeout = 10;
+			connect_timeout = 60;
 			timeout = 120;
 		}
 
@@ -103,7 +103,7 @@ impl Client {
 	/// Helper function to easily issue a HTTP GET request against a given URL that
 	/// returns a JSON object. Handles request building, JSON deserialization and
 	/// response code checking.
-	pub fn get<'a, T>(&self, url: &'a str, api_secret: Option<String>) -> Result<T, Error>
+	pub fn get<'a, T>(&self, url: &'a str, api_secret: &Option<String>) -> Result<T, Error>
 	where
 		for<'de> T: Deserialize<'de>,
 	{
@@ -116,7 +116,7 @@ impl Client {
 	pub async fn _get_async<'a, T>(
 		&self,
 		url: &'a str,
-		api_secret: Option<String>,
+		api_secret: &Option<String>,
 	) -> Result<T, Error>
 	where
 		for<'de> T: Deserialize<'de> + Send + 'static,
@@ -128,7 +128,7 @@ impl Client {
 	/// Helper function to easily issue a HTTP GET request
 	/// on a given URL that returns nothing. Handles request
 	/// building and response code checking.
-	pub fn _get_no_ret(&self, url: &str, api_secret: Option<String>) -> Result<(), Error> {
+	pub fn _get_no_ret(&self, url: &str, api_secret: &Option<String>) -> Result<(), Error> {
 		let req = self.build_request(url, Method::GET, None, api_secret, None)?;
 		self.send_request(req)?;
 		Ok(())
@@ -141,7 +141,7 @@ impl Client {
 	pub fn post<IN, OUT>(
 		&self,
 		url: &str,
-		api_secret: Option<String>,
+		api_secret: &Option<String>,
 		input: &IN,
 	) -> Result<OUT, Error>
 	where
@@ -159,7 +159,7 @@ impl Client {
 	pub async fn post_async<IN, OUT>(
 		&self,
 		url: &str,
-		api_secret: Option<String>,
+		api_secret: &Option<String>,
 		input: &IN,
 	) -> Result<OUT, Error>
 	where
@@ -178,7 +178,7 @@ impl Client {
 	pub fn _post_no_ret<IN>(
 		&self,
 		url: &str,
-		api_secret: Option<String>,
+		api_secret: &Option<String>,
 		input: &IN,
 	) -> Result<(), Error>
 	where
@@ -196,7 +196,7 @@ impl Client {
 	pub async fn _post_no_ret_async<IN>(
 		&self,
 		url: &str,
-		api_secret: Option<String>,
+		api_secret: &Option<String>,
 		input: &IN,
 	) -> Result<(), Error>
 	where
@@ -212,7 +212,7 @@ impl Client {
 		url: &str,
 		method: Method,
 		basic_auth_key: Option<String>, // In Node will be generated. Specify None if talk to the Node. Another wallet wants 'mwc'
-		api_secret: Option<String>,
+		api_secret: &Option<String>,
 		body: Option<String>,
 	) -> Result<RequestBuilder, Error> {
 		let basic_auth_key = basic_auth_key.unwrap_or(if global::is_mainnet() {
@@ -236,14 +236,18 @@ impl Client {
 		&self,
 		url: &str,
 		method: Method,
-		api_secret: Option<String>,
+		api_secret: &Option<String>,
 		basic_auth_key: Option<String>,
 		body: Option<String>,
 	) -> Result<RequestBuilder, Error> {
 		let mut builder = self.client.request(method, url);
 
 		if basic_auth_key.is_some() && api_secret.is_some() {
-			let auth_key = format!("{}:{}", basic_auth_key.unwrap(), api_secret.unwrap());
+			let auth_key = format!(
+				"{}:{}",
+				basic_auth_key.unwrap(),
+				api_secret.clone().unwrap()
+			);
 			let base64_key = to_base64(&auth_key);
 			let basic_auth = format!("Basic {}", base64_key);
 			builder = builder.header(AUTHORIZATION, basic_auth);
@@ -259,7 +263,7 @@ impl Client {
 		&self,
 		url: &str,
 		basic_auth_key: Option<String>, // Specify None if talk to the Node. Another wallet wants 'mwc'
-		api_secret: Option<String>,
+		api_secret: &Option<String>,
 		input: &IN,
 	) -> Result<RequestBuilder, Error>
 	where
@@ -273,7 +277,7 @@ impl Client {
 	pub fn _create_post_request_ex<IN>(
 		&self,
 		url: &str,
-		api_secret: Option<String>,
+		api_secret: &Option<String>,
 		basic_auth_key: Option<String>,
 		input: &IN,
 	) -> Result<RequestBuilder, Error>

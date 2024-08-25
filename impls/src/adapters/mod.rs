@@ -186,10 +186,9 @@ pub fn create_sender(
 	};
 
 	Ok(match method {
-		"http" => Box::new(
-			HttpDataSender::new(&dest, apisecret.clone(), None, false, None)
-				.map_err(|e| invalid(e))?,
-		),
+		"http" => {
+			Box::new(HttpDataSender::plain_http(&dest, apisecret.clone()).map_err(|e| invalid(e))?)
+		}
 		"tor" => match tor_config {
 			None => {
 				return Err(Error::WalletComms("Tor Configuration required".to_string()));
@@ -197,7 +196,7 @@ pub fn create_sender(
 			Some(tc) => {
 				let dest = validate_tor_address(dest)?;
 				Box::new(
-					HttpDataSender::with_socks_proxy(
+					HttpDataSender::tor_through_socks_proxy(
 						&dest,
 						apisecret.clone(),
 						&tc.socks_proxy_addr,
@@ -236,7 +235,7 @@ pub fn create_swap_message_sender(
 		"tor" => {
 			let dest = validate_tor_address(dest)?;
 			Box::new(
-				HttpDataSender::with_socks_proxy(
+				HttpDataSender::tor_through_socks_proxy(
 					&dest,
 					apisecret.clone(),
 					&tor_config.socks_proxy_addr,
