@@ -453,29 +453,32 @@ where
 		None,
 		None,
 	)?;
-	if tx_vec.len() != 1 {
+	if tx_vec.len() == 1 {
 		return Err(Error::TransactionDoesntExist(tx_id_string));
 	}
-	let tx = tx_vec[0].clone();
-	match tx.tx_type {
-		TxLogEntryType::TxSent | TxLogEntryType::TxReceived | TxLogEntryType::TxReverted => {}
-		_ => return Err(Error::TransactionNotCancellable(tx_id_string)),
+	// there are can be several transactions with a same txid (send file to self).
+	// In such case we need to cancel all of them
+	for tx in tx_vec {
+		match tx.tx_type {
+			TxLogEntryType::TxSent | TxLogEntryType::TxReceived | TxLogEntryType::TxReverted => {}
+			_ => return Err(Error::TransactionNotCancellable(tx_id_string)),
+		}
+		if tx.confirmed {
+			return Err(Error::TransactionNotCancellable(tx_id_string));
+		}
+		// get outputs associated with tx
+		let res = updater::retrieve_outputs(
+			wallet,
+			keychain_mask,
+			false,
+			Some(&tx),
+			&parent_key_id,
+			None,
+			None,
+		)?;
+		let outputs = res.iter().map(|m| m.output.clone()).collect();
+		updater::cancel_tx_and_outputs(wallet, keychain_mask, tx, outputs, parent_key_id)?;
 	}
-	if tx.confirmed {
-		return Err(Error::TransactionNotCancellable(tx_id_string));
-	}
-	// get outputs associated with tx
-	let res = updater::retrieve_outputs(
-		wallet,
-		keychain_mask,
-		false,
-		Some(&tx),
-		&parent_key_id,
-		None,
-		None,
-	)?;
-	let outputs = res.iter().map(|m| m.output.clone()).collect();
-	updater::cancel_tx_and_outputs(wallet, keychain_mask, tx, outputs, parent_key_id)?;
 	Ok(())
 }
 
