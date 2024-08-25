@@ -205,11 +205,6 @@ subcommands:
             short: g
             long: message
             takes_value: true
-        - stored_tx:
-            help: If present, use the previously stored Unconfirmed transaction with given id
-            short: t
-            long: stored_tx
-            takes_value: true
         - ttl_blocks:
             help: If present, the number of blocks from the current after which wallets should refuse to process transactions further
             short: b
