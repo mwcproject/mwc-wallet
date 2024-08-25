@@ -938,25 +938,40 @@ where
 			&secp,
 		)?;
 
-		println!();
-		println!("SLATEPACK CONTENTS");
-		println!("Slate:     {}", slate_str);
-		println!("Content:   {:?}", content);
+		let mut output = String::new();
+
+		output.push_str("SLATEPACK CONTENTS\n");
+		output.push_str(&format!("Slate:     {}\n", slate_str));
+		output.push_str(&format!("Content:   {:?}\n", content));
 		if let Some(sender) = sender {
-			println!(
-				"Sender:    {}",
+			output.push_str(&format!(
+				"Sender:    {}\n",
 				ProvableAddress::from_tor_pub_key(&sender).public_key
-			);
+			));
 		} else {
-			println!("Sender:    None (Not encrypted)");
+			output.push_str("Sender:    None (Not encrypted)\n");
 		}
 		if let Some(recipient) = recipient {
-			println!(
-				"recipient: {}",
+			output.push_str(&format!(
+				"recipient: {}\n",
 				ProvableAddress::from_tor_pub_key(&recipient).public_key
-			);
+			));
 		} else {
-			println!("recipient: None (Not encrypted)");
+			output.push_str("recipient: None (Not encrypted)\n");
+		}
+
+		println!("\n{}", output);
+
+		if let Some(outfile) = args.outfile {
+			let mut file = File::create(&outfile).map_err(|e| {
+				Error::IO(format!("Unable to create output file {}, {}", &outfile, e))
+			})?;
+			file.write_all(output.as_bytes()).map_err(|e| {
+				Error::IO(format!(
+					"Unable to write data into output file {}, {}",
+					&outfile, e
+				))
+			})?;
 		}
 
 		Ok(())
