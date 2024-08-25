@@ -1791,7 +1791,7 @@ where
 	K: keychain::Keychain + 'static,
 {
 	controller::owner_single_use(None, keychain_mask, Some(owner_api), |api, m| {
-		let result = api.get_stored_tx_proof(m, args.id);
+		let result = api.get_stored_tx_proof(m, args.id, args.tx_slate_id);
 		match result {
 			Ok(p) => {
 				// actually export proof

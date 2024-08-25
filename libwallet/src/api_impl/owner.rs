@@ -366,25 +366,25 @@ where
 pub fn get_stored_tx_proof<'a, L, C, K>(
 	wallet_inst: Arc<Mutex<Box<dyn WalletInst<'a, L, C, K>>>>,
 	id: Option<u32>,
+	tx_slate_id: Option<Uuid>,
 ) -> Result<TxProof, Error>
 where
 	L: WalletLCProvider<'a, C, K>,
 	C: NodeClient + 'a,
 	K: Keychain + 'a,
 {
-	if id.is_none() {
+	if id.is_none() && tx_slate_id.is_none() {
 		return Err(Error::PaymentProofRetrieval(
 			"Transaction ID must be specified".into(),
 		));
 	}
-	let tx_id = id.unwrap();
 	wallet_lock!(wallet_inst, w);
 	let parent_key_id = w.parent_key_id();
 	let txs: Vec<TxLogEntry> = updater::retrieve_txs(
 		&mut **w,
 		None,
-		Some(tx_id),
-		None,
+		id,
+		tx_slate_id,
 		None,
 		Some(&parent_key_id),
 		false,
@@ -392,11 +392,24 @@ where
 		None,
 	)
 	.map_err(|e| Error::StoredTransactionError(format!("{}", e)))?;
-	if txs.len() != 1 {
-		return Err(Error::GenericError(format!("Unable to find tx, {}", tx_id)))?;
+
+	let tx_name = match id {
+		Some(id) => id.to_string(),
+		None => match tx_slate_id {
+			Some(id) => format!("{}", id),
+			None => "Unknown".into(),
+		},
+	};
+
+	if txs.len() == 0 {
+		return Err(Error::GenericError(format!(
+			"Unable to find tx, {}",
+			tx_name
+		)))?;
 	}
+	// in case of many (self send) the first transaction is what we need
 	let uuid = txs[0].tx_slate_id.ok_or_else(|| {
-		Error::GenericError(format!("Unable to find slateId for txId, {}", tx_id))
+		Error::GenericError(format!("Unable to find slateId for txId, {}", tx_name))
 	})?;
 	let proof = TxProof::get_stored_tx_proof(w.get_data_file_dir(), &uuid.to_string())
 		.map_err(|e| Error::TransactionHasNoProof(format!("{}", e)))?;

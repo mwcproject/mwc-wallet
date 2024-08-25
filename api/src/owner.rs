@@ -2372,8 +2372,9 @@ where
 		&self,
 		_keychain_mask: Option<&SecretKey>,
 		tx_id: Option<u32>,
+		tx_slate_id: Option<Uuid>,
 	) -> Result<TxProof, Error> {
-		owner::get_stored_tx_proof(self.wallet_inst.clone(), tx_id)
+		owner::get_stored_tx_proof(self.wallet_inst.clone(), tx_id, tx_slate_id)
 	}
 
 	/// Verifies a [PaymentProof](../grin_wallet_libwallet/api_impl/types/struct.PaymentProof.html)
