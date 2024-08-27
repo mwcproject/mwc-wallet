@@ -33,15 +33,16 @@ use grin_wallet_impls::{DefaultLCProvider, DefaultWalletImpl};
 use grin_wallet_impls::{PathToSlateGetter, SlateGetter};
 use grin_wallet_libwallet::proof::proofaddress;
 use grin_wallet_libwallet::proof::proofaddress::ProvableAddress;
-use grin_wallet_libwallet::Slate;
 use grin_wallet_libwallet::{
 	swap::types::Currency, IssueInvoiceTxArgs, NodeClient, SwapStartArgs, WalletInst,
 	WalletLCProvider,
 };
+use grin_wallet_libwallet::{Slate, SlatePurpose};
 use grin_wallet_util::grin_core as core;
 use grin_wallet_util::grin_core::core::amount_to_hr_string;
 use grin_wallet_util::grin_keychain as keychain;
 use grin_wallet_util::grin_util::secp::Secp256k1;
+use grin_wallet_util::grin_util::ToHex;
 use linefeed::terminal::Signal;
 use linefeed::{Interface, ReadResult};
 use rpassword;
@@ -836,31 +837,20 @@ pub fn parse_process_invoice_args(
 	let method = parse_required(args, "method")?;
 
 	// dest
-	let dest = {
+	let mut dest = {
 		if method == "self" {
 			match args.value_of("dest") {
-				Some(d) => d,
-				None => "default",
+				Some(d) => Some(d.to_string()),
+				None => Some("default".to_string()),
 			}
 		} else {
 			if !estimate_selection_strategies {
-				parse_required(args, "dest")?
+				parse_optional(args, "dest")?
 			} else {
-				""
+				None
 			}
 		}
 	};
-	if !estimate_selection_strategies
-		&& method == "http"
-		&& !dest.starts_with("http://")
-		&& !dest.starts_with("https://")
-	{
-		let msg = format!(
-			"HTTP Destination should start with http://: or https://: {}",
-			dest,
-		);
-		return Err(ParseError::ArgumentError(msg));
-	}
 
 	// ttl_blocks
 	let ttl_blocks = parse_u64_or_none(args.value_of("ttl_blocks"));
@@ -869,25 +859,74 @@ pub fn parse_process_invoice_args(
 	let max_outputs = 500;
 
 	// file input only
-	let tx_file = parse_required(args, "input")?;
+	let tx_file = parse_optional(args, "file")?;
+	let input_slatepack_message = args.value_of("content").map(|s| s.to_string());
+
+	let slate = match &tx_file {
+		Some(file_name) => PathToSlateGetter::build_form_path(file_name.into())
+			.get_tx(Some(&slatepack_secret), height, &secp)
+			.map_err(|e| {
+				ParseError::IOError(format!(
+					"Unable to read slate data from file {}, {}",
+					file_name, e
+				))
+			})?,
+		None => match &input_slatepack_message {
+			Some(message) => PathToSlateGetter::build_form_str(message.clone())
+				.get_tx(Some(&slatepack_secret), height, &secp)
+				.map_err(|e| {
+					ParseError::IOError(format!(
+						"Unable to read slate data from the content, {}",
+						e
+					))
+				})?,
+			None => {
+				return Err(ParseError::ArgumentError(
+					"Please specify 'file' or 'content' argument".to_string(),
+				))
+			}
+		},
+	};
+
+	let (slate, sender, _, content, _) = slate
+		.to_slate()
+		.map_err(|e| ParseError::ArgumentError(format!("Unable to read the slate, {}", e)))?;
+
+	if content != SlatePurpose::InvoiceInitial {
+		return Err(ParseError::ArgumentError(
+			"Slate has a wrong type, it is not initial invoice slate".to_string(),
+		));
+	}
+
+	if dest.is_none() {
+		dest = match &sender {
+			Some(sender) => Some(sender.to_hex()),
+			None => {
+				if !estimate_selection_strategies {
+					return Err(ParseError::ArgumentError(
+						"Please specify 'dest' argument".to_string(),
+					));
+				}
+				None
+			}
+		};
+	}
+
+	if !estimate_selection_strategies && method == "http" {
+		if let Some(dest) = &dest {
+			if !dest.starts_with("http://") && !dest.starts_with("https://") {
+				return Err(ParseError::ArgumentError(format!(
+					"HTTP Destination should start with http://: or https://: {}",
+					dest
+				)));
+			}
+		}
+	}
 
 	if prompt {
 		// Now we need to prompt the user whether they want to do this,
 		// which requires reading the slate
-		let slate = match PathToSlateGetter::build_form_path((&tx_file).into()).get_tx(
-			Some(slatepack_secret),
-			height,
-			secp,
-		) {
-			Ok(s) => s,
-			Err(e) => return Err(ParseError::ArgumentError(format!("{}", e))),
-		};
-		let slate = slate
-			.to_slate()
-			.map_err(|e| ParseError::ArgumentError(format!("Unable to read the slate, {}", e)))?
-			.0;
-
-		prompt_pay_invoice(&slate, method, dest)?;
+		prompt_pay_invoice(&slate, method, dest.as_ref().unwrap())?;
 	}
 
 	let bridge = parse_optional(args, "bridge")?;
@@ -900,9 +939,10 @@ pub fn parse_process_invoice_args(
 		selection_strategy: selection_strategy.to_owned(),
 		estimate_selection_strategies,
 		method: method.to_owned(),
-		dest: dest.to_owned(),
+		dest: dest.unwrap_or(String::new()),
 		max_outputs: max_outputs,
-		input: tx_file.to_owned(),
+		input_slatepack_message,
+		input_file: tx_file,
 		ttl_blocks,
 		bridge,
 		slatepack_qr: slatepack_qr,

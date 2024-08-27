@@ -53,7 +53,7 @@ use grin_wallet_util::grin_p2p::libp2p_connection::ReceivedMessage;
 use grin_wallet_util::grin_p2p::{libp2p_connection, PeerAddr};
 use grin_wallet_util::grin_util::secp::{ContextFlag, Secp256k1};
 use grin_wallet_util::grin_util::static_secp_instance;
-use qr_code::QrCode;
+use qr_code::{EcLevel, QrCode};
 use serde_json as json;
 use serde_json::json;
 use serde_json::{Map as JsonMap, Value as JsonValue};
@@ -764,9 +764,14 @@ where
 	println!("Slatepack data was also backed up at {}", out_file_name);
 	println!();
 	if show_qr {
-		if let Ok(qr_string) = QrCode::new(slate_str) {
+		if let Ok(qr_string) = QrCode::with_error_correction_level(slate_str, EcLevel::M) {
 			println!("{}", qr_string.to_string(false, 3));
 			println!();
+		} else {
+			if let Ok(qr_string) = QrCode::with_error_correction_level(slate_str, EcLevel::L) {
+				println!("{}", qr_string.to_string(false, 3));
+				println!();
+			}
 		}
 	}
 	if is_encrypted {
@@ -1248,7 +1253,8 @@ pub struct ProcessInvoiceArgs {
 	pub method: String,
 	pub dest: String,
 	pub max_outputs: usize,
-	pub input: String,
+	pub input_file: Option<String>,
+	pub input_slatepack_message: Option<String>,
 	pub estimate_selection_strategies: bool,
 	pub ttl_blocks: Option<u64>,
 	pub bridge: Option<String>,
@@ -1283,11 +1289,25 @@ where
 		)
 	};
 
-	let slate_pkg = PathToSlateGetter::build_form_path((&args.input).into()).get_tx(
-		Some(&slatepack_secret),
-		height,
-		&secp,
-	)?;
+	let slate_pkg = match &args.input_file {
+		Some(file_name) => PathToSlateGetter::build_form_path(file_name.into()).get_tx(
+			Some(&slatepack_secret),
+			height,
+			&secp,
+		)?,
+		None => match &args.input_slatepack_message {
+			Some(message) => PathToSlateGetter::build_form_str(message.clone()).get_tx(
+				Some(&slatepack_secret),
+				height,
+				&secp,
+			)?,
+			None => {
+				return Err(Error::ArgumentError(
+					"Please specify 'file' or 'content' argument".to_string(),
+				))
+			}
+		},
+	};
 
 	let (slate, sender_pk, _recepient, content, _encrypted) = slate_pkg.to_slate()?;
 
@@ -1298,7 +1318,6 @@ where
 		)));
 	}
 
-	let wallet_inst = owner_api.wallet_inst.clone();
 	controller::owner_single_use(None, keychain_mask, Some(owner_api), |api, m| {
 		if args.estimate_selection_strategies {
 			let mut strategies: Vec<(&str, u64, u64)> = Vec::new();
@@ -1338,7 +1357,7 @@ where
 				)));
 			}
 			let result = api.process_invoice_tx(m, &slate, &init_args);
-			let mut slate = match result {
+			let slate = match result {
 				Ok(s) => {
 					info!(
 						"Invoice processed: {} mwc to {} (strategy '{}')",
@@ -1383,19 +1402,9 @@ where
 						)?;
 					}
 				}
-				"self" => {
-					api.tx_lock_outputs(m, &slate, Some(String::from("self")), 1)?;
-					let km = match keychain_mask.as_ref() {
-						None => None,
-						Some(&m) => Some(m.to_owned()),
-					};
-					controller::foreign_single_use(wallet_inst, km, |api| {
-						slate = api.finalize_invoice_tx(&slate)?;
-						Ok(())
-					})?;
-				}
-				method => {
-					let sender = create_sender(method, &args.dest, &None, tor_config)?;
+				"http" | "mwcmqs" => {
+					let sender =
+						create_sender(args.method.as_str(), &args.dest, &None, tor_config)?;
 					// We want to lock outputs for original slate. Sender can respond with anyhting. No reasons to check respond if lock works fine for original slate
 					let _ = sender.send_tx(
 						&slate,
@@ -1407,6 +1416,9 @@ where
 						&secp,
 					)?;
 					api.tx_lock_outputs(m, &slate, Some(args.dest.clone()), 1)?;
+				}
+				method => {
+					return Err(Error::ArgumentError(format!("Unknown method: {}", method)));
 				}
 			}
 		}

@@ -329,6 +329,10 @@ subcommands:
             help: send transaction as encoded slatepack for this recipient (wallet public key, similar to proof_address)
             long: slatepack_recipient
             takes_value: true
+        - slatepack_qr:
+            help: Show slatepack data as QR code
+            short: q
+            long: slatepack_qr
   - finalize_invoice:
       about: Processes invoice transaction file to finalize a transfer.
       args:
@@ -378,17 +382,17 @@ subcommands:
             short: e
             long: estimate-selection
         - method:
-            help: Method for sending the processed invoice back to the invoice creator
+            help: Method for sending the processed invoice back to the invoice creator. Use self if you are processing
             short: m
             long: method
             possible_values:
               - file
               - http
-              - self
+              - mwcmqs
             default_value: file
             takes_value: true
         - dest:
-            help: Send the transaction to the provided server (start with http://) or save as file.
+            help: Send the transaction to the provided server (start with http://) or save as file. If using tor and slate is encrypted, this option will be filled automatically
             short: d
             long: dest
             takes_value: true
@@ -397,10 +401,15 @@ subcommands:
             short: g
             long: message
             takes_value: true
-        - input:
+        - file:
             help: Partial transaction to process, expects the invoicer's transaction file.
-            short: i
-            long: input
+            short: f
+            long: file
+            takes_value: true
+        - content:
+            help: Slate or slatepack content as a string
+            short: n
+            long: content
             takes_value: true
         - ttl_blocks:
             help: If present, the number of blocks from the current after which wallets should refuse to process transactions further
