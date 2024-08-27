@@ -892,7 +892,7 @@ pub fn parse_process_invoice_args(
 		.to_slate()
 		.map_err(|e| ParseError::ArgumentError(format!("Unable to read the slate, {}", e)))?;
 
-	if content != SlatePurpose::InvoiceInitial {
+	if slate.compact_slate && content != SlatePurpose::InvoiceInitial {
 		return Err(ParseError::ArgumentError(
 			"Slate has a wrong type, it is not initial invoice slate".to_string(),
 		));

@@ -149,9 +149,8 @@ impl SlatePutter for PathToSlatePutter {
 
 		if let Some(path_buf) = &self.path_buf {
 			let file_name = path_buf.to_str().unwrap_or("INVALID PATH");
-			let mut pub_tx = File::create(&path_buf).map_err(|e| {
-				Error::IO(format!("Unable to create proof file {}, {}", file_name, e))
-			})?;
+			let mut pub_tx = File::create(&path_buf)
+				.map_err(|e| Error::IO(format!("Unable to create file {}, {}", file_name, e)))?;
 
 			pub_tx.write_all(slate_str.as_bytes()).map_err(|e| {
 				Error::IO(format!(
