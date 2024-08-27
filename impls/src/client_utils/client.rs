@@ -323,6 +323,12 @@ impl Client {
 			.send()
 			.await
 			.map_err(|e| Error::RequestError(format!("Cannot make request: {}", e)))?;
+		if resp.status().is_client_error() {
+			return Err(Error::RequestError(format!(
+				"Get error response, HTTP error code: {}",
+				resp.status()
+			)));
+		}
 		let text = resp
 			.text()
 			.await

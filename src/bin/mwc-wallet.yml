@@ -388,7 +388,6 @@ subcommands:
             possible_values:
               - file
               - http
-              - mwcmqs
             default_value: file
             takes_value: true
         - dest:

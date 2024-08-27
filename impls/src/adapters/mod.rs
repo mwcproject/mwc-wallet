@@ -52,6 +52,7 @@ pub trait SlateSender {
 	/// TODO: Probably need a slate wrapper type
 	fn send_tx(
 		&self,
+		send_tx: bool, // false if invoice, true if send operation
 		slate: &Slate,
 		slate_content: SlatePurpose,
 		slatepack_secret: &DalekSecretKey,

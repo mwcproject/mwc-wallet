@@ -789,6 +789,7 @@ where
 
 						slate = sender
 							.send_tx(
+								true,
 								&slate,
 								SlatePurpose::SendInitial,
 								&slatepack_secret,

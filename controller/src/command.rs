@@ -662,6 +662,7 @@ where
 
 					let original_slate = slate.clone();
 					slate = sender.send_tx(
+						true,
 						&slate,
 						SlatePurpose::SendInitial,
 						&slatepack_secret,
@@ -1402,11 +1403,12 @@ where
 						)?;
 					}
 				}
-				"http" | "mwcmqs" => {
+				"http" => {
 					let sender =
 						create_sender(args.method.as_str(), &args.dest, &None, tor_config)?;
 					// We want to lock outputs for original slate. Sender can respond with anyhting. No reasons to check respond if lock works fine for original slate
 					let _ = sender.send_tx(
+						false,
 						&slate,
 						SlatePurpose::InvoiceResponse,
 						&slatepack_secret,

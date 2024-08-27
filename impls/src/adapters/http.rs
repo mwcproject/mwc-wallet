@@ -70,7 +70,7 @@ impl HttpDataSender {
 			)))
 		} else {
 			Ok(HttpDataSender {
-				base_url: base_url.to_owned(),
+				base_url: Self::build_url_str(base_url),
 				apisecret,
 				use_socks: false,
 				socks_proxy_addr: None,
@@ -138,7 +138,16 @@ impl HttpDataSender {
 			let diff_time = start_time.elapsed().as_millis();
 			trace!("elapsed time check version = {}", diff_time);
 			// we try until it's taken more than 30 seconds.
-			if res.is_err() && diff_time <= timeout.unwrap_or(30_000) {
+
+			let is_http_err = match &res {
+				Ok(_) => false,
+				Err(e) => {
+					let err_string = format!("{}", e);
+					err_string.contains("HTTP error")
+				}
+			};
+
+			if res.is_err() && !is_http_err && diff_time <= timeout.unwrap_or(30_000) {
 				let res_err_str = format!("{:?}", res);
 				trace!(
 					"Got error (version_check), but continuing: {}, time elapsed = {}ms",
@@ -348,6 +357,14 @@ impl HttpDataSender {
 		Ok(res)
 	}
 
+	fn build_url_str(base_url: &str) -> String {
+		let trailing = match base_url.ends_with('/') {
+			true => "",
+			false => "/",
+		};
+		format!("{}{}v2/foreign", base_url, trailing)
+	}
+
 	fn set_up_tor_sender_process(
 		base_url: &str,
 		tor_config_dir: &String,
@@ -357,11 +374,7 @@ impl HttpDataSender {
 		proxy: &TorProxyConfig,
 		tor_log_file: &Option<String>,
 	) -> Result<(String, tor_process::TorProcess), Error> {
-		let trailing = match base_url.ends_with('/') {
-			true => "",
-			false => "/",
-		};
-		let url_str = format!("{}{}v2/foreign", base_url, trailing);
+		let url_str = Self::build_url_str(base_url);
 
 		// set up tor send process if needed
 		let mut tor = tor_process::TorProcess::new();
@@ -427,6 +440,7 @@ impl SlateSender for HttpDataSender {
 
 	fn send_tx(
 		&self,
+		send_tx: bool, // false if invoice, true if send operation
 		slate: &Slate,
 		slate_content: SlatePurpose,
 		slatepack_secret: &DalekSecretKey,
@@ -517,7 +531,9 @@ impl SlateSender for HttpDataSender {
 		let start_time = std::time::Instant::now();
 		loop {
 			// Note: not using easy-jsonrpc as don't want the dependencies in this crate
-			let req = json!({
+
+			let req = if send_tx {
+				json!({
 				"jsonrpc": "2.0",
 				"method": "receive_tx",
 				"id": 1,
@@ -526,8 +542,18 @@ impl SlateSender for HttpDataSender {
 							null,
 							null
 						]
-			});
-			trace!("Sending receive_tx request: {}", req);
+				})
+			} else {
+				json!({
+				"jsonrpc": "2.0",
+				"method": "finalize_invoice_tx",
+				"id": 1,
+				"params": [
+							slate_send
+						]
+				})
+			};
+			trace!("Sending request: {}", req);
 
 			let res = self.post(req);
 

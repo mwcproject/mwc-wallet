@@ -146,6 +146,7 @@ impl SlateSender for MwcMqsChannel {
 	// MQS doesn't do encryption because of backward compability. In any case it is not critical, the whole slate is encrypted and the size of slate is not important
 	fn send_tx(
 		&self,
+		send_tx: bool, // false if invoice, true if send operation
 		slate: &Slate,
 		_slate_content: SlatePurpose,
 		_slatepack_secret: &DalekSecretKey,
@@ -154,6 +155,12 @@ impl SlateSender for MwcMqsChannel {
 		_height: u64,
 		secp: &Secp256k1,
 	) -> Result<Slate, Error> {
+		if !send_tx {
+			return Err(Error::MqsGenericError(
+				"MWCMQS doesn't support invoice transactions".into(),
+			));
+		}
+
 		if let Some((mwcmqs_publisher, mwcmqs_subscriber)) = get_mwcmqs_brocker() {
 			// Creating channels for notification
 			let (tx_slate, rx_slate) = channel(); //this chaneel is used for listener thread to send message to other thread
