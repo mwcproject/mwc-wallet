@@ -1292,15 +1292,27 @@ where
 		}
 	};
 
+	let mut neeed_init_last_scaned = false;
 	{
 		// Checking if keychain mask correct. Issue that sometimes update_wallet_state doesn't need it and it is a security problem
 		let mut batch = w.batch(keychain_mask)?;
 		if batch.load_flag(FLAG_NEW_WALLET, true)? {
-			let blocks: Vec<ScannedBlockInfo> =
-				vec![ScannedBlockInfo::new(tip_height, tip_hash.clone())];
-			batch.save_last_scanned_blocks(tip_height, &blocks)?
+			neeed_init_last_scaned = true;
 		}
 		batch.commit()?;
+	}
+
+	if neeed_init_last_scaned {
+		// Let's still scan for last 100 blocks. That might be a mining wallet like tests has.
+		if tip_height > 100 {
+			let header = w.w2n_client().get_header_info(tip_height - 100)?;
+			let blocks: Vec<ScannedBlockInfo> =
+				vec![ScannedBlockInfo::new(header.height, header.hash)];
+
+			let mut batch = w.batch(keychain_mask)?;
+			batch.save_last_scanned_blocks(header.height, &blocks)?;
+			batch.commit()?;
+		}
 	}
 
 	let blocks = w.last_scanned_blocks()?;
