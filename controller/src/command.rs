@@ -48,7 +48,7 @@ use grin_wallet_libwallet::swap::types::Action;
 use grin_wallet_libwallet::swap::{message, Swap};
 use grin_wallet_libwallet::{Slate, TxLogEntry, WalletInst};
 use grin_wallet_util::grin_core::consensus::MWC_BASE;
-use grin_wallet_util::grin_core::core::amount_to_hr_string;
+use grin_wallet_util::grin_core::core::{amount_to_hr_string, Transaction};
 use grin_wallet_util::grin_core::global::{FLOONET_DNS_SEEDS, MAINNET_DNS_SEEDS};
 use grin_wallet_util::grin_p2p::libp2p_connection::ReceivedMessage;
 use grin_wallet_util::grin_p2p::{libp2p_connection, PeerAddr};
@@ -1600,23 +1600,29 @@ where
 	C: NodeClient + 'static,
 	K: keychain::Keychain + 'static,
 {
-	let (slatepack_secret, height, secp) = {
-		let mut w_lock = owner_api.wallet_inst.lock();
-		let w = w_lock.lc_provider()?.wallet_inst()?;
-		let keychain = w.keychain(keychain_mask)?;
-		let slatepack_secret = proofaddress::payment_proof_address_dalek_secret(&keychain, None)?;
-		let (height, _, _) = w.w2n_client().get_chain_tip()?;
-		(slatepack_secret, height, keychain.secp().clone())
-	};
+	let path_buf: PathBuf = (&args.input).into();
+	let mut pub_tx_f = File::open(&path_buf)
+		.map_err(|e| Error::IO(format!("Unable to open file {}, {}", args.input, e)))?;
+	let mut content = String::new();
+	pub_tx_f.read_to_string(&mut content).map_err(|e| {
+		Error::IO(format!(
+			"Unable to read data from file {}, {}",
+			args.input, e
+		))
+	})?;
+	if content.len() < 3 {
+		return Err(Error::GenericError(format!("File {} is empty", args.input)));
+	}
 
-	// Post expected to be internal api call, so there is no reasons to work with slatepacks.
-	let slate = PathToSlateGetter::build_form_path((&args.input).into())
-		.get_tx(Some(&slatepack_secret), height, &secp)?
-		.to_slate()?
-		.0;
+	let transaction: Transaction = serde_json::from_str(&content).map_err(|e| {
+		Error::IO(format!(
+			"Json to Transaction conversion failed for {}, {}",
+			content, e
+		))
+	})?;
 
 	controller::owner_single_use(None, keychain_mask, Some(owner_api), |api, m| {
-		api.post_tx(m, slate.tx_or_err()?, args.fluff)?;
+		api.post_tx(m, &transaction, args.fluff)?;
 		info!("Posted transaction");
 		return Ok(());
 	})?;

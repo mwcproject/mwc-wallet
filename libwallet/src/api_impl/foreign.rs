@@ -131,26 +131,18 @@ where
 	// that means it's not mqs so need to print it
 	if slate_message.is_some() {
 		println!(
-			"{}",
-			format!(
-				"slate [{}] received from [{}] for [{}] MWCs. Message: [\"{}\"]",
-				slate.id.to_string(),
-				display_from,
-				amount_to_hr_string(slate.amount, false),
-				slate_message.clone().unwrap()
-			)
-			.to_string()
+			"slate [{}] received from [{}] for [{}] MWCs. Message: [\"{}\"]",
+			slate.id.to_string(),
+			display_from,
+			amount_to_hr_string(slate.amount, false),
+			slate_message.clone().unwrap()
 		);
 	} else {
 		println!(
-			"{}",
-			format!(
-				"slate [{}] received from [{}] for [{}] MWCs.",
-				slate.id.to_string(),
-				display_from,
-				amount_to_hr_string(slate.amount, false)
-			)
-			.to_string()
+			"slate [{}] received from [{}] for [{}] MWCs.",
+			slate.id.to_string(),
+			display_from,
+			amount_to_hr_string(slate.amount, false)
 		);
 	}
 
@@ -288,6 +280,36 @@ where
 	check_ttl(w, &sl, refresh_from_node)?;
 	// Participant id 0 for mwc713 compatibility
 	let context = w.get_private_context(keychain_mask, sl.id.as_bytes(), 0)?;
+	let mut slate_message = String::new();
+	for participant_data in &slate.participant_data {
+		if let Some(msg2) = &participant_data.message {
+			if !slate_message.is_empty() {
+				slate_message.push_str(", ");
+			}
+			slate_message.push_str(msg2);
+		}
+	}
+
+	// that means it's not mqs so need to print it
+	if !slate_message.is_empty() {
+		println!(
+			"Get invoice slate [{}] to finalize for [{}] MWCs. Message: [\"{}\"], processing...",
+			slate.id.to_string(),
+			amount_to_hr_string(slate.amount, false),
+			slate_message
+		);
+	} else {
+		println!(
+			"Get invoice finalize slate [{}] for [{}] MWCs, processing...",
+			slate.id.to_string(),
+			amount_to_hr_string(slate.amount, false)
+		);
+	}
+
+	debug!(
+		"foreign just finalize_invoice_tx just got slate = {:?}",
+		slate
+	);
 
 	if slate.compact_slate {
 		// Add our contribution to the offset
@@ -317,6 +339,13 @@ where
 		batch.delete_private_context(sl.id.as_bytes(), 0)?;
 		batch.commit()?;
 	}
+
+	println!(
+		"Invoice slate [{}] for [{}] MWCs was processed and sent back for posting.",
+		slate.id.to_string(),
+		amount_to_hr_string(slate.amount, false)
+	);
+
 	Ok(sl)
 }
 
