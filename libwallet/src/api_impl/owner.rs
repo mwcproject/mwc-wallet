@@ -32,6 +32,7 @@ use crate::internal::{keys, scan, selection, tx, updater};
 use crate::slate::{PaymentInfo, Slate};
 use crate::types::{
 	AcctPathMapping, Context, NodeClient, OutputData, TxLogEntry, WalletBackend, WalletInfo,
+	FLAG_NEW_WALLET,
 };
 use crate::Error;
 use crate::{
@@ -1279,10 +1280,6 @@ where
 
 	// Wallet update logic doesn't handle truncating of the blockchain. That happen when node in sync or in reorg-sync
 	// In this case better to inform user and do nothing. Sync is useless in any case.
-
-	// Checking if keychain mask correct. Issue that sometimes update_wallet_state doesn't need it and it is a security problem
-	let _ = w.batch(keychain_mask)?;
-
 	let (tip_height, tip_hash, _) = match w.w2n_client().get_chain_tip() {
 		Ok(t) => t,
 		Err(_) => {
@@ -1294,6 +1291,17 @@ where
 			return Ok((0, String::new(), ScannedBlockInfo::empty(), false));
 		}
 	};
+
+	{
+		// Checking if keychain mask correct. Issue that sometimes update_wallet_state doesn't need it and it is a security problem
+		let mut batch = w.batch(keychain_mask)?;
+		if batch.load_flag(FLAG_NEW_WALLET, true)? {
+			let blocks: Vec<ScannedBlockInfo> =
+				vec![ScannedBlockInfo::new(tip_height, tip_hash.clone())];
+			batch.save_last_scanned_blocks(tip_height, &blocks)?
+		}
+		batch.commit()?;
+	}
 
 	let blocks = w.last_scanned_blocks()?;
 

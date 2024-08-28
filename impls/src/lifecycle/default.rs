@@ -26,6 +26,7 @@ use crate::lifecycle::seed::WalletSeed;
 use crate::util::secp::key::SecretKey;
 use crate::util::ZeroingString;
 use crate::LMDBBackend;
+use grin_wallet_libwallet::types::FLAG_NEW_WALLET;
 use grin_wallet_util::grin_util::logger::LoggingConfig;
 use std::fs;
 use std::path::PathBuf;
@@ -231,7 +232,10 @@ where
 				Ok(d) => d,
 			};
 		// Save init status of this wallet, to determine whether it needs a full UTXO scan
-		let batch = wallet.batch_no_mask()?;
+		let mut batch = wallet.batch_no_mask()?;
+		if mnemonic.is_none() {
+			batch.save_flag(FLAG_NEW_WALLET)?;
+		}
 		batch.commit()?;
 		info!("Wallet database backend created at {}", data_dir_name);
 		Ok(())

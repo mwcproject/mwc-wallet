@@ -267,6 +267,9 @@ where
 	fn get_ethereum_wallet(&self) -> Result<EthereumWallet, Error>;
 }
 
+/// New wallet with empty seed mark. Needed to skip first long scan
+pub const FLAG_NEW_WALLET: u64 = 1;
+
 /// Batch trait to update the output data backend atomically. Trying to use a
 /// batch after commit MAY result in a panic. Due to this being a trait, the
 /// commit method can't take ownership.
@@ -307,6 +310,12 @@ where
 		first_scanned_block_height: u64,
 		block: &Vec<ScannedBlockInfo>,
 	) -> Result<(), Error>;
+
+	/// Save safe flag into DB
+	fn save_flag(&mut self, flag: u64) -> Result<(), Error>;
+
+	/// Load and optionally delete the flag from DB
+	fn load_flag(&mut self, flag: u64, delete: bool) -> Result<bool, Error>;
 
 	/// Save the last used good node index
 	fn save_last_working_node_index(&mut self, node_index: u8) -> Result<(), Error>;

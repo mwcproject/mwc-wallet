@@ -54,6 +54,7 @@ const ACCOUNT_PATH_MAPPING_PREFIX: u8 = b'a';
 const LAST_SCANNED_BLOCK: u8 = b'm'; // pre v3.0 was l
 const LAST_WORKING_NODE_INDEX: u8 = b'n';
 const INTEGRITY_CONTEXT_PREFIX: u8 = b'g';
+const FLAGS: u8 = b'f'; // pre v3.0 was l
 
 /// test to see if database files exist in the current directory. If so,
 /// use a DB backend for all operations
@@ -753,6 +754,31 @@ where
 		}
 
 		Ok(())
+	}
+
+	/// Save safe flag into DB
+	fn save_flag(&mut self, flag: u64) -> Result<(), Error> {
+		let key = u64_to_key(FLAGS, flag);
+
+		self.db.borrow().as_ref().unwrap().put_ser(&key, &flag)?;
+
+		Ok(())
+	}
+
+	/// Load and optionally delete the flag from DB
+	fn load_flag(&mut self, flag: u64, delete: bool) -> Result<bool, Error> {
+		let br = self.db.borrow();
+		let db = br.as_ref().unwrap();
+
+		let key = u64_to_key(FLAGS, flag);
+		let index: Option<u64> = db.get_ser(&key, None)?;
+
+		let has_flag = index.is_some();
+
+		if has_flag & delete {
+			db.delete(&key)?;
+		}
+		Ok(has_flag)
 	}
 
 	/// Save the last used good node index
