@@ -40,6 +40,7 @@ use grin_wallet_impls::{Address, MWCMQSAddress, Publisher};
 use grin_wallet_libwallet::api_impl::{owner, owner_eth, owner_libp2p, owner_swap};
 use grin_wallet_libwallet::proof::proofaddress::{self, ProvableAddress};
 use grin_wallet_libwallet::proof::tx_proof::TxProof;
+use grin_wallet_libwallet::slate_versions::v3::sig_is_blank;
 use grin_wallet_libwallet::slatepack::SlatePurpose;
 use grin_wallet_libwallet::swap::fsm::state::StateId;
 use grin_wallet_libwallet::swap::trades;
@@ -1407,7 +1408,7 @@ where
 					let sender =
 						create_sender(args.method.as_str(), &args.dest, &None, tor_config)?;
 					// We want to lock outputs for original slate. Sender can respond with anyhting. No reasons to check respond if lock works fine for original slate
-					let _ = sender.send_tx(
+					let slate = sender.send_tx(
 						false,
 						&slate,
 						SlatePurpose::InvoiceResponse,
@@ -1418,6 +1419,23 @@ where
 						&secp,
 					)?;
 					api.tx_lock_outputs(m, &slate, Some(args.dest.clone()), 1)?;
+
+					let result = api.post_tx(m, slate.tx_or_err()?, true);
+					match result {
+						Ok(_) => {
+							let msg = format!(
+								"Invoice slate [{}] finalized and posted successfully",
+								slate.id.to_string()
+							);
+							info!("{}", msg);
+							println!("{}", msg);
+							return Ok(());
+						}
+						Err(e) => {
+							error!("Tx post fail: {}", e);
+							return Err(Error::LibWallet(format!("Unable to post slate, {}", e)));
+						}
+					}
 				}
 				method => {
 					return Err(Error::ArgumentError(format!("Unknown method: {}", method)));
@@ -1666,6 +1684,11 @@ where
 					);
 					return Ok(());
 				}
+				if sig_is_blank(&stored_tx.as_ref().unwrap().kernels()[0].excess_sig) {
+					error!("Transaction at {} has not been finalized.", args.id);
+					return Ok(());
+				}
+
 				api.post_tx(m, &stored_tx.unwrap(), args.fluff)?;
 				info!("Reposted transaction at {}", args.id);
 				return Ok(());

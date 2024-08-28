@@ -456,7 +456,7 @@ subcommands:
             short: f
             long: fluff
   - submit:
-      about: Submits a transaction that has already been finalized but not submitted to the network yet
+      about: Submits a binary transaction (mwctx) that has already been finalized but not submitted to the network yet. Binary transactions located at wallet_data/saved_txs/ folder.
       args:
         - input:
             help: Transaction file to submit

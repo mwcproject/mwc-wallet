@@ -38,11 +38,10 @@ use grin_wallet_libwallet::{
 	WalletLCProvider,
 };
 use grin_wallet_libwallet::{Slate, SlatePurpose};
-use grin_wallet_util::grin_core as core;
 use grin_wallet_util::grin_core::core::amount_to_hr_string;
 use grin_wallet_util::grin_keychain as keychain;
 use grin_wallet_util::grin_util::secp::Secp256k1;
-use grin_wallet_util::grin_util::ToHex;
+use grin_wallet_util::{grin_core as core, OnionV3Address};
 use linefeed::terminal::Signal;
 use linefeed::{Interface, ReadResult};
 use rpassword;
@@ -900,7 +899,10 @@ pub fn parse_process_invoice_args(
 
 	if dest.is_none() {
 		dest = match &sender {
-			Some(sender) => Some(sender.to_hex()),
+			Some(sender) => Some(format!(
+				"http://{}",
+				OnionV3Address::from_bytes(*sender.as_bytes()).to_ov3_str()
+			)),
 			None => {
 				if !estimate_selection_strategies {
 					return Err(ParseError::ArgumentError(

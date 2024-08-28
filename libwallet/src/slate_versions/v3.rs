@@ -103,6 +103,15 @@ fn u8_is_blank(u: &u8) -> bool {
 	*u == 0
 }
 
+pub fn sig_is_blank(s: &secp::Signature) -> bool {
+	for b in s.to_raw_data().iter() {
+		if *b != 0 {
+			return false;
+		}
+	}
+	true
+}
+
 impl SlateV3 {
 	pub fn to_slate(self, fix_kernel: bool) -> Result<Slate, Error> {
 		if self.coin_type.unwrap_or("mwc".to_string()) != "mwc" {
