@@ -17,6 +17,7 @@
 use crate::api::TLSConfig;
 use crate::apiwallet::Owner;
 use crate::config::{MQSConfig, TorConfig, WalletConfig, WALLET_CONFIG_FILE_NAME};
+use crate::controller::set_owner_api_thread;
 use crate::core::{core, global};
 use crate::error::Error;
 use crate::impls::{create_sender, SlateGetter as _};
@@ -271,6 +272,8 @@ where
 						error!("Error starting http listener");
 						return Err(Error::ListenerError);
 					}
+				} else {
+					set_owner_api_thread(t);
 				}
 			}
 		}

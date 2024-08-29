@@ -32,6 +32,7 @@ use std::env;
 use std::path::PathBuf;
 
 use grin_wallet_config::parse_node_address_string;
+use grin_wallet_controller::controller::{set_foreign_api_server, set_owner_api_server};
 use grin_wallet_libwallet::proof::proofaddress;
 use mwc_wallet::cmd;
 
@@ -171,5 +172,11 @@ fn real_main() -> i32 {
 	let node_client = HTTPNodeClient::new(node_list, None)
 		.expect("Unable create HTTP client for mwc-node connection");
 
-	cmd::wallet_command(&args, config, node_client)
+	let res = cmd::wallet_command(&args, config, node_client);
+
+	// stopping AI threads if they exist. We need to be clean
+	set_foreign_api_server(None);
+	set_owner_api_server(None);
+
+	res
 }

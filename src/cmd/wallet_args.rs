@@ -1569,8 +1569,12 @@ where
 			// If wallet exists and password is present then open it. Otherwise, that's fine too.
 			let mut wallet_lock = wallet.lock();
 			let lc = wallet_lock.lc_provider().unwrap();
-			open_wallet = wallet_args.is_present("pass")
-				&& lc.wallet_exists(None, wallet_config.wallet_data_dir.as_deref())?;
+			open_wallet = (wallet_args.is_present("pass")
+				&& lc.wallet_exists(None, wallet_config.wallet_data_dir.as_deref())?)
+				|| wallet_config.owner_api_include_foreign.unwrap_or(false)
+				|| wallet_config
+					.owner_api_include_mqs_listener
+					.unwrap_or(false);
 		}
 		_ => {}
 	}

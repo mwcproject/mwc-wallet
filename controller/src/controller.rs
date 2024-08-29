@@ -70,20 +70,71 @@ use std::pin::Pin;
 use std::sync::mpsc::Sender;
 use std::sync::{Arc, RwLock};
 use std::thread;
+use std::thread::JoinHandle;
 
 lazy_static! {
 	pub static ref MWC_OWNER_BASIC_REALM: HeaderValue =
 		HeaderValue::from_str("Basic realm=MWC-OwnerAPI").unwrap();
-	static ref FOREIGN_API_RUNNING: RwLock<bool> = RwLock::new(false);
-	static ref OWNER_API_RUNNING: RwLock<bool> = RwLock::new(false);
+
+	// Pairs with API Server and optional thread to wait. Server need to send signal to stop, thread needed for waiting
+	static ref FOREIGN_API: Arc<Mutex<(Option<ApiServer>, Option<JoinHandle<()>>)>> = Arc::new(Mutex::new((None,None)));
+	static ref OWNER_API: Arc<Mutex<(Option<ApiServer>, Option<JoinHandle<()>>)>> = Arc::new(Mutex::new((None,None)));
 }
 
 pub fn is_foreign_api_running() -> bool {
-	*FOREIGN_API_RUNNING.read().unwrap()
+	FOREIGN_API.lock().0.is_some()
 }
 
 pub fn is_owner_api_running() -> bool {
-	*OWNER_API_RUNNING.read().unwrap()
+	OWNER_API.lock().0.is_some()
+}
+
+pub fn set_foreign_api_server(api_server: Option<ApiServer>) {
+	set_api_server(&FOREIGN_API, api_server)
+}
+
+pub fn set_foreign_api_thread(thread: JoinHandle<()>) {
+	set_api_thread(&FOREIGN_API, thread)
+}
+
+pub fn set_owner_api_server(api_server: Option<ApiServer>) {
+	set_api_server(&OWNER_API, api_server)
+}
+
+pub fn set_owner_api_thread(thread: JoinHandle<()>) {
+	set_api_thread(&OWNER_API, thread)
+}
+
+fn set_api_server(
+	api: &Arc<Mutex<(Option<ApiServer>, Option<JoinHandle<()>>)>>,
+	api_server: Option<ApiServer>,
+) {
+	// Stopping prev server. That is a point to store it this way
+	{
+		let mut lock = api.lock();
+		let (ref mut prev_server, ref mut prev_thread) = &mut *lock;
+		if let Some(mut prev_server) = prev_server.take() {
+			prev_server.stop();
+		}
+		if let Some(prev_thread) = prev_thread.take() {
+			let _ = prev_thread.join();
+		}
+	}
+
+	if let Some(new_server) = api_server {
+		let mut lock = api.lock();
+		let (ref mut server, ref mut thread) = &mut *lock;
+
+		server.replace(new_server);
+		let _ = thread.take(); // thread just removed, no waiting even if it exist
+	}
+}
+
+fn set_api_thread(
+	api: &Arc<Mutex<(Option<ApiServer>, Option<JoinHandle<()>>)>>,
+	thread: JoinHandle<()>,
+) {
+	api.lock().1.replace(thread);
 }
 
 // This function has to use libwallet errots because of callback and runs on libwallet side
@@ -752,12 +803,12 @@ where
 		running_foreign = true;
 	}
 
-	if *OWNER_API_RUNNING.read().unwrap() {
+	if is_owner_api_running() {
 		return Err(Error::GenericError(
 			"Owner API is already up and running".to_string(),
 		));
 	}
-	if running_foreign && *FOREIGN_API_RUNNING.read().unwrap() {
+	if running_foreign && is_foreign_api_running() {
 		return Err(Error::GenericError(
 			"Foreign API is already up and running".to_string(),
 		));
@@ -813,18 +864,18 @@ where
 		.map_err(|e| Error::GenericError(format!("API thread failed to start, {}", e)))?;
 	warn!("HTTP Owner listener started.");
 
-	*OWNER_API_RUNNING.write().unwrap() = true;
+	set_owner_api_server(Some(apis));
 	if running_foreign {
-		*FOREIGN_API_RUNNING.write().unwrap() = true;
+		set_foreign_api_server(Some(ApiServer::new()));
 	}
 
 	let res = api_thread
 		.join()
 		.map_err(|e| Error::GenericError(format!("API thread panicked :{:?}", e)));
 
-	*OWNER_API_RUNNING.write().unwrap() = false;
+	set_owner_api_server(None);
 	if running_foreign {
-		*FOREIGN_API_RUNNING.write().unwrap() = false;
+		set_foreign_api_server(None);
 	}
 
 	res
@@ -976,7 +1027,7 @@ where
 	C: NodeClient + 'static,
 	K: Keychain + 'static,
 {
-	if *FOREIGN_API_RUNNING.read().unwrap() {
+	if is_foreign_api_running() {
 		return Err(Error::GenericError(
 			"Foreign API is already up and running".to_string(),
 		));
@@ -1049,7 +1100,7 @@ where
 		);
 	}
 
-	*FOREIGN_API_RUNNING.write().unwrap() = true;
+	set_foreign_api_server(Some(apis));
 
 	// Starting libp2p listener
 	let tor_process = if tor_info.is_some() && libp2p_listen_port.is_some() {
@@ -1071,7 +1122,7 @@ where
 		.join()
 		.map_err(|e| Error::GenericError(format!("API thread panicked :{:?}", e)));
 
-	*FOREIGN_API_RUNNING.write().unwrap() = false;
+	set_foreign_api_server(None);
 	tor::status::set_tor_address(None);
 
 	// Stopping tor, we failed to start in any case
