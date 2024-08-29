@@ -65,9 +65,9 @@ pub struct WalletConfig {
 	pub dark_background_color_scheme: Option<bool>,
 	/// Wallet data directory. Default none is 'wallet_data'
 	pub wallet_data_dir: Option<String>,
-	/// Base fee for all transactions. Please note, that fee can't be lower then Base fee
-	/// at the miner nodes. Otherwise your transaction will never be mined.
-	pub base_fee: Option<u64>,
+	/// Scaling factor from transaction weight to transaction fee
+	/// should match accept_fee_base parameter in grin-server
+	pub accept_fee_base: Option<u64>,
 	/// Ethereum Swap Contract Address
 	pub eth_swap_contract_address: Option<String>,
 	/// ERC20 Swap Contract Address
@@ -78,9 +78,6 @@ pub struct WalletConfig {
 	/// Key: <coin>_[main|test]_[1|2]
 	/// Value: url
 	pub swap_electrumx_addr: Option<BTreeMap<String, String>>,
-	/// Scaling factor from transaction weight to transaction fee
-	/// should match accept_fee_base parameter in grin-server
-	pub accept_fee_base: Option<u64>,
 }
 
 impl Default for WalletConfig {
@@ -103,7 +100,6 @@ impl Default for WalletConfig {
 			tls_certificate_key: None,
 			dark_background_color_scheme: Some(true),
 			wallet_data_dir: None,
-			base_fee: None,
 			eth_swap_contract_address: Some("2FA243fC8f9EAF014f8d6E909157B6A48cEE0bdC".to_string()),
 			erc20_swap_contract_address: Some(
 				"Dd62a95626453F54E686cF0531bCbf6766150794".to_string(),
@@ -141,7 +137,7 @@ impl Default for WalletConfig {
 				.map(|i| (i.0.to_string(), i.1.to_string()))
 				.collect::<BTreeMap<String, String>>(),
 			),
-			accept_fee_base: None,
+			accept_fee_base: Some(WalletConfig::default_accept_fee_base()),
 		}
 	}
 }

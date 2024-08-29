@@ -163,10 +163,6 @@ fn real_main() -> i32 {
 
 	let wallet_config = config.clone().members.unwrap().wallet;
 
-	if let Some(base_fee) = &wallet_config.base_fee {
-		global::set_global_accept_fee_base(base_fee.clone());
-	}
-
 	// Default derive index is 1 to match what mwc713 has by default...
 	proofaddress::set_address_index(wallet_config.grinbox_address_index.unwrap_or(0));
 

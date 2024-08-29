@@ -128,6 +128,17 @@ fn comments() -> HashMap<String, String> {
 "
 		.to_string(),
 	);
+
+	retval.insert(
+		"accept_fee_base".to_string(),
+		"
+# Minimum acceptable fee per unit of transaction weight. Please note that fee can't be lower than
+# network has, otherwise your transactions will be rejected.
+# If you are running fresh wallet, there is no needs to adjust this value.
+"
+		.to_string(),
+	);
+
 	retval.insert(
 		"eth_swap_contract_address".to_string(),
 		"
@@ -159,15 +170,6 @@ fn comments() -> HashMap<String, String> {
 	);
 
 	retval.insert(
-		"base_fee".to_string(),
-		"
-# Base fee for the transactions. Please note that fee can't be lower than fee at miner nodes, otherwise your transactions will be rejected.
-# If you are running fresh wallet, there is no needs to adjust this value.
-"
-			.to_string(),
-	);
-
-	retval.insert(
 		"[wallet.swap_electrumx_addr]".to_string(),
 		"
 # Electrum X servers that are used for Atomic Swap operations. Each Secondary Currency need
@@ -177,13 +179,6 @@ fn comments() -> HashMap<String, String> {
 # mainnet primary, mainnet secondary, testnet primary, testnet secondary,
 # Key: <coin>_[main|test]_[1|2]
 # value: URI
-"
-		.to_string(),
-	);
-	retval.insert(
-		"accept_fee_base".to_string(),
-		"
-#Minimum acceptable fee per unit of transaction weight
 "
 		.to_string(),
 	);
