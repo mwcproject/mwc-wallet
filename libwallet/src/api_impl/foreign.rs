@@ -114,7 +114,7 @@ pub fn receive_tx<'a, T: ?Sized, C, K>(
 	address: Option<String>,
 	key_id_opt: Option<&str>,
 	output_amounts: Option<Vec<u64>>,
-	dest_acct_name: Option<&str>,
+	dest_acct_name: &Option<String>,
 	message: Option<String>,
 	use_test_rng: bool,
 	refresh_from_node: bool,
@@ -150,7 +150,7 @@ where
 	let mut ret_slate = slate.clone();
 	check_ttl(w, &ret_slate, refresh_from_node)?;
 
-	let mut dest_acct_name = dest_acct_name.map(|s| s.to_string());
+	let mut dest_acct_name = dest_acct_name.clone();
 	if dest_acct_name.is_none() {
 		dest_acct_name = get_receive_account();
 	}

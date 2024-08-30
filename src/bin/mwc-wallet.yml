@@ -22,7 +22,6 @@ args:
       short: a
       long: account
       takes_value: true
-      default_value: default
   - top_level_dir:
       help: Top directory in which wallet files are stored (location of 'mwc-wallet.toml')
       short: t
@@ -178,7 +177,7 @@ subcommands:
             default_value: http
             takes_value: true
         - dest:
-            help: Send the transaction to the provided server (start with http://) or save as file.
+            help: Send the transaction to the provided server (start with http://) or save as file. For method self, dest can point to account name to move
             short: d
             long: dest
             takes_value: true
@@ -526,6 +525,11 @@ subcommands:
             takes_value: false
   - open:
       about: Opens a wallet (interactive mode only)
+      args:
+        - account:
+            help: Wallet account to use for this session
+            long: account
+            takes_value: true
   - close:
       about: Closes the wallet (interactive mode only)
   - recover:

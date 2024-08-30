@@ -419,7 +419,7 @@ where
 		&self,
 		from: &dyn Address,
 		slate: &mut Slate,
-		dest_acct_name: Option<&str>,
+		dest_acct_name: &Option<String>,
 		secp: &Secp256k1,
 	) -> Result<(), Error> {
 		let owner_api = Owner::new(self.wallet.clone(), None, None);
@@ -620,7 +620,7 @@ where
 			secp
 		};
 
-		let result = self.process_incoming_slate(from, slate, None, &secp);
+		let result = self.process_incoming_slate(from, slate, &None, &secp);
 
 		//send the message back
 		match result {

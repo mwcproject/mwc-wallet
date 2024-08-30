@@ -2299,11 +2299,11 @@ where
 		//send
 		slate = owner::init_send_tx(&mut **w, keychain_mask, &args, false, 1)?;
 		//receiver
-		let mut dest_account_name = None;
+		let mut dest_account_name: Option<String> = None;
 		let address_string;
 		if address.is_some() {
 			address_string = address.clone().unwrap();
-			dest_account_name = Option::from(&*(address_string));
+			dest_account_name = Some(address_string);
 		}
 		slate = foreign::receive_tx(
 			&mut **w,
@@ -2312,7 +2312,7 @@ where
 			address.clone(),
 			None,
 			None,
-			dest_account_name,
+			&dest_account_name,
 			None,
 			false,
 			false,

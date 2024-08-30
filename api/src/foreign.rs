@@ -390,7 +390,7 @@ where
 	///
 	/// // . . .
 	/// // Obtain a sent slate somehow
-	/// let result = api_foreign.receive_tx(&slate, None, None, None);
+	/// let result = api_foreign.receive_tx(&slate, None, &None, None);
 	///
 	/// if let Ok(slate) = result {
 	///     // Send back to recipient somehow
@@ -402,7 +402,7 @@ where
 		&self,
 		slate: &Slate,
 		address: Option<String>,
-		dest_acct_name: Option<&str>,
+		dest_acct_name: &Option<String>,
 		message: Option<String>,
 	) -> Result<Slate, Error> {
 		let mut w_lock = self.wallet_inst.lock();

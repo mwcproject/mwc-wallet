@@ -243,7 +243,7 @@ fn slatepack_exchange_test_impl(test_dir: &'static str) -> Result<(), libwallet:
 
 	// wallet 2 receives file, completes, sends file back
 	wallet::controller::foreign_single_use(wallet2.clone(), mask2_i.clone(), |api| {
-		let slate = api.receive_tx(&receive_slate, None, None, None)?;
+		let slate = api.receive_tx(&receive_slate, None, &None, None)?;
 		println!("receive_tx write slate: {:?}", slate);
 		output_slatepack(
 			&slate,
@@ -446,7 +446,7 @@ fn slatepack_exchange_test_impl(test_dir: &'static str) -> Result<(), libwallet:
 		let sender = res.get_sender();
 		assert!(sender.is_some());
 		let slate = res.to_result_slate();
-		let slate = api.receive_tx(&slate, None, None, None)?;
+		let slate = api.receive_tx(&slate, None, &None, None)?;
 		output_slatepack(
 			&slate,
 			SlatePurpose::SendResponse,

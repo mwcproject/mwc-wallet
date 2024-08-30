@@ -78,7 +78,7 @@ lazy_static! {
 /// Arguments common to all wallet commands
 #[derive(Clone)]
 pub struct GlobalArgs {
-	pub account: String,
+	pub account: Option<String>,
 	pub api_secret: Option<String>,
 	pub node_api_secret: Option<String>,
 	pub show_spent: bool,
@@ -650,7 +650,7 @@ where
 						slate = api.receive_tx(
 							&slate,
 							Some(String::from("self")),
-							Some(&args.dest),
+							&Some(args.dest.clone()),
 							None,
 						)?;
 						Ok(())
@@ -863,7 +863,7 @@ where
 		slate = api.receive_tx(
 			&slate,
 			Some(String::from("file")),
-			Some(&g_args.account),
+			&g_args.account,
 			args.message.clone(),
 		)?;
 

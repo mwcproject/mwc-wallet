@@ -32,7 +32,7 @@ use prettytable;
 
 /// Display outputs in a pretty way
 pub fn outputs(
-	account: &str,
+	account: &Option<String>,
 	cur_height: u64,
 	validated: bool,
 	outputs: Vec<OutputCommitMapping>,
@@ -43,7 +43,8 @@ pub fn outputs(
 		"{}",
 		format!(
 			"Wallet Outputs - Account '{}' - Block Height: {}",
-			account, cur_height
+			account.as_deref().unwrap_or("default"),
+			cur_height
 		)
 		.magenta()
 	);
@@ -128,7 +129,7 @@ pub fn outputs(
 
 /// Display transaction log in a pretty way
 pub fn txs(
-	account: &str,
+	account: &Option<String>,
 	cur_height: u64,
 	validated: bool,
 	txs: &[TxLogEntry],
@@ -142,7 +143,8 @@ pub fn txs(
 		"{}",
 		format!(
 			"Transaction Log - Account '{}' - Block Height: {}",
-			account, cur_height
+			account.as_deref().unwrap_or("default"),
+			cur_height
 		)
 		.magenta()
 	);
@@ -437,14 +439,15 @@ pub fn view_wallet_output(
 
 /// Display summary info in a pretty way
 pub fn info(
-	account: &str,
+	account: &Option<String>,
 	wallet_info: &WalletInfo,
 	validated: bool,
 	dark_background_color_scheme: bool,
 ) {
 	println!(
 		"\n____ Wallet Summary Info - Account '{}' as of height {} ____\n",
-		account, wallet_info.last_confirmed_height,
+		account.as_deref().unwrap_or("default"),
+		wallet_info.last_confirmed_height,
 	);
 
 	let mut table = table!();

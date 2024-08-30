@@ -88,7 +88,7 @@ pub fn command_loop<L, C, K>(
 	wallet_config: &WalletConfig,
 	tor_config: &TorConfig,
 	mqs_config: &MQSConfig,
-	global_wallet_args: &GlobalArgs,
+	global_wallet_args: &mut GlobalArgs,
 	test_mode: bool,
 ) -> Result<(), Error>
 where
@@ -162,7 +162,7 @@ where
 					Ok(args) => {
 						// handle opening /closing separately
 						keychain_mask = match args.subcommand() {
-							("open", Some(_)) => {
+							("open", Some(args)) => {
 								let mut wallet_lock = owner_api.wallet_inst.lock();
 								let lc = wallet_lock.lc_provider().unwrap();
 
@@ -193,11 +193,18 @@ where
 									&wallet_config.eth_infura_project_id,
 								);
 
-								if let Some(account) = args.value_of("account") {
-									if wallet_opened {
-										let wallet_inst = lc.wallet_inst()?;
-										wallet_inst.set_parent_key_id_by_name(account)?;
-									}
+								if wallet_opened {
+									let wallet_inst = lc.wallet_inst()?;
+									// Account name comes from open argument, next from global param, next 'default'
+									let account_name: String = match args.value_of("account") {
+										Some(account) => account.to_string(),
+										None => match &global_wallet_args.account {
+											Some(account) => account.clone(),
+											None => "default".to_string(),
+										},
+									};
+									wallet_inst.set_parent_key_id_by_name(account_name.as_str())?;
+									global_wallet_args.account = Some(account_name);
 								}
 								mask
 							}

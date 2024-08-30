@@ -292,7 +292,7 @@ pub fn parse_global_args(
 	config: &WalletConfig,
 	args: &ArgMatches,
 ) -> Result<command::GlobalArgs, ParseError> {
-	let account = parse_required(args, "account")?;
+	let account = args.value_of("account").map(|s| s.to_string());
 	let mut show_spent = false;
 	if args.is_present("show_spent") {
 		show_spent = true;
@@ -319,7 +319,7 @@ pub fn parse_global_args(
 	};
 
 	Ok(command::GlobalArgs {
-		account: account.to_owned(),
+		account: account,
 		show_spent: show_spent,
 		api_secret: api_secret,
 		node_api_secret: node_api_secret,
@@ -1488,7 +1488,7 @@ where
 		wallet_config.check_node_api_http_addr = sa.to_string().clone();
 	}
 
-	let global_wallet_args = arg_parse!(parse_global_args(&wallet_config, &wallet_args));
+	let mut global_wallet_args = arg_parse!(parse_global_args(&wallet_config, &wallet_args));
 
 	//parse the nodes address and put them in a vec
 	let node_list = parse_node_address_string(wallet_config.check_node_api_http_addr.clone());
@@ -1628,7 +1628,7 @@ where
 			&wallet_config,
 			&tor_config,
 			&mqs_config,
-			&global_wallet_args,
+			&mut global_wallet_args,
 			test_mode,
 		),
 		_ => {

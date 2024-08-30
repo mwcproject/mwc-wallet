@@ -970,7 +970,7 @@ where
 			self,
 			&slate_from,
 			sender.map(|p| ProvableAddress::from_tor_pub_key(&p).public_key), // We don't want to change RPC. New fields required new version
-			dest_acct_name.as_ref().map(String::as_str),
+			&dest_acct_name,
 			message,
 		)?;
 
