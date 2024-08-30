@@ -644,7 +644,9 @@ pub trait OwnerRpcV2: Sync + Send {
 				"max_outputs": 500,
 				"num_change_outputs": 1,
 				"selection_strategy_is_use_all": true,
-				"target_slate_version": 4
+				"target_slate_version": 4,
+				"exclude_change_outputs": true,
+				"minimum_confirmations_change_outputs": 1
 			}
 		},
 		"id": 1
