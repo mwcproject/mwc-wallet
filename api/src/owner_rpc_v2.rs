@@ -717,6 +717,36 @@ pub trait OwnerRpcV2: Sync + Send {
 	}
 	# "#
 	# ,false, 4, false, false, false, false, false);
+	#
+	# // Testing low 'max_outputs' value. Expecting to get error that slate is too large
+	# grin_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
+	# r#"
+	{
+		"jsonrpc": "2.0",
+		"method": "init_send_tx",
+		"params": {
+			"args": {
+				"amount": "20000000",
+				"minimum_confirmations": 2,
+				"max_outputs": 2
+			}
+		},
+		"id": 1
+	}
+	# "#
+	# ,
+	# r#"
+	{
+	  "id": 1,
+	  "jsonrpc": "2.0",
+	  "result": {
+		"Err": {
+		  "TooLargeSlate": 2
+		}
+	  }
+	}
+	# "#
+	# ,false, 4, false, false, false, false, false);
 	```
 	*/
 

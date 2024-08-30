@@ -864,10 +864,12 @@ where
 	// amount, the wallet should allow going over it to satisfy what the user
 	// wants to send. So the wallet considers max_outputs more of a soft limit.
 	if eligible.len() > max_outputs {
-		for window in eligible.windows(max_outputs) {
-			let windowed_eligibles = window.to_vec();
-			if let Some(outputs) = select_from(amount, select_all, windowed_eligibles) {
-				return (max_available, outputs);
+		if max_outputs > 0 {
+			for window in eligible.windows(max_outputs) {
+				let windowed_eligibles = window.to_vec();
+				if let Some(outputs) = select_from(amount, select_all, windowed_eligibles) {
+					return (max_available, outputs);
+				}
 			}
 		}
 		// Not exist in any window of which total amount >= amount.
