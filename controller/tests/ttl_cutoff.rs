@@ -1,4 +1,4 @@
-// Copyright 2019 The Grin Developers
+// Copyright 2021 The Grin Developers
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -22,6 +22,7 @@ use grin_wallet_libwallet as libwallet;
 use grin_wallet_util::grin_core::global;
 use impls::test_framework::{self, LocalWalletClient};
 use libwallet::{InitTxArgs, Slate, TxLogEntryType};
+use std::sync::atomic::Ordering;
 use std::thread;
 use std::time::Duration;
 
@@ -35,6 +36,7 @@ fn ttl_cutoff_test_impl(test_dir: &'static str) -> Result<(), wallet::Error> {
 	// Create a new proxy to simulate server and wallet responses
 	let mut wallet_proxy = create_wallet_proxy(test_dir);
 	let chain = wallet_proxy.chain.clone();
+	let stopper = wallet_proxy.running.clone();
 
 	create_wallet_and_add!(
 		client1,
@@ -96,7 +98,7 @@ fn ttl_cutoff_test_impl(test_dir: &'static str) -> Result<(), wallet::Error> {
 		slate = client1.send_tx_slate_direct("wallet2", &slate_i)?;
 		sender_api.tx_lock_outputs(m, &slate, None, 0)?;
 
-		let (_, txs) = sender_api.retrieve_txs(m, true, None, Some(slate.id))?;
+		let (_, txs) = sender_api.retrieve_txs(m, true, None, Some(slate.id), None)?;
 		let tx = txs[0].clone();
 
 		assert_eq!(tx.ttl_cutoff_height, Some(12));
@@ -107,7 +109,7 @@ fn ttl_cutoff_test_impl(test_dir: &'static str) -> Result<(), wallet::Error> {
 	let _ = test_framework::award_blocks_to_wallet(&chain, wallet1.clone(), mask1, 2, false);
 
 	wallet::controller::owner_single_use(Some(wallet1.clone()), mask1, None, |sender_api, m| {
-		let (_, txs) = sender_api.retrieve_txs(m, true, None, Some(slate.id))?;
+		let (_, txs) = sender_api.retrieve_txs(m, true, None, Some(slate.id), None)?;
 		let tx = txs[0].clone();
 
 		assert_eq!(tx.ttl_cutoff_height, Some(12));
@@ -117,7 +119,7 @@ fn ttl_cutoff_test_impl(test_dir: &'static str) -> Result<(), wallet::Error> {
 
 	// Should also be gone in wallet 2, and output gone
 	wallet::controller::owner_single_use(Some(wallet2.clone()), mask2, None, |sender_api, m| {
-		let (_, txs) = sender_api.retrieve_txs(m, true, None, Some(slate.id))?;
+		let (_, txs) = sender_api.retrieve_txs(m, true, None, Some(slate.id), None)?;
 		let tx = txs[0].clone();
 		let outputs = sender_api.retrieve_outputs(m, false, true, None)?.1;
 		assert_eq!(outputs.len(), 0);
@@ -145,7 +147,7 @@ fn ttl_cutoff_test_impl(test_dir: &'static str) -> Result<(), wallet::Error> {
 		sender_api.tx_lock_outputs(m, &slate_i, None, 0)?;
 		slate = slate_i;
 
-		let (_, txs) = sender_api.retrieve_txs(m, true, None, Some(slate.id))?;
+		let (_, txs) = sender_api.retrieve_txs(m, true, None, Some(slate.id), None)?;
 		let tx = txs[0].clone();
 
 		assert_eq!(tx.ttl_cutoff_height, Some(14));
@@ -157,7 +159,7 @@ fn ttl_cutoff_test_impl(test_dir: &'static str) -> Result<(), wallet::Error> {
 
 	// Wallet 2 will need to have updated past the TTL
 	wallet::controller::owner_single_use(Some(wallet2.clone()), mask2, None, |sender_api, m| {
-		let (_, _) = sender_api.retrieve_txs(m, true, None, Some(slate.id))?;
+		let (_, _) = sender_api.retrieve_txs(m, true, None, Some(slate.id), None)?;
 		Ok(())
 	})?;
 
@@ -170,6 +172,7 @@ fn ttl_cutoff_test_impl(test_dir: &'static str) -> Result<(), wallet::Error> {
 	})?;
 
 	// let logging finish
+	stopper.store(false, Ordering::Relaxed);
 	thread::sleep(Duration::from_millis(200));
 	Ok(())
 }
@@ -179,7 +182,7 @@ fn ttl_cutoff() {
 	let test_dir = "test_output/ttl_cutoff";
 	setup(test_dir);
 	if let Err(e) = ttl_cutoff_test_impl(test_dir) {
-		panic!("Libwallet Error: {} - {}", e, e.backtrace().unwrap());
+		panic!("Libwallet Error: {}", e);
 	}
 	clean_output_dir(test_dir);
 }

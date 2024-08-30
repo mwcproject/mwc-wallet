@@ -1,4 +1,4 @@
-// Copyright 2019 The Grin Developers
+// Copyright 2021 The Grin Developers
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,15 +14,21 @@
 
 /// HTTP Wallet 'plugin' implementation
 use crate::client_utils::{Client, ClientError};
-use crate::error::{Error, ErrorKind};
+use crate::error::Error;
 use crate::libwallet::slate_versions::{SlateVersion, VersionedSlate};
 use crate::libwallet::swap::message::Message;
 use crate::libwallet::Slate;
+use crate::tor::bridge::TorBridge;
+use crate::tor::proxy::TorProxy;
 use crate::{SlateSender, SwapMessageSender};
+use grin_wallet_config::types::{TorBridgeConfig, TorProxyConfig};
 use serde::Serialize;
 use serde_json::{json, Value};
+use std::collections::HashMap;
+use std::convert::TryFrom;
 use std::net::SocketAddr;
 use std::path::MAIN_SEPARATOR;
+use std::rc::Rc;
 
 use crate::adapters::MarketplaceMessageSender;
 use crate::tor;
@@ -32,6 +38,7 @@ use ed25519_dalek::{PublicKey as DalekPublicKey, SecretKey as DalekSecretKey};
 use grin_wallet_libwallet::address;
 use grin_wallet_libwallet::proof::proofaddress::ProvableAddress;
 use grin_wallet_libwallet::slatepack::SlatePurpose;
+use grin_wallet_util::grin_util::secp::Secp256k1;
 
 const TOR_CONFIG_PATH: &str = "tor/sender";
 
@@ -41,64 +48,76 @@ pub struct HttpDataSender {
 	apisecret: Option<String>,
 	pub use_socks: bool,
 	socks_proxy_addr: Option<SocketAddr>,
-	tor_config_dir: String,
-	socks_running: bool,
-	tor_log_file: Option<String>,
+	// tor_process instance is needed. The process is alive until this instance is not dropped.
+	tor_process: Rc<Option<tor_process::TorProcess>>,
+}
+
+impl Drop for HttpDataSender {
+	fn drop(&mut self) {
+		if self.tor_process.is_some() {
+			tor::status::set_tor_sender_running(false);
+		}
+	}
 }
 
 impl HttpDataSender {
 	/// Create, return Err if scheme is not "http"
-	pub fn new(
-		base_url: &str,
-		apisecret: Option<String>,
-		tor_config_dir: Option<String>,
-		socks_running: bool,
-		tor_log_file: Option<String>,
-	) -> Result<HttpDataSender, Error> {
+	pub fn plain_http(base_url: &str, apisecret: Option<String>) -> Result<HttpDataSender, Error> {
 		if !base_url.starts_with("http") && !base_url.starts_with("https") {
-			Err(ErrorKind::GenericError(format!("Invalid http url: {}", base_url)).into())
+			Err(Error::GenericError(format!(
+				"Invalid http url: {}",
+				base_url
+			)))
 		} else {
 			Ok(HttpDataSender {
-				base_url: base_url.to_owned(),
+				base_url: Self::build_url_str(base_url),
 				apisecret,
 				use_socks: false,
 				socks_proxy_addr: None,
-				tor_config_dir: tor_config_dir.unwrap_or(String::from("")),
-				socks_running: socks_running,
-				tor_log_file,
+				tor_process: Rc::new(None),
 			})
 		}
 	}
 
 	/// Switch to using socks proxy
-	pub fn with_socks_proxy(
+	pub fn tor_through_socks_proxy(
 		base_url: &str,
 		apisecret: Option<String>,
 		proxy_addr: &str,
 		tor_config_dir: Option<String>,
 		socks_running: bool,
 		tor_log_file: Option<String>,
+		tor_bridge: TorBridgeConfig,
+		tor_proxy: TorProxyConfig,
 	) -> Result<HttpDataSender, Error> {
-		let mut ret = Self::new(
+		let addr = proxy_addr.parse().map_err(|e| {
+			Error::GenericError(format!("Unable to parse address {}, {}", proxy_addr, e))
+		})?;
+		let socks_proxy_addr = SocketAddr::V4(addr);
+		let tor_config_dir = tor_config_dir.unwrap_or(String::from(""));
+
+		let (base_url, tor_process) = Self::set_up_tor_sender_process(
+			base_url,
+			&tor_config_dir,
+			socks_running,
+			&socks_proxy_addr,
+			&tor_bridge,
+			&tor_proxy,
+			&tor_log_file,
+		)?;
+
+		Ok(HttpDataSender {
 			base_url,
 			apisecret,
-			tor_config_dir.clone(),
-			socks_running,
-			tor_log_file,
-		)?;
-		ret.use_socks = true;
-		let addr = proxy_addr.parse().map_err(|e| {
-			ErrorKind::GenericError(format!("Unable to parse address {}, {}", proxy_addr, e))
-		})?;
-		ret.socks_proxy_addr = Some(SocketAddr::V4(addr));
-		ret.tor_config_dir = tor_config_dir.unwrap_or(String::from(""));
-		Ok(ret)
+			use_socks: true,
+			socks_proxy_addr: Some(socks_proxy_addr),
+			tor_process: Rc::new(Some(tor_process)),
+		})
 	}
 
 	/// Check version of the listening wallet
 	pub fn check_other_version(
 		&self,
-		url: &str,
 		timeout: Option<u128>,
 		destination_address: &String,
 	) -> Result<(SlateVersion, Option<String>), Error> {
@@ -114,12 +133,21 @@ impl HttpDataSender {
 				"params": []
 			});
 
-			let res = self.post(url, self.apisecret.clone(), req);
+			let res = self.post(req);
 
 			let diff_time = start_time.elapsed().as_millis();
 			trace!("elapsed time check version = {}", diff_time);
 			// we try until it's taken more than 30 seconds.
-			if res.is_err() && diff_time <= timeout.unwrap_or(30_000) {
+
+			let is_http_err = match &res {
+				Ok(_) => false,
+				Err(e) => {
+					let err_string = format!("{}", e);
+					err_string.contains("HTTP error")
+				}
+			};
+
+			if res.is_err() && !is_http_err && diff_time <= timeout.unwrap_or(30_000) {
 				let res_err_str = format!("{:?}", res);
 				trace!(
 					"Got error (version_check), but continuing: {}, time elapsed = {}ms",
@@ -147,12 +175,12 @@ impl HttpDataSender {
 						.to_string();
 				}
 				error!("{}", report);
-				ErrorKind::ClientCallback(report)
+				Error::ClientCallback(report)
 			})?;
 		}
 
 		let res: Value = serde_json::from_str(&res_str).map_err(|e| {
-			ErrorKind::GenericError(format!("Unable to parse respond {}, {}", res_str, e))
+			Error::GenericError(format!("Unable to parse respond {}, {}", res_str, e))
 		})?;
 		trace!("Response: {}", res);
 		if res["error"] != json!(null) {
@@ -161,14 +189,14 @@ impl HttpDataSender {
 				res["error"]["code"], res["error"]["message"]
 			);
 			error!("{}", report);
-			return Err(ErrorKind::ClientCallback(report).into());
+			return Err(Error::ClientCallback(report));
 		}
 
 		let resp_value = res["result"]["Ok"].clone();
 		trace!("resp_value: {}", resp_value.clone());
 		let foreign_api_version: u16 =
 			serde_json::from_value(resp_value["foreign_api_version"].clone()).map_err(|e| {
-				ErrorKind::GenericError(format!(
+				Error::GenericError(format!(
 					"Unable to read respond foreign_api_version value {}, {}",
 					res_str, e
 				))
@@ -177,7 +205,7 @@ impl HttpDataSender {
 			resp_value["supported_slate_versions"].clone(),
 		)
 		.map_err(|e| {
-			ErrorKind::GenericError(format!(
+			Error::GenericError(format!(
 				"Unable to read respond supported_slate_versions value {}, {}",
 				res_str, e
 			))
@@ -187,16 +215,21 @@ impl HttpDataSender {
 		if foreign_api_version < 2 {
 			let report = "Other wallet reports unrecognized API format.".to_string();
 			error!("{}", report);
-			return Err(ErrorKind::ClientCallback(report).into());
+			return Err(Error::ClientCallback(report));
 		}
 
 		let slatepack_address: Option<String> =
 			if supported_slate_versions.contains(&"SP".to_owned()) {
 				match address::pubkey_from_onion_v3(destination_address) {
-					Ok(pk) => Some(address::onion_v3_from_pubkey(&pk)?),
+					Ok(pk) => Some(address::onion_v3_from_pubkey(&pk).map_err(|e| {
+						Error::LibWallet(format!(
+							"Unable to build onion address from public key, {}",
+							e
+						))
+					})?),
 					Err(_) => {
 						// Destination is not tor address, so making foreign API request for get an address
-						Some(self.check_receiver_proof_address(url, timeout.clone())?)
+						Some(self.check_receiver_proof_address(timeout.clone())?)
 					}
 				}
 			} else {
@@ -215,15 +248,11 @@ impl HttpDataSender {
 
 		let report = "Unable to negotiate slate format with other wallet.".to_string();
 		error!("{}", report);
-		Err(ErrorKind::ClientCallback(report).into())
+		Err(Error::ClientCallback(report))
 	}
 
 	/// Check proof address of the listening wallet
-	pub fn check_receiver_proof_address(
-		&self,
-		url: &str,
-		timeout: Option<u128>,
-	) -> Result<String, Error> {
+	pub fn check_receiver_proof_address(&self, timeout: Option<u128>) -> Result<String, Error> {
 		let res_str: String;
 		let start_time = std::time::Instant::now();
 		trace!("starting now check proof address of listening wallet");
@@ -236,7 +265,7 @@ impl HttpDataSender {
 				"params": []
 			});
 
-			let res = self.post(url, self.apisecret.clone(), req);
+			let res = self.post(req);
 
 			let diff_time = start_time.elapsed().as_millis();
 			trace!("elapsed time check proof address = {}", diff_time);
@@ -271,12 +300,12 @@ impl HttpDataSender {
 						.to_string();
 				}
 				error!("{}", report);
-				ErrorKind::ClientCallback(report)
+				Error::ClientCallback(report)
 			})?;
 		}
 
 		let res: Value = serde_json::from_str(&res_str).map_err(|e| {
-			ErrorKind::GenericError(format!("Unable to parse respond {}, {}", res_str, e))
+			Error::GenericError(format!("Unable to parse respond {}, {}", res_str, e))
 		})?;
 		trace!("Response: {}", res);
 		if res["error"] != json!(null) {
@@ -285,7 +314,7 @@ impl HttpDataSender {
 				res["error"]["code"], res["error"]["message"]
 			);
 			error!("{}", report);
-			return Err(ErrorKind::ClientCallback(report).into());
+			return Err(Error::ClientCallback(report));
 		}
 
 		let resp_value = res["result"]["Ok"].clone();
@@ -300,60 +329,90 @@ impl HttpDataSender {
 		}
 		let report = "Unable to check proof address with other wallet.".to_string();
 		error!("{}", report);
-		Err(ErrorKind::ClientCallback(report).into())
+		Err(Error::ClientCallback(report))
 	}
 
-	fn post<IN>(
-		&self,
-		url: &str,
-		api_secret: Option<String>,
-		input: IN,
-	) -> Result<String, ClientError>
+	fn post<IN>(&self, input: IN) -> Result<String, ClientError>
 	where
 		IN: Serialize,
 	{
 		// For state sender we want send and disconnect
-		let client = Client::new(self.use_socks, self.socks_proxy_addr)?;
-		let req = client.create_post_request(url, Some("mwc".to_string()), api_secret, &input)?;
+		let client = if !self.use_socks {
+			Client::new()
+		} else {
+			Client::with_socks_proxy(
+				self.socks_proxy_addr
+					.ok_or_else(|| ClientError::Internal("No socks proxy address set".into()))?,
+			)
+		}
+		.map_err(|err| ClientError::Internal(format!("Unable to create http client, {}", err)))?;
+
+		let req = client.create_post_request(
+			&self.base_url,
+			Some("mwc".to_string()),
+			&self.apisecret,
+			&input,
+		)?;
 		let res = client.send_request(req)?;
 		Ok(res)
 	}
 
-	fn set_up_tor_send_process(&self) -> Result<(String, tor_process::TorProcess), Error> {
-		let trailing = match self.base_url.ends_with('/') {
+	fn build_url_str(base_url: &str) -> String {
+		let trailing = match base_url.ends_with('/') {
 			true => "",
 			false => "/",
 		};
-		let url_str = format!("{}{}v2/foreign", self.base_url, trailing);
+		format!("{}{}v2/foreign", base_url, trailing)
+	}
+
+	fn set_up_tor_sender_process(
+		base_url: &str,
+		tor_config_dir: &String,
+		socks_running: bool,
+		socks_proxy_addr: &SocketAddr,
+		bridge: &TorBridgeConfig,
+		proxy: &TorProxyConfig,
+		tor_log_file: &Option<String>,
+	) -> Result<(String, tor_process::TorProcess), Error> {
+		let url_str = Self::build_url_str(base_url);
 
 		// set up tor send process if needed
 		let mut tor = tor_process::TorProcess::new();
 		// We are checking the tor address because we are using the same Socks port. If listener is running,
 		// we don't need the sender.
-		if self.use_socks
-			&& !self.socks_running
+		if !socks_running
 			&& tor::status::get_tor_address().is_none()
 			&& !tor::status::get_tor_sender_running()
 		{
-			let tor_dir = format!(
-				"{}{}{}",
-				&self.tor_config_dir, MAIN_SEPARATOR, TOR_CONFIG_PATH
-			);
-			warn!(
-				"Starting TOR Process for send at {:?}",
-				self.socks_proxy_addr
-			);
+			let tor_dir = format!("{}{}{}", &tor_config_dir, MAIN_SEPARATOR, TOR_CONFIG_PATH);
+			warn!("Starting TOR Process for send at {}", socks_proxy_addr);
+
+			let mut hm_tor_bridge: HashMap<String, String> = HashMap::new();
+			if bridge.bridge_line.is_some() {
+				let bridge_struct = TorBridge::try_from(bridge.clone())
+					.map_err(|e| Error::TorConfig(format!("{:?}", e)))?;
+				hm_tor_bridge = bridge_struct
+					.to_hashmap()
+					.map_err(|e| Error::TorConfig(format!("{:?}", e)))?;
+			}
+
+			let mut hm_tor_proxy: HashMap<String, String> = HashMap::new();
+			if proxy.transport.is_some() || proxy.allowed_port.is_some() {
+				let proxy = TorProxy::try_from(proxy.clone())
+					.map_err(|e| Error::TorConfig(format!("{:?}", e)))?;
+				hm_tor_proxy = proxy
+					.to_hashmap()
+					.map_err(|e| Error::TorConfig(format!("{:?}", e)))?;
+			}
+
 			tor_config::output_tor_sender_config(
 				&tor_dir,
-				&self
-					.socks_proxy_addr
-					.ok_or(ErrorKind::GenericError(
-						"Not found socks_proxy_addr value".to_string(),
-					))?
-					.to_string(),
-				&self.tor_log_file,
+				socks_proxy_addr.to_string().as_str(),
+				tor_log_file,
+				hm_tor_bridge,
+				hm_tor_proxy,
 			)
-			.map_err(|e| ErrorKind::TorConfig(format!("Failed to config Tor, {}", e)))?;
+			.map_err(|e| Error::TorConfig(format!("Failed to config Tor, {}", e)))?;
 			// Start TOR process
 			let tor_cmd = format!("{}/torrc", &tor_dir);
 			tor.torrc_path(&tor_cmd)
@@ -362,10 +421,7 @@ impl HttpDataSender {
 				.completion_percent(100)
 				.launch()
 				.map_err(|e| {
-					ErrorKind::TorProcess(format!(
-						"Unable to start Tor process {}, {:?}",
-						tor_cmd, e
-					))
+					Error::TorProcess(format!("Unable to start Tor process {}, {:?}", tor_cmd, e))
 				})?;
 			tor::status::set_tor_sender_running(true);
 		}
@@ -379,31 +435,25 @@ impl SlateSender for HttpDataSender {
 		destination_address: &String,
 	) -> Result<Option<(SlateVersion, Option<String>)>, Error> {
 		// we need to keep _tor in scope so that the process is not killed by drop.
-		let (url_str, _tor) = self.set_up_tor_send_process()?;
-		Ok(Some(self.check_other_version(
-			&url_str,
-			None,
-			destination_address,
-		)?))
+		Ok(Some(self.check_other_version(None, destination_address)?))
 	}
 
 	fn send_tx(
 		&self,
+		send_tx: bool, // false if invoice, true if send operation
 		slate: &Slate,
 		slate_content: SlatePurpose,
 		slatepack_secret: &DalekSecretKey,
 		recipient: Option<DalekPublicKey>,
 		other_wallet_version: Option<(SlateVersion, Option<String>)>,
+		height: u64,
+		secp: &Secp256k1,
 	) -> Result<Slate, Error> {
-		// we need to keep _tor in scope so that the process is not killed by drop.
-		let (url_str, _tor) = self.set_up_tor_send_process()?;
-
 		if other_wallet_version.is_none() {
-			return Err(ErrorKind::GenericError(
+			return Err(Error::GenericError(
 				"Internal error, http based send_tx get empty value for other_wallet_version"
 					.to_string(),
-			)
-			.into());
+			));
 		}
 
 		let (mut slate_version, slatepack_address) = other_wallet_version.unwrap();
@@ -420,15 +470,17 @@ impl SlateSender for HttpDataSender {
 				if recipient.is_none() {
 					if let Some(slatepack_address) = slatepack_address {
 						recipient =
-							Some(ProvableAddress::from_str(&slatepack_address)?.tor_public_key()?);
+							Some(ProvableAddress::from_str(&slatepack_address)
+								.map_err(|e| Error::LibWallet(format!("Unable to parse slatepack address {}, {}", slatepack_address, e)))?
+								.tor_public_key()
+								.map_err(|e| Error::LibWallet(format!("Unable to convert slatepack address {} into public key, {}", slatepack_address, e)))?);
 					}
 				}
 
 				if recipient.is_none() {
-					return Err(ErrorKind::GenericError(
+					return Err(Error::GenericError(
 						"Not provided expected recipient address for Slate Pack".to_string(),
-					)
-					.into());
+					));
 				}
 				let tor_pk = DalekPublicKey::from(slatepack_secret);
 
@@ -440,33 +492,35 @@ impl SlateSender for HttpDataSender {
 					recipient,
 					slatepack_secret,
 					false,
-				)?
+					secp,
+				)
+				.map_err(|e| Error::LibWallet(format!("Unable to process slate, {}", e)))?
 			}
 			SlateVersion::V3B => {
 				if slate.compact_slate {
-					return Err(ErrorKind::ClientCallback(
+					return Err(Error::ClientCallback(
 						"Other wallet doesn't support slatepack compact model".into(),
-					)
-					.into());
+					));
 				}
-				VersionedSlate::into_version_plain(slate.clone(), SlateVersion::V3B)?
+				VersionedSlate::into_version_plain(slate.clone(), SlateVersion::V3B)
+					.map_err(|e| Error::LibWallet(format!("Unable to process slate, {}", e)))?
 			}
 			SlateVersion::V2 | SlateVersion::V3 => {
 				let mut slate = slate.clone();
 				if slate.compact_slate {
-					return Err(ErrorKind::ClientCallback(
+					return Err(Error::ClientCallback(
 						"Other wallet doesn't support slatepack compact model".into(),
-					)
-					.into());
+					));
 				}
 				if slate.payment_proof.is_some() {
-					return Err(ErrorKind::ClientCallback("Payment proof requested, but other wallet does not support payment proofs or tor payment proof. Please urge other user to upgrade, or re-send tx without a payment proof".into()).into());
+					return Err(Error::ClientCallback("Payment proof requested, but other wallet does not support payment proofs or tor payment proof. Please urge other user to upgrade, or re-send tx without a payment proof".into()));
 				}
 				if slate.ttl_cutoff_height.is_some() {
 					warn!("Slate TTL value will be ignored and removed by other wallet, as other wallet does not support this feature. Please urge other user to upgrade");
 				}
 				slate.version_info.version = 2;
-				VersionedSlate::into_version_plain(slate.clone(), SlateVersion::V2)?
+				VersionedSlate::into_version_plain(slate.clone(), SlateVersion::V2)
+					.map_err(|e| Error::LibWallet(format!("Unable to process slate, {}", e)))?
 			}
 		};
 
@@ -477,7 +531,9 @@ impl SlateSender for HttpDataSender {
 		let start_time = std::time::Instant::now();
 		loop {
 			// Note: not using easy-jsonrpc as don't want the dependencies in this crate
-			let req = json!({
+
+			let req = if send_tx {
+				json!({
 				"jsonrpc": "2.0",
 				"method": "receive_tx",
 				"id": 1,
@@ -486,10 +542,20 @@ impl SlateSender for HttpDataSender {
 							null,
 							null
 						]
-			});
-			trace!("Sending receive_tx request: {}", req);
+				})
+			} else {
+				json!({
+				"jsonrpc": "2.0",
+				"method": "finalize_invoice_tx",
+				"id": 1,
+				"params": [
+							slate_send
+						]
+				})
+			};
+			trace!("Sending request: {}", req);
 
-			let res = self.post(&url_str, self.apisecret.clone(), req);
+			let res = self.post(req);
 
 			let diff_time = start_time.elapsed().as_millis();
 			trace!("diff time slate send = {}", diff_time);
@@ -515,12 +581,12 @@ impl SlateSender for HttpDataSender {
 			res.map_err(|e| {
 				let report = format!("Posting transaction slate (is recipient listening?): {}", e);
 				error!("{}", report);
-				ErrorKind::ClientCallback(report)
+				Error::ClientCallback(report)
 			})?;
 		}
 
 		let mut res: Value = serde_json::from_str(&res_str).map_err(|e| {
-			ErrorKind::GenericError(format!("Unable to parse respond {}, {}", res_str, e))
+			Error::GenericError(format!("Unable to parse respond {}, {}", res_str, e))
 		})?;
 		trace!("Response: {}", res);
 		if res["error"] != json!(null) {
@@ -529,12 +595,12 @@ impl SlateSender for HttpDataSender {
 				res["error"]["code"], res["error"]["message"]
 			);
 			error!("{}", report);
-			return Err(ErrorKind::ClientCallback(report).into());
+			return Err(Error::ClientCallback(report));
 		}
 		if res["result"]["Err"] != json!(null) {
 			let report = format!("Posting transaction slate: Error: {}", res["result"]["Err"]);
 			error!("{}", report);
-			return Err(ErrorKind::ClientCallback(report).into());
+			return Err(Error::ClientCallback(report));
 		}
 
 		let slate_value = res["result"]["Ok"].clone();
@@ -542,7 +608,7 @@ impl SlateSender for HttpDataSender {
 		if slate_value.is_null() {
 			let report = format!("Unable to parse receiver wallet response {}", res_str);
 			error!("{}", report);
-			return Err(ErrorKind::ClientCallback(report).into());
+			return Err(Error::ClientCallback(report));
 		}
 
 		if res["result"]["Ok"]["version_info"]["version"] == json!(3)
@@ -552,24 +618,30 @@ impl SlateSender for HttpDataSender {
 		}
 
 		let slate_str = serde_json::to_string(&slate_value).map_err(|e| {
-			ErrorKind::GenericError(format!("Unable to build slate from values, {}", e))
+			Error::GenericError(format!("Unable to build slate from values, {}", e))
 		})?;
 
 		let res_slate = if Slate::deserialize_is_plain(&slate_str) {
 			Slate::deserialize_upgrade_plain(&slate_str).map_err(|e| {
-				ErrorKind::GenericError(format!(
+				Error::GenericError(format!(
 					"Unable to build slate from response {}, {}",
 					res_str, e
 				))
 			})?
 		} else {
 			let slatepack_str: String = serde_json::from_str(&slate_str).map_err(|e| {
-				ErrorKind::GenericError(format!(
+				Error::GenericError(format!(
 					"Invalid other wallet response, unable to decode the slate {}, {}",
 					slate_str, e
 				))
 			})?;
-			let sp = Slate::deserialize_upgrade_slatepack(&slatepack_str, &slatepack_secret)?;
+			let sp = Slate::deserialize_upgrade_slatepack(
+				&slatepack_str,
+				&slatepack_secret,
+				height,
+				secp,
+			)
+			.map_err(|e| Error::LibWallet(format!("Unable to process slate, {}", e)))?;
 			sp.to_result_slate()
 		};
 
@@ -579,11 +651,10 @@ impl SlateSender for HttpDataSender {
 
 impl SwapMessageSender for HttpDataSender {
 	/// Send a swap message. Return true is message delivery acknowledge can be set (message was delivered and processed)
-	fn send_swap_message(&self, swap_message: &Message) -> Result<bool, Error> {
+	fn send_swap_message(&self, swap_message: &Message, _secp: &Secp256k1) -> Result<bool, Error> {
 		// we need to keep _tor in scope so that the process is not killed by drop.
-		let (url_str, _tor) = self.set_up_tor_send_process()?;
 		let message_ser = &serde_json::to_string(&swap_message).map_err(|e| {
-			ErrorKind::SwapMessageGenericError(format!(
+			Error::SwapMessageGenericError(format!(
 				"Failed to convert swap message to json in preparation for Tor request, {}",
 				e
 			))
@@ -602,7 +673,7 @@ impl SwapMessageSender for HttpDataSender {
 			});
 			trace!("Sending receive_swap_message request: {}", req);
 
-			let res = self.post(&url_str, self.apisecret.clone(), req);
+			let res = self.post(req);
 
 			let diff_time = start_time.elapsed().as_millis();
 			if !res.is_err() {
@@ -615,12 +686,12 @@ impl SwapMessageSender for HttpDataSender {
 			res.map_err(|e| {
 				let report = format!("Posting swap message (is recipient listening?): {}", e);
 				error!("{}", report);
-				ErrorKind::ClientCallback(report)
+				Error::ClientCallback(report)
 			})?;
 		}
 
 		let res: Value = serde_json::from_str(&res_str).map_err(|e| {
-			ErrorKind::GenericError(format!("Unable to parse respond {}, {}", res_str, e))
+			Error::GenericError(format!("Unable to parse respond {}, {}", res_str, e))
 		})?;
 
 		if res["error"] != json!(null) {
@@ -629,7 +700,7 @@ impl SwapMessageSender for HttpDataSender {
 				res["error"]["code"], res["error"]["message"]
 			);
 			error!("{}", report);
-			return Err(ErrorKind::ClientCallback(report).into());
+			return Err(Error::ClientCallback(report));
 		}
 
 		// http call is synchronouse, so message was delivered and processes. Ack cn be granted.
@@ -640,7 +711,6 @@ impl SwapMessageSender for HttpDataSender {
 impl MarketplaceMessageSender for HttpDataSender {
 	fn send_swap_marketplace_message(&self, json_str: &String) -> Result<String, Error> {
 		// we need to keep _tor in scope so that the process is not killed by drop.
-		let (url_str, _tor) = self.set_up_tor_send_process()?;
 		let res_str: String;
 		let start_time = std::time::Instant::now();
 
@@ -655,7 +725,7 @@ impl MarketplaceMessageSender for HttpDataSender {
 			});
 			trace!("Sending marketplace_message request: {}", req);
 
-			let res = self.post(&url_str, self.apisecret.clone(), req);
+			let res = self.post(req);
 
 			let diff_time = start_time.elapsed().as_millis();
 			if !res.is_err() {
@@ -668,12 +738,12 @@ impl MarketplaceMessageSender for HttpDataSender {
 			res.map_err(|e| {
 				let report = format!("Posting swap message (is recipient listening?): {}", e);
 				error!("{}", report);
-				ErrorKind::ClientCallback(report)
+				Error::ClientCallback(report)
 			})?;
 		}
 
 		let res: Value = serde_json::from_str(&res_str).map_err(|e| {
-			ErrorKind::GenericError(format!("Unable to parse respond {}, {}", res_str, e))
+			Error::GenericError(format!("Unable to parse respond {}, {}", res_str, e))
 		})?;
 
 		if res["error"] != json!(null) {
@@ -682,7 +752,7 @@ impl MarketplaceMessageSender for HttpDataSender {
 				res["error"]["code"], res["error"]["message"]
 			);
 			error!("{}", report);
-			return Err(ErrorKind::ClientCallback(report).into());
+			return Err(Error::ClientCallback(report));
 		}
 
 		// http call is synchronouse, so message was delivered and processes. Ack cn be granted.

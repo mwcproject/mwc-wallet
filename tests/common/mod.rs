@@ -1,4 +1,4 @@
-// Copyright 2019 The Grin Developers
+// Copyright 2021 The Grin Developers
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -30,12 +30,13 @@ use grin_wallet_impls::{DefaultLCProvider, DefaultWalletImpl};
 use grin_wallet_libwallet::{NodeClient, WalletInfo, WalletInst};
 use grin_wallet_util::grin_core::global::{self, ChainTypes};
 use grin_wallet_util::grin_keychain::ExtKeychain;
-use grin_wallet_util::grin_util::{from_hex, static_secp_instance};
+use grin_wallet_util::grin_util::from_hex;
 use util::secp::key::{PublicKey, SecretKey};
 
 use grin_wallet_util::grin_api as api;
 use mwc_wallet::cmd::wallet_args;
 
+use grin_wallet_util::grin_util::secp::Secp256k1;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -127,14 +128,24 @@ macro_rules! setup_proxy {
 
 #[allow(dead_code)]
 pub fn clean_output_dir(test_dir: &str) {
-	let _ = fs::remove_dir_all(test_dir);
+	let _ = remove_dir_all::remove_dir_all(test_dir);
 }
 
 #[allow(dead_code)]
 pub fn setup(test_dir: &str) {
 	util::init_test_logger();
 	clean_output_dir(test_dir);
-	global::set_local_chain_type(ChainTypes::AutomatedTesting);
+	global::set_local_chain_type(global::ChainTypes::AutomatedTesting);
+}
+
+/// Some tests require the global chain_type to be configured.
+/// If tokio is used in any tests we need to ensure any threads spawned
+/// have the chain_type configured correctly.
+/// It is recommended to avoid relying on this if at all possible as global chain_type
+/// leaks across multiple tests and will likely have unintended consequences.
+#[allow(dead_code)]
+pub fn setup_global_chain_type() {
+	global::init_global_chain_type(global::ChainTypes::AutomatedTesting);
 }
 
 /// Create a wallet config file in the given current directory
@@ -153,14 +164,14 @@ pub fn config_command_wallet(
 	let mut config_file_name = current_dir.clone();
 	config_file_name.push("mwc-wallet.toml");
 	if config_file_name.exists() {
-		return Err(grin_wallet_controller::ErrorKind::ArgumentError(
+		return Err(grin_wallet_controller::Error::ArgumentError(
 			"mwc-wallet.toml already exists in the target directory. Please remove it first"
 				.to_owned(),
 		))?;
 	}
 	default_config.update_paths(&current_dir, None);
 	default_config
-		.write_to_file(config_file_name.to_str().unwrap())
+		.write_to_file(config_file_name.to_str().unwrap(), false, None, None)
 		.unwrap_or_else(|e| {
 			panic!("Error creating config file: {}", e);
 		});
@@ -376,7 +387,7 @@ where
 	}
 
 	let res = serde_json::from_str(&res).unwrap();
-	let res = easy_jsonrpc::Response::from_json_response(res).unwrap();
+	let res = easy_jsonrpc_mw::Response::from_json_response(res).unwrap();
 	let res = res.outputs.get(&id).unwrap().clone().unwrap();
 	if res["Err"] != json!(null) {
 		Ok(Err(WalletAPIReturnError {
@@ -429,7 +440,7 @@ where
 			code: res["error"]["code"].as_i64().unwrap() as i32,
 		}));
 	}
-	let res = easy_jsonrpc::Response::from_json_response(res).unwrap();
+	let res = easy_jsonrpc_mw::Response::from_json_response(res).unwrap();
 	let res = res
 		.outputs
 		.get(&(internal_request_id as u64))
@@ -464,25 +475,37 @@ where
 }
 
 #[allow(dead_code)]
-pub fn derive_ecdh_key(sec_key_str: &str, other_pubkey: &PublicKey) -> SecretKey {
+pub fn derive_ecdh_key(sec_key_str: &str, other_pubkey: &PublicKey, secp: &Secp256k1) -> SecretKey {
 	let sec_key_bytes = from_hex(sec_key_str).unwrap();
-	let sec_key = { SecretKey::from_slice(&sec_key_bytes).unwrap() };
-
-	let secp_inst = static_secp_instance();
-	let secp = secp_inst.lock();
+	let sec_key = { SecretKey::from_slice(secp, &sec_key_bytes).unwrap() };
 
 	let mut shared_pubkey = other_pubkey.clone();
-	shared_pubkey.mul_assign(&secp, &sec_key).unwrap();
+	shared_pubkey.mul_assign(secp, &sec_key).unwrap();
 
-	let x_coord = shared_pubkey.serialize_vec(true);
-	SecretKey::from_slice(&x_coord[1..]).unwrap()
+	let x_coord = shared_pubkey.serialize_vec(secp, true);
+	SecretKey::from_slice(secp, &x_coord[1..]).unwrap()
 }
 
 // Types to make working with json responses easier
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, thiserror::Error)]
 pub struct WalletAPIReturnError {
 	pub message: String,
 	pub code: i32,
+}
+
+impl std::fmt::Display for WalletAPIReturnError {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		write!(f, "{} - {}", self.code, &self.message)
+	}
+}
+
+impl From<grin_wallet_controller::Error> for WalletAPIReturnError {
+	fn from(error: grin_wallet_controller::Error) -> WalletAPIReturnError {
+		WalletAPIReturnError {
+			message: error.to_string(),
+			code: -1,
+		}
+	}
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

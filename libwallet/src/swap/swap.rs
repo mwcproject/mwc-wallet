@@ -16,23 +16,23 @@ use super::message::*;
 use super::multisig::{Builder as MultisigBuilder, Hashed};
 use super::ser::*;
 use super::types::*;
-use super::{ErrorKind, Keychain};
-use crate::grin_core::core::verifier_cache::LruVerifierCache;
+use super::{Error, Keychain};
 use crate::grin_core::core::{
 	transaction as tx, CommitWrapper, Inputs, KernelFeatures, OutputIdentifier, TxKernel, Weighting,
 };
 use crate::grin_core::libtx::secp_ser;
-use crate::grin_core::ser;
 use crate::grin_keychain::{Identifier, SwitchCommitmentType};
 use crate::grin_util::secp::key::{PublicKey, SecretKey};
 use crate::grin_util::secp::pedersen::{Commitment, RangeProof};
 use crate::grin_util::secp::{Message as SecpMessage, Secp256k1, Signature};
-use crate::grin_util::RwLock;
 use crate::swap::fsm::state::StateId;
 use crate::{NodeClient, Slate};
 use chrono::{DateTime, Utc};
-use std::sync::Arc;
+use std::convert::TryInto;
 use uuid::Uuid;
+
+#[cfg(test)]
+use crate::grin_util::RwLock;
 
 /// Dummy wrapper for the hex-encoded serialized transaction.
 #[derive(Serialize, Deserialize)]
@@ -190,7 +190,7 @@ impl Swap {
 		&self,
 		keychain: &K,
 		context: &Context,
-	) -> Result<(Identifier, u64, Commitment), ErrorKind> {
+	) -> Result<(Identifier, u64, Commitment), Error> {
 		assert!(self.is_seller());
 		let scontext = context.unwrap_seller()?;
 
@@ -206,7 +206,7 @@ impl Swap {
 	}
 
 	/// Return Seller specific data
-	pub fn unwrap_seller(&self) -> Result<(String, u64), ErrorKind> {
+	pub fn unwrap_seller(&self) -> Result<(String, u64), Error> {
 		match &self.role {
 			Role::Seller(address, change) => {
 				match address == "0x0000000000000000000000000000000000000000" {
@@ -214,14 +214,12 @@ impl Swap {
 					_ => Ok((address.clone(), *change)),
 				}
 			}
-			_ => Err(ErrorKind::UnexpectedRole(
-				"Swap call unwrap_seller".to_string(),
-			)),
+			_ => Err(Error::UnexpectedRole("Swap call unwrap_seller".to_string())),
 		}
 	}
 
 	/// Return buyer specific data
-	pub fn unwrap_buyer(&self) -> Result<Option<String>, ErrorKind> {
+	pub fn unwrap_buyer(&self) -> Result<Option<String>, Error> {
 		match &self.role {
 			Role::Buyer(address) => match address {
 				Some(address) => match address == "0x0000000000000000000000000000000000000000" {
@@ -230,9 +228,7 @@ impl Swap {
 				},
 				_ => Ok(address.clone()),
 			},
-			_ => Err(ErrorKind::UnexpectedRole(
-				"Swap call unwrap_buyer".to_string(),
-			)),
+			_ => Err(Error::UnexpectedRole("Swap call unwrap_buyer".to_string())),
 		}
 	}
 
@@ -267,7 +263,7 @@ impl Swap {
 		&self,
 		inner: Update,
 		inner_secondary: SecondaryUpdate,
-	) -> Result<Message, ErrorKind> {
+	) -> Result<Message, Error> {
 		Ok(Message::new(self.id.clone(), inner, inner_secondary))
 	}
 
@@ -275,7 +271,7 @@ impl Swap {
 		&self,
 		keychain: &K,
 		context: &Context,
-	) -> Result<SecretKey, ErrorKind> {
+	) -> Result<SecretKey, Error> {
 		let sec_key = keychain.derive_key(
 			self.primary_amount,
 			&context.multisig_key,
@@ -292,26 +288,30 @@ impl Swap {
 	pub(super) fn redeem_tx_fields(
 		&self,
 		redeem_slate: &Slate,
-	) -> Result<(PublicKey, PublicKey, SecpMessage), ErrorKind> {
+		secp: &Secp256k1,
+	) -> Result<(PublicKey, PublicKey, SecpMessage), Error> {
 		let pub_nonces = redeem_slate
 			.participant_data
 			.iter()
 			.map(|p| &p.public_nonce)
 			.collect();
-		let pub_nonce_sum = PublicKey::from_combination(pub_nonces)?;
+		let pub_nonce_sum = PublicKey::from_combination(secp, pub_nonces)?;
 		let pub_blinds = redeem_slate
 			.participant_data
 			.iter()
 			.map(|p| &p.public_blind_excess)
 			.collect();
-		let pub_blind_sum = PublicKey::from_combination(pub_blinds)?;
+		let pub_blind_sum = PublicKey::from_combination(secp, pub_blinds)?;
 
 		let features = KernelFeatures::Plain {
-			fee: redeem_slate.fee,
+			fee: redeem_slate
+				.fee
+				.try_into()
+				.map_err(|e| Error::Generic(format!("Invalid fee, {}", e)))?,
 		};
 		let message = features
 			.kernel_sig_msg()
-			.map_err(|e| ErrorKind::Generic(format!("Unable to generate message, {}", e)))?;
+			.map_err(|e| Error::Generic(format!("Unable to generate message, {}", e)))?;
 
 		Ok((pub_nonce_sum, pub_blind_sum, message))
 	}
@@ -319,13 +319,13 @@ impl Swap {
 	pub(super) fn find_redeem_kernel<C: NodeClient>(
 		&self,
 		node_client: &C,
-	) -> Result<Option<(TxKernel, u64)>, ErrorKind> {
+	) -> Result<Option<(TxKernel, u64)>, Error> {
 		let excess = &self
 			.redeem_slate
-			.tx
+			.tx_or_err()?
 			.kernels()
 			.get(0)
-			.ok_or(ErrorKind::UnexpectedAction(
+			.ok_or(Error::UnexpectedAction(
 				"Swap Fn find_redeem_kernel() redeem slate is not initialized, not found kernel"
 					.to_string(),
 			))?
@@ -343,19 +343,19 @@ impl Swap {
 	}
 
 	/// Common nonce for the BulletProof is sum_i H(C_i) where C_i is the commitment of participant i
-	pub(super) fn common_nonce(&self) -> Result<SecretKey, ErrorKind> {
+	pub(super) fn common_nonce(&self, secp: &Secp256k1) -> Result<SecretKey, Error> {
 		let hashed_nonces: Vec<SecretKey> = self
 			.multisig
 			.participants
 			.iter()
 			.filter_map(|p| p.partial_commitment.as_ref().map(|c| c.hash()))
-			.filter_map(|h| h.ok().map(|h| h.to_secret_key()))
+			.filter_map(|h| h.ok().map(|h| h.to_secret_key(secp)))
 			.filter_map(|s| s.ok())
 			.collect();
 		if hashed_nonces.len() != 2 {
-			return Err(super::multisig::ErrorKind::MultiSigIncomplete.into());
+			return Err(super::multisig::Error::MultiSigIncomplete.into());
 		}
-		let sec_key = Secp256k1::blind_sum(hashed_nonces, Vec::new())?;
+		let sec_key = secp.blind_sum(hashed_nonces, Vec::new())?;
 
 		Ok(sec_key)
 	}
@@ -508,7 +508,7 @@ impl Swap {
 	}
 }
 
-impl ser::Writeable for Swap {
+/*impl ser::Writeable for Swap {
 	fn write<W: ser::Writer>(&self, writer: &mut W) -> Result<(), ser::Error> {
 		writer.write_bytes(&serde_json::to_vec(self).map_err(|e| {
 			ser::Error::CorruptedData(format!("OutputData to json conversion failed, {}", e))
@@ -523,11 +523,11 @@ impl ser::Readable for Swap {
 			ser::Error::CorruptedData(format!("Json to outputData conversion failed, {}", e))
 		})
 	}
-}
+}*/
 
 /// Add an input to a tx at the appropriate position
-pub fn tx_add_input(slate: &mut Slate, commit: Commitment) {
-	match &mut slate.tx.body.inputs {
+pub fn tx_add_input(slate: &mut Slate, commit: Commitment) -> Result<(), Error> {
+	match &mut slate.tx_or_err_mut()?.body.inputs {
 		Inputs::FeaturesAndCommit(inputs) => {
 			let input = tx::Input {
 				features: tx::OutputFeatures::Plain,
@@ -546,10 +546,15 @@ pub fn tx_add_input(slate: &mut Slate, commit: Commitment) {
 				.map(|e| commits.insert(e, cmt));
 		}
 	}
+	Ok(())
 }
 
 /// Add an output to a tx at the appropriate position
-pub fn tx_add_output(slate: &mut Slate, commit: Commitment, proof: RangeProof) {
+pub fn tx_add_output(
+	slate: &mut Slate,
+	commit: Commitment,
+	proof: RangeProof,
+) -> Result<(), Error> {
 	let output = tx::Output {
 		identifier: OutputIdentifier {
 			features: tx::OutputFeatures::Plain,
@@ -557,17 +562,18 @@ pub fn tx_add_output(slate: &mut Slate, commit: Commitment, proof: RangeProof) {
 		},
 		proof,
 	};
-	let outputs = &mut slate.tx.body.outputs;
+	let outputs = &mut slate.tx_or_err_mut()?.body.outputs;
 	outputs
 		.binary_search(&output)
 		.err()
 		.map(|e| outputs.insert(e, output));
+	Ok(())
 }
 
 /// Interpret the final 32 bytes of the signature as a secret key
-pub fn signature_as_secret(signature: &Signature) -> Result<SecretKey, ErrorKind> {
+pub fn signature_as_secret(secp: &Secp256k1, signature: &Signature) -> Result<SecretKey, Error> {
 	let ser = signature.to_raw_data();
-	let key = SecretKey::from_slice(&ser[32..])?;
+	let key = SecretKey::from_slice(secp, &ser[32..])?;
 	Ok(key)
 }
 
@@ -576,12 +582,10 @@ pub fn publish_transaction<C: NodeClient>(
 	node_client: &C,
 	tx: &tx::Transaction,
 	fluff: bool,
-) -> Result<(), ErrorKind> {
-	tx.validate(
-		Weighting::AsTransaction,
-		Arc::new(RwLock::new(LruVerifierCache::new())),
-	)
-	.map_err(|e| ErrorKind::UnexpectedAction(format!("slate is not valid, {}", e)))?;
+) -> Result<(), Error> {
+	let (height, _, _) = node_client.get_chain_tip()?;
+	tx.validate(Weighting::AsTransaction, height)
+		.map_err(|e| Error::UnexpectedAction(format!("slate is not valid, {}", e)))?;
 
 	node_client.post_tx(tx, fluff)?;
 	Ok(())

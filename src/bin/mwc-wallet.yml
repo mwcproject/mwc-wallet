@@ -22,7 +22,6 @@ args:
       short: a
       long: account
       takes_value: true
-      default_value: default
   - top_level_dir:
       help: Top directory in which wallet files are stored (location of 'mwc-wallet.toml')
       short: t
@@ -45,7 +44,7 @@ args:
       takes_value: true
 subcommands:
   - cli:
-      about: Start the wallet in interactive CLI mode (EXPERIMENTAL and UNDER DEVELOPMENT)
+      about: Start the wallet in interactive CLI mode
   - account:
       about: List wallet accounts or create a new account
       args:
@@ -53,6 +52,24 @@ subcommands:
             help: Create a new wallet account with provided name
             short: c
             long: create
+            takes_value: true
+  - rewind_hash:
+      about: Return the hash of the wallet root public key.
+  - scan_rewind_hash:
+      about: Scan the UTXO set and return the outputs and the total of grin owned by a view wallet rewind hash.
+      args:
+        - rewind_hash:
+            help: Rewind hash of the wallet to be scanned in order to retrieve all the outputs and balance.
+            index: 1
+        - start_height:
+            help: If given, the first block from which to start the scan (default 1)
+            short: h
+            long: start_height
+            takes_value: true
+        - backwards_from_tip:
+            help: If given, start scan b blocks back from the tip
+            short: b
+            long: backwards_from_tip,
             takes_value: true
   - listen:
       about: Runs the wallet in listening mode waiting for transactions
@@ -68,7 +85,7 @@ subcommands:
             long: libp2p_port
             takes_value: true
         - method:
-            help: Which method to use for communication. Please note, http can trigger tor and libp2p listeners if they are configured
+            help: Which method to use for communication. Please note, http triggering tor and libp2p listeners if they are configured
             short: m
             long: method
             possible_values:
@@ -81,6 +98,10 @@ subcommands:
             short: n
             long: no_tor
             takes_value: false
+        - bridge:
+            help: Enable bridge relay with TOR listener
+            long: bridge
+            takes_value: true
   - owner_api:
       about: Runs the wallet's local web API
       args:
@@ -97,7 +118,7 @@ subcommands:
       about: Builds a transaction to send coins and sends to the specified listener directly
       args:
         - amount:
-            help: Number of coins to send with optional fraction, e.g. 12.423
+            help: Number of coins to send with optional fraction, e.g. 12.423. Keyword 'max' will send maximum amount.
             index: 1
         - minimum_confirmations:
             help: Minimum number of confirmations required for an output to be spendable
@@ -144,7 +165,7 @@ subcommands:
             long: min_fee
             takes_value: true
         - method:
-            help: Method for sending this transaction
+            help: Method for sending this transaction. Please use http method to send data through tor
             short: m
             long: method
             possible_values:
@@ -156,7 +177,7 @@ subcommands:
             default_value: http
             takes_value: true
         - dest:
-            help: Send the transaction to the provided server (start with http://) or save as file.
+            help: Send the transaction to the provided server (start with http://) or save as file. For method self, dest can point to account name to move
             short: d
             long: dest
             takes_value: true
@@ -165,15 +186,12 @@ subcommands:
             short: a
             long: apisecret
             takes_value: true
-        - request_payment_proof:
-            help: Request a payment proof from the recipient. If sending to a Tor address, the address will be filled automatically.
-            short: y
-            long: request_payment_proof
         - proof:
             help: Request a payment proof from the recipient. If sending to a Tor address, the address will be filled automatically.
+            short: y
             long: proof
         - proof_address:
-            help: Recipient proof address. If not using Tor, must be provided seprarately by the recipient
+            help: Recipient proof address. If not using Tor, must be provided separately by the recipient
             short: z
             long: proof_address
             takes_value: true
@@ -185,11 +203,6 @@ subcommands:
             help: Optional participant message to include
             short: g
             long: message
-            takes_value: true
-        - stored_tx:
-            help: If present, use the previously stored Unconfirmed transaction with given id
-            short: t
-            long: stored_tx
             takes_value: true
         - ttl_blocks:
             help: If present, the number of blocks from the current after which wallets should refuse to process transactions further
@@ -209,6 +222,17 @@ subcommands:
             help: use specific slate version for the output. Put version 4 if you are using slatepacks.
             long: slate_version
             takes_value: true
+        - bridge:
+            help: Enable tor bridge relay when sending via Slatepack workflow
+            long: bridge
+            takes_value: true
+        - slatepack_qr:
+            help: Show slatepack data as QR code
+            short: q
+            long: slatepack_qr
+        - amount_includes_fee:
+            help: Transaction amount includes transaction fee. Recipient will receive (amount - fee).
+            long: amount_includes_fee
   - unpack:
       about: Unpack and display an armored Slatepack Message, decrypting if possible
       args:
@@ -250,6 +274,14 @@ subcommands:
             short: o
             long: outfile
             takes_value: true
+        - bridge:
+            help: Enable tor bridge relay when receiving via Slatepack workflow
+            long: bridge
+            takes_value: true
+        - slatepack_qr:
+            help: Show slatepack data as QR code
+            short: q
+            long: slatepack_qr
   - finalize:
       about: Processes a receiver's transaction file to finalize a transfer.
       args:
@@ -296,6 +328,10 @@ subcommands:
             help: send transaction as encoded slatepack for this recipient (wallet public key, similar to proof_address)
             long: slatepack_recipient
             takes_value: true
+        - slatepack_qr:
+            help: Show slatepack data as QR code
+            short: q
+            long: slatepack_qr
   - finalize_invoice:
       about: Processes invoice transaction file to finalize a transfer.
       args:
@@ -338,24 +374,23 @@ subcommands:
             possible_values:
               - all
               - smallest
-            default_value: all
+            default_value: smallest
             takes_value: true
         - estimate_selection_strategies:
             help: Estimates all possible Coin/Output selection strategies.
             short: e
             long: estimate-selection
         - method:
-            help: Method for sending the processed invoice back to the invoice creator
+            help: Method for sending the processed invoice back to the invoice creator. Use self if you are processing
             short: m
             long: method
             possible_values:
               - file
               - http
-              - self
             default_value: file
             takes_value: true
         - dest:
-            help: Send the transaction to the provided server (start with http://) or save as file.
+            help: Send the transaction to the provided server (start with http://) or save as file. If using tor and slate is encrypted, this option will be filled automatically
             short: d
             long: dest
             takes_value: true
@@ -364,16 +399,29 @@ subcommands:
             short: g
             long: message
             takes_value: true
-        - input:
+        - file:
             help: Partial transaction to process, expects the invoicer's transaction file.
-            short: i
-            long: input
+            short: f
+            long: file
+            takes_value: true
+        - content:
+            help: Slate or slatepack content as a string
+            short: n
+            long: content
             takes_value: true
         - ttl_blocks:
             help: If present, the number of blocks from the current after which wallets should refuse to process transactions further
             short: b
             long: ttl_blocks
             takes_value: true
+        - bridge:
+            help: Enable tor bridge relay when receiving via Slatepack workflow
+            long: bridge
+            takes_value: true
+        - slatepack_qr:
+            help: Show slatepack data as QR code
+            short: q
+            long: slatepack_qr
   - outputs:
       about: Raw wallet output info (list of outputs)
   - txs:
@@ -389,6 +437,11 @@ subcommands:
             short: t
             long: txid
             takes_value: true
+        - count:
+            help: Maximum number of transactions to show
+            short: c
+            long: count
+            takes_value: true
   - post:
       about: Posts a finalized transaction to the chain
       args:
@@ -402,7 +455,7 @@ subcommands:
             short: f
             long: fluff
   - submit:
-      about: Submits a transaction that has already been finalized but not submitted to the network yet
+      about: Submits a binary transaction (mwctx) that has already been finalized but not submitted to the network yet. Binary transactions located at wallet_data/saved_txs/ folder.
       args:
         - input:
             help: Transaction file to submit
@@ -472,6 +525,11 @@ subcommands:
             takes_value: false
   - open:
       about: Opens a wallet (interactive mode only)
+      args:
+        - account:
+            help: Wallet account to use for this session
+            long: account
+            takes_value: true
   - close:
       about: Closes the wallet (interactive mode only)
   - recover:
@@ -966,4 +1024,4 @@ subcommands:
             long: tor_address
             takes_value: true
   - check_tor_connection:
-      about: check this wallet tor connection
+      about: check this wallet tor connection (for CLI mode)

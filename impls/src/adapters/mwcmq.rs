@@ -14,7 +14,7 @@
 
 use super::types::{Address, Publisher, Subscriber, SubscriptionHandler};
 use crate::adapters::types::MWCMQSAddress;
-use crate::error::{Error, ErrorKind};
+use crate::error::Error;
 use crate::libwallet::proof::crypto;
 use crate::libwallet::proof::crypto::Hex;
 use crate::util::Mutex;
@@ -32,6 +32,7 @@ use grin_wallet_libwallet::swap::message::Message;
 use grin_wallet_libwallet::swap::message::SwapMessage;
 use grin_wallet_libwallet::{Slate, SlateVersion, VersionedSlate};
 use grin_wallet_util::grin_util::secp::key::SecretKey;
+use grin_wallet_util::grin_util::secp::Secp256k1;
 use regex::Regex;
 use std::collections::HashMap;
 use std::io::Read;
@@ -84,14 +85,14 @@ impl MwcMqsChannel {
 		slate: &Slate,
 		mwcmqs_publisher: MWCMQPublisher,
 		rx_slate: Receiver<Slate>,
+		secp: &Secp256k1,
 	) -> Result<Slate, Error> {
-		let des_address = MWCMQSAddress::from_str(self.des_address.as_ref()).map_err(|e| {
-			ErrorKind::MqsGenericError(format!("Invalid destination address, {}", e))
-		})?;
+		let des_address = MWCMQSAddress::from_str(self.des_address.as_ref())
+			.map_err(|e| Error::MqsGenericError(format!("Invalid destination address, {}", e)))?;
 		mwcmqs_publisher
-			.post_slate(&slate, &des_address)
+			.post_slate(&slate, &des_address, secp)
 			.map_err(|e| {
-				ErrorKind::MqsGenericError(format!(
+				Error::MqsGenericError(format!(
 					"MQS unable to transfer slate {} to the worker, {}",
 					slate.id, e
 				))
@@ -108,10 +109,7 @@ impl MwcMqsChannel {
 		let slate_returned = rx_slate
 			.recv_timeout(Duration::from_secs(120))
 			.map_err(|e| {
-				ErrorKind::MqsGenericError(format!(
-					"MQS unable to process slate {}, {}",
-					slate.id, e
-				))
+				Error::MqsGenericError(format!("MQS unable to process slate {}, {}", slate.id, e))
 			})?;
 		return Ok(slate_returned);
 	}
@@ -121,14 +119,14 @@ impl MwcMqsChannel {
 		swap_message: &Message,
 		mwcmqs_publisher: MWCMQPublisher,
 		_rs_message: Receiver<Message>,
+		secp: &Secp256k1,
 	) -> Result<(), Error> {
-		let des_address = MWCMQSAddress::from_str(self.des_address.as_ref()).map_err(|e| {
-			ErrorKind::MqsGenericError(format!("Invalid destination address, {}", e))
-		})?;
+		let des_address = MWCMQSAddress::from_str(self.des_address.as_ref())
+			.map_err(|e| Error::MqsGenericError(format!("Invalid destination address, {}", e)))?;
 		mwcmqs_publisher
-			.post_take(swap_message, &des_address)
+			.post_take(swap_message, &des_address, secp)
 			.map_err(|e| {
-				ErrorKind::MqsGenericError(format!(
+				Error::MqsGenericError(format!(
 					"MQS unable to transfer swap message {} to the worker, {}",
 					swap_message.id, e
 				))
@@ -148,45 +146,51 @@ impl SlateSender for MwcMqsChannel {
 	// MQS doesn't do encryption because of backward compability. In any case it is not critical, the whole slate is encrypted and the size of slate is not important
 	fn send_tx(
 		&self,
+		send_tx: bool, // false if invoice, true if send operation
 		slate: &Slate,
 		_slate_content: SlatePurpose,
 		_slatepack_secret: &DalekSecretKey,
 		_recipients: Option<DalekPublicKey>,
 		_other_wallet_version: Option<(SlateVersion, Option<String>)>,
+		_height: u64,
+		secp: &Secp256k1,
 	) -> Result<Slate, Error> {
+		if !send_tx {
+			return Err(Error::MqsGenericError(
+				"MWCMQS doesn't support invoice transactions".into(),
+			));
+		}
+
 		if let Some((mwcmqs_publisher, mwcmqs_subscriber)) = get_mwcmqs_brocker() {
 			// Creating channels for notification
 			let (tx_slate, rx_slate) = channel(); //this chaneel is used for listener thread to send message to other thread
 
 			mwcmqs_subscriber.set_notification_channels(&slate.id, tx_slate);
-			let res = self.send_tx_to_mqs(slate, mwcmqs_publisher, rx_slate);
+			let res = self.send_tx_to_mqs(slate, mwcmqs_publisher, rx_slate, secp);
 			mwcmqs_subscriber.reset_notification_channels(&slate.id);
 			res
 		} else {
-			return Err(ErrorKind::MqsGenericError(format!(
+			return Err(Error::MqsGenericError(format!(
 				"MQS is not started, not able to send the slate {}",
 				slate.id
-			))
-			.into());
+			)));
 		}
 	}
 }
 
 impl SwapMessageSender for MwcMqsChannel {
 	/// Send a swap message. Return true is message delivery acknowledge can be set (message was delivered and procesed)
-	fn send_swap_message(&self, message: &Message) -> Result<bool, Error> {
+	fn send_swap_message(&self, message: &Message, secp: &Secp256k1) -> Result<bool, Error> {
 		if let Some((mwcmqs_publisher, _mwcmqs_subscriber)) = get_mwcmqs_brocker() {
 			let (_ts_message, rs_message) = channel();
-
-			self.send_swap_to_mqs(message, mwcmqs_publisher, rs_message)?;
+			self.send_swap_to_mqs(message, mwcmqs_publisher, rs_message, &secp)?;
 			// MQS is async protocol, message might never be delivered, so no ack can be granted.
 			Ok(false)
 		} else {
-			return Err(ErrorKind::MqsGenericError(format!(
+			return Err(Error::MqsGenericError(format!(
 				"MQS is not started, not able to send the swap message {}",
 				message.id
-			))
-			.into());
+			)));
 		}
 	}
 }
@@ -216,19 +220,24 @@ impl MWCMQPublisher {
 	}
 }
 impl Publisher for MWCMQPublisher {
-	fn post_slate(&self, slate: &Slate, to: &dyn Address) -> Result<(), Error> {
+	fn post_slate(&self, slate: &Slate, to: &dyn Address, secp: &Secp256k1) -> Result<(), Error> {
 		let to_address_raw = format!("mwcmqs://{}", to.get_stripped());
 		let to_address = MWCMQSAddress::from_str(&to_address_raw)?;
 		self.broker
-			.post_slate(slate, &to_address, &self.address, &self.secret_key)?;
+			.post_slate(slate, &to_address, &self.address, &self.secret_key, secp)?;
 		Ok(())
 	}
 
-	fn encrypt_slate(&self, slate: &Slate, to: &dyn Address) -> Result<String, Error> {
+	fn encrypt_slate(
+		&self,
+		slate: &Slate,
+		to: &dyn Address,
+		secp: &Secp256k1,
+	) -> Result<String, Error> {
 		let to_address_raw = format!("mwcmqs://{}", to.get_stripped());
 		let to_address = MWCMQSAddress::from_str(&to_address_raw)?;
 		self.broker
-			.encrypt_slate(slate, &to_address, &self.address, &self.secret_key)
+			.encrypt_slate(slate, &to_address, &self.address, &self.secret_key, secp)
 	}
 
 	fn decrypt_slate(
@@ -237,6 +246,7 @@ impl Publisher for MWCMQPublisher {
 		mapmessage: String,
 		signature: String,
 		source_address: &ProvableAddress,
+		secp: &Secp256k1,
 	) -> Result<String, Error> {
 		let r1 = str::replace(&mapmessage, "%22", "\"");
 		let r2 = str::replace(&r1, "%7B", "{");
@@ -254,22 +264,27 @@ impl Publisher for MWCMQPublisher {
 			signature.clone(),
 			&self.secret_key,
 			&source_address,
+			secp,
 		)
 		.map_err(|e| {
-			ErrorKind::MqsGenericError(format!("Unable to build txproof from the payload, {}", e))
+			Error::MqsGenericError(format!("Unable to build txproof from the payload, {}", e))
 		})?;
 
-		let slate = serde_json::to_string(&slate).map_err(|e| {
-			ErrorKind::MqsGenericError(format!("Unable convert Slate to Json, {}", e))
-		})?;
+		let slate = serde_json::to_string(&slate)
+			.map_err(|e| Error::MqsGenericError(format!("Unable convert Slate to Json, {}", e)))?;
 		Ok(slate)
 	}
 
-	fn post_take(&self, message: &Message, to: &dyn Address) -> Result<(), Error> {
+	fn post_take(
+		&self,
+		message: &Message,
+		to: &dyn Address,
+		secp: &Secp256k1,
+	) -> Result<(), Error> {
 		let to_address_raw = format!("mwcmqs://{}", to.get_stripped());
 		let to_address = MWCMQSAddress::from_str(&to_address_raw)?;
 		self.broker
-			.post_take(message, &to_address, &self.address, &self.secret_key)?;
+			.post_take(message, &to_address, &self.address, &self.secret_key, secp)?;
 		Ok(())
 	}
 
@@ -296,14 +311,14 @@ impl MWCMQSubscriber {
 	}
 }
 impl Subscriber for MWCMQSubscriber {
-	fn start(&mut self) -> Result<(), Error> {
+	fn start(&mut self, secp: &Secp256k1) -> Result<(), Error> {
 		self.broker
-			.subscribe(&self.address.address, &self.secret_key);
+			.subscribe(&self.address.address, &self.secret_key, secp);
 		Ok(())
 	}
 
 	fn stop(&mut self) -> bool {
-		if let Ok(client) = reqwest::Client::builder()
+		if let Ok(client) = reqwest::blocking::Client::builder()
 			.timeout(Duration::from_secs(60))
 			.build()
 		{
@@ -379,25 +394,32 @@ impl MWCMQSBroker {
 		to: &MWCMQSAddress,
 		from: &MWCMQSAddress,
 		secret_key: &SecretKey,
+		secp: &Secp256k1,
 	) -> Result<String, Error> {
-		let pkey = to.address.public_key()?;
+		let pkey = to.address.public_key().map_err(|e| {
+			Error::LibWallet(format!(
+				"Unable to parse address public key {}, {}",
+				to.address.public_key, e
+			))
+		})?;
 		let skey = secret_key.clone();
 		let version = slate.lowest_version();
-		let slate = VersionedSlate::into_version_plain(slate.clone(), version)?;
-		let serde_json = serde_json::to_string(&slate).map_err(|e| {
-			ErrorKind::MqsGenericError(format!("Unable convert Slate to Json, {}", e))
-		})?;
+		let slate = VersionedSlate::into_version_plain(slate.clone(), version)
+			.map_err(|e| Error::LibWallet(format!("Unable to process slate, {}", e)))?;
+		let serde_json = serde_json::to_string(&slate)
+			.map_err(|e| Error::MqsGenericError(format!("Unable convert Slate to Json, {}", e)))?;
 
-		let message = EncryptedMessage::new(serde_json, &to.address, &pkey, &skey)
-			.map_err(|e| ErrorKind::GenericError(format!("Unable encrypt slate, {}", e)))?;
+		let message = EncryptedMessage::new(serde_json, &to.address, &pkey, &skey, secp)
+			.map_err(|e| Error::GenericError(format!("Unable encrypt slate, {}", e)))?;
 
 		let message_ser = &serde_json::to_string(&message).map_err(|e| {
-			ErrorKind::MqsGenericError(format!("Unable convert Message to Json, {}", e))
+			Error::MqsGenericError(format!("Unable convert Message to Json, {}", e))
 		})?;
 
 		let mut challenge = String::new();
 		challenge.push_str(&message_ser);
-		let signature = crypto::sign_challenge(&challenge, secret_key)?;
+		let signature = crypto::sign_challenge(&challenge, secret_key, secp)
+			.map_err(|e| Error::LibWallet(format!("Unable to sign challenge, {}", e)))?;
 		let signature = signature.to_hex();
 
 		let mser: &str = &message_ser;
@@ -422,38 +444,47 @@ impl MWCMQSBroker {
 		to: &MWCMQSAddress,
 		from: &MWCMQSAddress,
 		secret_key: &SecretKey,
+		secp: &Secp256k1,
 	) -> Result<(), Error> {
 		if !self.is_running() {
-			return Err(ErrorKind::ClosedListener("mwcmqs".to_string()).into());
+			return Err(Error::ClosedListener("mwcmqs".to_string()));
 		}
-		let pkey = to.address.public_key()?;
+		let pkey = to.address.public_key().map_err(|e| {
+			Error::LibWallet(format!(
+				"Unable to parse address public key {}, {}",
+				to.address.public_key, e
+			))
+		})?;
 		let skey = secret_key.clone();
 		let version = slate.lowest_version();
-		let slate = VersionedSlate::into_version_plain(slate.clone(), version)?;
+		let slate = VersionedSlate::into_version_plain(slate.clone(), version)
+			.map_err(|e| Error::LibWallet(format!("Unable to process slate, {}", e)))?;
 
 		let message = EncryptedMessage::new(
 			serde_json::to_string(&slate).map_err(|e| {
-				ErrorKind::MqsGenericError(format!("Unable convert Slate to Json, {}", e))
+				Error::MqsGenericError(format!("Unable convert Slate to Json, {}", e))
 			})?,
 			&to.address,
 			&pkey,
 			&skey,
+			secp,
 		)
-		.map_err(|e| ErrorKind::GenericError(format!("Unable encrypt slate, {}", e)))?;
+		.map_err(|e| Error::GenericError(format!("Unable encrypt slate, {}", e)))?;
 
 		let message_ser = &serde_json::to_string(&message).map_err(|e| {
-			ErrorKind::MqsGenericError(format!("Unable convert Message to Json, {}", e))
+			Error::MqsGenericError(format!("Unable convert Message to Json, {}", e))
 		})?;
 
 		let mut challenge = String::new();
 		challenge.push_str(&message_ser);
-		let signature = crypto::sign_challenge(&challenge, secret_key)?;
+		let signature = crypto::sign_challenge(&challenge, secret_key, secp)
+			.map_err(|e| Error::LibWallet(format!("Unable to sign challenge, {}", e)))?;
 		let signature = signature.to_hex();
 
-		let client = reqwest::Client::builder()
+		let client = reqwest::blocking::Client::builder()
 			.timeout(Duration::from_secs(120))
 			.build()
-			.map_err(|e| ErrorKind::GenericError(format!("Failed to build a client, {}", e)))?;
+			.map_err(|e| Error::GenericError(format!("Failed to build a client, {}", e)))?;
 
 		let mser: &str = &message_ser;
 		let fromstripped = from.get_stripped();
@@ -472,22 +503,24 @@ impl MWCMQSBroker {
 		let response = client.post(&url).form(&params).send();
 
 		if !response.is_ok() {
-			return Err(ErrorKind::MqsInvalidRespose("mwcmqs connection error".to_string()).into());
+			return Err(Error::MqsInvalidRespose(
+				"mwcmqs connection error".to_string(),
+			));
 		} else {
 			let mut response = response.unwrap();
 			let mut resp_str = "".to_string();
 			let read_resp = response.read_to_string(&mut resp_str);
 
 			if !read_resp.is_ok() {
-				return Err(ErrorKind::MqsInvalidRespose("mwcmqs i/o error".to_string()).into());
+				return Err(Error::MqsInvalidRespose("mwcmqs i/o error".to_string()));
 			} else {
 				let data: Vec<&str> = resp_str.split(" ").collect();
 				if data.len() <= 1 {
-					return Err(ErrorKind::MqsInvalidRespose("mwcmqs".to_string()).into());
+					return Err(Error::MqsInvalidRespose("mwcmqs".to_string()));
 				} else {
 					let last_seen = data[1].parse::<i64>();
 					if !last_seen.is_ok() {
-						return Err(ErrorKind::MqsInvalidRespose("mwcmqs".to_string()).into());
+						return Err(Error::MqsInvalidRespose("mwcmqs".to_string()));
 					} else {
 						let last_seen = last_seen.unwrap();
 						if last_seen > 10000000000 {
@@ -512,37 +545,44 @@ impl MWCMQSBroker {
 		to: &MWCMQSAddress,
 		from: &MWCMQSAddress,
 		secret_key: &SecretKey,
+		secp: &Secp256k1,
 	) -> Result<(), Error> {
 		if !self.is_running() {
-			return Err(ErrorKind::ClosedListener("mwcmqs".to_string()).into());
+			return Err(Error::ClosedListener("mwcmqs".to_string()));
 		}
-		let pkey = to.address.public_key()?;
+		let pkey = to.address.public_key().map_err(|e| {
+			Error::LibWallet(format!(
+				"Unable to parse address public key {}, {}",
+				to.address.public_key, e
+			))
+		})?;
 		let skey = secret_key.clone();
 
 		let message = EncryptedMessage::new(
 			serde_json::to_string(&swapmessage).map_err(|e| {
-				ErrorKind::MqsGenericError(format!("Unable convert Slate to Json, {}", e))
+				Error::MqsGenericError(format!("Unable convert Slate to Json, {}", e))
 			})?,
 			&to.address,
 			&pkey,
 			&skey,
+			secp,
 		)
-		.map_err(|e| ErrorKind::GenericError(format!("Unable encrypt slate, {}", e)))?;
+		.map_err(|e| Error::GenericError(format!("Unable encrypt slate, {}", e)))?;
 
 		let message_ser = &serde_json::to_string(&message).map_err(|e| {
-			ErrorKind::MqsGenericError(format!("Unable to convert Swap Message to Json, {}", e))
+			Error::MqsGenericError(format!("Unable to convert Swap Message to Json, {}", e))
 		})?;
 
 		let mut challenge = String::new();
 		challenge.push_str(&message_ser);
-		let signature = crypto::sign_challenge(&challenge, secret_key);
+		let signature = crypto::sign_challenge(&challenge, secret_key, secp);
 		let signature = signature.unwrap().to_hex();
 
-		let client = reqwest::Client::builder()
+		let client = reqwest::blocking::Client::builder()
 			.timeout(Duration::from_secs(60))
 			.build()
 			.map_err(|e| {
-				ErrorKind::GenericError(format!("Failed to build a client for post_take, {}", e))
+				Error::GenericError(format!("Failed to build a client for post_take, {}", e))
 			})?;
 
 		let mser: &str = &message_ser;
@@ -562,26 +602,25 @@ impl MWCMQSBroker {
 		let response = client.post(&url).form(&params).send();
 
 		if !response.is_ok() {
-			return Err(ErrorKind::MqsInvalidRespose(format!(
+			return Err(Error::MqsInvalidRespose(format!(
 				"mwcmqs connection error, {:?}",
 				response
-			))
-			.into());
+			)));
 		} else {
 			let mut response = response.unwrap();
 			let mut resp_str = "".to_string();
 			let read_resp = response.read_to_string(&mut resp_str);
 
 			if !read_resp.is_ok() {
-				return Err(ErrorKind::MqsInvalidRespose("mwcmqs i/o error".to_string()).into());
+				return Err(Error::MqsInvalidRespose("mwcmqs i/o error".to_string()));
 			} else {
 				let data: Vec<&str> = resp_str.split(" ").collect();
 				if data.len() <= 1 {
-					return Err(ErrorKind::MqsInvalidRespose("mwcmqs".to_string()).into());
+					return Err(Error::MqsInvalidRespose("mwcmqs".to_string()));
 				} else {
 					let last_seen = data[1].parse::<i64>();
 					if !last_seen.is_ok() {
-						return Err(ErrorKind::MqsInvalidRespose("mwcmqs".to_string()).into());
+						return Err(Error::MqsInvalidRespose("mwcmqs".to_string()));
 					} else {
 						let last_seen = last_seen.unwrap();
 						if last_seen > 10000000000 {
@@ -630,7 +669,12 @@ impl MWCMQSBroker {
 		}
 	}
 
-	fn subscribe(&mut self, source_address: &ProvableAddress, secret_key: &SecretKey) -> () {
+	fn subscribe(
+		&mut self,
+		source_address: &ProvableAddress,
+		secret_key: &SecretKey,
+		secp: &Secp256k1,
+	) -> () {
 		let address = MWCMQSAddress::new(
 			source_address.clone(),
 			Some(self.mwcmqs_domain.clone()),
@@ -654,7 +698,7 @@ impl MWCMQSBroker {
 		let mut time_now = "";
 		let mut is_error = false;
 		let secs = 30;
-		let cl = reqwest::Client::builder()
+		let cl = reqwest::blocking::Client::builder()
 			.timeout(Duration::from_secs(secs))
 			.build();
 		if cl.is_ok() {
@@ -684,7 +728,9 @@ impl MWCMQSBroker {
 		}
 
 		let mut time_now_signature = String::new();
-		if let Ok(time_now_sign) = crypto::sign_challenge(&format!("{}", time_now), &secret_key) {
+		if let Ok(time_now_sign) =
+			crypto::sign_challenge(&format!("{}", time_now), &secret_key, secp)
+		{
 			let time_now_sign = str::replace(&format!("{:?}", time_now_sign), "Signature(", "");
 			let time_now_sign = str::replace(&time_now_sign, ")", "");
 			time_now_signature = time_now_sign;
@@ -736,7 +782,7 @@ impl MWCMQSBroker {
 				}
 
 				let secs = if !connected { 2 } else { 120 };
-				let cl = reqwest::Client::builder()
+				let cl = reqwest::blocking::Client::builder()
 					.timeout(Duration::from_secs(secs))
 					.build();
 				let client = if cl.is_ok() {
@@ -1067,6 +1113,7 @@ impl MWCMQSBroker {
 										signature.clone(),
 										&secret_key,
 										&source_address,
+										secp,
 									) {
 										Ok(x) => x,
 										Err(err) => {
@@ -1083,6 +1130,7 @@ impl MWCMQSBroker {
 										"".to_string(),
 										signature.clone(),
 										&secret_key,
+										secp,
 									) {
 										Ok(x) => x,
 										Err(err) => {
@@ -1094,7 +1142,9 @@ impl MWCMQSBroker {
 										self.handler.lock().on_swap_message(swap_message);
 									if let Some(ack_message) = ack_message {
 										let mqs_cannel = MwcMqsChannel::new(from.to_string());
-										if let Err(e) = mqs_cannel.send_swap_message(&ack_message) {
+										if let Err(e) =
+											mqs_cannel.send_swap_message(&ack_message, secp)
+										{
 											self.do_log_error(format!(
 												"Unable to send back ack message, {}",
 												e

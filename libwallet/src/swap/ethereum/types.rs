@@ -16,7 +16,7 @@ use crate::grin_util::to_hex;
 use crate::swap::message::SecondaryUpdate;
 use crate::swap::ser::*;
 use crate::swap::types::SecondaryData;
-use crate::swap::ErrorKind;
+use crate::swap::Error;
 use regex::Regex;
 use web3::types::{Address, H256};
 
@@ -50,7 +50,7 @@ pub struct EthData {
 impl EthData {
 	/// Create seller ETH data (party that receive ETH).
 	pub(crate) fn new(context: &EthSellerContext, // Derivarive index
-	) -> Result<Self, ErrorKind> {
+	) -> Result<Self, Error> {
 		Ok(Self {
 			redeem_address: context.redeem_address,
 			address_from_secret: None,
@@ -66,7 +66,7 @@ impl EthData {
 	pub(crate) fn from_offer(
 		offer: EthOfferUpdate,
 		context: &EthBuyerContext,
-	) -> Result<Self, ErrorKind> {
+	) -> Result<Self, Error> {
 		Ok(Self {
 			redeem_address: offer.redeem_address,
 			address_from_secret: context.address_from_secret,
@@ -82,7 +82,7 @@ impl EthData {
 	pub(crate) fn accepted_offer(
 		&mut self,
 		accepted_offer: EthAcceptOfferUpdate,
-	) -> Result<(), ErrorKind> {
+	) -> Result<(), Error> {
 		self.lock_tx = accepted_offer.lock_tx;
 		self.address_from_secret = accepted_offer.address_from_secret;
 		Ok(())
@@ -133,20 +133,20 @@ pub enum EthUpdate {
 
 impl EthUpdate {
 	/// Unwrap EthOfferUpdate  with data type verification
-	pub fn unwrap_offer(self) -> Result<EthOfferUpdate, ErrorKind> {
+	pub fn unwrap_offer(self) -> Result<EthOfferUpdate, Error> {
 		match self {
 			EthUpdate::Offer(u) => Ok(u),
-			_ => Err(ErrorKind::UnexpectedMessageType(
+			_ => Err(Error::UnexpectedMessageType(
 				"Fn unwrap_offer() expecting EthUpdate::Offer".to_string(),
 			)),
 		}
 	}
 
 	/// Unwrap EthAcceptOfferUpdate  with data type verification
-	pub fn unwrap_accept_offer(self) -> Result<EthAcceptOfferUpdate, ErrorKind> {
+	pub fn unwrap_accept_offer(self) -> Result<EthAcceptOfferUpdate, Error> {
 		match self {
 			EthUpdate::AcceptOffer(u) => Ok(u),
-			_ => Err(ErrorKind::UnexpectedMessageType(
+			_ => Err(Error::UnexpectedMessageType(
 				"Fn unwrap_accept_offer() expecting BtcUpdate::AcceptOffer".to_string(),
 			)),
 		}
@@ -175,13 +175,13 @@ pub struct EthAcceptOfferUpdate {
 }
 
 /// to web3 Address
-pub fn to_eth_address(address: String) -> Result<Address, ErrorKind> {
+pub fn to_eth_address(address: String) -> Result<Address, Error> {
 	let regex = Regex::new(r"^0x").unwrap();
 	let address = address.to_lowercase();
 	let address = regex.replace_all(&address, "").to_string();
 
 	if address.len() != 40 {
-		return Err(ErrorKind::InvalidEthAddress);
+		return Err(Error::InvalidEthAddress);
 	}
 	let mut address_slice = [0u8; 20];
 	address_slice.copy_from_slice(hex::decode(address).unwrap().as_slice());
@@ -198,12 +198,12 @@ pub fn eth_address(address: Address) -> String {
 }
 
 /// to eth transaction hash
-pub fn to_eth_tx_hash(tx_hash: String) -> Result<H256, ErrorKind> {
+pub fn to_eth_tx_hash(tx_hash: String) -> Result<H256, Error> {
 	let regex = Regex::new(r"^0x").unwrap();
 	let hash = regex.replace_all(&tx_hash, "").to_string();
 
 	if hash.len() != 64 {
-		return Err(ErrorKind::InvalidTxHash);
+		return Err(Error::InvalidTxHash);
 	}
 	let mut hash_slice = [0u8; 32];
 	hash_slice.copy_from_slice(hex::decode(hash).unwrap().as_slice());

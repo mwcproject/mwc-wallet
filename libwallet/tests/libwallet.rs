@@ -1,4 +1,4 @@
-// Copyright 2019 The Grin Developers
+// Copyright 2021 The Grin Developers
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -14,7 +14,7 @@
 //! core::libtx specific tests
 use grin_wallet_libwallet::proof::crypto::Hex;
 use grin_wallet_libwallet::Context;
-use grin_wallet_util::grin_core::core::transaction;
+use grin_wallet_util::grin_core::core::{transaction, FeeFields};
 use grin_wallet_util::grin_core::libtx::{aggsig, proof};
 use grin_wallet_util::grin_keychain::{
 	BlindSum, BlindingFactor, ChildNumber, ExtKeychain, ExtKeychainPath, Keychain,
@@ -25,9 +25,11 @@ use grin_wallet_util::grin_util::secp::key::{PublicKey, SecretKey};
 use rand::thread_rng;
 
 fn kernel_sig_msg() -> secp::Message {
-	transaction::KernelFeatures::Plain { fee: 0 }
-		.kernel_sig_msg()
-		.unwrap()
+	transaction::KernelFeatures::Plain {
+		fee: FeeFields::zero(),
+	}
+	.kernel_sig_msg()
+	.unwrap()
 }
 
 #[test]
@@ -55,7 +57,7 @@ fn aggsig_sender_receiver_interaction() {
 
 		keychain
 			.secp()
-			.commit(0, blinding_factor.secret_key().unwrap())
+			.commit(0, blinding_factor.secret_key(keychain.secp()).unwrap())
 			.unwrap()
 	};
 
@@ -74,7 +76,7 @@ fn aggsig_sender_receiver_interaction() {
 			.blind_sum(&bs.sub_blinding_factor(BlindingFactor::from_secret_key(skey)))
 			.unwrap();
 
-		let blind = blinding_factor.secret_key().unwrap();
+		let blind = blinding_factor.secret_key(keychain.secp()).unwrap();
 
 		s_cx = Context::with_excess(&keychain.secp(), blind, &parent, false, 0, 0, 0, None);
 		s_cx.get_public_keys(&keychain.secp())
@@ -94,16 +96,22 @@ fn aggsig_sender_receiver_interaction() {
 		let (pub_excess, pub_nonce) = rx_cx.get_public_keys(&keychain.secp());
 		rx_cx.add_output(&key_id, &None, 0);
 
-		pub_nonce_sum = PublicKey::from_combination(vec![
-			&s_cx.get_public_keys(keychain.secp()).1,
-			&rx_cx.get_public_keys(keychain.secp()).1,
-		])
+		pub_nonce_sum = PublicKey::from_combination(
+			keychain.secp(),
+			vec![
+				&s_cx.get_public_keys(keychain.secp()).1,
+				&rx_cx.get_public_keys(keychain.secp()).1,
+			],
+		)
 		.unwrap();
 
-		pub_key_sum = PublicKey::from_combination(vec![
-			&s_cx.get_public_keys(keychain.secp()).0,
-			&rx_cx.get_public_keys(keychain.secp()).0,
-		])
+		pub_key_sum = PublicKey::from_combination(
+			keychain.secp(),
+			vec![
+				&s_cx.get_public_keys(keychain.secp()).0,
+				&rx_cx.get_public_keys(keychain.secp()).0,
+			],
+		)
 		.unwrap();
 
 		let msg = kernel_sig_msg();
@@ -191,10 +199,13 @@ fn aggsig_sender_receiver_interaction() {
 		.unwrap();
 
 		// Receiver calculates the final public key (to verify sig later)
-		let final_pubkey = PublicKey::from_combination(vec![
-			&s_cx.get_public_keys(keychain.secp()).0,
-			&rx_cx.get_public_keys(keychain.secp()).0,
-		])
+		let final_pubkey = PublicKey::from_combination(
+			keychain.secp(),
+			vec![
+				&s_cx.get_public_keys(keychain.secp()).0,
+				&rx_cx.get_public_keys(keychain.secp()).0,
+			],
+		)
 		.unwrap();
 
 		(final_sig, final_pubkey)
@@ -237,7 +248,7 @@ fn aggsig_sender_receiver_interaction_offset() {
 	// This is the kernel offset that we use to split the key
 	// Summing these at the block level prevents the
 	// kernels from being used to reconstruct (or identify) individual transactions
-	let kernel_offset = SecretKey::new(&mut thread_rng());
+	let kernel_offset = SecretKey::new(sender_keychain.secp(), &mut thread_rng());
 
 	// Calculate the kernel excess here for convenience.
 	// Normally this would happen during transaction building.
@@ -260,7 +271,7 @@ fn aggsig_sender_receiver_interaction_offset() {
 
 		keychain
 			.secp()
-			.commit(0, blinding_factor.secret_key().unwrap())
+			.commit(0, blinding_factor.secret_key(keychain.secp()).unwrap())
 			.unwrap()
 	};
 
@@ -284,7 +295,7 @@ fn aggsig_sender_receiver_interaction_offset() {
 			)
 			.unwrap();
 
-		let blind = blinding_factor.secret_key().unwrap();
+		let blind = blinding_factor.secret_key(keychain.secp()).unwrap();
 
 		s_cx = Context::with_excess(&keychain.secp(), blind, &parent, false, 0, 0, 0, None);
 		s_cx.get_public_keys(&keychain.secp())
@@ -303,16 +314,22 @@ fn aggsig_sender_receiver_interaction_offset() {
 		let (pub_excess, pub_nonce) = rx_cx.get_public_keys(&keychain.secp());
 		rx_cx.add_output(&key_id, &None, 0);
 
-		pub_nonce_sum = PublicKey::from_combination(vec![
-			&s_cx.get_public_keys(keychain.secp()).1,
-			&rx_cx.get_public_keys(keychain.secp()).1,
-		])
+		pub_nonce_sum = PublicKey::from_combination(
+			keychain.secp(),
+			vec![
+				&s_cx.get_public_keys(keychain.secp()).1,
+				&rx_cx.get_public_keys(keychain.secp()).1,
+			],
+		)
 		.unwrap();
 
-		pub_key_sum = PublicKey::from_combination(vec![
-			&s_cx.get_public_keys(keychain.secp()).0,
-			&rx_cx.get_public_keys(keychain.secp()).0,
-		])
+		pub_key_sum = PublicKey::from_combination(
+			keychain.secp(),
+			vec![
+				&s_cx.get_public_keys(keychain.secp()).0,
+				&rx_cx.get_public_keys(keychain.secp()).0,
+			],
+		)
 		.unwrap();
 
 		let msg = kernel_sig_msg();
@@ -399,10 +416,13 @@ fn aggsig_sender_receiver_interaction_offset() {
 		.unwrap();
 
 		// Receiver calculates the final public key (to verify sig later)
-		let final_pubkey = PublicKey::from_combination(vec![
-			&s_cx.get_public_keys(keychain.secp()).0,
-			&rx_cx.get_public_keys(keychain.secp()).0,
-		])
+		let final_pubkey = PublicKey::from_combination(
+			keychain.secp(),
+			vec![
+				&s_cx.get_public_keys(keychain.secp()).0,
+				&rx_cx.get_public_keys(keychain.secp()).0,
+			],
+		)
 		.unwrap();
 
 		(final_sig, final_pubkey)
@@ -536,7 +556,7 @@ fn blind_factor() {
 	// This is the kernel offset that we use to split the key
 	// Summing these at the block level prevents the
 	// kernels from being used to reconstruct (or identify) individual transactions
-	let _kernel_offset = SecretKey::new(&mut thread_rng());
+	let _kernel_offset = SecretKey::new(receiver_keychain.secp(), &mut thread_rng());
 
 	let bytes_32: [u8; 32] = [
 		2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26,
@@ -544,7 +564,7 @@ fn blind_factor() {
 	];
 
 	let kernel_offset = BlindingFactor::from_slice(&bytes_32);
-	let offset_skey = kernel_offset.secret_key().unwrap();
+	let offset_skey = kernel_offset.secret_key(receiver_keychain.secp()).unwrap();
 	let offset_commit = receiver_keychain.secp().commit(0, offset_skey).unwrap();
 	//the hex string of the offset commit should remains the same.
 	let mut i = 0;

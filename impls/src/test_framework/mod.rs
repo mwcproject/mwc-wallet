@@ -1,4 +1,4 @@
-// Copyright 2019 The Grin Developers
+// Copyright 2021 The Grin Developers
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,7 +18,7 @@ use crate::chain;
 use crate::chain::Chain;
 use crate::core;
 use crate::core::core::hash::Hashed;
-use crate::core::core::{Output, OutputFeatures, OutputIdentifier, Transaction, TxKernel};
+use crate::core::core::{Output, Transaction, TxKernel};
 use crate::core::{consensus, global, pow};
 use crate::keychain;
 use crate::libwallet;
@@ -38,20 +38,14 @@ mod testclient;
 pub use self::{testclient::LocalWalletClient, testclient::WalletProxy};
 
 /// Get an output from the chain locally and present it back as an API output
-fn get_output_local(chain: &chain::Chain, commit: &pedersen::Commitment) -> Option<api::Output> {
-	let outputs = [
-		OutputIdentifier::new(OutputFeatures::Plain, commit),
-		OutputIdentifier::new(OutputFeatures::Coinbase, commit),
-	];
-
-	for x in outputs.iter() {
-		if chain.get_unspent(x.commit).is_ok() {
-			let block_height = chain.get_header_for_output(x.commit).unwrap().height;
-			let output_pos = chain.get_output_pos(&x.commit).unwrap_or(0);
-			return Some(api::Output::new(&commit, block_height, output_pos));
-		}
+fn get_output_local(chain: &chain::Chain, commit: pedersen::Commitment) -> Option<api::Output> {
+	if chain.get_unspent(commit).unwrap().is_some() {
+		let block_height = chain.get_header_for_output(commit).unwrap().height;
+		let output_pos = chain.get_output_pos(&commit).unwrap_or(0);
+		Some(api::Output::new(&commit, block_height, output_pos))
+	} else {
+		None
 	}
-	None
 }
 
 /// Get a kernel from the chain locally
@@ -124,19 +118,18 @@ fn get_blocks_by_height_local(
 	res
 }
 
-/// Adds a block with a given reward to the chain and mines it
-pub fn add_block_with_reward(
+fn create_block_with_reward(
 	chain: &Chain,
-	txs: Vec<&Transaction>,
+	prev: core::core::BlockHeader,
+	txs: &[Transaction],
 	reward_output: Output,
 	reward_kernel: TxKernel,
-) {
-	let prev = chain.head_header().unwrap();
-	let next_header_info = consensus::next_difficulty(1, chain.difficulty_iter().unwrap());
-	let txs_cloned: Vec<Transaction> = txs.into_iter().cloned().collect();
+) -> core::core::Block {
+	let next_header_info =
+		consensus::next_difficulty(prev.height + 1, chain.difficulty_iter().unwrap());
 	let mut b = core::core::Block::new(
 		&prev,
-		&txs_cloned,
+		txs,
 		next_header_info.clone().difficulty,
 		(reward_output, reward_kernel),
 	)
@@ -151,27 +144,37 @@ pub fn add_block_with_reward(
 		global::min_edge_bits(),
 	)
 	.unwrap();
-	chain.process_block(b, chain::Options::MINE).unwrap();
-	chain.validate(false).unwrap();
+	b
 }
 
-/// adds a reward output to a wallet, includes that reward in a block, mines
-/// the block and adds it to the chain, with option transactions included.
-/// Helpful for building up precise wallet balances for testing.
-pub fn award_block_to_wallet<'a, L, C, K>(
+/// Adds a block with a given reward to the chain and mines it
+pub fn add_block_with_reward(
 	chain: &Chain,
-	txs: Vec<&Transaction>,
+	txs: &[Transaction],
+	reward_output: Output,
+	reward_kernel: TxKernel,
+) {
+	let prev = chain.head_header().unwrap();
+	let block = create_block_with_reward(chain, prev, txs, reward_output, reward_kernel);
+	process_block(chain, block);
+}
+
+/// adds a reward output to a wallet, includes that reward in a block
+/// and return the block
+pub fn create_block_for_wallet<'a, L, C, K>(
+	chain: &Chain,
+	prev: core::core::BlockHeader,
+	txs: &[Transaction],
 	wallet: Arc<Mutex<Box<dyn WalletInst<'a, L, C, K> + 'a>>>,
 	keychain_mask: Option<&SecretKey>,
-) -> Result<(), libwallet::Error>
+) -> Result<core::core::Block, libwallet::Error>
 where
 	L: WalletLCProvider<'a, C, K>,
 	C: NodeClient + 'a,
 	K: keychain::Keychain + 'a,
 {
 	// build block fees
-	let prev = chain.head_header().unwrap();
-	let fee_amt = txs.iter().map(|tx| tx.fee()).sum();
+	let fee_amt = txs.iter().map(|tx| tx.fee(prev.height + 1)).sum();
 	let block_fees = BlockFees {
 		fees: fee_amt,
 		key_id: None,
@@ -183,8 +186,33 @@ where
 		let w = w_lock.lc_provider()?.wallet_inst()?;
 		foreign::build_coinbase(&mut **w, keychain_mask, &block_fees, false)?
 	};
-	add_block_with_reward(chain, txs, coinbase_tx.output, coinbase_tx.kernel);
+	let block = create_block_with_reward(chain, prev, txs, coinbase_tx.output, coinbase_tx.kernel);
+	Ok(block)
+}
+
+/// adds a reward output to a wallet, includes that reward in a block, mines
+/// the block and adds it to the chain, with option transactions included.
+/// Helpful for building up precise wallet balances for testing.
+pub fn award_block_to_wallet<'a, L, C, K>(
+	chain: &Chain,
+	txs: &[Transaction],
+	wallet: Arc<Mutex<Box<dyn WalletInst<'a, L, C, K> + 'a>>>,
+	keychain_mask: Option<&SecretKey>,
+) -> Result<(), libwallet::Error>
+where
+	L: WalletLCProvider<'a, C, K>,
+	C: NodeClient + 'a,
+	K: keychain::Keychain + 'a,
+{
+	let prev = chain.head_header().unwrap();
+	let block = create_block_for_wallet(chain, prev, txs, wallet, keychain_mask)?;
+	process_block(chain, block);
 	Ok(())
+}
+
+pub fn process_block(chain: &Chain, block: core::core::Block) {
+	chain.process_block(block, chain::Options::MINE).unwrap();
+	chain.validate(false).unwrap();
 }
 
 /// Award a blocks to a wallet directly
@@ -201,7 +229,7 @@ where
 	K: keychain::Keychain + 'a,
 {
 	for _ in 0..number {
-		award_block_to_wallet(chain, vec![], wallet.clone(), keychain_mask)?;
+		award_block_to_wallet(chain, &[], wallet.clone(), keychain_mask)?;
 		if pause_between {
 			thread::sleep(std::time::Duration::from_millis(100));
 		}
@@ -259,7 +287,7 @@ where
 		let w = w_lock.lc_provider()?.wallet_inst()?;
 		w.w2n_client().clone()
 	};
-	owner::post_tx(&client, &slate.tx, false)?; // mines a block
+	owner::post_tx(&client, slate.tx_or_err()?, false)?; // mines a block
 	Ok(())
 }
 

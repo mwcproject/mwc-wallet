@@ -1,4 +1,4 @@
-// Copyright 2019 The Grin Developers
+// Copyright 2021 The Grin Developers
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,14 +16,14 @@
 
 use crate::keychain::Keychain;
 use crate::libwallet::{
-	self, BlockFees, CbData, ErrorKind, InitTxArgs, IssueInvoiceTxArgs, NodeClient,
-	NodeVersionInfo, Slate, SlateVersion, VersionInfo, VersionedCoinbase, VersionedSlate,
-	WalletLCProvider,
+	self, BlockFees, CbData, Error, InitTxArgs, IssueInvoiceTxArgs, NodeClient, NodeVersionInfo,
+	Slate, SlateVersion, VersionInfo, VersionedCoinbase, VersionedSlate, WalletLCProvider,
 };
 use crate::{Foreign, ForeignCheckMiddlewareFn};
 use easy_jsonrpc_mw;
 use ed25519_dalek::PublicKey as DalekPublicKey;
 use grin_wallet_libwallet::proof::proofaddress::{self, ProvableAddress};
+use grin_wallet_util::grin_util::secp::Secp256k1;
 use libwallet::slatepack::SlatePurpose;
 
 /// Public definition used to generate Foreign jsonrpc api.
@@ -68,7 +68,7 @@ pub trait ForeignRpc {
 	# ,false, 0, false, false, true);
 	```
 	*/
-	fn check_version(&self) -> Result<VersionInfo, ErrorKind>;
+	fn check_version(&self) -> Result<VersionInfo, Error>;
 
 	/**
 	Networked version of [Foreign::check_version](struct.Foreign.html#method.check_version).
@@ -98,7 +98,7 @@ pub trait ForeignRpc {
 	# ,false, 0, false, false, true);
 	```
 	*/
-	fn get_proof_address(&self) -> Result<String, ErrorKind>;
+	fn get_proof_address(&self) -> Result<String, Error>;
 
 	/**
 	Networked Legacy (non-secure token) version of [Foreign::build_coinbase](struct.Foreign.html#method.build_coinbase).
@@ -149,7 +149,7 @@ pub trait ForeignRpc {
 	```
 	*/
 
-	fn build_coinbase(&self, block_fees: &BlockFees) -> Result<VersionedCoinbase, ErrorKind>;
+	fn build_coinbase(&self, block_fees: &BlockFees) -> Result<VersionedCoinbase, Error>;
 
 	/**
 	Networked version of [Foreign::verify_slate_messages](struct.Foreign.html#method.verify_slate_messages).
@@ -231,7 +231,7 @@ pub trait ForeignRpc {
 	# ,false, 1 ,false, false, false);
 	```
 	*/
-	fn verify_slate_messages(&self, slate: VersionedSlate) -> Result<(), ErrorKind>;
+	fn verify_slate_messages(&self, slate: VersionedSlate) -> Result<(), Error>;
 
 	/**
 	Networked version of [Foreign::receive_tx](struct.Foreign.html#method.receive_tx).
@@ -547,7 +547,7 @@ pub trait ForeignRpc {
 		slate: VersionedSlate,
 		dest_acct_name: Option<String>,
 		message: Option<String>,
-	) -> Result<VersionedSlate, ErrorKind>;
+	) -> Result<VersionedSlate, Error>;
 
 	/**
 
@@ -905,20 +905,20 @@ pub trait ForeignRpc {
 	# ,false, 5, false, true, true);
 	```
 	*/
-	fn finalize_invoice_tx(&self, slate: VersionedSlate) -> Result<VersionedSlate, ErrorKind>;
+	fn finalize_invoice_tx(&self, slate: VersionedSlate) -> Result<VersionedSlate, Error>;
 
 	/**
 	Networked version of [Foreign::receive_swap_message](struct.Foreign.html#method.receive_swap_message).
 
 	# Json rpc example
 	*/
-	fn receive_swap_message(&self, message: String) -> Result<(), ErrorKind>;
+	fn receive_swap_message(&self, message: String) -> Result<(), Error>;
 
 	/**
 	Networked version of [Foreign::marketplace_message](struct.Foreign.html#method.marketplace_message).
 	# Json rpc example
 	*/
-	fn marketplace_message(&self, accept_offer_message: &String) -> Result<String, ErrorKind>;
+	fn marketplace_message(&self, accept_offer_message: &String) -> Result<String, Error>;
 }
 
 impl<'a, L, C, K> ForeignRpc for Foreign<'a, L, C, K>
@@ -927,28 +927,22 @@ where
 	C: NodeClient + 'a,
 	K: Keychain + 'a,
 {
-	fn check_version(&self) -> Result<VersionInfo, ErrorKind> {
-		Foreign::check_version(self).map_err(|e| e.kind())
+	fn check_version(&self) -> Result<VersionInfo, Error> {
+		Foreign::check_version(self)
 	}
 
-	fn get_proof_address(&self) -> Result<String, ErrorKind> {
-		Foreign::get_proof_address(self).map_err(|e| e.kind())
+	fn get_proof_address(&self) -> Result<String, Error> {
+		Foreign::get_proof_address(self)
 	}
 
-	fn build_coinbase(&self, block_fees: &BlockFees) -> Result<VersionedCoinbase, ErrorKind> {
-		let cb: CbData = Foreign::build_coinbase(self, block_fees).map_err(|e| e.kind())?;
+	fn build_coinbase(&self, block_fees: &BlockFees) -> Result<VersionedCoinbase, Error> {
+		let cb: CbData = Foreign::build_coinbase(self, block_fees)?;
 		Ok(VersionedCoinbase::into_version(cb, SlateVersion::V2))
 	}
 
 	// verify_slate_messages doesn't make sense for the slate pack. That is why supporting only plain slates
-	fn verify_slate_messages(&self, slate: VersionedSlate) -> Result<(), ErrorKind> {
-		Foreign::verify_slate_messages(
-			self,
-			&slate.into_slate_plain().map_err(|e| {
-				ErrorKind::Compatibility(format!("Expected non ecrypted slate only, {}", e))
-			})?,
-		)
-		.map_err(|e| e.kind())
+	fn verify_slate_messages(&self, slate: VersionedSlate) -> Result<(), Error> {
+		Foreign::verify_slate_messages(self, &slate.into_slate_plain(true)?)
 	}
 
 	fn receive_tx(
@@ -956,34 +950,29 @@ where
 		in_slate: VersionedSlate,
 		dest_acct_name: Option<String>,
 		message: Option<String>,
-	) -> Result<VersionedSlate, ErrorKind> {
+	) -> Result<VersionedSlate, Error> {
 		let version = in_slate.version();
 		let (slate_from, sender) = if in_slate.is_slatepack() {
-			let (slate_from, content, sender) =
-				Foreign::decrypt_slate(self, in_slate).map_err(|e| {
-					ErrorKind::SlatepackDecodeError(format!("Unable to decrypt a slatepack, {}", e))
-				})?;
+			let (slate_from, content, sender) = Foreign::decrypt_slate(self, in_slate)?;
 
 			if content != SlatePurpose::SendInitial {
-				return Err(ErrorKind::SlatepackDecodeError(format!(
+				return Err(Error::SlatepackDecodeError(format!(
 					"Expecting SendInitial content of the slatepack, get {:?}",
 					content
 				)));
 			}
-
 			(slate_from, sender)
 		} else {
-			let slate_from = in_slate.into_slate_plain().map_err(|e| e.kind())?;
+			let slate_from = in_slate.into_slate_plain(false)?;
 			(slate_from, None)
 		};
 		let out_slate = Foreign::receive_tx(
 			self,
 			&slate_from,
 			sender.map(|p| ProvableAddress::from_tor_pub_key(&p).public_key), // We don't want to change RPC. New fields required new version
-			dest_acct_name.as_ref().map(String::as_str),
+			&dest_acct_name,
 			message,
-		)
-		.map_err(|e| e.kind())?;
+		)?;
 
 		let res_slate = Foreign::encrypt_slate(
 			self,
@@ -993,24 +982,18 @@ where
 			sender, // sending back to the sender
 			None,
 			self.doctest_mode,
-		)
-		.map_err(|e| {
-			ErrorKind::SlatepackEncodeError(format!("Unable to encode the slatepack, {}", e))
-		})?;
+		)?;
 
 		Ok(res_slate)
 	}
 
-	fn finalize_invoice_tx(&self, in_slate: VersionedSlate) -> Result<VersionedSlate, ErrorKind> {
+	fn finalize_invoice_tx(&self, in_slate: VersionedSlate) -> Result<VersionedSlate, Error> {
 		let version = in_slate.version();
 		let (in_slate, sender) = if in_slate.is_slatepack() {
-			let (slate_from, content, sender) =
-				Foreign::decrypt_slate(self, in_slate).map_err(|e| {
-					ErrorKind::SlatepackDecodeError(format!("Unable to decrypt a slatepack, {}", e))
-				})?;
+			let (slate_from, content, sender) = Foreign::decrypt_slate(self, in_slate)?;
 
 			if content != SlatePurpose::InvoiceResponse {
-				return Err(ErrorKind::SlatepackDecodeError(format!(
+				return Err(Error::SlatepackDecodeError(format!(
 					"Expecting InvoiceResponse content of the slatepack, get {:?}",
 					content
 				)));
@@ -1018,11 +1001,11 @@ where
 
 			(slate_from, sender)
 		} else {
-			let slate_from = in_slate.into_slate_plain().map_err(|e| e.kind())?;
+			let slate_from = in_slate.into_slate_plain(false)?;
 			(slate_from, None)
 		};
 
-		let out_slate = Foreign::finalize_invoice_tx(self, &in_slate).map_err(|e| e.kind())?;
+		let out_slate = Foreign::finalize_invoice_tx(self, &in_slate)?;
 
 		let res_slate = Foreign::encrypt_slate(
 			self,
@@ -1032,24 +1015,17 @@ where
 			sender, // sending back to the sender
 			None,
 			self.doctest_mode,
-		)
-		.map_err(|e| {
-			ErrorKind::SlatepackEncodeError(format!("Unable to encode the slatepack, {}", e))
-		})?;
+		)?;
 		Ok(res_slate)
 	}
 
-	fn receive_swap_message(&self, message: String) -> Result<(), ErrorKind> {
-		Foreign::receive_swap_message(&self, &message).map_err(|e| {
-			ErrorKind::SwapError(format!("Error encountered receiving swap message, {}", e))
-		})?;
+	fn receive_swap_message(&self, message: String) -> Result<(), Error> {
+		Foreign::receive_swap_message(&self, &message)?;
 		Ok(())
 	}
 
-	fn marketplace_message(&self, message: &String) -> Result<String, ErrorKind> {
-		let res = Foreign::marketplace_message(&self, &message).map_err(|e| {
-			ErrorKind::SwapError(format!("Error encountered receiving swap message, {}", e))
-		})?;
+	fn marketplace_message(&self, message: &String) -> Result<String, Error> {
+		let res = Foreign::marketplace_message(&self, &message)?;
 		Ok(res)
 	}
 }
@@ -1060,7 +1036,7 @@ fn test_check_middleware(
 	_slate: Option<&Slate>,
 ) -> Result<(), libwallet::Error> {
 	// TODO: Implement checks
-	// return Err(ErrorKind::GenericError("Test Rejection".into()))?
+	// return Err(Error::GenericError("Test Rejection".into()))?
 	Ok(())
 }
 
@@ -1231,6 +1207,8 @@ pub fn run_doctest_foreign(
 	};
 	let w2_slatepack_address = ProvableAddress::from_tor_pub_key(&w2_tor_pubkey);
 
+	let secp = Secp256k1::new();
+
 	if init_invoice_tx {
 		let amount = 2_000_000_000;
 		let mut slate = {
@@ -1284,6 +1262,7 @@ pub fn run_doctest_foreign(
 				Some(w2_tor_pubkey.clone()),
 				&w1_tor_secret,
 				true,
+				&secp,
 			)
 			.unwrap();
 			println!(
@@ -1328,6 +1307,7 @@ pub fn run_doctest_foreign(
 				Some(w1_tor_pubkey.clone()),
 				&w2_tor_secret,
 				true,
+				&secp,
 			)
 			.unwrap();
 			println!(

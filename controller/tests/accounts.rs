@@ -1,4 +1,4 @@
-// Copyright 2019 The Grin Developers
+// Copyright 2021 The Grin Developers
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -25,6 +25,7 @@ use self::keychain::{ExtKeychain, Keychain};
 use grin_wallet_libwallet as libwallet;
 use impls::test_framework::{self, LocalWalletClient};
 use libwallet::InitTxArgs;
+use std::sync::atomic::Ordering;
 use std::thread;
 use std::time::Duration;
 
@@ -38,6 +39,7 @@ fn accounts_test_impl(test_dir: &'static str) -> Result<(), wallet::Error> {
 	// Create a new proxy to simulate server and wallet responses
 	let mut wallet_proxy = create_wallet_proxy(test_dir);
 	let chain = wallet_proxy.chain.clone();
+	let stopper = wallet_proxy.running.clone();
 
 	create_wallet_and_add!(
 		client1,
@@ -137,7 +139,7 @@ fn accounts_test_impl(test_dir: &'static str) -> Result<(), wallet::Error> {
 		assert_eq!(wallet1_info.total, 5 * reward);
 		assert_eq!(wallet1_info.amount_currently_spendable, (5 - cm) * reward);
 		// check tx log as well
-		let (_, txs) = api.retrieve_txs(m, true, None, None)?;
+		let (_, txs) = api.retrieve_txs(m, true, None, None, None)?;
 		assert_eq!(txs.len(), 5);
 		Ok(())
 	})?;
@@ -161,7 +163,7 @@ fn accounts_test_impl(test_dir: &'static str) -> Result<(), wallet::Error> {
 		assert_eq!(wallet1_info.total, 7 * reward);
 		assert_eq!(wallet1_info.amount_currently_spendable, 7 * reward);
 		// check tx log as well
-		let (_, txs) = api.retrieve_txs(m, true, None, None)?;
+		let (_, txs) = api.retrieve_txs(m, true, None, None, None)?;
 		assert_eq!(txs.len(), 7);
 		Ok(())
 	})?;
@@ -180,7 +182,7 @@ fn accounts_test_impl(test_dir: &'static str) -> Result<(), wallet::Error> {
 		assert_eq!(wallet1_info.total, 0,);
 		assert_eq!(wallet1_info.amount_currently_spendable, 0,);
 		// check tx log as well
-		let (_, txs) = api.retrieve_txs(m, true, None, None)?;
+		let (_, txs) = api.retrieve_txs(m, true, None, None, None)?;
 		assert_eq!(txs.len(), 0);
 		Ok(())
 	})?;
@@ -204,7 +206,7 @@ fn accounts_test_impl(test_dir: &'static str) -> Result<(), wallet::Error> {
 		slate = client1.send_tx_slate_direct("wallet2", &slate)?;
 		api.tx_lock_outputs(m, &slate, None, 0)?;
 		slate = api.finalize_tx(m, &slate)?;
-		api.post_tx(m, &slate.tx, false)?;
+		api.post_tx(m, slate.tx_or_err()?, false)?;
 		Ok(())
 	})?;
 
@@ -214,7 +216,7 @@ fn accounts_test_impl(test_dir: &'static str) -> Result<(), wallet::Error> {
 		let (wallet1_refreshed, wallet1_info) = api.retrieve_summary_info(m, true, 1)?;
 		assert!(wallet1_refreshed);
 		assert_eq!(wallet1_info.last_confirmed_height, 13);
-		let (_, txs) = api.retrieve_txs(m, true, None, None)?;
+		let (_, txs) = api.retrieve_txs(m, true, None, None, None)?;
 		assert_eq!(txs.len(), 9);
 		Ok(())
 	})?;
@@ -229,7 +231,7 @@ fn accounts_test_impl(test_dir: &'static str) -> Result<(), wallet::Error> {
 		assert_eq!(wallet1_info.last_confirmed_height, 13); // mwc already updated that
 		let (_, wallet1_info) = api.retrieve_summary_info(m, true, 1)?;
 		assert_eq!(wallet1_info.last_confirmed_height, 13);
-		let (_, txs) = api.retrieve_txs(m, true, None, None)?;
+		let (_, txs) = api.retrieve_txs(m, true, None, None, None)?;
 		println!("{:?}", txs);
 		assert_eq!(txs.len(), 5);
 		Ok(())
@@ -240,7 +242,7 @@ fn accounts_test_impl(test_dir: &'static str) -> Result<(), wallet::Error> {
 		let (wallet2_refreshed, wallet2_info) = api.retrieve_summary_info(m, true, 1)?;
 		assert!(wallet2_refreshed);
 		assert_eq!(wallet2_info.last_confirmed_height, 13);
-		let (_, txs) = api.retrieve_txs(m, true, None, None)?;
+		let (_, txs) = api.retrieve_txs(m, true, None, None, None)?;
 		assert_eq!(txs.len(), 1);
 		Ok(())
 	})?;
@@ -258,12 +260,13 @@ fn accounts_test_impl(test_dir: &'static str) -> Result<(), wallet::Error> {
 		assert_eq!(wallet2_info.total, 0,);
 		assert_eq!(wallet2_info.amount_currently_spendable, 0,);
 		// check tx log as well
-		let (_, txs) = api.retrieve_txs(m, true, None, None)?;
+		let (_, txs) = api.retrieve_txs(m, true, None, None, None)?;
 		assert_eq!(txs.len(), 0);
 		Ok(())
 	})?;
 
 	// let logging finish
+	stopper.store(false, Ordering::Relaxed);
 	thread::sleep(Duration::from_millis(200));
 	Ok(())
 }
@@ -273,7 +276,7 @@ fn accounts() {
 	let test_dir = "test_output/accounts";
 	setup(test_dir);
 	if let Err(e) = accounts_test_impl(test_dir) {
-		panic!("Libwallet Error: {} - {}", e, e.backtrace().unwrap());
+		panic!("Libwallet Error: {}", e);
 	}
 	clean_output_dir(test_dir);
 }

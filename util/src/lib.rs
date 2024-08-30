@@ -1,4 +1,4 @@
-// Copyright 2019 The Grin Developers
+// Copyright 2021 The Grin Developers
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -24,8 +24,11 @@
 extern crate serde_derive;
 
 mod ov3;
+mod tokio_runtime;
+
 pub use ov3::OnionV3Address;
 pub use ov3::OnionV3Error as OnionV3AddressError;
+pub use tokio_runtime::RUNTIME;
 
 pub use grin_api;
 pub use grin_chain;

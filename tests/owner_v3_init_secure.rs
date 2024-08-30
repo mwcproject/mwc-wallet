@@ -1,4 +1,4 @@
-// Copyright 2019 The Grin Developers
+// Copyright 2021 The Grin Developers
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -37,8 +37,9 @@ use serde_json;
 mod common;
 use common::{
 	clean_output_dir, derive_ecdh_key, execute_command, initial_setup_wallet, instantiate_wallet,
-	send_request, send_request_enc, setup, RetrieveSummaryInfoResp,
+	send_request, send_request_enc, setup, setup_global_chain_type, RetrieveSummaryInfoResp,
 };
+use grin_wallet_util::grin_util::secp::Secp256k1;
 
 #[test]
 fn owner_v3_init_secure() -> Result<(), grin_wallet_controller::Error> {
@@ -48,11 +49,10 @@ fn owner_v3_init_secure() -> Result<(), grin_wallet_controller::Error> {
 		return Ok(());
 	}
 
+	setup_global_chain_type();
+
 	let test_dir = "target/test_output/owner_v3_init_secure";
 	setup(test_dir);
-	// Setup global because We are using owner API that runs in separate thread
-	global::init_global_chain_type(global::ChainTypes::AutomatedTesting);
-	global::set_local_chain_type(global::ChainTypes::AutomatedTesting);
 
 	// Create a new proxy to simulate server and wallet responses
 	setup_proxy!(test_dir, chain, wallet1, client1, mask1, wallet2, client2, _mask2);
@@ -76,8 +76,10 @@ fn owner_v3_init_secure() -> Result<(), grin_wallet_controller::Error> {
 	let sec_key_str = "e00dcc4a009e3427c6b1e1a550c538179d46f3827a13ed74c759c860761caf1e";
 	let _pub_key_str = "03b3c18c9a38783d105e238953b1638b021ba7456d87a5c085b3bdb75777b4c490";
 
+	let secp = Secp256k1::new();
+
 	let sec_key_bytes = from_hex(sec_key_str).unwrap();
-	let sec_key = { SecretKey::from_slice(&sec_key_bytes).unwrap() };
+	let sec_key = { SecretKey::from_slice(&secp, &sec_key_bytes).unwrap() };
 
 	// 1) Attempt to send an encrypted request before calling `init_secure_api`
 	let req = include_str!("data/v3_reqs/retrieve_info.req.json");
@@ -105,7 +107,7 @@ fn owner_v3_init_secure() -> Result<(), grin_wallet_controller::Error> {
 
 	assert!(res.is_ok());
 	let value: ECDHPubkey = res.unwrap();
-	let shared_key = derive_ecdh_key(sec_key_str, &value.ecdh_pubkey);
+	let shared_key = derive_ecdh_key(sec_key_str, &value.ecdh_pubkey, &secp);
 
 	// 4) A normal request, correct key
 	let req = include_str!("data/v3_reqs/retrieve_info.req.json");
@@ -175,7 +177,7 @@ fn owner_v3_init_secure() -> Result<(), grin_wallet_controller::Error> {
 	println!("RES 8: {:?}", res);
 	assert!(res.is_ok());
 	let value: ECDHPubkey = res.unwrap();
-	let shared_key = derive_ecdh_key(sec_key_str, &value.ecdh_pubkey);
+	let shared_key = derive_ecdh_key(sec_key_str, &value.ecdh_pubkey, &secp);
 
 	// 9) A normal request, with new correct key
 	let req = include_str!("data/v3_reqs/retrieve_info.req.json");
@@ -196,7 +198,7 @@ fn owner_v3_init_secure() -> Result<(), grin_wallet_controller::Error> {
 
 	assert!(res.is_ok());
 	let value: ECDHPubkey = res.unwrap();
-	let shared_key = derive_ecdh_key(sec_key_str, &value.ecdh_pubkey);
+	let shared_key = derive_ecdh_key(sec_key_str, &value.ecdh_pubkey, &secp);
 
 	// 11) A normal request, correct key
 	let req = include_str!("data/v3_reqs/retrieve_info.req.json");

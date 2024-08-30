@@ -1,4 +1,4 @@
-// Copyright 2019 The Grin Developers
+// Copyright 2021 The Grin Developers
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,7 +14,7 @@
 
 //! Public types for config modules
 
-use failure::Fail;
+use std::fmt;
 use std::io;
 use std::path::PathBuf;
 
@@ -65,9 +65,9 @@ pub struct WalletConfig {
 	pub dark_background_color_scheme: Option<bool>,
 	/// Wallet data directory. Default none is 'wallet_data'
 	pub wallet_data_dir: Option<String>,
-	/// Base fee for all transactions. Please note, that fee can't be lower then Base fee
-	/// at the miner nodes. Otherwise your transaction will never be mined.
-	pub base_fee: Option<u64>,
+	/// Scaling factor from transaction weight to transaction fee
+	/// should match accept_fee_base parameter in grin-server
+	pub accept_fee_base: Option<u64>,
 	/// Ethereum Swap Contract Address
 	pub eth_swap_contract_address: Option<String>,
 	/// ERC20 Swap Contract Address
@@ -100,7 +100,6 @@ impl Default for WalletConfig {
 			tls_certificate_key: None,
 			dark_background_color_scheme: Some(true),
 			wallet_data_dir: None,
-			base_fee: None,
 			eth_swap_contract_address: Some("2FA243fC8f9EAF014f8d6E909157B6A48cEE0bdC".to_string()),
 			erc20_swap_contract_address: Some(
 				"Dd62a95626453F54E686cF0531bCbf6766150794".to_string(),
@@ -138,6 +137,7 @@ impl Default for WalletConfig {
 				.map(|i| (i.0.to_string(), i.1.to_string()))
 				.collect::<BTreeMap<String, String>>(),
 			),
+			accept_fee_base: Some(WalletConfig::default_accept_fee_base()),
 		}
 	}
 }
@@ -151,6 +151,11 @@ impl WalletConfig {
 	/// Default listener port
 	pub fn default_owner_api_listen_port() -> u16 {
 		3420
+	}
+
+	/// Default TX base fee, same that we have now (1 milli MWC)
+	pub fn default_accept_fee_base() -> u64 {
+		1_000_000
 	}
 
 	/// Use value from config file, defaulting to sensible value if missing.
@@ -170,37 +175,37 @@ impl WalletConfig {
 			.clone()
 			.unwrap_or(GRIN_WALLET_DIR.to_string())
 	}
+
+	/// Accept fee base
+	pub fn accept_fee_base(&self) -> u64 {
+		self.accept_fee_base
+			.unwrap_or_else(|| WalletConfig::default_accept_fee_base())
+	}
 }
 
 /// Error type wrapping config errors.
-#[derive(Debug, Fail)]
+#[derive(Debug, thiserror::Error)]
 pub enum ConfigError {
 	/// Error with parsing of config file (file_name, message)
-	#[fail(display = "Error parsing configuration file at {}, {}", _0, _1)]
+	#[error("Error parsing configuration file at {0}, {1}")]
 	ParseError(String, String),
 
 	/// Error with fileIO while reading config file
 	/// (file_name, message)
-	#[fail(display = "Config IO error, {}", _0)]
-	FileIOError(String),
+	#[error("Config IO error, {0}")]
+	FileIOError(#[from] io::Error),
 
 	/// No file found (file_name)
-	#[fail(display = "Configuration file not found: {}", _0)]
+	#[error("Configuration file not found: {0}")]
 	FileNotFoundError(String),
 
 	/// Error serializing config values
-	#[fail(display = "Error serializing configuration, {}", _0)]
+	#[error("Error serializing configuration, {0}")]
 	SerializationError(String),
 
 	/// Path doesn't exist
-	#[fail(display = "Not found expected path {}", _0)]
+	#[error("Not found expected path {0}")]
 	PathNotFoundError(String),
-}
-
-impl From<io::Error> for ConfigError {
-	fn from(error: io::Error) -> ConfigError {
-		ConfigError::FileIOError(format!("Error loading config file, {}", error))
-	}
 }
 
 /// Tor configuration
@@ -214,8 +219,14 @@ pub struct TorConfig {
 	pub send_config_dir: String,
 	/// Whether or not the socks5 proxy is already running
 	pub socks_running: bool,
-	/// Optional log file for tor. Default is
+	/// Optional log file for tor. Default is None
 	pub tor_log_file: Option<String>,
+	/// tor bridge config
+	#[serde(default)]
+	pub bridge: TorBridgeConfig,
+	/// tor proxy config
+	#[serde(default)]
+	pub proxy: TorProxyConfig,
 }
 
 impl Default for TorConfig {
@@ -226,7 +237,66 @@ impl Default for TorConfig {
 			send_config_dir: ".".into(),
 			socks_running: false,
 			tor_log_file: None,
+			bridge: TorBridgeConfig::default(),
+			proxy: TorProxyConfig::default(),
 		}
+	}
+}
+
+/// Tor Bridge Config
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct TorBridgeConfig {
+	/// Bridge Line
+	pub bridge_line: Option<String>,
+	/// Client Option
+	pub client_option: Option<String>,
+}
+
+impl Default for TorBridgeConfig {
+	fn default() -> TorBridgeConfig {
+		TorBridgeConfig {
+			bridge_line: None,
+			client_option: None,
+		}
+	}
+}
+
+impl fmt::Display for TorBridgeConfig {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		write!(f, "{:?}", self)
+	}
+}
+
+/// Tor Proxy configuration (useful for protocols such as shadowsocks)
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct TorProxyConfig {
+	/// socks4 |socks5 | http(s)
+	pub transport: Option<String>,
+	/// ip or dns
+	pub address: Option<String>,
+	/// user for auth - socks5|https(s)
+	pub username: Option<String>,
+	/// pass for auth - socks5|https(s)
+	pub password: Option<String>,
+	/// allowed port - proxy
+	pub allowed_port: Option<Vec<u16>>,
+}
+
+impl Default for TorProxyConfig {
+	fn default() -> TorProxyConfig {
+		TorProxyConfig {
+			transport: None,
+			address: None,
+			username: None,
+			password: None,
+			allowed_port: None,
+		}
+	}
+}
+
+impl fmt::Display for TorProxyConfig {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		write!(f, "{:?}", self)
 	}
 }
 
@@ -260,6 +330,9 @@ pub struct GlobalWalletConfig {
 /// Wallet internal members
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct GlobalWalletConfigMembers {
+	/// Config file version (None == version 1)
+	#[serde(default)]
+	pub config_file_version: Option<u32>,
 	/// Wallet configuration
 	#[serde(default)]
 	pub wallet: WalletConfig,

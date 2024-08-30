@@ -1,4 +1,4 @@
-// Copyright 2019 The Grin Developers
+// Copyright 2021 The Grin Developers
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -33,7 +33,7 @@ fn simple_server_wallet() {
 	init_test_logger();
 	info!("starting simple_server_wallet");
 	let _test_name_dir = "test_servers";
-	core::global::set_mining_mode(core::global::ChainTypes::AutomatedTesting);
+	core::global::set_local_chain_type(core::global::ChainTypes::AutomatedTesting);
 
 	// Run a separate coinbase wallet for coinbase transactions
 	let coinbase_dir = "coinbase_wallet_api";
@@ -142,7 +142,7 @@ fn simple_server_wallet() {
 fn test_p2p() {
 	init_test_logger();
 	info!("starting test_p2p");
-	global::set_mining_mode(ChainTypes::AutomatedTesting);
+	global::set_local_chain_type(ChainTypes::AutomatedTesting);
 
 	let _test_name_dir = "test_servers";
 
@@ -271,7 +271,8 @@ fn get_block_by_height_compact(
 		"http://{}:{}/v1/blocks/{}?no_merkle_proof&compact",
 		base_addr, api_server_port, height
 	);
-	api::client::get::<api::CompactBlockPrintable>(url.as_str(), None).map_err(|e| Error::API(url, e))
+	api::client::get::<api::CompactBlockPrintable>(url.as_str(), None)
+		.map_err(|e| Error::API(url, e))
 }
 
 fn get_block_by_hash(
@@ -295,7 +296,8 @@ fn get_block_by_hash_compact(
 		"http://{}:{}/v1/blocks/{}?no_merkle_proof&compact",
 		base_addr, api_server_port, block_hash
 	);
-	api::client::get::<api::CompactBlockPrintable>(url.as_str(), None).map_err(|e| Error::API(url, e))
+	api::client::get::<api::CompactBlockPrintable>(url.as_str(), None)
+		.map_err(|e| Error::API(url, e))
 }
 
 // Chain output handler functions
@@ -482,5 +484,5 @@ pub fn get_all_peers(
 pub enum Error {
 	/// Error originating from HTTP API calls.
 	#[fail(display = "API {} call error {}", _0, _1)]
-	API(String,api::Error),
+	API(String, api::Error),
 }

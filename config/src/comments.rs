@@ -1,4 +1,4 @@
-// Copyright 2019 The Grin Developers
+// Copyright 2021 The Grin Developers
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,6 +20,14 @@ fn comments() -> HashMap<String, String> {
 	let mut retval = HashMap::new();
 
 	retval.insert(
+		"config_file_version".to_string(),
+		"
+#Version of the Generated Configuration File for the Grin Wallet (DO NOT EDIT)
+"
+		.to_string(),
+	);
+
+	retval.insert(
 		"[wallet]".to_string(),
 		"
 #########################################
@@ -32,7 +40,7 @@ fn comments() -> HashMap<String, String> {
 	retval.insert(
 		"api_listen_interface".to_string(),
 		"
-#host IP for wallet listener, change to \"0.0.0.0\" to receive grins
+#host IP for wallet listener, change to \"0.0.0.0\" to receive mwc coins
 "
 		.to_string(),
 	);
@@ -120,6 +128,17 @@ fn comments() -> HashMap<String, String> {
 "
 		.to_string(),
 	);
+
+	retval.insert(
+		"accept_fee_base".to_string(),
+		"
+# Minimum acceptable fee per unit of transaction weight. Please note that fee can't be lower than
+# network has, otherwise your transactions will be rejected.
+# If you are running fresh wallet, there is no needs to adjust this value.
+"
+		.to_string(),
+	);
+
 	retval.insert(
 		"eth_swap_contract_address".to_string(),
 		"
@@ -151,15 +170,6 @@ fn comments() -> HashMap<String, String> {
 	);
 
 	retval.insert(
-		"base_fee".to_string(),
-		"
-# Base fee for the transactions. Please note that fee can't be lower than fee at miner nodes, otherwise your transactions will be rejected.
-# If you are running fresh wallet, there is no needs to adjust this value.
-"
-			.to_string(),
-	);
-
-	retval.insert(
 		"[wallet.swap_electrumx_addr]".to_string(),
 		"
 # Electrum X servers that are used for Atomic Swap operations. Each Secondary Currency need
@@ -172,10 +182,25 @@ fn comments() -> HashMap<String, String> {
 "
 		.to_string(),
 	);
-
 	retval.insert(
 		"[logging]".to_string(),
 		"
+#Type of proxy, eg \"socks4\", \"socks5\", \"http\", \"https\"
+#transport = \"https\"
+
+#Proxy address, eg IP:PORT or Hostname
+#server = \"\"
+
+#Username for the proxy server authentification
+#user = \"\"
+
+#Password for the proxy server authentification
+#pass = \"\"
+
+#This computer goes through a firewall that only allows connections to certain ports (Optional)
+#allowed_port = [80, 443]
+
+
 #########################################
 ### LOGGING CONFIGURATION             ###
 #########################################
@@ -261,7 +286,7 @@ fn comments() -> HashMap<String, String> {
 	retval.insert(
 		"socks_proxy_addr".to_string(),
 		"
-# TOR (SOCKS) proxy server address
+#Address of the running TOR (SOCKS) server
 "
 		.to_string(),
 	);
@@ -272,6 +297,37 @@ fn comments() -> HashMap<String, String> {
 #Directory to output TOR configuration to when sending
 "
 		.to_string(),
+	);
+
+	retval.insert(
+		"[tor.bridge]".to_string(),
+		"
+#########################################
+### TOR BRIDGE                        ###
+#########################################
+"
+		.to_string(),
+	);
+
+	retval.insert(
+		"[tor.proxy]".to_string(),
+		"
+#Tor bridge relay: allow to send and receive via TOR in a country where it is censored.
+#Enable it by entering a single bridge line. To disable it, you must comment it.
+#Support of the transport: obfs4, meek and snowflake.
+#obfs4proxy or snowflake client binary must be installed and on your path.
+#For example, the bridge line must be in the following format for obfs4 transport: \"obfs4 [IP:PORT] [FINGERPRINT] cert=[CERT] iat-mode=[IAT-MODE]\"
+#bridge_line = \"\"
+
+#Plugging client option, needed only for snowflake (let it empty if you want to use the default option of tor) or debugging purpose
+#client_option = \"\"
+
+
+#########################################
+### TOR PROXY                         ###
+#########################################
+"
+			.to_string(),
 	);
 
 	retval.insert(
@@ -330,4 +386,93 @@ pub fn insert_comments(orig: String) -> String {
 		ret_val.push_str(&l);
 	}
 	ret_val
+}
+
+pub fn migrate_comments(
+	old_config: String,
+	new_config: String,
+	old_version: Option<u32>,
+) -> String {
+	let comments = comments();
+	// Prohibe the key we are basing on to introduce new comments for [tor.proxy]
+	let prohibited_key = match old_version {
+		None => vec!["[logging]"],
+		Some(_) => vec![],
+	};
+	let mut vec_old_conf = vec![];
+	let mut hm_key_cmt_old = HashMap::new();
+	let old_conf: Vec<&str> = old_config.split_inclusive('\n').collect();
+	// collect old key in a vec and insert old key/comments from the old conf in a hashmap
+	let vec_key_old = old_conf
+		.iter()
+		.filter_map(|line| {
+			let line_nospace = line.trim();
+			let is_ascii_control = line_nospace.chars().all(|x| x.is_ascii_control());
+			match line.contains("#") || is_ascii_control {
+				true => {
+					vec_old_conf.push(line.to_owned());
+					None
+				}
+				false => {
+					let comments: String =
+						vec_old_conf.iter().map(|s| s.chars()).flatten().collect();
+					let key = get_key(line_nospace);
+					match !(key == "NOT_FOUND") {
+						true => {
+							vec_old_conf.clear();
+							hm_key_cmt_old.insert(key.clone(), comments);
+							Some(key)
+						}
+						false => None,
+					}
+				}
+			}
+		})
+		.collect::<Vec<String>>();
+
+	let new_conf: Vec<&str> = new_config.split_inclusive('\n').collect();
+	// collect new key and the whole key line from the new config
+	let vec_key_cmt_new = new_conf
+		.iter()
+		.filter_map(|line| {
+			let line_nospace = line.trim();
+			let is_ascii_control = line_nospace.chars().all(|x| x.is_ascii_control());
+			match !(line.contains("#") || is_ascii_control) {
+				true => {
+					let key = get_key(line_nospace);
+					match !(key == "NOT_FOUND") {
+						true => Some((key, line_nospace.to_string())),
+						false => None,
+					}
+				}
+				false => None,
+			}
+		})
+		.collect::<Vec<(String, String)>>();
+
+	let mut new_config_str = String::from("");
+	// Merging old comments in the new config (except if the key is contained in the prohibited vec) with all new introduced key comments
+	for (key, key_line) in vec_key_cmt_new {
+		let old_key_exist = vec_key_old.iter().any(|old_key| *old_key == key);
+		let key_fmt = format!("{}\n", key_line);
+		if old_key_exist {
+			if prohibited_key.contains(&key.as_str()) {
+				// push new config key/comments
+				let value = comments.get(&key).unwrap();
+				new_config_str.push_str(value);
+				new_config_str.push_str(&key_fmt);
+			} else {
+				// push old config key/comment
+				let value = hm_key_cmt_old.get(&key).unwrap();
+				new_config_str.push_str(value);
+				new_config_str.push_str(&key_fmt);
+			}
+		} else {
+			// old key does not exist, we push new key/comments
+			let value = comments.get(&key).unwrap();
+			new_config_str.push_str(value);
+			new_config_str.push_str(&key_fmt);
+		}
+	}
+	new_config_str
 }

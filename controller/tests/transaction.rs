@@ -1,4 +1,4 @@
-// Copyright 2019 The Grin Developers
+// Copyright 2021 The Grin Developers
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -19,11 +19,13 @@ extern crate grin_wallet_impls as impls;
 extern crate grin_wallet_libwallet as libwallet;
 
 use grin_wallet_util::grin_core as core;
+use std::convert::TryInto;
 
 use self::core::core::transaction;
 use self::core::global;
 use self::libwallet::{InitTxArgs, OutputStatus, Slate};
 use impls::test_framework::{self, LocalWalletClient};
+use std::sync::atomic::Ordering;
 use std::thread;
 use std::time::Duration;
 
@@ -38,6 +40,7 @@ fn basic_transaction_api(test_dir: &'static str) -> Result<(), wallet::Error> {
 	// Create a new proxy to simulate server and wallet responses
 	let mut wallet_proxy = create_wallet_proxy(test_dir);
 	let chain = wallet_proxy.chain.clone();
+	let stopper = wallet_proxy.running.clone();
 
 	create_wallet_and_add!(
 		client1,
@@ -113,17 +116,29 @@ fn basic_transaction_api(test_dir: &'static str) -> Result<(), wallet::Error> {
 
 		// Check we are creating a tx with the expected lock_height of 0.
 		// We will check this produces a Plain kernel later.
-		assert_eq!(0, slate_i.lock_height);
+		assert_eq!(0, slate.get_kernel_features());
+
+		// Check we are creating a tx with the expected lock_height of 0.
+		// We will check this produces a Plain kernel later.
+		assert_eq!(0, slate_i.get_lock_height());
 
 		slate = client1.send_tx_slate_direct("wallet2", &slate_i)?;
 		sender_api.tx_lock_outputs(m, &slate, None, 0)?;
 		slate = sender_api.finalize_tx(m, &slate)?;
 
 		// Check we have a single kernel and that it is a Plain kernel (no lock_height).
-		assert_eq!(slate.tx.kernels().len(), 1);
+		// fees for 7 inputs, 2 outputs, 1 kernel (weight 52)  (2 * 4 + 1 - 7)*1m = 2m = 2000000
+		assert_eq!(slate.tx_or_err()?.kernels().len(), 1);
 		assert_eq!(
-			slate.tx.kernels().first().map(|k| k.features).unwrap(),
-			transaction::KernelFeatures::Plain { fee: 2000000 }
+			slate
+				.tx_or_err()?
+				.kernels()
+				.first()
+				.map(|k| k.features)
+				.unwrap(),
+			transaction::KernelFeatures::Plain {
+				fee: (2000000 as u64).try_into().unwrap()
+			}
 		);
 
 		Ok(())
@@ -132,13 +147,12 @@ fn basic_transaction_api(test_dir: &'static str) -> Result<(), wallet::Error> {
 	// Check transaction log for wallet 1
 	wallet::controller::owner_single_use(Some(wallet1.clone()), mask1, None, |api, m| {
 		let (_, wallet1_info) = api.retrieve_summary_info(m, true, 1)?;
-		let (refreshed, txs) = api.retrieve_txs(m, true, None, None)?;
+		let (refreshed, txs) = api.retrieve_txs(m, true, None, None, None)?;
 		assert!(refreshed);
 		let fee = core::libtx::tx_fee(
 			wallet1_info.last_confirmed_height as usize - cm as usize,
 			2,
 			1,
-			None,
 		);
 		// we should have a transaction entry for this slate
 		let tx = txs.iter().find(|t| t.tx_slate_id == Some(slate.id));
@@ -154,7 +168,7 @@ fn basic_transaction_api(test_dir: &'static str) -> Result<(), wallet::Error> {
 
 	// Check transaction log for wallet 2
 	wallet::controller::owner_single_use(Some(wallet2.clone()), mask2, None, |api, m| {
-		let (refreshed, txs) = api.retrieve_txs(m, true, None, None)?;
+		let (refreshed, txs) = api.retrieve_txs(m, true, None, None, None)?;
 		assert!(refreshed);
 		// we should have a transaction entry for this slate
 		let tx = txs.iter().find(|t| t.tx_slate_id == Some(slate.id));
@@ -170,7 +184,7 @@ fn basic_transaction_api(test_dir: &'static str) -> Result<(), wallet::Error> {
 
 	// post transaction
 	wallet::controller::owner_single_use(Some(wallet1.clone()), mask1, None, |api, m| {
-		api.post_tx(m, &slate.tx, false)?;
+		api.post_tx(m, slate.tx_or_err()?, false)?;
 		Ok(())
 	})?;
 
@@ -185,7 +199,6 @@ fn basic_transaction_api(test_dir: &'static str) -> Result<(), wallet::Error> {
 			wallet1_info.last_confirmed_height as usize - 1 - cm as usize,
 			2,
 			1,
-			None,
 		);
 		assert!(wallet1_refreshed);
 		// wallet 1 received fees, so amount should be the same
@@ -200,7 +213,7 @@ fn basic_transaction_api(test_dir: &'static str) -> Result<(), wallet::Error> {
 		assert_eq!(wallet1_info.amount_immature, cm * reward + fee);
 
 		// check tx log entry is confirmed
-		let (refreshed, txs) = api.retrieve_txs(m, true, None, None)?;
+		let (refreshed, txs) = api.retrieve_txs(m, true, None, None, None)?;
 		assert!(refreshed);
 		let tx = txs.iter().find(|t| t.tx_slate_id == Some(slate.id));
 		assert!(tx.is_some());
@@ -236,7 +249,7 @@ fn basic_transaction_api(test_dir: &'static str) -> Result<(), wallet::Error> {
 		assert_eq!(wallet2_info.amount_currently_spendable, amount);
 
 		// check tx log entry is confirmed
-		let (refreshed, txs) = api.retrieve_txs(m, true, None, None)?;
+		let (refreshed, txs) = api.retrieve_txs(m, true, None, None, None)?;
 		assert!(refreshed);
 		let tx = txs.iter().find(|t| t.tx_slate_id == Some(slate.id));
 		assert!(tx.is_some());
@@ -260,6 +273,7 @@ fn basic_transaction_api(test_dir: &'static str) -> Result<(), wallet::Error> {
 		};
 		let est = sender_api.init_send_tx(m, &init_args, 1)?;
 		assert_eq!(est.amount, 10 * core::consensus::MWC_FIRST_GROUP_REWARD);
+		// fees for 5 inputs, 2 outputs, 1 kernel   2*4 + 1 - 5 = 4m
 		assert_eq!(est.fee, 4_000_000);
 
 		let init_args = InitTxArgs {
@@ -274,6 +288,7 @@ fn basic_transaction_api(test_dir: &'static str) -> Result<(), wallet::Error> {
 		};
 		let est = sender_api.init_send_tx(m, &init_args, 1)?;
 		assert_eq!(est.amount, core::consensus::MWC_FIRST_GROUP_REWARD * 3);
+		// fees for 3 inputs, 2 outputs, 1 kernel    2*4+1-3 = 6m
 		assert_eq!(est.fee, 6_000_000);
 
 		Ok(())
@@ -302,7 +317,7 @@ fn basic_transaction_api(test_dir: &'static str) -> Result<(), wallet::Error> {
 	wallet::controller::owner_single_use(Some(wallet1.clone()), mask1, None, |sender_api, m| {
 		let (refreshed, _wallet1_info) = sender_api.retrieve_summary_info(m, true, 1)?;
 		assert!(refreshed);
-		let (_, txs) = sender_api.retrieve_txs(m, true, None, None)?;
+		let (_, txs) = sender_api.retrieve_txs(m, true, None, None, None)?;
 		// find the transaction
 		let tx = txs
 			.iter()
@@ -329,7 +344,7 @@ fn basic_transaction_api(test_dir: &'static str) -> Result<(), wallet::Error> {
 		assert_eq!(wallet2_info.amount_currently_spendable, amount * 3);
 
 		// check tx log entry is confirmed
-		let (refreshed, txs) = api.retrieve_txs(m, true, None, None)?;
+		let (refreshed, txs) = api.retrieve_txs(m, true, None, None, None)?;
 		assert!(refreshed);
 		let tx = txs.iter().find(|t| t.tx_slate_id == Some(slate.id));
 		assert!(tx.is_some());
@@ -339,7 +354,48 @@ fn basic_transaction_api(test_dir: &'static str) -> Result<(), wallet::Error> {
 		Ok(())
 	})?;
 
+	// try to send a transaction with amount inclusive of fees, but amount too
+	// small to cover fees. Should fail.
+	wallet::controller::owner_single_use(Some(wallet1.clone()), mask1, None, |sender_api, m| {
+		// note this will increment the block count as part of the transaction "Posting"
+		let args = InitTxArgs {
+			src_acct_name: None,
+			amount: 1,
+			amount_includes_fee: Some(true),
+			minimum_confirmations: 2,
+			max_outputs: 500,
+			num_change_outputs: 1,
+			selection_strategy_is_use_all: true,
+			..Default::default()
+		};
+		let res = sender_api.init_send_tx(m, &args, 1);
+		assert!(res.is_err());
+		Ok(())
+	})?;
+
+	// try to build a transaction with amount inclusive of fees. Confirm that tx
+	// amount + fee is equal to the originally specified amount
+	let amount = 6_000_000_000;
+	wallet::controller::owner_single_use(Some(wallet1.clone()), mask1, None, |sender_api, m| {
+		// note this will increment the block count as part of the transaction "Posting"
+		let args = InitTxArgs {
+			src_acct_name: None,
+			amount: amount,
+			amount_includes_fee: Some(true),
+			minimum_confirmations: 2,
+			max_outputs: 500,
+			num_change_outputs: 1,
+			selection_strategy_is_use_all: true,
+			..Default::default()
+		};
+		let slate_i = sender_api.init_send_tx(m, &args, 1)?;
+		let total_spend: u64 = slate_i.amount + slate_i.fee;
+		assert_eq!(amount, total_spend);
+		Ok(())
+	})?;
+
 	// let logging finish
+	stopper.store(false, Ordering::Relaxed);
 	thread::sleep(Duration::from_millis(200));
 	Ok(())
 }
@@ -351,6 +407,7 @@ fn tx_rollback(test_dir: &'static str) -> Result<(), wallet::Error> {
 	// Create a new proxy to simulate server and wallet responses
 	let mut wallet_proxy = create_wallet_proxy(test_dir);
 	let chain = wallet_proxy.chain.clone();
+	let stopper = wallet_proxy.running.clone();
 
 	create_wallet_and_add!(
 		client1,
@@ -418,7 +475,7 @@ fn tx_rollback(test_dir: &'static str) -> Result<(), wallet::Error> {
 			wallet1_info.last_confirmed_height
 		);
 		assert!(refreshed);
-		let (_, txs) = api.retrieve_txs(m, true, None, None)?;
+		let (_, txs) = api.retrieve_txs(m, true, None, None, None)?;
 		// we should have a transaction entry for this slate
 		let tx = txs.iter().find(|t| t.tx_slate_id == Some(slate.id));
 		assert!(tx.is_some());
@@ -443,7 +500,7 @@ fn tx_rollback(test_dir: &'static str) -> Result<(), wallet::Error> {
 
 	// Check transaction log for wallet 2
 	wallet::controller::owner_single_use(Some(wallet2.clone()), mask2, None, |api, m| {
-		let (refreshed, txs) = api.retrieve_txs(m, true, None, None)?;
+		let (refreshed, txs) = api.retrieve_txs(m, true, None, None, None)?;
 		assert!(refreshed);
 		let mut unconfirmed_count = 0;
 		let tx = txs.iter().find(|t| t.tx_slate_id == Some(slate.id));
@@ -473,7 +530,7 @@ fn tx_rollback(test_dir: &'static str) -> Result<(), wallet::Error> {
 		// can't roll back coinbase
 		let res = api.cancel_tx(m, Some(1), None);
 		assert!(res.is_err());
-		let (_, txs) = api.retrieve_txs(m, true, None, None)?;
+		let (_, txs) = api.retrieve_txs(m, true, None, None, None)?;
 		let tx = txs
 			.iter()
 			.find(|t| t.tx_slate_id == Some(slate.id))
@@ -500,7 +557,7 @@ fn tx_rollback(test_dir: &'static str) -> Result<(), wallet::Error> {
 
 	// Wallet 2 rolls back
 	wallet::controller::owner_single_use(Some(wallet2.clone()), mask2, None, |api, m| {
-		let (_, txs) = api.retrieve_txs(m, true, None, None)?;
+		let (_, txs) = api.retrieve_txs(m, true, None, None, None)?;
 		let tx = txs
 			.iter()
 			.find(|t| t.tx_slate_id == Some(slate.id))
@@ -519,6 +576,7 @@ fn tx_rollback(test_dir: &'static str) -> Result<(), wallet::Error> {
 	})?;
 
 	// let logging finish
+	stopper.store(false, Ordering::Relaxed);
 	thread::sleep(Duration::from_millis(200));
 	Ok(())
 }
@@ -528,7 +586,7 @@ fn db_wallet_basic_transaction_api() {
 	let test_dir = "test_output/basic_transaction_api";
 	setup(test_dir);
 	if let Err(e) = basic_transaction_api(test_dir) {
-		panic!("Libwallet Error: {} - {}", e, e.backtrace().unwrap());
+		panic!("Libwallet Error: {}", e);
 	}
 	clean_output_dir(test_dir);
 }
@@ -538,7 +596,7 @@ fn db_wallet_tx_rollback() {
 	let test_dir = "test_output/tx_rollback";
 	setup(test_dir);
 	if let Err(e) = tx_rollback(test_dir) {
-		panic!("Libwallet Error: {} - {}", e, e.backtrace().unwrap());
+		panic!("Libwallet Error: {}", e);
 	}
 	clean_output_dir(test_dir);
 }

@@ -9,7 +9,7 @@ use crate::grin_keychain::Keychain;
 use crate::grin_keychain::SwitchCommitmentType;
 use crate::grin_util::secp::key::SecretKey;
 
-use crate::{Error, ErrorKind};
+use crate::Error;
 
 type HmacSha512 = Hmac<Sha512>;
 
@@ -77,13 +77,13 @@ impl BIP32Hasher for BIP32GrinboxHasher {
 pub fn derive_address_key<K: Keychain>(keychain: &K, index: u32) -> Result<SecretKey, Error> {
 	let root = keychain
 		.derive_key(713, &K::root_key_id(), SwitchCommitmentType::Regular)
-		.map_err(|e| ErrorKind::DeriveKeyError(format!("Derive key error, {}", e)))?;
+		.map_err(|e| Error::DeriveKeyError(format!("Derive key error, {}", e)))?;
 	let mut hasher = BIP32GrinboxHasher::new(is_floonet());
 	let secp = keychain.secp();
 	let master = ExtendedPrivKey::new_master(secp, &mut hasher, &root.0)
-		.map_err(|e| ErrorKind::DeriveKeyError(format!("Derive key error, {}", e)))?;
+		.map_err(|e| Error::DeriveKeyError(format!("Derive key error, {}", e)))?;
 	let private_key = master
 		.ckd_priv(secp, &mut hasher, ChildNumber::from_normal_idx(index))
-		.map_err(|e| ErrorKind::DeriveKeyError(format!("Derive key error, {}", e)))?;
+		.map_err(|e| Error::DeriveKeyError(format!("Derive key error, {}", e)))?;
 	Ok(private_key.secret_key)
 }

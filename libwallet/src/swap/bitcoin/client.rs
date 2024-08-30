@@ -14,7 +14,7 @@
 
 use crate::grin_util::Mutex;
 use crate::swap::types::Currency;
-use crate::swap::ErrorKind;
+use crate::swap::Error;
 use bitcoin::consensus::Decodable;
 use bitcoin::{OutPoint, Transaction, Txid};
 use std::collections::HashMap;
@@ -60,11 +60,11 @@ pub trait BtcNodeClient: Sync + Send + 'static {
 	/// Name of this client. Normally it is URL
 	fn name(&self) -> String;
 	/// Get node height
-	fn height(&mut self) -> Result<u64, ErrorKind>;
+	fn height(&mut self) -> Result<u64, Error>;
 	/// Get unspent outputs for the address
-	fn unspent(&mut self, currency: Currency, address: &String) -> Result<Vec<Output>, ErrorKind>;
+	fn unspent(&mut self, currency: Currency, address: &String) -> Result<Vec<Output>, Error>;
 	/// Post BTC tranaction,
-	fn post_tx(&mut self, tx: Vec<u8>) -> Result<(), ErrorKind>;
+	fn post_tx(&mut self, tx: Vec<u8>) -> Result<(), Error>;
 	/// Get BTC transaction info.
 	/// Return (height)
 	/// Note: we can't return transaction because it is not Only BTC now, so we don't have parser
@@ -72,7 +72,7 @@ pub trait BtcNodeClient: Sync + Send + 'static {
 	fn transaction(
 		&mut self,
 		tx_hash: &Txid, // tx hash
-	) -> Result<Option<u64>, ErrorKind>;
+	) -> Result<Option<u64>, Error>;
 }
 
 /// Mock BTC node for the testing
@@ -197,11 +197,11 @@ impl BtcNodeClient for TestBtcNodeClient {
 		String::from("BTC test client")
 	}
 
-	fn height(&mut self) -> Result<u64, ErrorKind> {
+	fn height(&mut self) -> Result<u64, Error> {
 		Ok(self.state.lock().height)
 	}
 
-	fn unspent(&mut self, currency: Currency, address: &String) -> Result<Vec<Output>, ErrorKind> {
+	fn unspent(&mut self, currency: Currency, address: &String) -> Result<Vec<Output>, Error> {
 		let state = self.state.lock();
 		let script_pubkey = currency.address_2_script_pubkey(address)?;
 
@@ -242,21 +242,21 @@ impl BtcNodeClient for TestBtcNodeClient {
 		Ok(outputs)
 	}
 
-	fn post_tx(&mut self, tx: Vec<u8>) -> Result<(), ErrorKind> {
+	fn post_tx(&mut self, tx: Vec<u8>) -> Result<(), Error> {
 		let mut state = self.state.lock();
 
 		let cursor = Cursor::new(tx);
 		let tx = Transaction::consensus_decode(cursor).map_err(|e| {
-			ErrorKind::ElectrumNodeClient(format!("Unable to parse transaction, {}", e))
+			Error::ElectrumNodeClient(format!("Unable to parse transaction, {}", e))
 		})?;
 
 		let txid = tx.txid();
 		/* It is expected, transaction repost does work, especially if fees are different...
 		if state.pending.contains_key(&txid) {
-			return Err(ErrorKind::ElectrumNodeClient("Already in mempool".into()));
+			return Err(Error::ElectrumNodeClient("Already in mempool".into()));
 		}*/
 		if state.txs.contains_key(&txid) {
-			return Err(ErrorKind::ElectrumNodeClient("Already in chain".into()));
+			return Err(Error::ElectrumNodeClient("Already in chain".into()));
 		}
 
 		let verify_fn = |out_point: &OutPoint| match state.txs.get(&out_point.txid) {
@@ -268,13 +268,13 @@ impl BtcNodeClient for TestBtcNodeClient {
 		};
 
 		tx.verify(verify_fn)
-			.map_err(|e| ErrorKind::ElectrumNodeClient(format!("{}", e)))?;
+			.map_err(|e| Error::ElectrumNodeClient(format!("{}", e)))?;
 		state.pending.insert(txid, tx.clone());
 
 		Ok(())
 	}
 
-	fn transaction(&mut self, tx_hash: &Txid) -> Result<Option<u64>, ErrorKind> {
+	fn transaction(&mut self, tx_hash: &Txid) -> Result<Option<u64>, Error> {
 		let state = self.state.lock();
 
 		if state.pending.contains_key(tx_hash) {

@@ -1,4 +1,4 @@
-// Copyright 2019 The Grin Developers
+// Copyright 2021 The Grin Developers
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,7 +22,7 @@ pub use self::file::{PathToSlateGetter, PathToSlatePutter};
 pub use self::http::HttpDataSender;
 
 use crate::config::{TorConfig, WalletConfig};
-use crate::error::{Error, ErrorKind};
+use crate::error::Error;
 use crate::libwallet::swap::message::Message;
 use crate::libwallet::Slate;
 use crate::tor::config::complete_tor_address;
@@ -30,6 +30,7 @@ use crate::util::ZeroingString;
 use ed25519_dalek::{PublicKey as DalekPublicKey, SecretKey as DalekSecretKey};
 use grin_wallet_libwallet::slatepack::SlatePurpose;
 use grin_wallet_libwallet::{SlateVersion, Slatepacker};
+use grin_wallet_util::grin_util::secp::Secp256k1;
 pub use mwcmq::{
 	get_mwcmqs_brocker, init_mwcmqs_access_data, MWCMQPublisher, MWCMQSubscriber, MwcMqsChannel,
 };
@@ -51,11 +52,14 @@ pub trait SlateSender {
 	/// TODO: Probably need a slate wrapper type
 	fn send_tx(
 		&self,
+		send_tx: bool, // false if invoice, true if send operation
 		slate: &Slate,
 		slate_content: SlatePurpose,
 		slatepack_secret: &DalekSecretKey,
 		recipient: Option<DalekPublicKey>,
 		other_wallet_version: Option<(SlateVersion, Option<String>)>,
+		height: u64,
+		secp: &Secp256k1,
 	) -> Result<Slate, Error>;
 }
 
@@ -78,8 +82,9 @@ pub trait SlatePutter {
 	fn put_tx(
 		&self,
 		slate: &Slate,
-		slatepack_secret: &DalekSecretKey,
+		slatepack_secret: Option<&DalekSecretKey>,
 		use_test_rng: bool,
+		secp: &Secp256k1,
 	) -> Result<String, Error>;
 }
 
@@ -94,13 +99,18 @@ pub enum SlateGetData {
 /// Checks for a transaction from a corresponding SlatePutter, returns the transaction if it exists
 pub trait SlateGetter {
 	/// Receive a transaction sync. Just read it from wherever and return the slate.
-	fn get_tx(&self, slatepack_secret: &DalekSecretKey) -> Result<SlateGetData, Error>;
+	fn get_tx(
+		&self,
+		slatepack_secret: Option<&DalekSecretKey>,
+		height: u64,
+		secp: &Secp256k1,
+	) -> Result<SlateGetData, Error>;
 }
 
 /// Swap Message Sender
 pub trait SwapMessageSender {
 	/// Send a swap message. Return true is message delivery acknowledge can be set (message was delivered and procesed)
-	fn send_swap_message(&self, swap_message: &Message) -> Result<bool, Error>;
+	fn send_swap_message(&self, swap_message: &Message, secp: &Secp256k1) -> Result<bool, Error>;
 }
 
 /// Swap Message Sender
@@ -159,7 +169,7 @@ pub fn create_sender(
 	tor_config: Option<TorConfig>,
 ) -> Result<Box<dyn SlateSender>, Error> {
 	let invalid = |e| {
-		ErrorKind::WalletComms(format!(
+		Error::WalletComms(format!(
 			"Invalid wallet comm type and destination. method: {}, dest: {}, error: {}",
 			method, dest, e
 		))
@@ -177,26 +187,25 @@ pub fn create_sender(
 	};
 
 	Ok(match method {
-		"http" => Box::new(
-			HttpDataSender::new(&dest, apisecret.clone(), None, false, None)
-				.map_err(|e| invalid(e))?,
-		),
+		"http" => {
+			Box::new(HttpDataSender::plain_http(&dest, apisecret.clone()).map_err(|e| invalid(e))?)
+		}
 		"tor" => match tor_config {
 			None => {
-				return Err(
-					ErrorKind::WalletComms("Tor Configuration required".to_string()).into(),
-				);
+				return Err(Error::WalletComms("Tor Configuration required".to_string()));
 			}
 			Some(tc) => {
 				let dest = validate_tor_address(dest)?;
 				Box::new(
-					HttpDataSender::with_socks_proxy(
+					HttpDataSender::tor_through_socks_proxy(
 						&dest,
 						apisecret.clone(),
 						&tc.socks_proxy_addr,
 						Some(tc.send_config_dir),
 						tc.socks_running,
-						tc.tor_log_file.clone(),
+						tc.tor_log_file,
+						tc.bridge,
+						tc.proxy,
 					)
 					.map_err(|e| invalid(e))?,
 				)
@@ -217,7 +226,7 @@ pub fn create_swap_message_sender(
 	tor_config: &TorConfig,
 ) -> Result<Box<dyn SwapMessageSender>, Error> {
 	let invalid = |e| {
-		ErrorKind::WalletComms(format!(
+		Error::WalletComms(format!(
 			"Invalid wallet comm type and destination. method: {}, dest: {}, error: {}",
 			method, dest, e
 		))
@@ -227,13 +236,15 @@ pub fn create_swap_message_sender(
 		"tor" => {
 			let dest = validate_tor_address(dest)?;
 			Box::new(
-				HttpDataSender::with_socks_proxy(
+				HttpDataSender::tor_through_socks_proxy(
 					&dest,
 					apisecret.clone(),
 					&tor_config.socks_proxy_addr,
 					Some(tor_config.send_config_dir.clone()),
 					tor_config.socks_running,
 					tor_config.tor_log_file.clone(),
+					tor_config.bridge.clone(),
+					tor_config.proxy.clone(),
 				)
 				.map_err(|e| invalid(e))?,
 			)
@@ -257,21 +268,18 @@ pub fn validate_tor_address(dest: &str) -> Result<String, Error> {
 pub fn handle_unsupported_types(method: &str) -> Error {
 	match method {
 		"file" => {
-			return ErrorKind::WalletComms(
+			return Error::WalletComms(
 				"File based transactions must be performed asynchronously.".to_string(),
-			)
-			.into();
+			);
 		}
 		"self" => {
-			return ErrorKind::WalletComms("No sender implementation for \"self\".".to_string())
-				.into();
+			return Error::WalletComms("No sender implementation for \"self\".".to_string());
 		}
 		_ => {
-			return ErrorKind::WalletComms(format!(
+			return Error::WalletComms(format!(
 				"Wallet comm method \"{}\" does not exist.",
 				method
-			))
-			.into();
+			));
 		}
 	}
 }

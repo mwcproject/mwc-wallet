@@ -1,4 +1,4 @@
-// Copyright 2019 The Grin Developers
+// Copyright 2021 The Grin Developers
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -23,7 +23,7 @@ extern crate log;
 use crate::config::ConfigError;
 use crate::core::global;
 use crate::util::init_logger;
-use clap::App;
+use clap::{App, AppSettings};
 use grin_wallet_config as config;
 use grin_wallet_impls::HTTPNodeClient;
 use grin_wallet_util::grin_core as core;
@@ -31,8 +31,8 @@ use grin_wallet_util::grin_util as util;
 use std::env;
 use std::path::PathBuf;
 
-use grin_wallet_libwallet::internal::selection;
 use grin_wallet_config::parse_node_address_string;
+use grin_wallet_controller::controller::{set_foreign_api_server, set_owner_api_server};
 use grin_wallet_libwallet::proof::proofaddress;
 use mwc_wallet::cmd;
 
@@ -75,6 +75,7 @@ fn real_main() -> i32 {
 	let yml = load_yaml!("mwc-wallet.yml");
 	let args = App::from_yaml(yml)
 		.version(built_info::PKG_VERSION)
+		.setting(AppSettings::VersionlessSubcommands)
 		.get_matches();
 
 	let chain_type = if args.is_present("floonet") {
@@ -159,11 +160,9 @@ fn real_main() -> i32 {
 			.clone(),
 	);
 
-	let wallet_config = config.clone().members.unwrap().wallet;
+	global::init_global_accept_fee_base(config.members.as_ref().unwrap().wallet.accept_fee_base());
 
-	if let Some(base_fee) = &wallet_config.base_fee {
-		selection::set_base_fee(base_fee.clone());
-	}
+	let wallet_config = config.clone().members.unwrap().wallet;
 
 	// Default derive index is 1 to match what mwc713 has by default...
 	proofaddress::set_address_index(wallet_config.grinbox_address_index.unwrap_or(0));
@@ -173,5 +172,11 @@ fn real_main() -> i32 {
 	let node_client = HTTPNodeClient::new(node_list, None)
 		.expect("Unable create HTTP client for mwc-node connection");
 
-	cmd::wallet_command(&args, config, node_client)
+	let res = cmd::wallet_command(&args, config, node_client);
+
+	// stopping AI threads if they exist. We need to be clean
+	set_foreign_api_server(None);
+	set_owner_api_server(None);
+
+	res
 }

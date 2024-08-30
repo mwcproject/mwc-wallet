@@ -1,4 +1,4 @@
-// Copyright 2019 The Grin Developers
+// Copyright 2021 The Grin Developers
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -24,7 +24,6 @@ extern crate serde_json;
 extern crate log;
 #[macro_use]
 extern crate lazy_static;
-use failure;
 use grin_wallet_api as apiwallet;
 use grin_wallet_config as config;
 use grin_wallet_impls as impls;
@@ -40,4 +39,4 @@ pub mod display;
 mod error;
 pub mod executor;
 
-pub use crate::error::{Error, ErrorKind};
+pub use crate::error::Error;

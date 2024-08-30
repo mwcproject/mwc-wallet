@@ -1,4 +1,4 @@
-// Copyright 2019 The Grin Developers
+// Copyright 2021 The Grin Developers
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,20 +18,21 @@ use crate::libwallet::swap::fsm::state::StateEtaInfo;
 use crate::libwallet::swap::swap;
 use crate::libwallet::swap::types::{Action, Currency, Role};
 use crate::libwallet::{
-	AcctPathMapping, Error, OutputCommitMapping, OutputStatus, TxLogEntry, WalletInfo,
+	AcctPathMapping, Error, OutputCommitMapping, OutputStatus, TxLogEntry, ViewWallet, WalletInfo,
 };
 
-use crate::util;
+use crate::util::{to_hex, ToHex};
 use chrono::prelude::*;
 use chrono::Local;
 use colored::*;
 use grin_wallet_libwallet::swap::swap::SwapJournalRecord;
 use grin_wallet_libwallet::swap::types::SwapTransactionsConfirmations;
+use grin_wallet_util::grin_util::secp::Secp256k1;
 use prettytable;
 
 /// Display outputs in a pretty way
 pub fn outputs(
-	account: &str,
+	account: &Option<String>,
 	cur_height: u64,
 	validated: bool,
 	outputs: Vec<OutputCommitMapping>,
@@ -42,7 +43,8 @@ pub fn outputs(
 		"{}",
 		format!(
 			"Wallet Outputs - Account '{}' - Block Height: {}",
-			account, cur_height
+			account.as_deref().unwrap_or("default"),
+			cur_height
 		)
 		.magenta()
 	);
@@ -62,7 +64,7 @@ pub fn outputs(
 	]);
 
 	for m in outputs {
-		let commit = format!("{}", util::to_hex(&m.commit.0));
+		let commit = format!("{}", m.commit.as_ref().to_hex());
 		let index = match m.output.mmr_index {
 			None => "None".to_owned(),
 			Some(t) => t.to_string(),
@@ -127,10 +129,10 @@ pub fn outputs(
 
 /// Display transaction log in a pretty way
 pub fn txs(
-	account: &str,
+	account: &Option<String>,
 	cur_height: u64,
 	validated: bool,
-	txs: &Vec<TxLogEntry>,
+	txs: &[TxLogEntry],
 	include_status: bool,
 	dark_background_color_scheme: bool,
 	show_full_info: bool,
@@ -141,7 +143,8 @@ pub fn txs(
 		"{}",
 		format!(
 			"Transaction Log - Account '{}' - Block Height: {}",
-			account, cur_height
+			account.as_deref().unwrap_or("default"),
+			cur_height
 		)
 		.magenta()
 	);
@@ -193,7 +196,7 @@ pub fn txs(
 		};
 		// mwc713 (short) representation of ID
 		let short_slate_id = match t.tx_slate_id {
-			Some(m) => util::to_hex(&m.as_bytes()[..4]),
+			Some(m) => to_hex(&m.as_bytes()[..4]),
 			None => String::from(""),
 		};
 
@@ -238,7 +241,7 @@ pub fn txs(
 			None => "None".to_owned(),
 		};
 		let kernel_excess = match t.kernel_excess {
-			Some(e) => util::to_hex(&e.0),
+			Some(e) => e.0.as_ref().to_hex(),
 			None => "None".to_owned(),
 		};
 		let payment_proof = if has_proof(t) {
@@ -342,16 +345,109 @@ pub fn txs(
 	}
 	Ok(())
 }
+
+pub fn view_wallet_balance(w: ViewWallet, cur_height: u64, dark_background_color_scheme: bool) {
+	println!(
+		"\n____ View Wallet Summary Info - Block Height: {} ____\n Rewind Hash - {}\n",
+		cur_height, w.rewind_hash
+	);
+	let mut table = table!();
+
+	if dark_background_color_scheme {
+		table.add_row(row![
+			bFG->"Total Balance",
+			FG->amount_to_hr_string(w.total_balance, false)
+		]);
+	} else {
+		table.add_row(row![
+			bFG->"Total Balance",
+			FG->amount_to_hr_string(w.total_balance, false)
+		]);
+	};
+	table.set_format(*prettytable::format::consts::FORMAT_NO_BORDER_LINE_SEPARATOR);
+	table.printstd();
+	println!();
+}
+
+pub fn view_wallet_output(
+	view_wallet: ViewWallet,
+	cur_height: u64,
+	dark_background_color_scheme: bool,
+) -> Result<(), Error> {
+	println!();
+	let title = format!("View Wallet Outputs - Block Height: {}", cur_height);
+
+	if term::stdout().is_none() {
+		println!("Could not open terminal");
+		return Ok(());
+	}
+
+	let mut t = term::stdout().unwrap();
+	t.fg(term::color::MAGENTA).unwrap();
+	writeln!(t, "{}", title).unwrap();
+	t.reset().unwrap();
+
+	let mut table = table!();
+
+	table.set_titles(row![
+		bMG->"Output Commitment",
+		bMG->"MMR Index",
+		bMG->"Block Height",
+		bMG->"Locked Until",
+		bMG->"Coinbase?",
+		bMG->"# Confirms",
+		bMG->"Value",
+	]);
+
+	for m in view_wallet.output_result {
+		let commit = format!("{}", m.commit);
+		let index = m.mmr_index;
+		let height = format!("{}", m.height);
+		let lock_height = format!("{}", m.lock_height);
+		let is_coinbase = format!("{}", m.is_coinbase);
+		let num_confirmations = format!("{}", m.num_confirmations(cur_height));
+		let value = format!("{}", core::amount_to_hr_string(m.value, false));
+
+		if dark_background_color_scheme {
+			table.add_row(row![
+				bFC->commit,
+				bFB->index,
+				bFB->height,
+				bFB->lock_height,
+				bFY->is_coinbase,
+				bFB->num_confirmations,
+				bFG->value,
+			]);
+		} else {
+			table.add_row(row![
+				bFD->commit,
+				bFB->index,
+				bFB->height,
+				bFB->lock_height,
+				bFD->is_coinbase,
+				bFB->num_confirmations,
+				bFG->value,
+			]);
+		}
+	}
+
+	table.set_format(*prettytable::format::consts::FORMAT_NO_COLSEP);
+	table.printstd();
+	println!();
+	Ok(())
+}
+
 /// Display summary info in a pretty way
 pub fn info(
-	account: &str,
+	account: &Option<String>,
 	wallet_info: &WalletInfo,
 	validated: bool,
 	dark_background_color_scheme: bool,
 ) {
 	println!(
 		"\n____ Wallet Summary Info - Account '{}' as of height {} ____\n",
-		account, wallet_info.last_confirmed_height,
+		account.as_deref().unwrap_or("default"),
+		wallet_info.last_confirmed_height,
 	);
 
 	let mut table = table!();
@@ -361,6 +457,12 @@ pub fn info(
 			bFG->"Confirmed Total",
 			FG->amount_to_hr_string(wallet_info.total, false)
 		]);
+		if wallet_info.amount_reverted > 0 {
+			table.add_row(row![
+				Fr->format!("Reverted"),
+				Fr->amount_to_hr_string(wallet_info.amount_reverted, false)
+			]);
+		}
 		// Only dispay "Immature Coinbase" if we have related outputs in the wallet.
 		// This row just introduces confusion if the wallet does not receive coinbase rewards.
 		if wallet_info.amount_immature > 0 {
@@ -394,6 +496,12 @@ pub fn info(
 			bFG->"Total",
 			FG->amount_to_hr_string(wallet_info.total, false)
 		]);
+		if wallet_info.amount_reverted > 0 {
+			table.add_row(row![
+				Fr->format!("Reverted"),
+				Fr->amount_to_hr_string(wallet_info.amount_reverted, false)
+			]);
+		}
 		// Only dispay "Immature Coinbase" if we have related outputs in the wallet.
 		// This row just introduces confusion if the wallet does not receive coinbase rewards.
 		if wallet_info.amount_immature > 0 {
@@ -494,7 +602,11 @@ pub fn accounts(acct_mappings: Vec<AcctPathMapping>) {
 }
 
 /// Display transaction log messages
-pub fn tx_messages(tx: &TxLogEntry, dark_background_color_scheme: bool) -> Result<(), Error> {
+pub fn tx_messages(
+	tx: &TxLogEntry,
+	dark_background_color_scheme: bool,
+	secp: &Secp256k1,
+) -> Result<(), Error> {
 	println!();
 	println!(
 		"{}",
@@ -525,13 +637,13 @@ pub fn tx_messages(tx: &TxLogEntry, dark_background_color_scheme: bool) -> Resul
 
 	for m in msgs.messages {
 		let id = format!("{}", m.id);
-		let public_key = format!("{}", util::to_hex(&m.public_key.serialize_vec(true)));
+		let public_key = format!("{}", m.public_key.serialize_vec(secp, true).to_hex());
 		let message = match m.message {
 			Some(m) => format!("{}", m),
 			None => "None".to_owned(),
 		};
 		let message_sig = match m.message_sig {
-			Some(s) => format!("{}", util::to_hex(&s.serialize_der())),
+			Some(s) => format!("{}", s.serialize_der(secp).to_hex()),
 			None => "None".to_owned(),
 		};
 		if dark_background_color_scheme {
@@ -576,7 +688,7 @@ pub fn payment_proof(tx: &TxLogEntry) -> Result<(), Error> {
 
 	println!();
 	let receiver_signature = match pp.receiver_signature {
-		Some(s) => util::to_hex(s.as_bytes()),
+		Some(s) => s.to_hex(),
 		None => "None".to_owned(),
 	};
 	let fee = match tx.fee {
@@ -593,11 +705,11 @@ pub fn payment_proof(tx: &TxLogEntry) -> Result<(), Error> {
 	};
 
 	let sender_signature = match pp.sender_signature {
-		Some(s) => util::to_hex(s.as_bytes()),
+		Some(s) => s.to_hex(),
 		None => "None".to_owned(),
 	};
 	let kernel_excess = match tx.kernel_excess {
-		Some(e) => util::to_hex(&e.0),
+		Some(e) => e.to_hex(),
 		None => "None".to_owned(),
 	};
 
@@ -694,14 +806,18 @@ pub fn swap_trade(
 	};
 	println!("    Locking order: {}", lock_str.bold().yellow());
 
-	if tx_conf.mwc_tip < swap.refund_slate.lock_height {
-		let mwc_lock_sec = (swap.refund_slate.lock_height - tx_conf.mwc_tip) * 60;
+	if tx_conf.mwc_tip < swap.refund_slate.get_lock_height_check()? {
+		let mwc_lock_sec = (swap.refund_slate.get_lock_height_check()? - tx_conf.mwc_tip) * 60;
 		let sel_lock_h = mwc_lock_sec / 3600;
 		let sel_lock_m = (mwc_lock_sec % 3600) / 60;
 		let est_time_str = format!("{} hours and {} minutes", sel_lock_h, sel_lock_m);
 		println!(
 			"    MWC funds will be locked until block {}, and are expected to be mined in {}",
-			swap.refund_slate.lock_height.to_string().bold().yellow(),
+			swap.refund_slate
+				.get_lock_height()
+				.to_string()
+				.bold()
+				.yellow(),
 			est_time_str.bold().yellow(),
 		);
 	} else {
@@ -834,7 +950,7 @@ pub fn swap_trade(
 }
 
 fn timestamp_to_local_time(timestamp: i64) -> String {
-	let dt = Local.timestamp(timestamp, 0);
+	let dt = Local.timestamp_opt(timestamp, 0).unwrap();
 	dt.format("%B %e %H:%M:%S").to_string()
 }
 

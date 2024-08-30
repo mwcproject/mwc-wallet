@@ -1,4 +1,4 @@
-// Copyright 2020 The Grin Developers
+// Copyright 2021 The Grin Developers
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,20 +16,18 @@ use crate::grin_util::from_hex;
 use data_encoding::BASE32;
 use ed25519_dalek::PublicKey as DalekPublicKey;
 use ed25519_dalek::SecretKey as DalekSecretKey;
-use failure::Fail;
 use sha3::{Digest, Sha3_256};
 use std::convert::TryFrom;
 use std::fmt;
 
-#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Eq, PartialEq, thiserror::Error, Serialize, Deserialize)]
 /// OnionV3 Address Errors
-#[derive(Fail)]
 pub enum OnionV3Error {
 	/// Error decoding an address from a string
-	#[fail(display = "Unable to decode Onion address from a string, {}", _0)]
+	#[error("Unable to decode Onion address from a string, {0}")]
 	AddressDecoding(String),
 	/// Error with given private key
-	#[fail(display = "Invalid private key, {}", _0)]
+	#[error("Invalid private key, {0}")]
 	InvalidPrivateKey(String),
 }
 

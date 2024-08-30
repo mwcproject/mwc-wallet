@@ -1,4 +1,4 @@
-// Copyright 2019 The Grin Developers
+// Copyright 2021 The Grin Developers
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -14,14 +14,15 @@
 use crate::core::libtx::secp_ser;
 use crate::keychain::Identifier;
 use crate::libwallet::dalek_ser;
-use crate::libwallet::{Error, ErrorKind};
+use crate::libwallet::Error;
 use crate::libwallet::{
 	ParticipantMessages, StoredProofInfo, TxLogEntry, TxLogEntryType, VersionedSlate,
 };
 use crate::util::secp::key::{PublicKey, SecretKey};
 use crate::util::secp::pedersen;
-use crate::util::{from_hex, to_hex};
+use crate::util::{from_hex, ToHex};
 use grin_wallet_libwallet::slatepack::SlatePurpose;
+use grin_wallet_libwallet::types::option_duration_as_secs;
 
 use base64;
 use chrono::{DateTime, Utc};
@@ -31,6 +32,7 @@ use rand::{thread_rng, Rng};
 use ring::aead;
 use serde_json::{self, Value};
 use std::collections::HashMap;
+use std::time::Duration;
 use uuid::Uuid;
 
 /// Represents a compliant JSON RPC 2.0 id.
@@ -84,7 +86,7 @@ impl EncryptedBody {
 	pub fn from_json(json_in: &Value, enc_key: &SecretKey) -> Result<Self, Error> {
 		let mut to_encrypt = serde_json::to_string(&json_in)
 			.map_err(|e| {
-				ErrorKind::APIEncryption(format!("EncryptedBody Enc: Unable to encode JSON, {}", e))
+				Error::APIEncryption(format!("EncryptedBody Enc: Unable to encode JSON, {}", e))
 			})?
 			.as_bytes()
 			.to_vec();
@@ -100,15 +102,14 @@ impl EncryptedBody {
 			&mut to_encrypt,
 		);
 		if let Err(e) = res {
-			return Err(ErrorKind::APIEncryption(format!(
+			return Err(Error::APIEncryption(format!(
 				"EncryptedBody: encryption failed, {}",
 				e
-			))
-			.into());
+			)));
 		}
 
 		Ok(EncryptedBody {
-			nonce: to_hex(&nonce),
+			nonce: nonce.to_hex(),
 			body_enc: base64::encode(&to_encrypt),
 		})
 	}
@@ -116,7 +117,7 @@ impl EncryptedBody {
 	/// return serialize JSON self
 	pub fn as_json_value(&self) -> Result<Value, Error> {
 		let res = serde_json::to_value(self).map_err(|e| {
-			ErrorKind::APIEncryption(format!("EncryptedBody: JSON serialization failed, {}", e))
+			Error::APIEncryption(format!("EncryptedBody: JSON serialization failed, {}", e))
 		})?;
 		Ok(res)
 	}
@@ -125,7 +126,7 @@ impl EncryptedBody {
 	pub fn as_json_str(&self) -> Result<String, Error> {
 		let res = self.as_json_value()?;
 		let res = serde_json::to_string(&res).map_err(|e| {
-			ErrorKind::APIEncryption(format!(
+			Error::APIEncryption(format!(
 				"EncryptedBody: JSON String serialization failed, {}",
 				e
 			))
@@ -136,24 +137,23 @@ impl EncryptedBody {
 	/// Return original request
 	pub fn decrypt(&self, dec_key: &SecretKey) -> Result<Value, Error> {
 		let mut to_decrypt = base64::decode(&self.body_enc).map_err(|e| {
-			ErrorKind::APIEncryption(format!(
+			Error::APIEncryption(format!(
 				"EncryptedBody Dec: Encrypted request contains invalid Base64, {}",
 				e
 			))
 		})?;
 
 		let nonce = from_hex(&self.nonce).map_err(|e| {
-			ErrorKind::APIEncryption(format!(
+			Error::APIEncryption(format!(
 				"EncryptedBody Dec: Encrypted request contains invalid nonce, {}",
 				e
 			))
 		})?;
 
 		if nonce.len() < 12 {
-			return Err(ErrorKind::APIEncryption(
+			return Err(Error::APIEncryption(
 				"EncryptedBody Dec: Invalid Nonce length".to_string(),
-			)
-			.into());
+			));
 		}
 		let mut n = [0u8; 12];
 		n.copy_from_slice(&nonce[0..12]);
@@ -163,20 +163,18 @@ impl EncryptedBody {
 		opening_key
 			.open_in_place(aead::Nonce::assume_unique_for_key(n), aad, &mut to_decrypt)
 			.map_err(|e| {
-				ErrorKind::APIEncryption(format!("EncryptedBody: decryption failed, {}", e))
+				Error::APIEncryption(format!("EncryptedBody: decryption failed, {}", e))
 			})?;
 
 		for _ in 0..aead::AES_256_GCM.tag_len() {
 			to_decrypt.pop();
 		}
 
-		let decrypted = String::from_utf8(to_decrypt).map_err(|_| {
-			ErrorKind::APIEncryption("EncryptedBody Dec: Invalid UTF-8".to_string())
-		})?;
+		let decrypted = String::from_utf8(to_decrypt)
+			.map_err(|_| Error::APIEncryption("EncryptedBody Dec: Invalid UTF-8".to_string()))?;
 
-		Ok(serde_json::from_str(&decrypted).map_err(|e| {
-			ErrorKind::APIEncryption(format!("EncryptedBody Dec: Invalid JSON, {}", e))
-		})?)
+		Ok(serde_json::from_str(&decrypted)
+			.map_err(|e| Error::APIEncryption(format!("EncryptedBody Dec: Invalid JSON, {}", e)))?)
 	}
 }
 
@@ -207,7 +205,7 @@ impl EncryptedRequest {
 	/// return serialize JSON self
 	pub fn as_json_value(&self) -> Result<Value, Error> {
 		let res = serde_json::to_value(self).map_err(|e| {
-			ErrorKind::APIEncryption(format!(
+			Error::APIEncryption(format!(
 				"EncryptedRequest: JSON serialization failed, {}",
 				e
 			))
@@ -219,7 +217,7 @@ impl EncryptedRequest {
 	pub fn as_json_str(&self) -> Result<String, Error> {
 		let res = self.as_json_value()?;
 		let res = serde_json::to_string(&res).map_err(|e| {
-			ErrorKind::APIEncryption(format!(
+			Error::APIEncryption(format!(
 				"EncryptedRequest: JSON String serialization failed, {}",
 				e
 			))
@@ -262,7 +260,7 @@ impl EncryptedResponse {
 	/// return serialize JSON self
 	pub fn as_json_value(&self) -> Result<Value, Error> {
 		let res = serde_json::to_value(self).map_err(|e| {
-			ErrorKind::APIEncryption(format!(
+			Error::APIEncryption(format!(
 				"EncryptedResponse: JSON serialization failed, {}",
 				e
 			))
@@ -274,7 +272,7 @@ impl EncryptedResponse {
 	pub fn as_json_str(&self) -> Result<String, Error> {
 		let res = self.as_json_value()?;
 		let res = serde_json::to_string(&res).map_err(|e| {
-			ErrorKind::APIEncryption(format!(
+			Error::APIEncryption(format!(
 				"EncryptedResponse: JSON String serialization failed, {}",
 				e
 			))
@@ -286,8 +284,8 @@ impl EncryptedResponse {
 	pub fn decrypt(&self, dec_key: &SecretKey) -> Result<Value, Error> {
 		self.result
 			.get("Ok")
-			.ok_or(ErrorKind::GenericError(format!(
-				"Not found expetced 'OK' value at result"
+			.ok_or(Error::GenericError(format!(
+				"Not found expetced 'OK' value at response"
 			)))?
 			.decrypt(dec_key)
 	}
@@ -330,7 +328,7 @@ impl EncryptionErrorResponse {
 	/// return serialized JSON self
 	pub fn as_json_value(&self) -> Value {
 		let res = serde_json::to_value(self).map_err(|e| {
-			ErrorKind::APIEncryption(format!(
+			Error::APIEncryption(format!(
 				"EncryptedResponse: JSON serialization failed, {}",
 				e
 			))
@@ -410,6 +408,8 @@ pub struct TxLogEntryAPI {
 	/// Output commits as Strings, defined for send & recieve
 	#[serde(default)]
 	pub output_commits: Vec<String>,
+	#[serde(with = "option_duration_as_secs", default)]
+	pub reverted_after: Option<Duration>,
 }
 
 impl TxLogEntryAPI {
@@ -437,8 +437,9 @@ impl TxLogEntryAPI {
 			kernel_offset: tle.kernel_offset.clone(),
 			kernel_lookup_min_height: tle.kernel_lookup_min_height.clone(),
 			payment_proof: tle.payment_proof.clone(),
-			input_commits: tle.input_commits.iter().map(|c| to_hex(&c.0)).collect(),
-			output_commits: tle.output_commits.iter().map(|c| to_hex(&c.0)).collect(),
+			input_commits: tle.input_commits.iter().map(|c| c.0.to_hex()).collect(),
+			output_commits: tle.output_commits.iter().map(|c| c.0.to_hex()).collect(),
+			reverted_after: tle.reverted_after.clone(),
 		}
 	}
 
@@ -468,11 +469,14 @@ pub struct SlatepackInfo {
 #[test]
 fn encrypted_request() -> Result<(), Error> {
 	use crate::util::from_hex;
+	use grin_wallet_util::grin_util::static_secp_instance;
 
 	let sec_key_str = "e00dcc4a009e3427c6b1e1a550c538179d46f3827a13ed74c759c860761caf1e";
 	let shared_key = {
 		let sec_key_bytes = from_hex(sec_key_str).unwrap();
-		SecretKey::from_slice(&sec_key_bytes)?
+		let secp_inst = static_secp_instance();
+		let secp = secp_inst.lock();
+		SecretKey::from_slice(&secp, &sec_key_bytes)?
 	};
 	let req = serde_json::json!({
 		"jsonrpc": "2.0",

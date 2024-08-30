@@ -1,4 +1,4 @@
-// Copyright 2019 The Grin Developers
+// Copyright 2021 The Grin Developers
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,10 +22,12 @@ use crate::slate_versions::v2::{CoinbaseV2, SlateV2};
 use crate::slate_versions::v3::{CoinbaseV3, SlateV3};
 use crate::slatepack::SlatePurpose;
 use crate::types::CbData;
+use crate::Error;
 use crate::Slatepacker;
-use crate::{Error, ErrorKind};
 use ed25519_dalek::PublicKey as DalekPublicKey;
 use ed25519_dalek::SecretKey as DalekSecretKey;
+use grin_wallet_util::grin_util::secp::Secp256k1;
+use std::convert::TryFrom;
 
 pub mod ser;
 
@@ -107,6 +109,7 @@ impl VersionedSlate {
 		recipient: Option<DalekPublicKey>,
 		secret: &DalekSecretKey,
 		use_test_rng: bool,
+		secp: &Secp256k1,
 	) -> Result<VersionedSlate, Error> {
 		match version {
 			SlateVersion::SP => {
@@ -118,6 +121,7 @@ impl VersionedSlate {
 					recipient,
 					secret,
 					use_test_rng,
+					secp,
 				)?;
 				Ok(VersionedSlate::SP(armored_slatepack))
 			}
@@ -131,45 +135,53 @@ impl VersionedSlate {
 		version: SlateVersion,
 	) -> Result<VersionedSlate, Error> {
 		match version {
-			SlateVersion::SP => {
-				return Err(ErrorKind::GenericError("Slate is encrypted".to_string()).into())
-			}
+			SlateVersion::SP => return Err(Error::GenericError("Slate is encrypted".to_string())),
 			SlateVersion::V3B | SlateVersion::V3 => Ok(VersionedSlate::V3(slate.into())),
 			// Left here as a reminder of what needs to be inserted on
 			// the release of a new slate
 			SlateVersion::V2 => {
 				let s = SlateV3::from(slate);
-				let s = SlateV2::from(&s);
+				let s = SlateV2::try_from(&s)?;
 				Ok(VersionedSlate::V2(s))
 			}
 		}
 	}
 
 	/// Decode into the slate and sender address.
-	pub fn into_slatepack(&self, dec_key: &DalekSecretKey) -> Result<Slatepacker, Error> {
+	pub fn into_slatepack(
+		&self,
+		dec_key: &DalekSecretKey,
+		height: u64,
+		secp: &Secp256k1,
+	) -> Result<Slatepacker, Error> {
 		match self {
 			VersionedSlate::SP(arm_slatepack) => {
-				let packer = Slatepacker::decrypt_slatepack(arm_slatepack.as_bytes(), dec_key)?;
+				let packer = Slatepacker::decrypt_slatepack(
+					arm_slatepack.as_bytes(),
+					dec_key,
+					height,
+					secp,
+				)?;
 				Ok(packer)
 			}
-			VersionedSlate::V3(s) => Ok(Slatepacker::wrap_slate(s.clone().to_slate()?)),
+			VersionedSlate::V3(s) => Ok(Slatepacker::wrap_slate(s.clone().to_slate(false)?)),
 			VersionedSlate::V2(s) => {
 				let s = SlateV3::from(s.clone());
-				Ok(Slatepacker::wrap_slate(s.to_slate()?))
+				Ok(Slatepacker::wrap_slate(s.to_slate(false)?))
 			}
 		}
 	}
 
 	/// Non encrypted slate conversion
-	pub fn into_slate_plain(&self) -> Result<Slate, Error> {
+	pub fn into_slate_plain(&self, fix_kernel: bool) -> Result<Slate, Error> {
 		match self {
 			VersionedSlate::SP(_) => {
-				return Err(ErrorKind::GenericError("Slate is encrypted".to_string()).into())
+				return Err(Error::GenericError("Slate is encrypted".to_string()))
 			}
-			VersionedSlate::V3(s) => Ok(s.clone().to_slate()?),
+			VersionedSlate::V3(s) => Ok(s.clone().to_slate(fix_kernel)?),
 			VersionedSlate::V2(s) => {
 				let s = SlateV3::from(s.clone());
-				Ok(s.to_slate()?)
+				Ok(s.to_slate(false)?)
 			}
 		}
 	}
@@ -179,10 +191,10 @@ impl VersionedSlate {
 		let str = match self {
 			VersionedSlate::SP(s) => s.clone(),
 			VersionedSlate::V3(s) => serde_json::to_string(&s).map_err(|e| {
-				ErrorKind::GenericError(format!("Failed convert SlateV3 to Json, {}", e))
+				Error::GenericError(format!("Failed convert SlateV3 to Json, {}", e))
 			})?,
 			VersionedSlate::V2(s) => serde_json::to_string(&s).map_err(|e| {
-				ErrorKind::GenericError(format!("Failed convert SlateV2 to Json, {}", e))
+				Error::GenericError(format!("Failed convert SlateV2 to Json, {}", e))
 			})?,
 		};
 		Ok(str)

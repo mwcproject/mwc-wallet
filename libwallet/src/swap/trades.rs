@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::ErrorKind;
+use super::Error;
 use crate::grin_core::global;
 use crate::grin_util::secp::key::SecretKey;
 use crate::grin_util::{from_hex, to_hex};
@@ -96,7 +96,7 @@ pub fn get_electrumx_uri(
 	currency: &Currency,
 	swap_electrum_node_uri1: &Option<String>,
 	swap_electrum_node_uri2: &Option<String>,
-) -> Result<(String, String), ErrorKind> {
+) -> Result<(String, String), Error> {
 	let network = if global::is_mainnet() { "main" } else { "test" };
 
 	let map = ELECTRUM_X_URI.read();
@@ -109,7 +109,7 @@ pub fn get_electrumx_uri(
 			.as_ref()
 			.unwrap()
 			.get(&format!("{}_{}_1", sec_coin, network))
-			.ok_or(ErrorKind::UndefinedElectrumXURI("primary".to_string()))?
+			.ok_or(Error::UndefinedElectrumXURI("primary".to_string()))?
 			.clone(),
 	};
 	let uri2 = match swap_electrum_node_uri2.clone() {
@@ -118,7 +118,7 @@ pub fn get_electrumx_uri(
 			.as_ref()
 			.unwrap()
 			.get(&format!("{}_{}_2", sec_coin, network))
-			.ok_or(ErrorKind::UndefinedElectrumXURI("secondary".to_string()))?
+			.ok_or(Error::UndefinedElectrumXURI("secondary".to_string()))?
 			.clone(),
 	};
 
@@ -129,14 +129,14 @@ pub fn get_electrumx_uri(
 pub fn get_eth_swap_contract_address(
 	_currency: &Currency,
 	eth_swap_contract_addr: &Option<String>,
-) -> Result<String, ErrorKind> {
+) -> Result<String, Error> {
 	let swap_contract_addresss = ETH_SWAP_CONTRACT_ADDR.read().clone();
 
 	match eth_swap_contract_addr.clone() {
 		Some(s) => Ok(s),
 		None => match swap_contract_addresss {
 			Some(s) => Ok(s),
-			None => swap_contract_addresss.ok_or(ErrorKind::UndefinedEthSwapContractAddress),
+			None => swap_contract_addresss.ok_or(Error::UndefinedEthSwapContractAddress),
 		},
 	}
 }
@@ -145,14 +145,14 @@ pub fn get_eth_swap_contract_address(
 pub fn get_erc20_swap_contract_address(
 	_currency: &Currency,
 	erc20_swap_contract_addr: &Option<String>,
-) -> Result<String, ErrorKind> {
+) -> Result<String, Error> {
 	let swap_contract_addresss = ERC20_SWAP_CONTRACT_ADDR.read().clone();
 
 	match erc20_swap_contract_addr.clone() {
 		Some(s) => Ok(s),
 		None => match swap_contract_addresss {
 			Some(s) => Ok(s),
-			None => swap_contract_addresss.ok_or(ErrorKind::UndefinedEthSwapContractAddress),
+			None => swap_contract_addresss.ok_or(Error::UndefinedEthSwapContractAddress),
 		},
 	}
 }
@@ -161,20 +161,20 @@ pub fn get_erc20_swap_contract_address(
 pub fn get_eth_infura_projectid(
 	_currency: &Currency,
 	eth_infura_projectid: &Option<String>,
-) -> Result<String, ErrorKind> {
+) -> Result<String, Error> {
 	let infura_project_id = ETH_INFURA_PROJECTID.read().clone();
 
 	match eth_infura_projectid.clone() {
 		Some(s) => Ok(s),
 		None => match infura_project_id {
 			Some(s) => Ok(s),
-			None => infura_project_id.ok_or(ErrorKind::UndefinedInfuraProjectId),
+			None => infura_project_id.ok_or(Error::UndefinedInfuraProjectId),
 		},
 	}
 }
 
 /// List available swap trades.
-pub fn list_swap_trades() -> Result<Vec<String>, ErrorKind> {
+pub fn list_swap_trades() -> Result<Vec<String>, Error> {
 	let mut result: Vec<String> = Vec::new();
 
 	for entry in fs::read_dir(TRADE_DEALS_PATH.read().clone().unwrap())? {
@@ -208,9 +208,9 @@ pub fn delete_swap_trade(
 	swap_id: &str,
 	dec_key: &SecretKey,
 	lock: &Mutex<()>,
-) -> Result<(), ErrorKind> {
+) -> Result<(), Error> {
 	if lock.try_lock().is_some() {
-		return Err(ErrorKind::Generic(format!(
+		return Err(Error::Generic(format!(
 			"delete_swap_trade processing unlocked instance {}",
 			swap_id
 		)));
@@ -218,7 +218,7 @@ pub fn delete_swap_trade(
 
 	let (_context, swap) = get_swap_trade(swap_id, dec_key, lock)?;
 	if !swap.state.is_final_state() {
-		return Err(ErrorKind::Generic(format!(
+		return Err(Error::Generic(format!(
 			"Swap {} is still in the progress. Please finish or cancel this trade",
 			swap_id
 		)));
@@ -246,7 +246,7 @@ pub fn delete_swap_trade(
 		.join(format!("{}.swap.del", swap_id));
 
 	fs::rename(target_path, deleted_path).map_err(|e| {
-		ErrorKind::TradeIoError(swap_id.to_string(), format!("Unable to delete, {}", e))
+		Error::TradeIoError(swap_id.to_string(), format!("Unable to delete, {}", e))
 	})?;
 	Ok(())
 }
@@ -257,9 +257,9 @@ pub fn get_swap_trade(
 	swap_id: &str,
 	dec_key: &SecretKey,
 	lock: &Mutex<()>,
-) -> Result<(Context, Swap), ErrorKind> {
+) -> Result<(Context, Swap), Error> {
 	if lock.try_lock().is_some() {
-		return Err(ErrorKind::Generic(format!(
+		return Err(Error::Generic(format!(
 			"get_swap_trade processing unlocked instance {}",
 			swap_id
 		)));
@@ -271,15 +271,15 @@ pub fn get_swap_trade(
 		.unwrap()
 		.join(format!("{}.swap", swap_id));
 	if !path.exists() {
-		return Err(ErrorKind::TradeNotFound(swap_id.to_string()));
+		return Err(Error::TradeNotFound(swap_id.to_string()));
 	}
 
 	read_swap_data_from_file(path.as_path(), dec_key)
 }
 
-fn read_swap_content(path: &Path, dec_key: &SecretKey) -> Result<String, ErrorKind> {
+fn read_swap_content(path: &Path, dec_key: &SecretKey) -> Result<String, Error> {
 	let mut swap_deal_f = File::open(path).map_err(|e| {
-		ErrorKind::IO(format!(
+		Error::IO(format!(
 			"Unable to open file {}, {}",
 			path.to_str().unwrap(),
 			e
@@ -287,7 +287,7 @@ fn read_swap_content(path: &Path, dec_key: &SecretKey) -> Result<String, ErrorKi
 	})?;
 	let mut content = String::new();
 	swap_deal_f.read_to_string(&mut content).map_err(|e| {
-		ErrorKind::IO(format!(
+		Error::IO(format!(
 			"Unable to read data from {}, {}",
 			path.to_str().unwrap(),
 			e
@@ -299,10 +299,7 @@ fn read_swap_content(path: &Path, dec_key: &SecretKey) -> Result<String, ErrorKi
 	Ok(dec_swap_content)
 }
 
-fn read_swap_data_from_file(
-	path: &Path,
-	dec_key: &SecretKey,
-) -> Result<(Context, Swap), ErrorKind> {
+fn read_swap_data_from_file(path: &Path, dec_key: &SecretKey) -> Result<(Context, Swap), Error> {
 	let dec_swap_content = read_swap_content(path, dec_key)?;
 
 	let mut split = dec_swap_content.split("<#>");
@@ -311,21 +308,21 @@ fn read_swap_data_from_file(
 	let swap_str = split.next();
 
 	if context_str.is_none() || swap_str.is_none() {
-		return Err(ErrorKind::IO(format!(
+		return Err(Error::IO(format!(
 			"Not found all packages at the swap trade file {}",
 			path.to_str().unwrap()
 		)));
 	}
 
 	let context: Context = serde_json::from_str(context_str.unwrap()).map_err(|e| {
-		ErrorKind::IO(format!(
+		Error::IO(format!(
 			"Unable to parce Swap data from file {}, {}",
 			path.to_str().unwrap(),
 			e
 		))
 	})?;
 	let swap: Swap = serde_json::from_str(swap_str.unwrap()).map_err(|e| {
-		ErrorKind::IO(format!(
+		Error::IO(format!(
 			"Unable to parce Swap data from file {}, {}",
 			path.to_str().unwrap(),
 			e
@@ -341,9 +338,9 @@ pub fn store_swap_trade(
 	swap: &Swap,
 	enc_key: &SecretKey,
 	lock: &Mutex<()>,
-) -> Result<(), ErrorKind> {
+) -> Result<(), Error> {
 	if lock.try_lock().is_some() {
-		return Err(ErrorKind::Generic(format!(
+		return Err(Error::Generic(format!(
 			"store_swap_trade processing unlocked instance {}",
 			swap.id
 		)));
@@ -360,7 +357,7 @@ pub fn store_swap_trade(
 		.join(format!("{}.swap_{}.bak", swap_id, r));
 	{
 		let mut stored_swap = File::create(path.clone()).map_err(|e| {
-			ErrorKind::TradeIoError(
+			Error::TradeIoError(
 				swap_id.clone(),
 				format!(
 					"Unable to create the file {} to store swap trade, {}",
@@ -371,13 +368,13 @@ pub fn store_swap_trade(
 		})?;
 
 		let context_ser = serde_json::to_string(context).map_err(|e| {
-			ErrorKind::TradeIoError(
+			Error::TradeIoError(
 				swap_id.clone(),
 				format!("Unable to convert context to Json, {}", e),
 			)
 		})?;
 		let swap_ser = serde_json::to_string(swap).map_err(|e| {
-			ErrorKind::TradeIoError(
+			Error::TradeIoError(
 				swap_id.clone(),
 				format!("Unable to convert swap to Json, {}", e),
 			)
@@ -385,13 +382,13 @@ pub fn store_swap_trade(
 		let res_str = context_ser + "<#>" + swap_ser.as_str();
 		let encrypted_swap = EncryptedSwap::from_json(&res_str, enc_key)?;
 		let enc_swap_ser = serde_json::to_string(&encrypted_swap).map_err(|e| {
-			ErrorKind::TradeEncDecError(format!("Unable to serialize encrypted swap, {}", e))
+			Error::TradeEncDecError(format!("Unable to serialize encrypted swap, {}", e))
 		})?;
 
 		stored_swap
 			.write_all(&enc_swap_ser.as_bytes())
 			.map_err(|e| {
-				ErrorKind::TradeIoError(
+				Error::TradeIoError(
 					swap_id.clone(),
 					format!(
 						"Unable to write swap deal to file {}, {}",
@@ -401,7 +398,7 @@ pub fn store_swap_trade(
 				)
 			})?;
 		stored_swap.sync_all().map_err(|e| {
-			ErrorKind::TradeIoError(
+			Error::TradeIoError(
 				swap_id.clone(),
 				format!(
 					"Unable to sync file {} all after writing swap deal, {}",
@@ -418,7 +415,7 @@ pub fn store_swap_trade(
 		.unwrap()
 		.join(format!("{}.swap", swap.id.to_string()));
 	fs::rename(path, path_target).map_err(|e| {
-		ErrorKind::TradeIoError(
+		Error::TradeIoError(
 			swap_id.clone(),
 			format!("Unable to finalize writing, rename failed with error {}", e),
 		)
@@ -432,9 +429,9 @@ pub fn dump_swap_trade(
 	swap_id: &str,
 	dec_key: &SecretKey,
 	lock: &Mutex<()>,
-) -> Result<String, ErrorKind> {
+) -> Result<String, Error> {
 	if lock.try_lock().is_some() {
-		return Err(ErrorKind::Generic(format!(
+		return Err(Error::Generic(format!(
 			"dump_swap_trade processing unlocked instance {}",
 			swap_id
 		)));
@@ -446,14 +443,14 @@ pub fn dump_swap_trade(
 		.unwrap()
 		.join(format!("{}.swap", swap_id));
 	if !path.exists() {
-		return Err(ErrorKind::TradeNotFound(swap_id.to_string()));
+		return Err(Error::TradeNotFound(swap_id.to_string()));
 	}
 
 	read_swap_content(path.as_path(), dec_key)
 }
 
 /// Export encrypted trade data into the file
-pub fn export_trade(swap_id: &str, export_file_name: &str) -> Result<(), ErrorKind> {
+pub fn export_trade(swap_id: &str, export_file_name: &str) -> Result<(), Error> {
 	let path = TRADE_DEALS_PATH
 		.read()
 		.clone()
@@ -461,11 +458,11 @@ pub fn export_trade(swap_id: &str, export_file_name: &str) -> Result<(), ErrorKi
 		.join(format!("{}.swap", swap_id));
 
 	if !path.exists() {
-		return Err(ErrorKind::TradeNotFound(swap_id.to_string()));
+		return Err(Error::TradeNotFound(swap_id.to_string()));
 	}
 
 	fs::copy(path, export_file_name).map_err(|e| {
-		ErrorKind::IO(format!(
+		Error::IO(format!(
 			"Unable to export trade data into the file {}, {}",
 			export_file_name, e
 		))
@@ -480,16 +477,16 @@ pub fn import_trade(
 	trade_file_name: &str,
 	dec_key: &SecretKey,
 	lock: &Mutex<()>,
-) -> Result<String, ErrorKind> {
+) -> Result<String, Error> {
 	if lock.try_lock().is_some() {
-		return Err(ErrorKind::Generic(format!(
+		return Err(Error::Generic(format!(
 			"import_trade processing unlocked instance"
 		)));
 	}
 
 	let src_path = Path::new(trade_file_name);
 	if !src_path.exists() {
-		return Err(ErrorKind::IO(format!("Not found file {}", trade_file_name)));
+		return Err(Error::IO(format!("Not found file {}", trade_file_name)));
 	}
 
 	let (context, swap) = read_swap_data_from_file(src_path, dec_key)?;
@@ -510,20 +507,17 @@ pub struct EncryptedSwap {
 
 impl EncryptedSwap {
 	/// Encrypts and encodes json as base 64
-	pub fn from_json(json_in: &String, enc_key: &SecretKey) -> Result<Self, ErrorKind> {
+	pub fn from_json(json_in: &String, enc_key: &SecretKey) -> Result<Self, Error> {
 		let mut to_encrypt = serde_json::to_string(&json_in)
 			.map_err(|e| {
-				ErrorKind::TradeEncDecError(format!(
-					"EncryptSwap Enc: unable to encode Json, {}",
-					e
-				))
+				Error::TradeEncDecError(format!("EncryptSwap Enc: unable to encode Json, {}", e))
 			})?
 			.as_bytes()
 			.to_vec();
 
 		let nonce: [u8; 12] = thread_rng().gen();
 		let unbound_key = aead::UnboundKey::new(&aead::AES_256_GCM, &enc_key.0)
-			.map_err(|e| ErrorKind::Generic(format!("Unable to build a key, {}", e)))?;
+			.map_err(|e| Error::Generic(format!("Unable to build a key, {}", e)))?;
 		let sealing_key: aead::LessSafeKey = aead::LessSafeKey::new(unbound_key);
 		let aad = aead::Aad::from(&[]);
 		let res = sealing_key.seal_in_place_append_tag(
@@ -532,11 +526,10 @@ impl EncryptedSwap {
 			&mut to_encrypt,
 		);
 		if let Err(e) = res {
-			return Err(ErrorKind::TradeEncDecError(format!(
+			return Err(Error::TradeEncDecError(format!(
 				"EncryptedSwap Enc: Encryption failed, {}",
 				e
-			))
-			.into());
+			)));
 		}
 
 		Ok(EncryptedSwap {
@@ -546,50 +539,48 @@ impl EncryptedSwap {
 	}
 
 	/// Decrypts and returns the original swap+context
-	pub fn decrypt(&self, dec_key: &SecretKey) -> Result<String, ErrorKind> {
+	pub fn decrypt(&self, dec_key: &SecretKey) -> Result<String, Error> {
 		let mut to_decrypt = base64::decode(&self.body_enc).map_err(|e| {
-			ErrorKind::TradeEncDecError(format!(
+			Error::TradeEncDecError(format!(
 				"EncryptedSwap Dec: Encrypted swap contains invalid Base64, {}",
 				e
 			))
 		})?;
 
 		let nonce = from_hex(&self.nonce).map_err(|e| {
-			ErrorKind::TradeEncDecError(format!(
+			Error::TradeEncDecError(format!(
 				"EncryptedSwap Dec: Encrypted request contains invalid nonce, {}",
 				e
 			))
 		})?;
 		if nonce.len() < 12 {
-			return Err(ErrorKind::TradeEncDecError(
+			return Err(Error::TradeEncDecError(
 				"EncryptedSwap Dec: Invalid Nonce length".to_string(),
-			)
-			.into());
+			));
 		}
 
 		let mut n = [0u8; 12];
 		n.copy_from_slice(&nonce[0..12]);
 		let unbound_key = aead::UnboundKey::new(&aead::AES_256_GCM, &dec_key.0)
-			.map_err(|e| ErrorKind::Generic(format!("Unable to build a key, {}", e)))?;
+			.map_err(|e| Error::Generic(format!("Unable to build a key, {}", e)))?;
 		let opening_key: aead::LessSafeKey = aead::LessSafeKey::new(unbound_key);
 		let aad = aead::Aad::from(&[]);
 
 		opening_key
 			.open_in_place(aead::Nonce::assume_unique_for_key(n), aad, &mut to_decrypt)
 			.map_err(|e| {
-				ErrorKind::TradeEncDecError(format!("EncryptedSwap Dec: Decryption failed, {}", e))
+				Error::TradeEncDecError(format!("EncryptedSwap Dec: Decryption failed, {}", e))
 			})?;
 
 		for _ in 0..aead::AES_256_GCM.tag_len() {
 			to_decrypt.pop();
 		}
 
-		let decrypted = String::from_utf8(to_decrypt).map_err(|_| {
-			ErrorKind::TradeEncDecError("EncryptedSwap Dec: Invalid UTF-8".to_string())
-		})?;
+		let decrypted = String::from_utf8(to_decrypt)
+			.map_err(|_| Error::TradeEncDecError("EncryptedSwap Dec: Invalid UTF-8".to_string()))?;
 
 		Ok(serde_json::from_str(&decrypted).map_err(|e| {
-			ErrorKind::TradeEncDecError(format!("EncryptedSwap Dec: Invalid JSON, {}", e))
+			Error::TradeEncDecError(format!("EncryptedSwap Dec: Invalid JSON, {}", e))
 		})?)
 	}
 }

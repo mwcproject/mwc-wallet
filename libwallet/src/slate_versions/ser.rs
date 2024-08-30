@@ -1,4 +1,4 @@
-// Copyright 2019 The Grin Developers
+// Copyright 2021 The Grin Developers
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -77,7 +77,7 @@ pub mod ov3_serde {
 
 /// Serializes an ed25519 PublicKey to and from hex
 pub mod dalek_pubkey_serde {
-	use crate::grin_util::{from_hex, to_hex};
+	use crate::grin_util::{from_hex, ToHex};
 	use ed25519_dalek::PublicKey as DalekPublicKey;
 	use serde::{Deserialize, Deserializer, Serializer};
 
@@ -86,7 +86,7 @@ pub mod dalek_pubkey_serde {
 	where
 		S: Serializer,
 	{
-		serializer.serialize_str(&to_hex(&key.to_bytes()))
+		serializer.serialize_str(&key.to_bytes().to_hex())
 	}
 
 	///
@@ -118,7 +118,7 @@ pub mod option_dalek_pubkey_serde {
 	use serde::de::Error;
 	use serde::{Deserialize, Deserializer, Serializer};
 
-	use crate::grin_util::{from_hex, to_hex};
+	use crate::grin_util::{from_hex, ToHex};
 
 	///
 	pub fn serialize<S>(key: &Option<DalekPublicKey>, serializer: S) -> Result<S::Ok, S::Error>
@@ -126,7 +126,7 @@ pub mod option_dalek_pubkey_serde {
 		S: Serializer,
 	{
 		match key {
-			Some(key) => serializer.serialize_str(&to_hex(&key.to_bytes())),
+			Some(key) => serializer.serialize_str(&key.to_bytes().to_hex()),
 			None => serializer.serialize_none(),
 		}
 	}
@@ -161,16 +161,16 @@ pub mod dalek_sig_serde {
 	use ed25519_dalek::Signature as DalekSignature;
 	use serde::de::Error;
 	use serde::{Deserialize, Deserializer, Serializer};
+	use std::convert::TryFrom;
 
-	use crate::grin_util::{from_hex, to_hex};
-	use crate::signature::Signature;
+	use crate::grin_util::{from_hex, ToHex};
 
 	///
-	pub fn serialize<S>(key: &DalekSignature, serializer: S) -> Result<S::Ok, S::Error>
+	pub fn serialize<S>(sig: &DalekSignature, serializer: S) -> Result<S::Ok, S::Error>
 	where
 		S: Serializer,
 	{
-		serializer.serialize_str(&to_hex(&key.to_bytes()))
+		serializer.serialize_str(&sig.to_bytes().as_ref().to_hex())
 	}
 
 	///
@@ -183,7 +183,7 @@ pub mod dalek_sig_serde {
 			.and_then(|bytes: Vec<u8>| {
 				let mut b = [0u8; 64];
 				b.copy_from_slice(&bytes[0..64]);
-				DalekSignature::from_bytes(&b).map_err(|err| Error::custom(err.to_string()))
+				DalekSignature::try_from(b).map_err(|err| Error::custom(err.to_string()))
 			})
 	}
 }
@@ -193,17 +193,17 @@ pub mod option_dalek_sig_serde {
 	use ed25519_dalek::Signature as DalekSignature;
 	use serde::de::Error;
 	use serde::{Deserialize, Deserializer, Serializer};
+	use std::convert::TryFrom;
 
-	use crate::grin_util::{from_hex, to_hex};
-	use crate::signature::Signature;
+	use crate::grin_util::{from_hex, ToHex};
 
 	///
-	pub fn serialize<S>(key: &Option<DalekSignature>, serializer: S) -> Result<S::Ok, S::Error>
+	pub fn serialize<S>(sig: &Option<DalekSignature>, serializer: S) -> Result<S::Ok, S::Error>
 	where
 		S: Serializer,
 	{
-		match key {
-			Some(key) => serializer.serialize_str(&to_hex(&key.to_bytes())),
+		match sig {
+			Some(s) => serializer.serialize_str(&s.to_bytes().as_ref().to_hex()),
 			None => serializer.serialize_none(),
 		}
 	}
@@ -224,7 +224,7 @@ pub mod option_dalek_sig_serde {
 				.and_then(|bytes: Vec<u8>| {
 					let mut b = [0u8; 64];
 					b.copy_from_slice(&bytes[0..64]);
-					DalekSignature::from_bytes(&b).map(Some).map_err(|err| {
+					DalekSignature::try_from(b).map(Some).map_err(|err| {
 						Error::custom(format!("Unable to build DalekPublicKey, {}", err))
 					})
 				}),
@@ -247,6 +247,7 @@ mod test {
 	use serde::Deserialize;
 
 	use ed25519_dalek::Signer;
+	use grin_wallet_util::grin_util::secp::{ContextFlag, Secp256k1};
 	use serde_json;
 
 	#[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
@@ -264,7 +265,8 @@ mod test {
 	impl SerTest {
 		pub fn random() -> SerTest {
 			let mut test_rng = StepRng::new(1234567890u64, 1);
-			let sec_key = secp::key::SecretKey::new(&mut test_rng);
+			let secp = Secp256k1::with_caps(ContextFlag::None);
+			let sec_key = secp::key::SecretKey::new(&secp, &mut test_rng);
 			let d_skey = DalekSecretKey::from_bytes(&sec_key.0).unwrap();
 			let d_pub_key: DalekPublicKey = (&d_skey).into();
 

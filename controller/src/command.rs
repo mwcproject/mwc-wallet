@@ -1,4 +1,4 @@
-// Copyright 2019 The Grin Developers
+// Copyright 2021 The Grin Developers
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,8 +17,9 @@
 use crate::api::TLSConfig;
 use crate::apiwallet::Owner;
 use crate::config::{MQSConfig, TorConfig, WalletConfig, WALLET_CONFIG_FILE_NAME};
+use crate::controller::set_owner_api_thread;
 use crate::core::{core, global};
-use crate::error::{Error, ErrorKind};
+use crate::error::Error;
 use crate::impls::{create_sender, SlateGetter as _};
 use crate::impls::{PathToSlateGetter, PathToSlatePutter, SlatePutter};
 use crate::keychain;
@@ -28,6 +29,7 @@ use crate::libwallet::{
 use crate::util::secp::key::SecretKey;
 use crate::util::{Mutex, ZeroingString};
 use crate::{controller, display};
+use ::core::time;
 use chrono::Utc;
 use ed25519_dalek::{PublicKey as DalekPublicKey, SecretKey as DalekSecretKey};
 use grin_wallet_impls::adapters::{
@@ -37,20 +39,23 @@ use grin_wallet_impls::tor;
 use grin_wallet_impls::{libp2p_messaging, HttpDataSender};
 use grin_wallet_impls::{Address, MWCMQSAddress, Publisher};
 use grin_wallet_libwallet::api_impl::{owner, owner_eth, owner_libp2p, owner_swap};
-use grin_wallet_libwallet::internal::selection;
 use grin_wallet_libwallet::proof::proofaddress::{self, ProvableAddress};
 use grin_wallet_libwallet::proof::tx_proof::TxProof;
+use grin_wallet_libwallet::slate_versions::v3::sig_is_blank;
 use grin_wallet_libwallet::slatepack::SlatePurpose;
 use grin_wallet_libwallet::swap::fsm::state::StateId;
 use grin_wallet_libwallet::swap::trades;
 use grin_wallet_libwallet::swap::types::Action;
 use grin_wallet_libwallet::swap::{message, Swap};
 use grin_wallet_libwallet::{Slate, TxLogEntry, WalletInst};
-use grin_wallet_util::grin_core::consensus::GRIN_BASE;
-use grin_wallet_util::grin_core::core::amount_to_hr_string;
+use grin_wallet_util::grin_core::consensus::MWC_BASE;
+use grin_wallet_util::grin_core::core::{amount_to_hr_string, Transaction};
 use grin_wallet_util::grin_core::global::{FLOONET_DNS_SEEDS, MAINNET_DNS_SEEDS};
 use grin_wallet_util::grin_p2p::libp2p_connection::ReceivedMessage;
 use grin_wallet_util::grin_p2p::{libp2p_connection, PeerAddr};
+use grin_wallet_util::grin_util::secp::{ContextFlag, Secp256k1};
+use grin_wallet_util::grin_util::static_secp_instance;
+use qr_code::{EcLevel, QrCode};
 use serde_json as json;
 use serde_json::json;
 use serde_json::{Map as JsonMap, Value as JsonValue};
@@ -73,11 +78,10 @@ lazy_static! {
 /// Arguments common to all wallet commands
 #[derive(Clone)]
 pub struct GlobalArgs {
-	pub account: String,
+	pub account: Option<String>,
 	pub api_secret: Option<String>,
 	pub node_api_secret: Option<String>,
 	pub show_spent: bool,
-	pub chain_type: global::ChainTypes,
 	pub password: Option<ZeroingString>,
 	pub tls_conf: Option<TLSConfig>,
 }
@@ -94,7 +98,7 @@ pub struct InitArgs {
 
 pub fn init<L, C, K>(
 	owner_api: &mut Owner<L, C, K>,
-	g_args: &GlobalArgs,
+	_g_args: &GlobalArgs,
 	args: InitArgs,
 	wallet_data_dir: Option<&str>,
 ) -> Result<(), Error>
@@ -103,16 +107,12 @@ where
 	C: NodeClient + 'static,
 	K: keychain::Keychain + 'static,
 {
+	// Assume global chain type has already been initialized.
+	let chain_type = global::get_chain_type();
+
 	let mut w_lock = owner_api.wallet_inst.lock();
 	let p = w_lock.lc_provider()?;
-	p.create_config(
-		&g_args.chain_type,
-		WALLET_CONFIG_FILE_NAME,
-		None,
-		None,
-		None,
-		None,
-	)?;
+	p.create_config(&chain_type, WALLET_CONFIG_FILE_NAME, None, None, None, None)?;
 	p.create_wallet(
 		None,
 		args.recovery_phrase,
@@ -122,8 +122,6 @@ where
 		wallet_data_dir.clone(),
 	)?;
 
-	let m = p.get_mnemonic(None, args.password, wallet_data_dir)?;
-	grin_wallet_impls::lifecycle::show_recovery_phrase(m);
 	Ok(())
 }
 
@@ -146,6 +144,79 @@ where
 	let p = w_lock.lc_provider()?;
 	let m = p.get_mnemonic(None, args.passphrase, wallet_data_dir)?;
 	grin_wallet_impls::lifecycle::show_recovery_phrase(m);
+	Ok(())
+}
+
+pub fn rewind_hash<'a, L, C, K>(
+	owner_api: &mut Owner<L, C, K>,
+	keychain_mask: Option<&SecretKey>,
+) -> Result<(), Error>
+where
+	L: WalletLCProvider<'static, C, K>,
+	C: NodeClient + 'static,
+	K: keychain::Keychain + 'static,
+{
+	controller::owner_single_use(None, keychain_mask, Some(owner_api), |api, m| {
+		let rewind_hash = api.get_rewind_hash(m)?;
+		println!();
+		println!("Wallet Rewind Hash");
+		println!("-------------------------------------");
+		println!("{}", rewind_hash);
+		println!();
+		Ok(())
+	})?;
+	Ok(())
+}
+
+/// Arguments for rewind hash view wallet scan command
+pub struct ViewWalletScanArgs {
+	pub rewind_hash: String,
+	pub start_height: Option<u64>,
+	pub backwards_from_tip: Option<u64>,
+}
+
+pub fn scan_rewind_hash<L, C, K>(
+	owner_api: &mut Owner<L, C, K>,
+	args: ViewWalletScanArgs,
+	dark_scheme: bool,
+) -> Result<(), Error>
+where
+	L: WalletLCProvider<'static, C, K> + 'static,
+	C: NodeClient + 'static,
+	K: keychain::Keychain + 'static,
+{
+	controller::owner_single_use(None, None, Some(owner_api), |api, m| {
+		let rewind_hash = args.rewind_hash;
+		let tip_height = api.node_height(m)?.height;
+		let start_height = match args.backwards_from_tip {
+			Some(b) => tip_height.saturating_sub(b),
+			None => match args.start_height {
+				Some(s) => s,
+				None => 1,
+			},
+		};
+		warn!(
+			"Starting view wallet output scan from height {} ...",
+			start_height
+		);
+		let result = api.scan_rewind_hash(rewind_hash, Some(start_height));
+		let deci_sec = time::Duration::from_millis(100);
+		thread::sleep(deci_sec);
+		match result {
+			Ok(res) => {
+				warn!("View wallet check complete");
+				if res.total_balance != 0 {
+					display::view_wallet_output(res.clone(), tip_height, dark_scheme)?;
+				}
+				display::view_wallet_balance(res.clone(), tip_height, dark_scheme);
+				Ok(())
+			}
+			Err(e) => {
+				error!("View wallet check failed: {}", e);
+				Err(e.into())
+			}
+		}
+	})?;
 	Ok(())
 }
 
@@ -187,6 +258,8 @@ where
 						&tor_config.socks_proxy_addr,
 						&config.libp2p_listen_port,
 						&tor_config.tor_log_file,
+						tor_config.bridge,
+						tor_config.proxy,
 					);
 					if let Err(e) = res {
 						error!("Error starting http listener: {}", e);
@@ -197,8 +270,10 @@ where
 					let r = t.join();
 					if let Err(_) = r {
 						error!("Error starting http listener");
-						return Err(ErrorKind::ListenerError.into());
+						return Err(Error::ListenerError);
 					}
+				} else {
+					set_owner_api_thread(t);
 				}
 			}
 		}
@@ -213,13 +288,14 @@ where
 			)
 			.map_err(|e| {
 				error!("Unable to start mwcmqs listener, {}", e);
-				Error::from(ErrorKind::ListenerError)
+				Error::from(Error::ListenerError)
 			})?;
 		}
 		method => {
-			return Err(
-				ErrorKind::ArgumentError(format!("No listener for method '{}'", method)).into(),
-			);
+			return Err(Error::ArgumentError(format!(
+				"No listener for method '{}'",
+				method
+			)));
 		}
 	};
 	Ok(())
@@ -260,10 +336,10 @@ where
 		config.owner_api_listen_addr().as_str(),
 		g_args.api_secret.clone(),
 		g_args.tls_conf.clone(),
-		config.owner_api_include_foreign.clone(),
+		config.owner_api_include_foreign,
 		Some(tor_config.clone()),
 	)
-	.map_err(|e| ErrorKind::LibWallet(format!("Unable to start Listener, {}", e)))?;
+	.map_err(|e| Error::LibWallet(format!("Unable to start Listener, {}", e)))?;
 	Ok(())
 }
 
@@ -293,7 +369,7 @@ where
 		if let Err(e) = res {
 			let err_str = format!("Error listing accounts: {}", e);
 			error!("{}", err_str);
-			return Err(ErrorKind::LibWallet(err_str).into());
+			return Err(Error::LibWallet(err_str));
 		}
 	} else {
 		let label = args.create.unwrap();
@@ -307,7 +383,7 @@ where
 			thread::sleep(Duration::from_millis(200));
 			let err_str = format!("Error creating account '{}': {}", label, e);
 			error!("{}", err_str);
-			return Err(ErrorKind::LibWallet(err_str).into());
+			return Err(Error::LibWallet(err_str));
 		}
 	}
 	Ok(())
@@ -316,6 +392,8 @@ where
 /// Arguments for the send command
 pub struct SendArgs {
 	pub amount: u64,
+	pub amount_includes_fee: bool,
+	pub use_max_amount: bool,
 	pub message: Option<String>,
 	pub minimum_confirmations: u64,
 	pub selection_strategy: String,
@@ -336,6 +414,8 @@ pub struct SendArgs {
 	pub slatepack_recipient: Option<ProvableAddress>, // Destination for slatepack. The address will be the same as for payment_proof_address. The role is different.
 	pub late_lock: bool,
 	pub min_fee: Option<u64>,
+	pub bridge: Option<String>,
+	pub slatepack_qr: bool,
 }
 
 pub fn send<L, C, K>(
@@ -354,6 +434,16 @@ where
 	C: NodeClient + 'static,
 	K: keychain::Keychain + 'static,
 {
+	let mut amount = args.amount;
+	if args.use_max_amount {
+		controller::owner_single_use(None, keychain_mask, Some(owner_api), |api, m| {
+			let (_, wallet_info) =
+				api.retrieve_summary_info(m, true, args.minimum_confirmations)?;
+			amount = wallet_info.amount_currently_spendable;
+			Ok(())
+		})?;
+	};
+
 	let wallet_inst = owner_api.wallet_inst.clone();
 	controller::owner_single_use(None, keychain_mask, Some(owner_api), |api, m| {
 		if args.estimate_selection_strategies {
@@ -361,7 +451,8 @@ where
 			for strategy in vec!["smallest", "all"] {
 				let init_args = InitTxArgs {
 					src_acct_name: None,
-					amount: args.amount,
+					amount: amount,
+					amount_includes_fee: Some(args.amount_includes_fee),
 					minimum_confirmations: args.minimum_confirmations,
 					max_outputs: args.max_outputs as u32,
 					num_change_outputs: args.change_outputs as u32,
@@ -377,11 +468,12 @@ where
 				let slate = api.init_send_tx(m, &init_args, 1)?;
 				strategies.push((strategy, slate.amount, slate.fee));
 			}
-			display::estimate(args.amount, strategies, dark_scheme);
+			display::estimate(amount, strategies, dark_scheme);
 		} else {
 			let mut init_args = InitTxArgs {
 				src_acct_name: None,
-				amount: args.amount,
+				amount: amount,
+				amount_includes_fee: Some(args.amount_includes_fee),
 				minimum_confirmations: args.minimum_confirmations,
 				max_outputs: args.max_outputs as u32,
 				num_change_outputs: args.change_outputs as u32,
@@ -411,7 +503,7 @@ where
 								mqs_config_unwrapped = s;
 							}
 							None => {
-								return Err(ErrorKind::MQSConfig(format!("NO MQS config!")).into());
+								return Err(Error::MQSConfig(format!("NO MQS config!")));
 							}
 						}
 
@@ -430,6 +522,16 @@ where
 				}
 				_ => {}
 			}
+
+			let tor_config = match tor_config {
+				Some(mut c) => {
+					if let Some(b) = args.bridge.clone() {
+						c.bridge.bridge_line = Some(b);
+					}
+					Some(c)
+				}
+				None => None,
+			};
 
 			// Creating sender because we need to request other wallet version first
 			let sender_info = match args.method.as_str() {
@@ -453,7 +555,7 @@ where
 				Ok(s) => {
 					info!(
 						"Tx created: {} mwc to {} (strategy '{}')",
-						core::amount_to_hr_string(args.amount, false),
+						core::amount_to_hr_string(amount, false),
 						args.dest,
 						args.selection_strategy,
 					);
@@ -461,11 +563,10 @@ where
 				}
 				Err(e) => {
 					info!("Tx not created: {}", e);
-					return Err(ErrorKind::LibWallet(format!(
+					return Err(Error::LibWallet(format!(
 						"Unable to create send slate , {}",
 						e
-					))
-					.into());
+					)));
 				}
 			};
 
@@ -474,45 +575,69 @@ where
 				recipient = Some(sp_address.tor_public_key()?);
 			}
 
-			let (slatepack_secret, slatepack_sender) = {
+			let (slatepack_secret, slatepack_sender, height, secp) = {
 				let mut w_lock = api.wallet_inst.lock();
 				let w = w_lock.lc_provider()?.wallet_inst()?;
 				let keychain = w.keychain(keychain_mask)?;
 				let slatepack_secret =
 					proofaddress::payment_proof_address_dalek_secret(&keychain, None)?;
 				let slate_pub_key = DalekPublicKey::from(&slatepack_secret);
-				(slatepack_secret, slate_pub_key)
+				let (height, _, _) = w.w2n_client().get_chain_tip()?;
+				(
+					slatepack_secret,
+					slate_pub_key,
+					height,
+					keychain.secp().clone(),
+				)
 			};
 
 			match args.method.as_str() {
 				"file" | "slatepack" => {
 					let dest: Option<PathBuf> = if args.dest.is_empty() {
 						if args.method == "file" {
-							return Err(ErrorKind::ArgumentError(
+							return Err(Error::ArgumentError(
 								"Please specify destination for file".to_string(),
-							)
-							.into());
+							));
 						}
 						None
 					} else {
 						Some((&args.dest).into())
 					};
 
+					let slatepack_format = args.method == "slatepack";
 					let slate_str = PathToSlatePutter::build_encrypted(
 						dest,
 						SlatePurpose::SendInitial,
 						slatepack_sender,
 						recipient,
-						args.method == "slatepack",
+						slatepack_format,
 					)
-					.put_tx(&slate, &slatepack_secret, false)
+					.put_tx(&slate, Some(&slatepack_secret), false, &secp)
 					.map_err(|e| {
-						ErrorKind::IO(format!("Unable to store the file at {}, {}", args.dest, e))
+						Error::IO(format!("Unable to store the file at {}, {}", args.dest, e))
 					})?;
 					api.tx_lock_outputs(m, &slate, Some(String::from("file")), 0)?;
-					if args.dest.is_empty() {
-						println!("Slatepack: {}", slate_str);
+
+					if !args.dest.is_empty() {
+						println!(
+							"Resulting transaction is successfully stored at : {}",
+							args.dest
+						);
+						println!();
 					}
+
+					if slatepack_format {
+						show_slatepack(
+							api,
+							&slate_str, // encrypted (optionally) slate with a purpose.
+							&slate.id,
+							&SlatePurpose::SendInitial,
+							recipient.is_some(),
+							false,
+							args.slatepack_qr,
+						)?;
+					}
+
 					return Ok(());
 				}
 				"self" => {
@@ -525,7 +650,7 @@ where
 						slate = api.receive_tx(
 							&slate,
 							Some(String::from("self")),
-							Some(&args.dest),
+							&Some(args.dest.clone()),
 							None,
 						)?;
 						Ok(())
@@ -533,20 +658,22 @@ where
 				}
 				_ => {
 					if sender_info.is_none() {
-						return Err(ErrorKind::GenericError(
+						return Err(Error::GenericError(
 							"Internal error. Sender not created".to_string(),
-						)
-						.into());
+						));
 					}
 					let (sender, wallet_info) = sender_info.unwrap();
 
 					let original_slate = slate.clone();
 					slate = sender.send_tx(
+						true,
 						&slate,
 						SlatePurpose::SendInitial,
 						&slatepack_secret,
 						recipient,
 						wallet_info,
+						height,
+						&secp,
 					)?;
 					// Restore back ttl, because it can be gone
 					slate.ttl_cutoff_height = original_slate.ttl_cutoff_height.clone();
@@ -562,7 +689,7 @@ where
 
 			slate = api.finalize_tx(m, &slate)?;
 
-			let result = api.post_tx(m, &slate.tx, args.fluff);
+			let result = api.post_tx(m, slate.tx_or_err()?, args.fluff);
 			match result {
 				Ok(_) => {
 					info!("slate [{}] finalized successfully", slate.id.to_string());
@@ -571,12 +698,93 @@ where
 				}
 				Err(e) => {
 					error!("Tx sent fail: {}", e);
-					return Err(ErrorKind::LibWallet(format!("Unable to post slate, {}", e)).into());
+					return Err(Error::LibWallet(format!("Unable to post slate, {}", e)));
 				}
 			}
 		}
 		Ok(())
 	})?;
+	Ok(())
+}
+
+/// Show slate pack and save it into the backup for historical purpose
+pub fn show_slatepack<L, C, K>(
+	api: &mut Owner<L, C, K>,
+	slate_str: &str, // encrypted (optionally) slate with a purpose.
+	slate_id: &Uuid,
+	slate_purpose: &SlatePurpose,
+	is_encrypted: bool,
+	show_finalizing_message: bool,
+	show_qr: bool,
+) -> Result<(), Error>
+where
+	L: WalletLCProvider<'static, C, K> + 'static,
+	C: NodeClient + 'static,
+	K: keychain::Keychain + 'static,
+{
+	// Output if it is a slatepack, into stdout and backup file
+	let tld = api.get_top_level_directory()?;
+
+	// create a directory to which files will be output
+	let slate_dir = format!("{}/{}", tld, "slatepack");
+	let _ = std::fs::create_dir_all(slate_dir.clone());
+	let out_file_name = format!(
+		"{}/{}.{}.slatepack",
+		slate_dir,
+		slate_id,
+		slate_purpose.to_str()
+	);
+
+	let mut output = File::create(out_file_name.clone()).map_err(|e| {
+		Error::IO(format!(
+			"Unable to create slate backup file {}, {}",
+			out_file_name, e
+		))
+	})?;
+	output.write_all(&slate_str.as_bytes()).map_err(|e| {
+		Error::IO(format!(
+			"Unable to store slate backup data into file {}, {}",
+			out_file_name, e
+		))
+	})?;
+	output.sync_all().map_err(|e| {
+		Error::IO(format!(
+			"Unable to sync data for file {}, {}",
+			out_file_name, e
+		))
+	})?;
+
+	println!();
+	if !show_finalizing_message {
+		println!("Slatepack data follows. Please provide this output to the other party");
+	} else {
+		println!("Slatepack data follows.");
+	}
+	println!();
+	println!("--- CUT BELOW THIS LINE ---");
+	println!();
+	println!("{}", slate_str);
+	println!("--- CUT ABOVE THIS LINE ---");
+	println!();
+	println!("Slatepack data was also backed up at {}", out_file_name);
+	println!();
+	if show_qr {
+		if let Ok(qr_string) = QrCode::with_error_correction_level(slate_str, EcLevel::M) {
+			println!("{}", qr_string.to_string(false, 3));
+			println!();
+		} else {
+			if let Ok(qr_string) = QrCode::with_error_correction_level(slate_str, EcLevel::L) {
+				println!("{}", qr_string.to_string(false, 3));
+				println!();
+			}
+		}
+	}
+	if is_encrypted {
+		println!("The slatepack data is encrypted for the recipient only");
+	} else {
+		println!("The slatepack data is NOT encrypted");
+	}
+	println!();
 	Ok(())
 }
 
@@ -586,6 +794,8 @@ pub struct ReceiveArgs {
 	pub input_slatepack_message: Option<String>,
 	pub message: Option<String>,
 	pub outfile: Option<String>,
+	pub bridge: Option<String>,
+	pub slatepack_qr: bool,
 }
 
 pub fn receive<L, C, K>(
@@ -604,51 +814,56 @@ where
 		Some(&m) => Some(m.to_owned()),
 	};
 	controller::foreign_single_use(owner_api.wallet_inst.clone(), km, |api| {
-		let slatepack_secret = {
+		let (slatepack_secret, height, secp) = {
 			let mut w_lock = api.wallet_inst.lock();
 			let w = w_lock.lc_provider()?.wallet_inst()?;
 			let keychain = w.keychain(keychain_mask)?;
 			let slatepack_secret =
 				proofaddress::payment_proof_address_dalek_secret(&keychain, None)?;
-			slatepack_secret
+			let (height, _, _) = w.w2n_client().get_chain_tip()?;
+			(slatepack_secret, height, keychain.secp().clone())
 		};
 
-		let slate_pkg =
-			match &args.input_file {
-				Some(file_name) => PathToSlateGetter::build_form_path(file_name.into())
-					.get_tx(&slatepack_secret)?,
-				None => match &args.input_slatepack_message {
-					Some(message) => PathToSlateGetter::build_form_str(message.clone())
-						.get_tx(&slatepack_secret)?,
-					None => {
-						return Err(ErrorKind::ArgumentError(
-							"Please specify 'file' or 'content' argument".to_string(),
-						)
-						.into())
-					}
-				},
-			};
+		let slate_pkg = match &args.input_file {
+			Some(file_name) => PathToSlateGetter::build_form_path(file_name.into()).get_tx(
+				Some(&slatepack_secret),
+				height,
+				&secp,
+			)?,
+			None => match &args.input_slatepack_message {
+				Some(message) => PathToSlateGetter::build_form_str(message.clone()).get_tx(
+					Some(&slatepack_secret),
+					height,
+					&secp,
+				)?,
+				None => {
+					return Err(Error::ArgumentError(
+						"Please specify 'file' or 'content' argument".to_string(),
+					))
+				}
+			},
+		};
 
 		let (mut slate, sender, _recipient, content, slatepack_format) = slate_pkg.to_slate()?;
 
 		if !(content == SlatePurpose::FullSlate || content == SlatePurpose::SendInitial) {
-			return Err(ErrorKind::ArgumentError(format!(
+			return Err(Error::ArgumentError(format!(
 				"Wrong slate content. Expecting SendInitial, get {:?}",
 				content
-			))
-			.into());
+			)));
 		}
 
 		if let Err(e) = api.verify_slate_messages(&slate) {
 			error!("Error validating participant messages: {}", e);
-			return Err(
-				ErrorKind::LibWallet(format!("Unable to validate slate messages, {}", e)).into(),
-			);
+			return Err(Error::LibWallet(format!(
+				"Unable to validate slate messages, {}",
+				e
+			)));
 		}
 		slate = api.receive_tx(
 			&slate,
 			Some(String::from("file")),
-			Some(&g_args.account),
+			&g_args.account,
 			args.message.clone(),
 		)?;
 
@@ -664,13 +879,28 @@ where
 			sender,
 			slatepack_format,
 		)
-		.put_tx(&slate, &slatepack_secret, false)?;
+		.put_tx(&slate, Some(&slatepack_secret), false, &secp)?;
 
 		if let Some(response_file) = &response_file {
-			info!("Response file {}.response generated, and can be sent back to the transaction originator.", response_file);
-		} else {
-			println!("Response Slate: {}", slatepack_str);
+			println!(
+				"Response file {} generated, and can be sent back to the transaction originator.",
+				response_file
+			);
+			println!();
 		}
+
+		if slatepack_format {
+			show_slatepack(
+				owner_api,
+				&slatepack_str, // encrypted (optionally) slate with a purpose.
+				&slate.id,
+				&SlatePurpose::SendResponse,
+				sender.is_some(),
+				false,
+				args.slatepack_qr,
+			)?;
+		}
+
 		Ok(())
 	})?;
 
@@ -692,55 +922,79 @@ where
 		Some(&m) => Some(m.to_owned()),
 	};
 	controller::foreign_single_use(owner_api.wallet_inst.clone(), km, |api| {
-		let slatepack_secret = {
+		let (slatepack_secret, height, secp) = {
 			let mut w_lock = api.wallet_inst.lock();
 			let w = w_lock.lc_provider()?.wallet_inst()?;
 			let keychain = w.keychain(keychain_mask)?;
 			let slatepack_secret =
 				proofaddress::payment_proof_address_dalek_secret(&keychain, None)?;
-			slatepack_secret
+			let (height, _, _) = w.w2n_client().get_chain_tip()?;
+			(slatepack_secret, height, keychain.secp().clone())
 		};
 
-		let slate_pkg =
-			match &args.input_file {
-				Some(file_name) => PathToSlateGetter::build_form_path(file_name.into())
-					.get_tx(&slatepack_secret)?,
-				None => match &args.input_slatepack_message {
-					Some(message) => PathToSlateGetter::build_form_str(message.clone())
-						.get_tx(&slatepack_secret)?,
-					None => {
-						return Err(ErrorKind::ArgumentError(
-							"Please specify 'file' or 'content' argument".to_string(),
-						)
-						.into())
-					}
-				},
-			};
+		let slate_pkg = match &args.input_file {
+			Some(file_name) => PathToSlateGetter::build_form_path(file_name.into()).get_tx(
+				Some(&slatepack_secret),
+				height,
+				&secp,
+			)?,
+			None => match &args.input_slatepack_message {
+				Some(message) => PathToSlateGetter::build_form_str(message.clone()).get_tx(
+					Some(&slatepack_secret),
+					height,
+					&secp,
+				)?,
+				None => {
+					return Err(Error::ArgumentError(
+						"Please specify 'file' or 'content' argument".to_string(),
+					))
+				}
+			},
+		};
 
 		let (slate, sender, recipient, content, _slatepack_format) = slate_pkg.to_slate()?;
 
-		let slate_str =
-			PathToSlatePutter::build_plain(None).put_tx(&slate, &slatepack_secret, false)?;
+		let slate_str = PathToSlatePutter::build_plain(None).put_tx(
+			&slate,
+			Some(&slatepack_secret),
+			false,
+			&secp,
+		)?;
 
-		println!();
-		println!("SLATEPACK CONTENTS");
-		println!("Slate:     {}", slate_str);
-		println!("Content:   {:?}", content);
+		let mut output = String::new();
+
+		output.push_str("SLATEPACK CONTENTS\n");
+		output.push_str(&format!("Slate:     {}\n", slate_str));
+		output.push_str(&format!("Content:   {:?}\n", content));
 		if let Some(sender) = sender {
-			println!(
-				"Sender:    {}",
+			output.push_str(&format!(
+				"Sender:    {}\n",
 				ProvableAddress::from_tor_pub_key(&sender).public_key
-			);
+			));
 		} else {
-			println!("Sender:    None (Not encrypted)");
+			output.push_str("Sender:    None (Not encrypted)\n");
 		}
 		if let Some(recipient) = recipient {
-			println!(
-				"recipient: {}",
+			output.push_str(&format!(
+				"recipient: {}\n",
 				ProvableAddress::from_tor_pub_key(&recipient).public_key
-			);
+			));
 		} else {
-			println!("recipient: None (Not encrypted)");
+			output.push_str("recipient: None (Not encrypted)\n");
+		}
+
+		println!("\n{}", output);
+
+		if let Some(outfile) = args.outfile {
+			let mut file = File::create(&outfile).map_err(|e| {
+				Error::IO(format!("Unable to create output file {}, {}", &outfile, e))
+			})?;
+			file.write_all(output.as_bytes()).map_err(|e| {
+				Error::IO(format!(
+					"Unable to write data into output file {}, {}",
+					&outfile, e
+				))
+			})?;
 		}
 
 		Ok(())
@@ -756,6 +1010,8 @@ pub struct FinalizeArgs {
 	pub fluff: bool,
 	pub nopost: bool,
 	pub dest: Option<String>,
+	// Finalize can't show slatepack because it is too large
+	// pub slatepack_qr: bool,
 }
 
 pub fn finalize<L, C, K>(
@@ -776,31 +1032,36 @@ where
 	let mut slatepack_format = false;
 
 	controller::owner_single_use(None, keychain_mask, Some(owner_api), |api, m| {
-		let slatepack_secret = {
+		let (slatepack_secret, height, secp) = {
 			let mut w_lock = api.wallet_inst.lock();
 			let w = w_lock.lc_provider()?.wallet_inst()?;
 			let keychain = w.keychain(m)?;
 			let slatepack_secret = proofaddress::payment_proof_address_secret(&keychain, None)?;
 			let slatepack_secret = DalekSecretKey::from_bytes(&slatepack_secret.0)
-				.map_err(|e| ErrorKind::GenericError(format!("Unable to build secret, {}", e)))?;
-			slatepack_secret
+				.map_err(|e| Error::GenericError(format!("Unable to build secret, {}", e)))?;
+			let (height, _, _) = w.w2n_client().get_chain_tip()?;
+			(slatepack_secret, height, keychain.secp().clone())
 		};
 
-		let slate_pkg =
-			match &args.input_file {
-				Some(file_name) => PathToSlateGetter::build_form_path(file_name.into())
-					.get_tx(&slatepack_secret)?,
-				None => match &args.input_slatepack_message {
-					Some(message) => PathToSlateGetter::build_form_str(message.clone())
-						.get_tx(&slatepack_secret)?,
-					None => {
-						return Err(ErrorKind::ArgumentError(
-							"Please specify 'file' or 'content' argument".to_string(),
-						)
-						.into())
-					}
-				},
-			};
+		let slate_pkg = match &args.input_file {
+			Some(file_name) => PathToSlateGetter::build_form_path(file_name.into()).get_tx(
+				Some(&slatepack_secret),
+				height,
+				&secp,
+			)?,
+			None => match &args.input_slatepack_message {
+				Some(message) => PathToSlateGetter::build_form_str(message.clone()).get_tx(
+					Some(&slatepack_secret),
+					height,
+					&secp,
+				)?,
+				None => {
+					return Err(Error::ArgumentError(
+						"Please specify 'file' or 'content' argument".to_string(),
+					))
+				}
+			},
+		};
 
 		let (slate2, sender2, recipient2, content2, slatepack_format2) = slate_pkg.to_slate()?;
 		slate = slate2;
@@ -818,11 +1079,10 @@ where
 
 	if is_invoice {
 		if !(content == SlatePurpose::FullSlate || content == SlatePurpose::InvoiceResponse) {
-			return Err(ErrorKind::ArgumentError(format!(
+			return Err(Error::ArgumentError(format!(
 				"Wrong slate content. Expecting InvoiceResponse, get {:?}",
 				content
-			))
-			.into());
+			)));
 		}
 
 		let km = match keychain_mask.as_ref() {
@@ -832,41 +1092,38 @@ where
 		controller::foreign_single_use(owner_api.wallet_inst.clone(), km, |api| {
 			if let Err(e) = api.verify_slate_messages(&slate) {
 				error!("Error validating participant messages: {}", e);
-				return Err(ErrorKind::LibWallet(format!(
+				return Err(Error::LibWallet(format!(
 					"Unable to validate slate messages, {}",
 					e
-				))
-				.into());
+				)));
 			}
-			slate = api.finalize_invoice_tx(&mut slate)?;
+			slate = api.finalize_invoice_tx(&slate)?;
 			Ok(())
 		})?;
 	} else {
 		if !(content == SlatePurpose::FullSlate || content == SlatePurpose::SendResponse) {
-			return Err(ErrorKind::ArgumentError(format!(
+			return Err(Error::ArgumentError(format!(
 				"Wrong slate content. Expecting SendResponse, get {:?}",
 				content
-			))
-			.into());
+			)));
 		}
 
 		controller::owner_single_use(None, keychain_mask, Some(owner_api), |api, m| {
 			if let Err(e) = api.verify_slate_messages(m, &slate) {
 				error!("Error validating participant messages: {}", e);
-				return Err(ErrorKind::LibWallet(format!(
+				return Err(Error::LibWallet(format!(
 					"Unable to validate slate messages, {}",
 					e
-				))
-				.into());
+				)));
 			}
-			slate = api.finalize_tx(m, &mut slate)?;
+			slate = api.finalize_tx(m, &slate)?;
 			Ok(())
 		})?;
 	}
 
 	if !args.nopost {
 		controller::owner_single_use(None, keychain_mask, Some(owner_api), |api, m| {
-			let result = api.post_tx(m, &slate.tx, args.fluff);
+			let result = api.post_tx(m, slate.tx_or_err()?, args.fluff);
 			match result {
 				Ok(_) => {
 					info!(
@@ -876,35 +1133,50 @@ where
 				}
 				Err(e) => {
 					error!("Tx not sent: {}", e);
-					return Err(ErrorKind::LibWallet(format!("Unable to post slate, {}", e)).into());
+					return Err(Error::LibWallet(format!("Unable to post slate, {}", e)));
 				}
 			}
 		})?;
 	}
 
-	if args.dest.is_some() {
+	if args.dest.is_some() || slatepack_format {
 		controller::owner_single_use(None, keychain_mask, Some(owner_api), |api, m| {
-			let slatepack_secret = {
+			let (slatepack_secret, secp) = {
 				let mut w_lock = api.wallet_inst.lock();
 				let w = w_lock.lc_provider()?.wallet_inst()?;
 				let keychain = w.keychain(m)?;
 				let slatepack_secret = proofaddress::payment_proof_address_secret(&keychain, None)?;
-				let slatepack_secret =
-					DalekSecretKey::from_bytes(&slatepack_secret.0).map_err(|e| {
-						ErrorKind::GenericError(format!("Unable to build secret, {}", e))
-					})?;
-				slatepack_secret
+				let slatepack_secret = DalekSecretKey::from_bytes(&slatepack_secret.0)
+					.map_err(|e| Error::GenericError(format!("Unable to build secret, {}", e)))?;
+				(slatepack_secret, keychain.secp().clone())
+			};
+
+			let path_buf: Option<PathBuf> = match args.dest {
+				Some(d) => Some(d.into()),
+				None => None,
 			};
 
 			// save to a destination not as a slatepack
-			PathToSlatePutter::build_encrypted(
-				Some((&args.dest.unwrap()).into()),
+			let slatepack_str = PathToSlatePutter::build_encrypted(
+				path_buf,
 				SlatePurpose::FullSlate,
 				DalekPublicKey::from(&slatepack_secret),
 				sender,
 				slatepack_format,
 			)
-			.put_tx(&slate, &slatepack_secret, false)?;
+			.put_tx(&slate, Some(&slatepack_secret), false, &secp)?;
+
+			if slatepack_format {
+				show_slatepack(
+					api,
+					&slatepack_str, // encrypted (optionally) slate with a purpose.
+					&slate.id,
+					&SlatePurpose::FullSlate,
+					sender.is_some(),
+					true,
+					false,
+				)?;
+			}
 
 			Ok(())
 		})?;
@@ -919,6 +1191,8 @@ pub struct IssueInvoiceArgs {
 	pub dest: String,
 	/// issue invoice tx args
 	pub issue_args: IssueInvoiceTxArgs,
+	/// show slatepack as QR code
+	pub slatepack_qr: bool,
 }
 
 pub fn issue_invoice_tx<L, C, K>(
@@ -939,24 +1213,38 @@ where
 
 		let slate = api.issue_invoice_tx(m, &args.issue_args)?;
 
-		let (slatepack_secret, tor_address) = {
+		let (slatepack_secret, tor_address, secp) = {
 			let mut w_lock = api.wallet_inst.lock();
 			let w = w_lock.lc_provider()?.wallet_inst()?;
 			let keychain = w.keychain(keychain_mask)?;
 			let slatepack_secret =
 				proofaddress::payment_proof_address_dalek_secret(&keychain, None)?;
 			let slatepack_pk = DalekPublicKey::from(&slatepack_secret);
-			(slatepack_secret, slatepack_pk)
+			(slatepack_secret, slatepack_pk, keychain.secp().clone())
 		};
 
-		PathToSlatePutter::build_encrypted(
+		let slatepack_format = recipient.is_some();
+		let slate_str = PathToSlatePutter::build_encrypted(
 			Some((&args.dest).into()),
 			SlatePurpose::InvoiceInitial,
 			tor_address,
 			recipient,
-			recipient.is_some(),
+			slatepack_format,
 		)
-		.put_tx(&slate, &slatepack_secret, false)?;
+		.put_tx(&slate, Some(&slatepack_secret), false, &secp)?;
+
+		if slatepack_format {
+			show_slatepack(
+				api,
+				&slate_str, // encrypted (optionally) slate with a purpose.
+				&slate.id,
+				&SlatePurpose::InvoiceInitial,
+				recipient.is_some(),
+				false,
+				args.slatepack_qr,
+			)?;
+		}
+
 		Ok(())
 	})?;
 	Ok(())
@@ -970,9 +1258,12 @@ pub struct ProcessInvoiceArgs {
 	pub method: String,
 	pub dest: String,
 	pub max_outputs: usize,
-	pub input: String,
+	pub input_file: Option<String>,
+	pub input_slatepack_message: Option<String>,
 	pub estimate_selection_strategies: bool,
 	pub ttl_blocks: Option<u64>,
+	pub bridge: Option<String>,
+	pub slatepack_qr: bool,
 }
 
 /// Process invoice
@@ -988,28 +1279,50 @@ where
 	C: NodeClient + 'static,
 	K: keychain::Keychain + 'static,
 {
-	let slatepack_secret = {
+	let (slatepack_secret, tor_address, height, secp) = {
 		let mut w_lock = owner_api.wallet_inst.lock();
 		let w = w_lock.lc_provider()?.wallet_inst()?;
 		let keychain = w.keychain(keychain_mask)?;
 		let slatepack_secret = proofaddress::payment_proof_address_dalek_secret(&keychain, None)?;
-		slatepack_secret
+		let slatepack_pk = DalekPublicKey::from(&slatepack_secret);
+		let (height, _, _) = w.w2n_client().get_chain_tip()?;
+		(
+			slatepack_secret,
+			slatepack_pk,
+			height,
+			keychain.secp().clone(),
+		)
 	};
 
-	let slate_pkg =
-		PathToSlateGetter::build_form_path((&args.input).into()).get_tx(&slatepack_secret)?;
+	let slate_pkg = match &args.input_file {
+		Some(file_name) => PathToSlateGetter::build_form_path(file_name.into()).get_tx(
+			Some(&slatepack_secret),
+			height,
+			&secp,
+		)?,
+		None => match &args.input_slatepack_message {
+			Some(message) => PathToSlateGetter::build_form_str(message.clone()).get_tx(
+				Some(&slatepack_secret),
+				height,
+				&secp,
+			)?,
+			None => {
+				return Err(Error::ArgumentError(
+					"Please specify 'file' or 'content' argument".to_string(),
+				))
+			}
+		},
+	};
 
 	let (slate, sender_pk, _recepient, content, _encrypted) = slate_pkg.to_slate()?;
 
 	if !(content == SlatePurpose::FullSlate || content == SlatePurpose::InvoiceInitial) {
-		return Err(ErrorKind::ArgumentError(format!(
+		return Err(Error::ArgumentError(format!(
 			"Wrong slate content. Expecting InvoiceInitial, get {:?}",
 			content
-		))
-		.into());
+		)));
 	}
 
-	let wallet_inst = owner_api.wallet_inst.clone();
 	controller::owner_single_use(None, keychain_mask, Some(owner_api), |api, m| {
 		if args.estimate_selection_strategies {
 			let mut strategies: Vec<(&str, u64, u64)> = Vec::new();
@@ -1043,14 +1356,13 @@ where
 			};
 			if let Err(e) = api.verify_slate_messages(m, &slate) {
 				error!("Error validating participant messages: {}", e);
-				return Err(ErrorKind::LibWallet(format!(
+				return Err(Error::LibWallet(format!(
 					"Unable to validate slate messages, {}",
 					e
-				))
-				.into());
+				)));
 			}
 			let result = api.process_invoice_tx(m, &slate, &init_args);
-			let mut slate = match result {
+			let slate = match result {
 				Ok(s) => {
 					info!(
 						"Invoice processed: {} mwc to {} (strategy '{}')",
@@ -1062,44 +1374,74 @@ where
 				}
 				Err(e) => {
 					info!("Tx not created: {}", e);
-					return Err(
-						ErrorKind::LibWallet(format!("Unable to process invoice, {}", e)).into(),
-					);
+					return Err(Error::LibWallet(format!(
+						"Unable to process invoice, {}",
+						e
+					)));
 				}
 			};
 
 			match args.method.as_str() {
 				"file" => {
 					// Process invoice slate is not required to send anywhere. Let's write it for our records.
-					PathToSlatePutter::build_plain(Some((&args.dest).into())).put_tx(
-						&slate,
-						&slatepack_secret,
-						false,
-					)?;
+					let slatepack_format = sender_pk.is_some();
+					let slate_str = PathToSlatePutter::build_encrypted(
+						Some((&args.dest).into()),
+						SlatePurpose::InvoiceResponse,
+						tor_address,
+						sender_pk,
+						slatepack_format,
+					)
+					.put_tx(&slate, Some(&slatepack_secret), false, &secp)?;
 					api.tx_lock_outputs(m, &slate, Some(String::from("file")), 1)?;
+
+					if slatepack_format {
+						show_slatepack(
+							api,
+							&slate_str, // encrypted (optionally) slate with a purpose.
+							&slate.id,
+							&SlatePurpose::InvoiceResponse,
+							sender_pk.is_some(),
+							false,
+							args.slatepack_qr,
+						)?;
+					}
 				}
-				"self" => {
-					api.tx_lock_outputs(m, &slate, Some(String::from("self")), 1)?;
-					let km = match keychain_mask.as_ref() {
-						None => None,
-						Some(&m) => Some(m.to_owned()),
-					};
-					controller::foreign_single_use(wallet_inst, km, |api| {
-						slate = api.finalize_invoice_tx(&slate)?;
-						Ok(())
-					})?;
-				}
-				method => {
-					let sender = create_sender(method, &args.dest, &None, tor_config)?;
+				"http" => {
+					let sender =
+						create_sender(args.method.as_str(), &args.dest, &None, tor_config)?;
 					// We want to lock outputs for original slate. Sender can respond with anyhting. No reasons to check respond if lock works fine for original slate
-					let _ = sender.send_tx(
+					let slate = sender.send_tx(
+						false,
 						&slate,
 						SlatePurpose::InvoiceResponse,
 						&slatepack_secret,
 						sender_pk,
 						sender.check_other_wallet_version(&args.dest)?,
+						height,
+						&secp,
 					)?;
 					api.tx_lock_outputs(m, &slate, Some(args.dest.clone()), 1)?;
+
+					let result = api.post_tx(m, slate.tx_or_err()?, true);
+					match result {
+						Ok(_) => {
+							let msg = format!(
+								"Invoice slate [{}] finalized and posted successfully",
+								slate.id.to_string()
+							);
+							info!("{}", msg);
+							println!("{}", msg);
+							return Ok(());
+						}
+						Err(e) => {
+							error!("Tx post fail: {}", e);
+							return Err(Error::LibWallet(format!("Unable to post slate, {}", e)));
+						}
+					}
+				}
+				method => {
+					return Err(Error::ArgumentError(format!("Unknown method: {}", method)));
 				}
 			}
 		}
@@ -1170,6 +1512,7 @@ where
 pub struct TxsArgs {
 	pub id: Option<u32>,
 	pub tx_slate_id: Option<Uuid>,
+	pub count: Option<u32>,
 }
 
 pub fn txs<L, C, K>(
@@ -1187,13 +1530,18 @@ where
 	let updater_running = owner_api.updater_running.load(Ordering::Relaxed);
 	controller::owner_single_use(None, keychain_mask, Some(owner_api), |api, m| {
 		let res = api.node_height(m)?;
-		let (validated, txs) = api.retrieve_txs(m, true, args.id, args.tx_slate_id)?;
+		// Note advanced query args not currently supported by command line client
+		let (validated, txs) = api.retrieve_txs(m, true, args.id, args.tx_slate_id, None)?;
 		let include_status = !args.id.is_some() && !args.tx_slate_id.is_some();
+		// If view count is specified, restrict the TX list to `txs.len() - count`
+		let first_tx = args
+			.count
+			.map_or(0, |c| txs.len().saturating_sub(c as usize));
 		display::txs(
 			&g_args.account,
 			res.height,
 			validated || updater_running,
-			&txs,
+			&txs[first_tx..],
 			include_status,
 			dark_scheme,
 			true, // mwc-wallet alwways show the full info because it is advanced tool
@@ -1224,9 +1572,12 @@ where
 				outputs,
 				dark_scheme,
 			)?;
+
+			let secp = Secp256k1::with_caps(ContextFlag::None);
+
 			// should only be one here, but just in case
 			for tx in txs {
-				display::tx_messages(&tx, dark_scheme)?;
+				display::tx_messages(&tx, dark_scheme, &secp)?;
 				display::payment_proof(&tx)?;
 			}
 		}
@@ -1252,22 +1603,29 @@ where
 	C: NodeClient + 'static,
 	K: keychain::Keychain + 'static,
 {
-	let slatepack_secret = {
-		let mut w_lock = owner_api.wallet_inst.lock();
-		let w = w_lock.lc_provider()?.wallet_inst()?;
-		let keychain = w.keychain(keychain_mask)?;
-		let slatepack_secret = proofaddress::payment_proof_address_dalek_secret(&keychain, None)?;
-		slatepack_secret
-	};
+	let path_buf: PathBuf = (&args.input).into();
+	let mut pub_tx_f = File::open(&path_buf)
+		.map_err(|e| Error::IO(format!("Unable to open file {}, {}", args.input, e)))?;
+	let mut content = String::new();
+	pub_tx_f.read_to_string(&mut content).map_err(|e| {
+		Error::IO(format!(
+			"Unable to read data from file {}, {}",
+			args.input, e
+		))
+	})?;
+	if content.len() < 3 {
+		return Err(Error::GenericError(format!("File {} is empty", args.input)));
+	}
 
-	// Post expected to be internal api call, so there is no reasons to work with slatepacks.
-	let slate = PathToSlateGetter::build_form_path((&args.input).into())
-		.get_tx(&slatepack_secret)?
-		.to_slate()?
-		.0;
+	let transaction: Transaction = serde_json::from_str(&content).map_err(|e| {
+		Error::IO(format!(
+			"Json to Transaction conversion failed for {}, {}",
+			content, e
+		))
+	})?;
 
 	controller::owner_single_use(None, keychain_mask, Some(owner_api), |api, m| {
-		api.post_tx(m, &slate.tx, args.fluff)?;
+		api.post_tx(m, &transaction, args.fluff)?;
 		info!("Posted transaction");
 		return Ok(());
 	})?;
@@ -1317,7 +1675,7 @@ where
 	K: keychain::Keychain + 'static,
 {
 	controller::owner_single_use(None, keychain_mask, Some(owner_api), |api, m| {
-		let (_, txs) = api.retrieve_txs(m, true, Some(args.id), None)?;
+		let (_, txs) = api.retrieve_txs(m, true, Some(args.id), None, None)?;
 		let stored_tx = api.get_stored_tx(m, &txs[0])?;
 		if stored_tx.is_none() {
 			error!(
@@ -1335,22 +1693,27 @@ where
 					);
 					return Ok(());
 				}
+				if sig_is_blank(&stored_tx.as_ref().unwrap().kernels()[0].excess_sig) {
+					error!("Transaction at {} has not been finalized.", args.id);
+					return Ok(());
+				}
+
 				api.post_tx(m, &stored_tx.unwrap(), args.fluff)?;
 				info!("Reposted transaction at {}", args.id);
 				return Ok(());
 			}
 			Some(f) => {
 				let mut tx_file = File::create(f.clone()).map_err(|e| {
-					ErrorKind::IO(format!("Unable to create tx dump file {}, {}", f, e))
+					Error::IO(format!("Unable to create tx dump file {}, {}", f, e))
 				})?;
 				let tx_as_str = json::to_string(&stored_tx).map_err(|e| {
-					ErrorKind::GenericError(format!("Unable convert Tx to Json, {}", e))
+					Error::GenericError(format!("Unable convert Tx to Json, {}", e))
 				})?;
 				tx_file.write_all(tx_as_str.as_bytes()).map_err(|e| {
-					ErrorKind::IO(format!("Unable to save tx to the file {}, {}", f, e))
+					Error::IO(format!("Unable to save tx to the file {}, {}", f, e))
 				})?;
 				tx_file.sync_all().map_err(|e| {
-					ErrorKind::IO(format!("Unable to save tx to the file {}, {}", f, e))
+					Error::IO(format!("Unable to save tx to the file {}, {}", f, e))
 				})?;
 				info!("Dumped transaction data for tx {} to {}", args.id, f);
 				return Ok(());
@@ -1386,11 +1749,10 @@ where
 			}
 			Err(e) => {
 				error!("TX Cancellation failed: {}", e);
-				Err(ErrorKind::LibWallet(format!(
+				Err(Error::LibWallet(format!(
 					"Unable to cancel Transaction {}, {}",
 					args.tx_id_string, e
-				))
-				.into())
+				)))
 			}
 		}
 	})?;
@@ -1432,8 +1794,7 @@ where
 			}
 			Err(e) => {
 				error!("Wallet check failed: {}", e);
-				error!("Backtrace: {}", e.backtrace().unwrap());
-				Err(ErrorKind::LibWallet(format!("Wallet check failed, {}", e)).into())
+				Err(Error::LibWallet(format!("Wallet check failed, {}", e)))
 			}
 		}
 	})?;
@@ -1486,12 +1847,12 @@ where
 	K: keychain::Keychain + 'static,
 {
 	controller::owner_single_use(None, keychain_mask, Some(owner_api), |api, m| {
-		let result = api.get_stored_tx_proof(m, args.id);
+		let result = api.get_stored_tx_proof(m, args.id, args.tx_slate_id);
 		match result {
 			Ok(p) => {
 				// actually export proof
 				let mut proof_file = File::create(args.output_file.clone()).map_err(|e| {
-					ErrorKind::GenericError(format!(
+					Error::GenericError(format!(
 						"Unable to create file {}, {}",
 						args.output_file, e
 					))
@@ -1499,27 +1860,23 @@ where
 				proof_file
 					.write_all(json::to_string_pretty(&p).unwrap().as_bytes())
 					.map_err(|e| {
-						ErrorKind::GenericError(format!(
+						Error::GenericError(format!(
 							"Unable to save the proof file {}, {}",
 							args.output_file, e
 						))
 					})?;
 				proof_file.sync_all().map_err(|e| {
-					ErrorKind::GenericError(format!(
-						"Unable to save file {}, {}",
-						args.output_file, e
-					))
+					Error::GenericError(format!("Unable to save file {}, {}", args.output_file, e))
 				})?;
 				warn!("Payment proof exported to {}", args.output_file);
 				Ok(())
 			}
 			Err(e) => {
 				error!("Proof export failed: {}", e);
-				return Err(ErrorKind::GenericError(format!(
+				return Err(Error::GenericError(format!(
 					"Unable to retrieve payment proof, {}",
 					e
-				))
-				.into());
+				)));
 			}
 		}
 	})?;
@@ -1554,17 +1911,23 @@ where
 	if !path.exists() {
 		let msg = format!("Unable to open payment proof file at {}", args.input_file);
 		error!("{}", msg);
-		return Err(ErrorKind::LibWallet(msg).into());
+		return Err(Error::LibWallet(msg));
 	}
 	let mut file = File::open(path)
-		.map_err(|e| ErrorKind::LibWallet(format!("Unable to open proof data, {}", e)))?;
+		.map_err(|e| Error::LibWallet(format!("Unable to open proof data, {}", e)))?;
 	let mut proof = String::new();
 	file.read_to_string(&mut proof)
-		.map_err(|e| ErrorKind::LibWallet(format!("Unable to read proof data, {}", e)))?;
+		.map_err(|e| Error::LibWallet(format!("Unable to read proof data, {}", e)))?;
 	let tx_pf: TxProof = serde_json::from_str(&proof)
-		.map_err(|e| ErrorKind::LibWallet(format!("Unable to deserialize proof data, {}", e)))?;
+		.map_err(|e| Error::LibWallet(format!("Unable to deserialize proof data, {}", e)))?;
 
-	match grin_wallet_libwallet::proof::tx_proof::verify_tx_proof_wrapper(&tx_pf) {
+	let secp = {
+		let secp_inst = static_secp_instance();
+		let secp = secp_inst.lock().clone();
+		secp
+	};
+
+	match grin_wallet_libwallet::proof::tx_proof::verify_tx_proof_wrapper(&tx_pf, &secp) {
 		Ok((sender, receiver, amount, outputs, kernel)) => {
 			grin_wallet_libwallet::proof::tx_proof::proof_ok(
 				sender, receiver, amount, outputs, kernel,
@@ -1573,7 +1936,7 @@ where
 		}
 		Err(e) => {
 			error!("Unable to verify proof. {}", e);
-			Err(ErrorKind::LibWallet(format!("Proof not valid: {}", e)).into())
+			Err(Error::LibWallet(format!("Proof not valid: {}", e)))
 		}
 	}
 }
@@ -1597,7 +1960,7 @@ where
 			}
 			Err(e) => {
 				error!("Wallet Data dump failed: {}", e);
-				Err(ErrorKind::LibWallet(format!("Wallet Data dump failed, {}", e)).into())
+				Err(Error::LibWallet(format!("Wallet Data dump failed, {}", e)))
 			}
 		}
 	})?;
@@ -1617,22 +1980,19 @@ where
 	match args.buyer_communication_method.as_str() {
 		"mwcmqs" => {
 			// Validating destination address
-			let _ = MWCMQSAddress::from_str(&args.buyer_communication_address).map_err(|e| {
-				ErrorKind::ArgumentError(format!("Invalid destination address, {}", e))
-			})?;
+			let _ = MWCMQSAddress::from_str(&args.buyer_communication_address)
+				.map_err(|e| Error::ArgumentError(format!("Invalid destination address, {}", e)))?;
 		}
 		"tor" => {
-			let _ = validate_tor_address(&args.buyer_communication_address).map_err(|e| {
-				ErrorKind::ArgumentError(format!("Invalid destination address, {}", e))
-			})?;
+			let _ = validate_tor_address(&args.buyer_communication_address)
+				.map_err(|e| Error::ArgumentError(format!("Invalid destination address, {}", e)))?;
 		}
 		"file" => (), // not validating the fine name. Files are secondary and testing method.
 		_ => {
-			return Err(ErrorKind::ArgumentError(format!(
+			return Err(Error::ArgumentError(format!(
 				"Invalid communication method '{}'. Valid methods: mwcmqs, tor, file",
 				args.buyer_communication_method
-			))
-			.into())
+			)))
 		}
 	}
 
@@ -1645,7 +2005,10 @@ where
 			}
 			Err(e) => {
 				error!("Unable to start Swap trade: {}", e);
-				Err(ErrorKind::LibWallet(format!("Unable to start Swap trade: {}", e)).into())
+				Err(Error::LibWallet(format!(
+					"Unable to start Swap trade: {}",
+					e
+				)))
 			}
 		}
 	})?;
@@ -1671,11 +2034,10 @@ where
 			}
 			Err(e) => {
 				error!("Unable to create a Swap trade from message {}: {}", file, e);
-				Err(ErrorKind::LibWallet(format!(
+				Err(Error::LibWallet(format!(
 					"Unable to create a Swap trade from message {}: {}",
 					file, e
-				))
-				.into())
+				)))
 			}
 		}
 	})?;
@@ -1897,6 +2259,9 @@ where
 		None => None,
 		Some(&m) => Some(m.to_owned()),
 	};
+
+	let secp = Secp256k1::new();
+
 	match args.subcommand {
 		SwapSubcommand::List | SwapSubcommand::ListAndCheck => {
 			let result = owner_swap::swap_list(
@@ -1950,12 +2315,15 @@ where
 				}
 				Err(e) => {
 					error!("Unable to List Swap trades: {}", e);
-					Err(ErrorKind::LibWallet(format!("Unable to List Swap trades: {}", e)).into())
+					Err(Error::LibWallet(format!(
+						"Unable to List Swap trades: {}",
+						e
+					)))
 				}
 			}
 		}
 		SwapSubcommand::Delete => {
-			let swap_id = args.swap_id.ok_or(ErrorKind::ArgumentError(
+			let swap_id = args.swap_id.ok_or(Error::ArgumentError(
 				"Not found expected 'swap_id' argument".to_string(),
 			))?;
 			let result = owner_swap::swap_delete(wallet_inst, keychain_mask, &swap_id);
@@ -1966,43 +2334,42 @@ where
 				}
 				Err(e) => {
 					error!("Unable to delete Swap {}: {}", swap_id, e);
-					Err(
-						ErrorKind::LibWallet(format!("Unable to delete Swap {}: {}", swap_id, e))
-							.into(),
-					)
+					Err(Error::LibWallet(format!(
+						"Unable to delete Swap {}: {}",
+						swap_id, e
+					)))
 				}
 			}
 		}
 		SwapSubcommand::Adjust => {
-			let swap_id = args.swap_id.ok_or(ErrorKind::ArgumentError(
+			let swap_id = args.swap_id.ok_or(Error::ArgumentError(
 				"Not found expected 'swap_id' argument".to_string(),
 			))?;
 
 			// Checking parameters here. We can't do that at libwallet side
 			if let Some(method) = args.method.clone() {
-				let destination = args.destination.clone().ok_or(ErrorKind::ArgumentError(
+				let destination = args.destination.clone().ok_or(Error::ArgumentError(
 					"Please specify '--dest' parameter as well".to_string(),
 				))?;
 				match method.as_str() {
 					"mwcmqs" => {
 						// Validating destination address
 						let _ = MWCMQSAddress::from_str(&destination).map_err(|e| {
-							ErrorKind::ArgumentError(format!("Invalid destination address, {}", e))
+							Error::ArgumentError(format!("Invalid destination address, {}", e))
 						})?;
 					}
 					"tor" => {
 						// Validating tor address
 						let _ = validate_tor_address(&destination).map_err(|e| {
-							ErrorKind::ArgumentError(format!("Invalid destination address, {}", e))
+							Error::ArgumentError(format!("Invalid destination address, {}", e))
 						})?;
 					}
 					"file" => (),
 					_ => {
-						return Err(ErrorKind::ArgumentError(format!(
+						return Err(Error::ArgumentError(format!(
 							"Unknown communication method value '{}'",
 							method
-						))
-						.into());
+						)));
 					}
 				}
 			}
@@ -2037,11 +2404,10 @@ where
 					}
 					Err(e) => {
 						error!("Unable to adjust the Swap {}: {}", swap_id, e);
-						return Err(ErrorKind::LibWallet(format!(
+						return Err(Error::LibWallet(format!(
 							"Unable to adjust Swap {}: {}",
 							swap_id, e
-						))
-						.into());
+						)));
 					}
 				}
 			}
@@ -2053,7 +2419,7 @@ where
 			Ok(())
 		}
 		SwapSubcommand::Check => {
-			let swap_id = args.swap_id.ok_or(ErrorKind::ArgumentError(
+			let swap_id = args.swap_id.ok_or(Error::ArgumentError(
 				"Not found expected 'swap_id' argument".to_string(),
 			))?;
 			let result = owner_swap::swap_get(wallet_inst.clone(), keychain_mask, &swap_id);
@@ -2097,7 +2463,7 @@ where
 									"messageExchangeTimeLimit" : swap.message_exchange_time_sec,
 									"redeemTimeLimit" : swap.redeem_time_sec,
 									"sellerLockingFirst" : swap.seller_lock_first,
-									"mwcLockHeight" : swap.refund_slate.lock_height,
+									"mwcLockHeight" : swap.refund_slate.get_lock_height(),
 									"mwcLockTime" : "0".to_string(),
 									"secondaryLockTime" : swap.get_time_secondary_lock_publish().to_string(),
 									"communicationMethod" : swap.communication_method,
@@ -2116,7 +2482,7 @@ where
 								println!("JSON: {}", item.to_string());
 								return Ok(());
 							} else {
-								return Err(Error::from(e));
+								return Err(e.into());
 							}
 						}
 					};
@@ -2148,12 +2514,14 @@ where
 						cancelled_swaps,
 					);
 
-					let mwc_lock_time = if conf_status.mwc_tip < swap.refund_slate.lock_height {
-						Utc::now().timestamp() as u64
-							+ (swap.refund_slate.lock_height - conf_status.mwc_tip) * 60
-					} else {
-						0
-					};
+					let mwc_lock_time =
+						if conf_status.mwc_tip < swap.refund_slate.get_lock_height_check()? {
+							Utc::now().timestamp() as u64
+								+ (swap.refund_slate.get_lock_height_check()? - conf_status.mwc_tip)
+									* 60
+						} else {
+							0
+						};
 
 					// RoadMap
 					let road_map_to_print: Vec<StateEtaInfoString> = roadmap
@@ -2188,7 +2556,7 @@ where
 							"messageExchangeTimeLimit" : swap.message_exchange_time_sec,
 							"redeemTimeLimit" : swap.redeem_time_sec,
 							"sellerLockingFirst" : swap.seller_lock_first,
-							"mwcLockHeight" : swap.refund_slate.lock_height,
+							"mwcLockHeight" : swap.refund_slate.get_lock_height(),
 							"mwcLockTime" : mwc_lock_time.to_string(),
 							"secondaryLockTime" : swap.get_time_secondary_lock_publish().to_string(),
 							"communicationMethod" : swap.communication_method,
@@ -2223,21 +2591,21 @@ where
 				}
 				Err(e) => {
 					error!("Unable to retrieve Swap {}: {}", swap_id, e);
-					Err(
-						ErrorKind::LibWallet(format!("Unable to retrieve Swap {}: {}", swap_id, e))
-							.into(),
-					)
+					Err(Error::LibWallet(format!(
+						"Unable to retrieve Swap {}: {}",
+						swap_id, e
+					)))
 				}
 			}
 		}
 		SwapSubcommand::Process => {
-			let swap_id = args.swap_id.ok_or(ErrorKind::ArgumentError(
+			let swap_id = args.swap_id.ok_or(Error::ArgumentError(
 				"Not found expected 'swap_id' argument".to_string(),
 			))?;
 
 			if args.method.is_some() || args.destination.is_some() {
-				return Err(ErrorKind::ArgumentError(
-					"swap --process doesn't accept 'method' or 'dest' parameters, instead it is using parameters associated with this swap trade.".to_string()).into());
+				return Err(Error::ArgumentError(
+					"swap --process doesn't accept 'method' or 'dest' parameters, instead it is using parameters associated with this swap trade.".to_string()));
 			}
 
 			// Creating message delivery transport as a closure
@@ -2248,7 +2616,10 @@ where
 			let message_sender = move |swap_message: message::Message,
 			                           method: String,
 			                           dest: String|
-			      -> Result<(bool, String), crate::libwallet::Error> {
+			      -> Result<
+				(bool, String),
+				grin_wallet_libwallet::swap::Error,
+			> {
 				let destination_str = format!("{} {}", method, dest);
 				let from_address;
 
@@ -2265,7 +2636,7 @@ where
 								true,
 							)
 							.map_err(|e| {
-								crate::libwallet::ErrorKind::SwapError(format!(
+								grin_wallet_libwallet::swap::Error::MessageSender(format!(
 									"Unable to start mwcmqs listener, {}",
 									e
 								))
@@ -2273,13 +2644,13 @@ where
 							thread::sleep(Duration::from_millis(2000));
 						}
 						from_address = grin_wallet_impls::adapters::get_mwcmqs_brocker()
-							.ok_or(crate::libwallet::ErrorKind::SwapError(
+							.ok_or(grin_wallet_libwallet::swap::Error::MessageSender(
 								"Unable to start mwcmqs listener".to_string(),
 							))?
 							.0
 							.get_publisher_address()
 							.map_err(|e| {
-								crate::libwallet::ErrorKind::SwapError(format!(
+								grin_wallet_libwallet::swap::Error::MessageSender(format!(
 									"Unable to get publisher address {}",
 									e
 								))
@@ -2301,6 +2672,8 @@ where
 										&tor_config.socks_proxy_addr,
 										&None,
 										&tor_config.tor_log_file,
+										tor_config.bridge,
+										tor_config.proxy,
 									);
 									if let Err(e) = res {
 										error!("Error starting http listener: {}", e);
@@ -2309,7 +2682,7 @@ where
 							thread::sleep(Duration::from_millis(2000));
 						}
 						from_address = tor::status::get_tor_address().ok_or(
-							crate::libwallet::ErrorKind::GenericError(
+							grin_wallet_libwallet::swap::Error::MessageSender(
 								"Tor is not running".to_string(),
 							),
 						)?;
@@ -2317,9 +2690,14 @@ where
 					"file" => {
 						// File, let's process it here
 						let msg_str = swap_message.to_json()?;
-						let mut file = File::create(dest.clone())?;
+						let mut file = File::create(dest.clone()).map_err(|e| {
+							grin_wallet_libwallet::swap::Error::MessageSender(format!(
+								"Unable to create file {}, {}",
+								dest, e
+							))
+						})?;
 						file.write_all(msg_str.as_bytes()).map_err(|e| {
-							crate::libwallet::ErrorKind::SwapError(format!(
+							grin_wallet_libwallet::swap::Error::MessageSender(format!(
 								"Unable to store message data to the destination file, {}",
 								e
 							))
@@ -2329,10 +2707,8 @@ where
 					}
 					_ => {
 						error!("Please specify a method (mwcmqs, tor, or file) for transporting swap messages to the other party with whom you're doing the swap!");
-						return Err(crate::libwallet::Error::from(
-							crate::libwallet::ErrorKind::SwapError(
-								"Expected 'method' argument is not found".to_string(),
-							),
+						return Err(grin_wallet_libwallet::swap::Error::MessageSender(
+							"Expected 'method' argument is not found".to_string(),
 						));
 					}
 				}
@@ -2345,7 +2721,7 @@ where
 					&tor_config2,
 				)
 				.map_err(|e| {
-					crate::libwallet::ErrorKind::SwapError(format!(
+					grin_wallet_libwallet::swap::Error::MessageSender(format!(
 						"Unable to create message sender, {}",
 						e
 					))
@@ -2357,15 +2733,15 @@ where
 				}
 
 				let ack = sender
-					.send_swap_message(&swap_message)
+					.send_swap_message(&swap_message, &secp)
 					.map_err(|e| {
-						ErrorKind::LibWallet(format!(
+						grin_wallet_libwallet::swap::Error::MessageSender(format!(
 							"Failure in sending swap message {} by {}: {}",
 							swap_id2, method, e
 						))
 					})
 					.map_err(|e| {
-						crate::libwallet::ErrorKind::SwapError(format!(
+						grin_wallet_libwallet::swap::Error::MessageSender(format!(
 							"Unable to deliver the message, {}",
 							e
 						))
@@ -2400,10 +2776,10 @@ where
 				}
 				Err(e) => {
 					error!("Unable to process Swap {}: {}", swap_id, e);
-					Err(
-						ErrorKind::LibWallet(format!("Unable to process Swap {}: {}", swap_id, e))
-							.into(),
-					)
+					Err(Error::LibWallet(format!(
+						"Unable to process Swap {}: {}",
+						swap_id, e
+					)))
 				}
 			}
 		}
@@ -2412,13 +2788,13 @@ where
 			// For auto swap --json_format is a trigger for a one shot action.
 			let one_shot = args.json_format;
 
-			let swap_id = args.swap_id.ok_or(ErrorKind::ArgumentError(
+			let swap_id = args.swap_id.ok_or(Error::ArgumentError(
 				"Not found expected 'swap_id' argument".to_string(),
 			))?;
 
 			if args.method.is_some() || args.destination.is_some() {
-				return Err(ErrorKind::ArgumentError(
-					"swap --autoswap doesn't accept 'method' or 'dest' parameters, instead it is using parameters associated with this swap trade.".to_string()).into());
+				return Err(Error::ArgumentError(
+					"swap --autoswap doesn't accept 'method' or 'dest' parameters, instead it is using parameters associated with this swap trade.".to_string()));
 			}
 
 			let swap = owner_swap::swap_get(wallet_inst.clone(), keychain_mask, &swap_id)?;
@@ -2434,7 +2810,7 @@ where
 				match swap.communication_method.as_str() {
 					"mwcmqs" => {
 						if grin_wallet_impls::adapters::get_mwcmqs_brocker().is_some() {
-							return Err(ErrorKind::GenericError("mwcmqs listener is already running, there is no need to specify '--start_listener' parameter".to_string()).into());
+							return Err(Error::GenericError("mwcmqs listener is already running, there is no need to specify '--start_listener' parameter".to_string()));
 						}
 
 						// Startting MQS
@@ -2446,14 +2822,14 @@ where
 							true,
 						)
 						.map_err(|e| {
-							ErrorKind::LibWallet(format!("Unable to start mwcmqs listener, {}", e))
+							Error::LibWallet(format!("Unable to start mwcmqs listener, {}", e))
 						})?;
 						thread::sleep(Duration::from_millis(2000));
 					}
 					"tor" => {
 						// Checking is foreign API is running. It dont't important if it is tor or http.
 						if controller::is_foreign_api_running() {
-							return Err(ErrorKind::GenericError("tor or http listener is already running, there is no need to specify '--start_listener' parameter".to_string()).into());
+							return Err(Error::GenericError("tor or http listener is already running, there is no need to specify '--start_listener' parameter".to_string()));
 						}
 
 						// Starting tor
@@ -2470,6 +2846,8 @@ where
 									&tor_config.socks_proxy_addr,
 									&None,
 									&tor_config.tor_log_file,
+									tor_config.bridge,
+									tor_config.proxy,
 								);
 								if let Err(e) = res {
 									error!("Error starting http listener: {}", e);
@@ -2478,11 +2856,10 @@ where
 						thread::sleep(Duration::from_millis(2000));
 					}
 					_ => {
-						return Err(ErrorKind::ArgumentError(format!(
+						return Err(Error::ArgumentError(format!(
 							"Auto Swap doesn't support communication method {}",
 							swap.communication_method
-						))
-						.into());
+						)));
 					}
 				}
 			}
@@ -2493,48 +2870,43 @@ where
 				"mwcmqs" => {
 					// Validating destination address
 					let _ = MWCMQSAddress::from_str(&swap.communication_address).map_err(|e| {
-						ErrorKind::ArgumentError(format!("Invalid destination address, {}", e))
+						Error::ArgumentError(format!("Invalid destination address, {}", e))
 					})?;
 
 					if grin_wallet_impls::adapters::get_mwcmqs_brocker().is_none() {
-						return Err(ErrorKind::GenericError("mqcmqs listener is not running. Please start it with 'listen' command or '--start_listener' argument".to_string()).into());
+						return Err(Error::GenericError("mqcmqs listener is not running. Please start it with 'listen' command or '--start_listener' argument".to_string()));
 					}
 					from_address = grin_wallet_impls::adapters::get_mwcmqs_brocker()
-						.ok_or(ErrorKind::GenericError(
+						.ok_or(Error::GenericError(
 							"Unable to start mwcmqs listener".to_string(),
 						))?
 						.0
 						.get_publisher_address()
 						.map_err(|e| {
-							ErrorKind::GenericError(format!(
-								"Unable to get publisher address {}",
-								e
-							))
+							Error::GenericError(format!("Unable to get publisher address {}", e))
 						})?
 						.get_full_name();
 				}
 				"tor" => {
 					// Validating tor address
 					let _ = validate_tor_address(&swap.communication_address).map_err(|e| {
-						ErrorKind::ArgumentError(format!("Invalid destination address, {}", e))
+						Error::ArgumentError(format!("Invalid destination address, {}", e))
 					})?;
 
 					if !controller::is_foreign_api_running() {
-						return Err(ErrorKind::GenericError(
+						return Err(Error::GenericError(
 							"Foreign API is not active and tor listener is not running."
 								.to_string(),
-						)
-						.into());
+						));
 					}
 					from_address = tor::status::get_tor_address()
-						.ok_or(ErrorKind::GenericError("Tor is not running".to_string()))?;
+						.ok_or(Error::GenericError("Tor is not running".to_string()))?;
 				}
 				_ => {
-					return Err(ErrorKind::ArgumentError(format!(
+					return Err(Error::ArgumentError(format!(
 						"Auto Swap doesn't support communication method {}",
 						swap.communication_method
-					))
-					.into());
+					)));
 				}
 			}
 
@@ -2542,37 +2914,40 @@ where
 			let apisecret = args.apisecret.clone();
 			let swap_id2 = swap_id.clone();
 			let tor_config2 = tor_config.clone();
-			let message_sender = move |swap_message: message::Message,
-			                           method: String,
-			                           destination: String|
-			      -> Result<(bool, String), crate::libwallet::Error> {
-				// File is processed, the online send will be handled here
-				let sender = create_swap_message_sender(
-					method.as_str(),
-					destination.as_str(),
-					&apisecret,
-					&tor_config2,
-				)
-				.map_err(|e| {
-					crate::libwallet::ErrorKind::SwapError(format!(
-						"Unable to create message sender, {}",
-						e
-					))
-				})?;
+			let message_sender =
+				move |swap_message: message::Message,
+				      method: String,
+				      destination: String|
+				      -> Result<(bool, String), grin_wallet_libwallet::swap::Error> {
+					// File is processed, the online send will be handled here
+					let sender = create_swap_message_sender(
+						method.as_str(),
+						destination.as_str(),
+						&apisecret,
+						&tor_config2,
+					)
+					.map_err(|e| {
+						grin_wallet_libwallet::swap::Error::MessageSender(format!(
+							"Unable to create message sender, {}",
+							e
+						))
+					})?;
 
-				let mut swap_message = swap_message;
-				if let message::Update::Offer(offer_update) = &mut swap_message.inner {
-					offer_update.from_address = from_address;
-				}
+					let mut swap_message = swap_message;
+					if let message::Update::Offer(offer_update) = &mut swap_message.inner {
+						offer_update.from_address = from_address;
+					}
 
-				let ack = sender.send_swap_message(&swap_message).map_err(|e| {
-					crate::libwallet::ErrorKind::SwapError(format!(
-						"Unable to deliver the message {} by {}: {}",
-						swap_id2, method, e
-					))
-				})?;
-				Ok((ack, format!("{} {}", method, destination)))
-			};
+					let ack = sender
+						.send_swap_message(&swap_message, &secp)
+						.map_err(|e| {
+							grin_wallet_libwallet::swap::Error::MessageSender(format!(
+								"Unable to deliver the message {} by {}: {}",
+								swap_id2, method, e
+							))
+						})?;
+					Ok((ack, format!("{} {}", method, destination)))
+				};
 
 			// Calling mostly for params and environment validation. Also it is a nice chance to print the status of the deal that will be started
 			let (mut prev_state, mut prev_action, mut prev_journal_len) = {
@@ -2621,7 +2996,7 @@ where
 							swap.secondary_currency
 								.validate_address(addr)
 								.map_err(|e| {
-									ErrorKind::ArgumentError(format!(
+									Error::ArgumentError(format!(
 										"Invalid secondary currency address {}, {}",
 										addr, e
 									))
@@ -2631,11 +3006,10 @@ where
 							if swap.get_secondary_address().is_empty()
 								&& swap.secondary_currency.is_btc_family()
 							{
-								return Err(ErrorKind::GenericError(
+								return Err(Error::GenericError(
 									"Please define buyer_refund_address for automated swap"
 										.to_string(),
-								)
-								.into());
+								));
 							}
 						}
 					}
@@ -2858,11 +3232,10 @@ where
 					let r = t.join();
 					if let Err(_) = r {
 						error!("Error during running autoswap thread for {}", swap_id);
-						return Err(ErrorKind::LibWallet(format!(
+						return Err(Error::LibWallet(format!(
 							"Error during running autoswap thread for {}",
 							swap_id
-						))
-						.into());
+						)));
 					}
 				}
 			}
@@ -2874,7 +3247,7 @@ where
 			println!("This command is going to stop all the ongoing auto-swap threads. You can continue with the swap manually by entering commands step by step.");
 			println!("Do you want to continue? Please answer Yes/No");
 			input.read_line(&mut answer).map_err(|e| {
-				ErrorKind::LibWallet(format!(
+				Error::LibWallet(format!(
 					"Invalid answer to terminating the auto swap threads, {}",
 					e
 				))
@@ -2887,7 +3260,7 @@ where
 			Ok(())
 		}
 		SwapSubcommand::Dump => {
-			let swap_id = args.swap_id.ok_or(ErrorKind::ArgumentError(
+			let swap_id = args.swap_id.ok_or(Error::ArgumentError(
 				"Not found expected 'swap_id' argument".to_string(),
 			))?;
 			let result = owner_swap::swap_dump(wallet_inst, keychain_mask, &swap_id);
@@ -2901,31 +3274,30 @@ where
 						"Unable to dump the content of the swap file {}.swap: {}",
 						swap_id, e
 					);
-					Err(ErrorKind::LibWallet(format!(
+					Err(Error::LibWallet(format!(
 						"Unable to dump the content of the swap file {}.swap: {}",
 						swap_id, e
-					))
-					.into())
+					)))
 				}
 			}
 		}
 		SwapSubcommand::TradeExport => {
-			let swap_id = args.swap_id.ok_or(ErrorKind::ArgumentError(
+			let swap_id = args.swap_id.ok_or(Error::ArgumentError(
 				"Not found expected 'swap_id' argument".to_string(),
 			))?;
 
-			let file_name = args.destination.ok_or(ErrorKind::ArgumentError(
+			let file_name = args.destination.ok_or(Error::ArgumentError(
 				"Not found expected file name for the exported data".to_string(),
 			))?;
 
 			trades::export_trade(swap_id.as_str(), file_name.as_str())
-				.map_err(|e| ErrorKind::LibWallet(format!("Unable to export trade data, {}", e)))?;
+				.map_err(|e| Error::LibWallet(format!("Unable to export trade data, {}", e)))?;
 
 			println!("Swap trade is exported to {}", file_name);
 			Ok(())
 		}
 		SwapSubcommand::TradeImport => {
-			let trade_file_name = args.destination.ok_or(ErrorKind::ArgumentError(
+			let trade_file_name = args.destination.ok_or(Error::ArgumentError(
 				"Not found expected file name for the exported data".to_string(),
 			))?;
 
@@ -2961,10 +3333,9 @@ where
 					return Ok(());
 				}
 				_ => {
-					return Err(ErrorKind::LibWallet(
+					return Err(Error::LibWallet(
 						"Ethereum Get Wallet Info failed!".to_string(),
-					)
-					.into());
+					));
 				}
 			}
 		}
@@ -2990,19 +3361,16 @@ where
 					return Ok(());
 				}
 				Err(e) => match e {
-					grin_wallet_libwallet::swap::ErrorKind::EthBalanceNotEnough => Err(
-						ErrorKind::LibWallet("Not Enough Ether to transfer/gas".to_string()).into(),
+					grin_wallet_libwallet::swap::Error::EthBalanceNotEnough => Err(
+						Error::LibWallet("Not Enough Ether to transfer/gas".to_string()),
 					),
-					grin_wallet_libwallet::swap::ErrorKind::ERC20TokenBalanceNotEnough(_error) => {
-						Err(ErrorKind::LibWallet(format!(
+					grin_wallet_libwallet::swap::Error::ERC20TokenBalanceNotEnough(_error) => {
+						Err(Error::LibWallet(format!(
 							"Not Enough ERC-20 Token: {} to transfer",
 							currency
-						))
-						.into())
+						)))
 					}
-					_ => {
-						Err(ErrorKind::LibWallet("Unknown Ethereum Chain Error".to_string()).into())
-					}
+					_ => Err(Error::LibWallet("Unknown Ethereum Chain Error".to_string())),
 				},
 			}
 		}
@@ -3089,28 +3457,24 @@ where
 		}
 		IntegritySubcommand::Create => {
 			if args.fee.is_empty() {
-				return Err(ErrorKind::ArgumentError(
+				return Err(Error::ArgumentError(
 					"Please specify comma separated integrity fee that you need to activate"
 						.to_string(),
-				)
-				.into());
+				));
 			}
 
 			let min_fee = args.fee.iter().min().unwrap_or(&0);
 			let min_integrity_fee =
-				selection::get_base_fee() * libp2p_connection::INTEGRITY_FEE_MIN_X;
+				global::get_accept_fee_base() * libp2p_connection::INTEGRITY_FEE_MIN_X;
 			if *min_fee < min_integrity_fee {
-				return Err(ErrorKind::ArgumentError(format!(
+				return Err(Error::ArgumentError(format!(
 					"The minimal accepted integrity fee is {} MWC",
 					amount_to_hr_string(min_integrity_fee, true)
-				))
-				.into());
+				)));
 			}
 
 			let max_fee = args.fee.iter().max().unwrap_or(&0);
-			let reservation_amount = args
-				.reserve
-				.unwrap_or(std::cmp::max(GRIN_BASE, max_fee * 2));
+			let reservation_amount = args.reserve.unwrap_or(std::cmp::max(MWC_BASE, max_fee * 2));
 
 			let res = owner_libp2p::create_integral_balance(
 				wallet_inst.clone(),
@@ -3256,10 +3620,7 @@ where
 						for addr in libp2p_peers.libp2p_peers {
 							libp2p_connection::add_new_peer(&PeerAddr::Onion(addr.clone()))
 								.map_err(|e| {
-									ErrorKind::GenericError(format!(
-										"Failed to add libp2p peer, {}",
-										e
-									))
+									Error::GenericError(format!("Failed to add libp2p peer, {}", e))
 								})?;
 							if !args.json {
 								println!("Joining the node peer at {}", addr);
@@ -3269,10 +3630,7 @@ where
 						for addr in libp2p_peers.node_peers {
 							libp2p_connection::add_new_peer(&PeerAddr::Onion(addr.clone()))
 								.map_err(|e| {
-									ErrorKind::GenericError(format!(
-										"Failed to add libp2p peer, {}",
-										e
-									))
+									Error::GenericError(format!("Failed to add libp2p peer, {}", e))
 								})?;
 							if !args.json {
 								println!("Joining the node peer at {}", addr);
@@ -3298,7 +3656,7 @@ where
 					if seed.ends_with("onion") {
 						libp2p_connection::add_new_peer(&PeerAddr::Onion(seed.to_string()))
 							.map_err(|e| {
-								ErrorKind::GenericError(format!("Failed to add libp2p peer, {}", e))
+								Error::GenericError(format!("Failed to add libp2p peer, {}", e))
 							})?;
 					}
 				}
@@ -3430,26 +3788,24 @@ where
 
 	if args.publish_message.is_some() {
 		let publish_message = args.publish_message.unwrap();
-		let publish_topic = args.publish_topic.ok_or(ErrorKind::ArgumentError(
+		let publish_topic = args.publish_topic.ok_or(Error::ArgumentError(
 			"Please specify publish topic".to_string(),
 		))?;
-		let publish_interval = args.publish_interval.ok_or(ErrorKind::ArgumentError(
+		let publish_interval = args.publish_interval.ok_or(Error::ArgumentError(
 			"Please specify message publishing interval value".to_string(),
 		))?;
 		if publish_interval < 60 {
-			return Err(ErrorKind::ArgumentError(
+			return Err(Error::ArgumentError(
 				"Message publishing interval minimal value is 60 seconds".to_string(),
-			)
-			.into());
+			));
 		}
-		let min_fee = selection::get_base_fee() * libp2p_connection::INTEGRITY_FEE_MIN_X;
+		let min_fee = global::get_accept_fee_base() * libp2p_connection::INTEGRITY_FEE_MIN_X;
 		let fee = args.fee.unwrap_or(min_fee);
 		if fee < min_fee {
-			return Err(ErrorKind::ArgumentError(format!(
+			return Err(Error::ArgumentError(format!(
 				"Please specify fee higher than minimal integrity fee {}",
 				amount_to_hr_string(min_fee, true)
-			))
-			.into());
+			)));
 		}
 
 		// Let's check if message already running, so we can reuse integrity context
@@ -3488,11 +3844,10 @@ where
 			context = if args.fee_uuid.is_some() {
 				let fee_uuid = args.fee_uuid.clone().unwrap();
 				if used_ctx_uuid.contains(&fee_uuid) {
-					return Err(ErrorKind::GenericError(format!(
+					return Err(Error::GenericError(format!(
 						"Fee uuid {} is already used for another transaction",
 						fee_uuid
-					))
-					.into());
+					)));
 				}
 				fee_transaction
 					.iter()
@@ -3513,20 +3868,19 @@ where
 		}
 
 		if context.is_none() {
-			return Err(ErrorKind::GenericError(
+			return Err(Error::GenericError(
 				"Not found integrity context with paid fee".to_string(),
-			)
-			.into());
+			));
 		}
 
 		let mkt_message =
 			serde_json::from_str::<serde_json::Value>(&publish_message).map_err(|e| {
-				ErrorKind::GenericError(format!(
+				Error::GenericError(format!(
 					"Unable to parse the message {}, {}",
 					publish_message, e
 				))
 			})?;
-		let offer_id = mkt_message["id"].as_str().ok_or(ErrorKind::GenericError(
+		let offer_id = mkt_message["id"].as_str().ok_or(Error::GenericError(
 			"Not found expected offer id".to_string(),
 		))?;
 
@@ -3553,11 +3907,10 @@ where
 		let uuid = match Uuid::parse_str(&withdraw_message_id) {
 			Ok(uuid) => uuid,
 			Err(e) => {
-				return Err(ErrorKind::ArgumentError(format!(
+				return Err(Error::ArgumentError(format!(
 					"Unable to parse withdraw_message_id UUID value, {}",
 					e
-				))
-				.into())
+				)))
 			}
 		};
 		owner_swap::remove_published_offer(&uuid);
@@ -3676,23 +4029,24 @@ where
 	K: keychain::Keychain + 'static,
 {
 	if !controller::is_foreign_api_running() {
-		return Err(ErrorKind::GenericError(
+		return Err(Error::GenericError(
 			"TOR is not running. Please start tor listener for your wallet".to_string(),
-		)
-		.into());
+		));
 	}
 
 	let dest = validate_tor_address(&args.tor_address)?;
 
-	let sender = HttpDataSender::with_socks_proxy(
+	let sender = HttpDataSender::tor_through_socks_proxy(
 		&dest,
 		None, // It is foreign API, no secret
 		&tor_config.socks_proxy_addr,
 		Some(tor_config.send_config_dir.clone()),
 		tor_config.socks_running,
 		tor_config.tor_log_file.clone(),
+		tor_config.bridge.clone(),
+		tor_config.proxy.clone(),
 	)
-	.map_err(|e| ErrorKind::GenericError(format!("Unable to create HTTP client to send, {}", e)))?;
+	.map_err(|e| Error::GenericError(format!("Unable to create HTTP client to send, {}", e)))?;
 
 	let tor_pk = owner::get_wallet_public_address(wallet_inst.clone(), keychain_mask)?;
 	let tor_addr = ProvableAddress::from_tor_pub_key(&tor_pk);
@@ -3721,10 +4075,9 @@ where
 	K: keychain::Keychain + 'static,
 {
 	if !controller::is_foreign_api_running() {
-		return Err(ErrorKind::GenericError(
+		return Err(Error::GenericError(
 			"TOR is not running. Please start tor listener for your wallet".to_string(),
-		)
-		.into());
+		));
 	}
 
 	let tor_pk = owner::get_wallet_public_address(wallet_inst.clone(), keychain_mask)?;

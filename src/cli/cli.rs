@@ -1,4 +1,4 @@
-// Copyright 2020 The Grin Developers
+// Copyright 2021 The Grin Developers
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,7 +15,7 @@
 use crate::cmd::wallet_args;
 use crate::util::secp::key::SecretKey;
 use crate::util::Mutex;
-use clap::App;
+use clap::{App, AppSettings};
 //use colored::Colorize;
 use grin_wallet_api::Owner;
 use grin_wallet_config::{MQSConfig, TorConfig, WalletConfig};
@@ -88,7 +88,7 @@ pub fn command_loop<L, C, K>(
 	wallet_config: &WalletConfig,
 	tor_config: &TorConfig,
 	mqs_config: &MQSConfig,
-	global_wallet_args: &GlobalArgs,
+	global_wallet_args: &mut GlobalArgs,
 	test_mode: bool,
 ) -> Result<(), Error>
 where
@@ -123,7 +123,9 @@ where
 	}*/
 
 	let yml = load_yaml!("../bin/mwc-wallet.yml");
-	let mut app = App::from_yaml(yml).version(crate_version!());
+	let mut app = App::from_yaml(yml)
+		.version(crate_version!())
+		.setting(AppSettings::VersionlessSubcommands);
 	let mut keychain_mask = keychain_mask;
 
 	// catch updater messages
@@ -140,7 +142,7 @@ where
 					continue;
 				}
 				// TODO tidy up a bit
-				if command.to_lowercase() == "exit" {
+				if command.to_lowercase().trim() == "exit" {
 					break;
 				}
 				/* use crate::common::{is_cli, COLORED_PROMPT}; */
@@ -154,13 +156,16 @@ where
 				// Just add 'mwc-wallet' to each command behind the scenes
 				// so we don't need to maintain a separate definition file
 				let augmented_command = format!("mwc-wallet {}", command);
-				let args =
-					app.get_matches_from_safe_borrow(augmented_command.trim().split_whitespace());
+				let command_split = match shlex::split(&augmented_command) {
+					Some(command_split) => command_split,
+					None => vec!["mwc-wallet".to_string()],
+				};
+				let args = app.get_matches_from_safe_borrow(command_split);
 				let done = match args {
 					Ok(args) => {
 						// handle opening /closing separately
 						keychain_mask = match args.subcommand() {
-							("open", Some(_)) => {
+							("open", Some(args)) => {
 								let mut wallet_lock = owner_api.wallet_inst.lock();
 								let lc = wallet_lock.lc_provider().unwrap();
 
@@ -191,11 +196,18 @@ where
 									&wallet_config.eth_infura_project_id,
 								);
 
-								if let Some(account) = args.value_of("account") {
-									if wallet_opened {
-										let wallet_inst = lc.wallet_inst()?;
-										wallet_inst.set_parent_key_id_by_name(account)?;
-									}
+								if wallet_opened {
+									let wallet_inst = lc.wallet_inst()?;
+									// Account name comes from open argument, next from global param, next 'default'
+									let account_name: String = match args.value_of("account") {
+										Some(account) => account.to_string(),
+										None => match &global_wallet_args.account {
+											Some(account) => account.clone(),
+											None => "default".to_string(),
+										},
+									};
+									wallet_inst.set_parent_key_id_by_name(account_name.as_str())?;
+									global_wallet_args.account = Some(account_name);
 								}
 								mask
 							}

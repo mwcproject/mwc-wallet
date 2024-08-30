@@ -1,4 +1,4 @@
-// Copyright 2019 The Grin Developers
+// Copyright 2021 The Grin Developers
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,32 +16,34 @@
 //! around during an interactive wallet exchange
 
 use crate::blake2::blake2b::blake2b;
-use crate::error::{Error, ErrorKind};
+use crate::error::Error;
 use crate::grin_core::core::amount_to_hr_string;
 use crate::grin_core::core::committed::Committed;
 use crate::grin_core::core::transaction::{
 	Input, KernelFeatures, Output, OutputFeatures, Transaction, TransactionBody, TxKernel,
 	Weighting,
 };
-use crate::grin_core::core::verifier_cache::LruVerifierCache;
 use crate::grin_core::global;
 use crate::grin_core::libtx::{aggsig, build, proof::ProofBuild, secp_ser, tx_fee};
 use crate::grin_core::map_vec;
 use crate::grin_keychain::{BlindSum, BlindingFactor, Keychain, SwitchCommitmentType};
+use crate::grin_util::secp;
 use crate::grin_util::secp::key::{PublicKey, SecretKey};
 use crate::grin_util::secp::pedersen::Commitment;
 use crate::grin_util::secp::Signature;
-use crate::grin_util::{self, secp, RwLock};
+use crate::grin_util::ToHex;
 use crate::Context;
+use bitcoin_lib::secp256k1::ContextFlag;
 use serde::ser::{Serialize, Serializer};
 use serde_json;
+use std::convert::{TryFrom, TryInto};
 use std::fmt;
-use std::sync::Arc;
 use uuid::Uuid;
 
 use crate::slate_versions::v2::SlateV2;
 use crate::slate_versions::v2::SlateV2ParseTTL;
 
+use crate::grin_core::consensus::WEEK_HEIGHT;
 use crate::slate_versions::v3::{
 	CoinbaseV3, InputV3, OutputV3, ParticipantDataV3, PaymentInfoV3, SlateV3, TransactionBodyV3,
 	TransactionV3, TxKernelV3, VersionCompatInfoV3,
@@ -54,6 +56,8 @@ use crate::proof::proofaddress::ProvableAddress;
 use crate::types::CbData;
 use crate::{SlateVersion, Slatepacker, CURRENT_SLATE_VERSION};
 use ed25519_dalek::SecretKey as DalekSecretKey;
+use grin_wallet_util::grin_core::core::FeeFields;
+use grin_wallet_util::grin_util::secp::Secp256k1;
 use rand::rngs::mock::StepRng;
 use rand::thread_rng;
 
@@ -149,10 +153,11 @@ impl fmt::Display for ParticipantMessageData {
 			writeln!(f, "(Recipient)")?;
 		}
 		writeln!(f, "---------------------")?;
+		let secp = Secp256k1::with_caps(ContextFlag::None);
 		writeln!(
 			f,
 			"Public Key: {}",
-			&grin_util::to_hex(&self.public_key.serialize_vec(true))
+			&self.public_key.serialize_vec(&secp, true).to_hex()
 		)?;
 		let message = match self.message.clone() {
 			None => "None".to_owned(),
@@ -161,7 +166,7 @@ impl fmt::Display for ParticipantMessageData {
 		writeln!(f, "Message: {}", message)?;
 		let message_sig = match self.message_sig {
 			None => "None".to_owned(),
-			Some(m) => grin_util::to_hex(&m.to_raw_data()),
+			Some(m) => m.to_raw_data().as_ref().to_hex(),
 		};
 		writeln!(f, "Message Signature: {}", message_sig)
 	}
@@ -172,7 +177,7 @@ impl fmt::Display for ParticipantMessageData {
 /// the slate around by whatever means they choose, (but we can provide some
 /// binary or JSON serialization helpers here).
 
-#[derive(Deserialize, Debug, Clone)]
+#[derive(Debug, Clone)]
 pub struct Slate {
 	/// True is created from slatepack data.
 	pub compact_slate: bool,
@@ -184,43 +189,37 @@ pub struct Slate {
 	pub id: Uuid,
 	/// The core transaction data:
 	/// inputs, outputs, kernels, kernel offset
-	pub tx: Transaction,
+	/// Optional as of V4(aka V3) to allow for a compact
+	/// transaction initiation
+	pub tx: Option<Transaction>,
 	/// base amount (excluding fee)
-	#[serde(with = "secp_ser::string_or_u64")]
 	pub amount: u64,
 	/// fee amount
-	#[serde(with = "secp_ser::string_or_u64")]
 	pub fee: u64,
 	/// Block height for the transaction
-	#[serde(with = "secp_ser::string_or_u64")]
 	pub height: u64,
-	/// Lock height
-	#[serde(with = "secp_ser::string_or_u64")]
-	pub lock_height: u64,
+	/// Lock height (private because it is related to kernel_features)
+	lock_height: u64,
 	/// TTL, the block height at which wallets
 	/// should refuse to process the transaction and unlock all
 	/// associated outputs
-	#[serde(with = "secp_ser::opt_string_or_u64")]
 	pub ttl_cutoff_height: Option<u64>,
 	/// Participant data, each participant in the transaction will
 	/// insert their public data here. For now, 0 is sender and 1
 	/// is receiver, though this will change for multi-party
 	pub participant_data: Vec<ParticipantData>,
 	/// Payment Proof
-	#[serde(default = "default_payment_none")]
 	pub payment_proof: Option<PaymentInfo>,
 	/// Offset, needed when posting of transaction is deferred.
-	#[serde(default = "zero_bf")]
 	pub offset: BlindingFactor,
+	/// Kernel Features flag -
+	/// 	0: plain
+	/// 	1: coinbase (invalid)
+	/// 	2: height_locked
+	/// 	3: NRD
+	kernel_features: u8,
 }
 
-fn zero_bf() -> BlindingFactor {
-	BlindingFactor::zero()
-}
-
-fn default_payment_none() -> Option<PaymentInfo> {
-	None
-}
 /// Versioning and compatibility info about this slate
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct VersionCompatInfo {
@@ -238,10 +237,140 @@ pub struct ParticipantMessages {
 }
 
 impl Slate {
+	/// Create new instance. Data will be validated
+	pub fn new(
+		compact_slate: bool,
+		version_info: VersionCompatInfo,
+		num_participants: usize,
+		id: Uuid,
+		tx: Option<Transaction>,
+		amount: u64,
+		fee: u64,
+		height: u64,
+		lock_height: u64,
+		kernel_features: u8,
+		ttl_cutoff_height: Option<u64>,
+		participant_data: Vec<ParticipantData>,
+		payment_proof: Option<PaymentInfo>,
+		offset: BlindingFactor,
+	) -> Result<Self, Error> {
+		let res = Slate {
+			compact_slate,
+			version_info,
+			num_participants,
+			id,
+			tx,
+			amount,
+			fee,
+			height,
+			lock_height,
+			ttl_cutoff_height,
+			participant_data,
+			payment_proof,
+			offset,
+			kernel_features,
+		};
+		// let's validate the kernal params first
+		let _ = res.kernel_features()?;
+		Ok(res)
+	}
+
+	/// Return the transaction, throwing an error if it doesn't exist
+	/// to be used at points in the code where the existence of a transaction
+	/// is assumed
+	pub fn tx_or_err(&self) -> Result<&Transaction, Error> {
+		match &self.tx {
+			Some(t) => Ok(t),
+			None => Err(Error::SlateTransactionRequired),
+		}
+	}
+
+	/// As above, but return mutable reference
+	pub fn tx_or_err_mut(&mut self) -> Result<&mut Transaction, Error> {
+		match &mut self.tx {
+			Some(t) => Ok(t),
+			None => Err(Error::SlateTransactionRequired),
+		}
+	}
+
+	/// Get kernel feature code
+	pub fn get_kernel_features(&self) -> u8 {
+		self.kernel_features
+	}
+
+	/// Get lock height pure value, caller must take care about kernel_features as well
+	pub fn get_lock_height(&self) -> u64 {
+		self.lock_height
+	}
+
+	/// Get lock height for current kernel feature. Note, for NRD it might be not accurate value
+	pub fn calc_lock_height(&self) -> u64 {
+		match self.kernel_features {
+			3 => self.height + self.lock_height, // nrd
+			_ => self.lock_height,               // others must have height in sync
+		}
+	}
+
+	/// Locking height value with kernel feature consistency checking
+	pub fn get_lock_height_check(&self) -> Result<u64, Error> {
+		match self.kernel_features {
+			2 => Ok(self.lock_height),
+			_ => Err(Error::InvalidKernelFeatures(format!(
+				"Expected legit Lock kernel, but get kernel {} and lock_height {}",
+				self.kernel_features, self.lock_height
+			))),
+		}
+	}
+
+	/// Reset to plain kernel
+	pub fn reset_lock_height(&mut self) {
+		self.lock_height = 0;
+		self.kernel_features = 0;
+	}
+
+	/// For debug only!!!
+	pub fn set_lock_height_no_check(&mut self, lock_height: u64) {
+		self.lock_height = lock_height;
+		self.kernel_features = 2;
+	}
+
+	/// Set lock height and LockHeight Kernel type
+	pub fn set_lock_height(&mut self, lock_height: u64) -> Result<(), Error> {
+		if lock_height == 0 {
+			return Err(Error::InvalidKernelFeatures(format!(
+				"Setting zero lock height"
+			)));
+		}
+		if lock_height <= self.height {
+			return Err(Error::InvalidKernelFeatures(format!(
+				"Lock height {} is lower then slate height {}",
+				lock_height, self.height
+			)));
+		}
+		self.lock_height = lock_height;
+		self.kernel_features = 2;
+		Ok(())
+	}
+
+	/// Set NRD LockHeight Kernel type
+	/// Note, currently NRD is not active, so node will reject it until the hardfork
+	/// Currently nobody expectign to call it
+	pub fn set_related_height(&mut self, lock_height: u64) -> Result<(), Error> {
+		if lock_height == 0 || lock_height >= WEEK_HEIGHT {
+			return Err(Error::InvalidKernelFeatures(format!(
+				"Setting wrong related height {}",
+				lock_height
+			)));
+		}
+		self.lock_height = lock_height;
+		self.kernel_features = 3;
+		Ok(())
+	}
+
 	/// Attempt to find slate version
 	pub fn parse_slate_version(slate_json: &str) -> Result<u16, Error> {
 		let probe: SlateVersionProbe = serde_json::from_str(slate_json).map_err(|e| {
-			ErrorKind::SlateVersionParse(format!(
+			Error::SlateVersionParse(format!(
 				"Unable to find slate version at {}, {}",
 				slate_json, e
 			))
@@ -258,8 +387,10 @@ impl Slate {
 	pub fn deserialize_upgrade_slatepack(
 		slate_str: &str,
 		dec_key: &DalekSecretKey,
+		height: u64,
+		secp: &Secp256k1,
 	) -> Result<Slatepacker, Error> {
-		let sp = Slatepacker::decrypt_slatepack(slate_str.as_bytes(), dec_key)?;
+		let sp = Slatepacker::decrypt_slatepack(slate_str.as_bytes(), dec_key, height, secp)?;
 		Ok(sp)
 	}
 
@@ -283,14 +414,14 @@ impl Slate {
 
 		let v3: SlateV3 = match version {
 			3 => serde_json::from_str(slate_json).map_err(|e| {
-				ErrorKind::SlateDeser(format!(
+				Error::SlateDeser(format!(
 					"Json to SlateV3 conversion failed for {}, {}",
 					slate_json, e
 				))
 			})?,
 			2 => {
 				let v2: SlateV2 = serde_json::from_str(slate_json).map_err(|e| {
-					ErrorKind::SlateDeser(format!(
+					Error::SlateDeser(format!(
 						"Json to SlateV2 conversion failed for {}, {}",
 						slate_json, e
 					))
@@ -299,24 +430,27 @@ impl Slate {
 				ret.ttl_cutoff_height = ttl_cutoff_height;
 				ret
 			}
-			_ => return Err(ErrorKind::SlateVersion(version).into()),
+			_ => return Err(Error::SlateVersion(version)),
 		};
-		Ok(v3.to_slate()?)
+		Ok(v3.to_slate(true)?)
 	}
 
 	/// Create a new slate
 	/// slatepack also mean 'compact slate'. Please note the slates are build different way, so for the compact
-	/// slates we have defferent method of building it.
+	/// slates we have different method of building it.
 	pub fn blank(num_participants: usize, compact_slate: bool) -> Slate {
 		let np = match num_participants {
 			0 => 2,
 			n => n,
 		};
-		let mut slate = Slate {
+		// The transaction inputs type need to be Commit and feature. So let's fix that now while it is empty.
+		let mut tx = Transaction::empty();
+		tx.body.inputs = Inputs::FeaturesAndCommit(vec![]);
+		let slate = Slate {
 			compact_slate,
 			num_participants: np, // assume 2 if not present
 			id: Uuid::new_v4(),
-			tx: Transaction::empty(),
+			tx: Some(tx),
 			amount: 0,
 			fee: 0,
 			height: 0,
@@ -329,60 +463,63 @@ impl Slate {
 			},
 			payment_proof: None,
 			offset: BlindingFactor::zero(),
+			kernel_features: 0,
 		};
-		// The transaction inputs type need need to be Commit and feature. So let's fix that now while it is empty.
-		slate.tx.body.inputs = Inputs::FeaturesAndCommit(vec![]);
 		slate
 	}
 
 	/// Compare two slates for send: sended and responded. Just want to check if sender didn't mess with slate
 	pub fn compare_slates_send(send_slate: &Self, respond_slate: &Self) -> Result<(), Error> {
 		if send_slate.id != respond_slate.id {
-			return Err(ErrorKind::SlateValidation("uuid mismatch".to_string()).into());
+			return Err(Error::SlateValidation("uuid mismatch".to_string()));
 		}
 		if !send_slate.compact_slate {
 			if send_slate.amount != respond_slate.amount {
-				return Err(ErrorKind::SlateValidation("amount mismatch".to_string()).into());
+				return Err(Error::SlateValidation("amount mismatch".to_string()));
 			}
 			if send_slate.fee != respond_slate.fee {
-				return Err(ErrorKind::SlateValidation("fee mismatch".to_string()).into());
+				return Err(Error::SlateValidation("fee mismatch".to_string()));
 			}
 			// Checking transaction...
-			// Inputs must match excatly
-			if send_slate.tx.body.inputs != respond_slate.tx.body.inputs {
-				return Err(ErrorKind::SlateValidation("inputs mismatch".to_string()).into());
+			// Inputs must match exactly
+			if send_slate.tx_or_err()?.body.inputs != respond_slate.tx_or_err()?.body.inputs {
+				return Err(Error::SlateValidation("inputs mismatch".to_string()));
 			}
 
 			// Checking if participant data match each other
 			for pat_data in &send_slate.participant_data {
 				if !respond_slate.participant_data.contains(&pat_data) {
-					return Err(ErrorKind::SlateValidation(
+					return Err(Error::SlateValidation(
 						"participant data mismatch".to_string(),
-					)
-					.into());
+					));
 				}
 			}
 
 			// Respond outputs must include send_slate's. Expected that some was added
-			for output in &send_slate.tx.body.outputs {
-				if !respond_slate.tx.body.outputs.contains(&output) {
-					return Err(ErrorKind::SlateValidation("outputs mismatch".to_string()).into());
+			for output in &send_slate.tx_or_err()?.body.outputs {
+				if !respond_slate.tx_or_err()?.body.outputs.contains(&output) {
+					return Err(Error::SlateValidation("outputs mismatch".to_string()));
 				}
 			}
 
-			// Kernels must match excatly
-			if send_slate.tx.body.kernels != respond_slate.tx.body.kernels {
-				return Err(ErrorKind::SlateValidation("kernels mismatch".to_string()).into());
+			// Kernels must match exactly
+			if send_slate.tx_or_err()?.body.kernels != respond_slate.tx_or_err()?.body.kernels {
+				return Err(Error::SlateValidation("kernels mismatch".to_string()));
 			}
 		}
+		if send_slate.kernel_features != respond_slate.kernel_features {
+			return Err(Error::SlateValidation(
+				"kernel_features mismatch".to_string(),
+			));
+		}
 		if send_slate.lock_height != respond_slate.lock_height {
-			return Err(ErrorKind::SlateValidation("lock_height mismatch".to_string()).into());
+			return Err(Error::SlateValidation("lock_height mismatch".to_string()));
 		}
 		if send_slate.height != respond_slate.height {
-			return Err(ErrorKind::SlateValidation("heigh mismatch".to_string()).into());
+			return Err(Error::SlateValidation("height mismatch".to_string()));
 		}
 		if send_slate.ttl_cutoff_height != respond_slate.ttl_cutoff_height {
-			return Err(ErrorKind::SlateValidation("ttl_cutoff mismatch".to_string()).into());
+			return Err(Error::SlateValidation("ttl_cutoff mismatch".to_string()));
 		}
 
 		Ok(())
@@ -391,30 +528,30 @@ impl Slate {
 	/// Compare two slates for invoice: sended and responded. Just want to check if sender didn't mess with slate
 	pub fn compare_slates_invoice(invoice_slate: &Self, respond_slate: &Self) -> Result<(), Error> {
 		if invoice_slate.id != respond_slate.id {
-			return Err(ErrorKind::SlateValidation("uuid mismatch".to_string()).into());
+			return Err(Error::SlateValidation("uuid mismatch".to_string()));
 		}
 		if invoice_slate.amount != respond_slate.amount {
-			return Err(ErrorKind::SlateValidation("amount mismatch".to_string()).into());
+			return Err(Error::SlateValidation("amount mismatch".to_string()));
 		}
 		if invoice_slate.height != respond_slate.height {
-			return Err(ErrorKind::SlateValidation("heigh mismatch".to_string()).into());
+			return Err(Error::SlateValidation("height mismatch".to_string()));
 		}
 		if invoice_slate.ttl_cutoff_height != respond_slate.ttl_cutoff_height {
-			return Err(ErrorKind::SlateValidation("ttl_cutoff mismatch".to_string()).into());
+			return Err(Error::SlateValidation("ttl_cutoff mismatch".to_string()));
 		}
-		assert!(invoice_slate.tx.body.inputs.is_empty());
+		assert!(invoice_slate.tx_or_err()?.body.inputs.is_empty());
 		// Respond outputs must include original ones. Expected that some was added
-		for output in &invoice_slate.tx.body.outputs {
-			if !respond_slate.tx.body.outputs.contains(&output) {
-				return Err(ErrorKind::SlateValidation("outputs mismatch".to_string()).into());
+		for output in &invoice_slate.tx_or_err()?.body.outputs {
+			if !respond_slate.tx_or_err()?.body.outputs.contains(&output) {
+				return Err(Error::SlateValidation("outputs mismatch".to_string()));
 			}
 		}
 		// Checking if participant data match each other
 		for pat_data in &invoice_slate.participant_data {
 			if !respond_slate.participant_data.contains(&pat_data) {
-				return Err(
-					ErrorKind::SlateValidation("participant data mismatch".to_string()).into(),
-				);
+				return Err(Error::SlateValidation(
+					"participant data mismatch".to_string(),
+				));
 			}
 		}
 
@@ -443,23 +580,26 @@ impl Slate {
 		K: Keychain,
 		B: ProofBuild,
 	{
-		self.update_kernel();
+		self.update_kernel()?;
 		if elems.is_empty() {
 			return Ok(BlindingFactor::zero());
 		}
-		let (tx, blind) = build::partial_transaction(self.tx.clone(), &elems, keychain, builder)?;
-		self.tx = tx;
+		let (tx, blind) =
+			build::partial_transaction(self.tx_or_err()?.clone(), &elems, keychain, builder)?;
+		self.tx = Some(tx);
 		Ok(blind)
 	}
 
 	/// Update the tx kernel based on kernel features derived from the current slate.
 	/// The fee may change as we build a transaction and we need to
 	/// update the tx kernel to reflect this during the tx building process.
-	pub fn update_kernel(&mut self) {
-		self.tx = self
-			.tx
-			.clone()
-			.replace_kernel(TxKernel::with_features(self.kernel_features()));
+	pub fn update_kernel(&mut self) -> Result<(), Error> {
+		self.tx = Some(
+			self.tx_or_err()?
+				.clone()
+				.replace_kernel(TxKernel::with_features(self.kernel_features()?)),
+		);
+		Ok(())
 	}
 
 	/// Completes callers part of round 1, adding public key info
@@ -478,7 +618,7 @@ impl Slate {
 	{
 		if !self.compact_slate {
 			// Generating offset for backward compability. Offset ONLY for the TX, the slate copy is kept the same.
-			if self.tx.offset == BlindingFactor::zero() {
+			if self.tx_or_err()?.offset == BlindingFactor::zero() {
 				self.generate_legacy_offset(keychain, sec_key, use_test_rng)?;
 			}
 		}
@@ -495,29 +635,73 @@ impl Slate {
 		Ok(())
 	}
 
-	/// Construct the appropriate kernel features based on our fee and lock_height.
-	/// If lock_height is 0 then its a plain kernel, otherwise its a height locked kernel.
-	pub fn kernel_features(&self) -> KernelFeatures {
-		match self.lock_height {
-			0 => KernelFeatures::Plain { fee: self.fee },
-			_ => KernelFeatures::HeightLocked {
-				fee: self.fee,
-				lock_height: self.lock_height,
-			},
+	/// Build kernel features based on variant and associated data.
+	/// kernel_features values:
+	/// 0: plain
+	/// 1: coinbase (invalid)
+	/// 2: height_locked (with associated lock_height)
+	/// 3: NRD (with associated relative_height)
+	/// Any other value is invalid.
+	pub fn kernel_features(&self) -> Result<KernelFeatures, Error> {
+		match self.kernel_features {
+			0 => {
+				if self.lock_height != 0 {
+					return Err(Error::SlateValidation(format!("Invalid lock_height for Plain kernel feature. lock_height expected to be zero, but has {}", self.lock_height)));
+				}
+				Ok(KernelFeatures::Plain {
+					fee: self.build_fee()?,
+				})
+			}
+			1 => Err(Error::InvalidKernelFeatures(
+				"Coinbase feature is not expected at Slate".into(),
+			)),
+			2 => Ok(KernelFeatures::HeightLocked {
+				fee: self.build_fee()?,
+				lock_height: if self.lock_height > self.height && self.height > 0 {
+					self.lock_height
+				} else {
+					return Err(Error::SlateValidation(format!(
+						"Invalid lock_height, height value is {}, but lock_height is {}",
+						self.height, self.lock_height
+					)));
+				},
+			}),
+			3 => Ok(KernelFeatures::NoRecentDuplicate {
+				fee: self.build_fee()?,
+				relative_height: if self.lock_height < WEEK_HEIGHT {
+					NRDRelativeHeight::new(self.lock_height)?
+				} else {
+					return Err(Error::SlateValidation(format!(
+						"Invalid NRD relative_height, height value is {}, limit is {}",
+						self.lock_height, WEEK_HEIGHT
+					)));
+				},
+			}),
+			n => Err(Error::UnknownKernelFeatures(n)),
 		}
 	}
 
-	// This is the msg that we will sign as part of the tx kernel.
-	// If lock_height is 0 then build a plain kernel, otherwise build a height locked kernel.
-	fn msg_to_sign(&self) -> Result<secp::Message, Error> {
-		let msg = self.kernel_features().kernel_sig_msg()?;
+	// u64 try_into for FeeFields is build for VALID values, so 0 is not accepted.
+	// That is why we need this method
+	fn build_fee(&self) -> Result<FeeFields, Error> {
+		if self.fee == 0 {
+			Ok(FeeFields::zero())
+		} else {
+			Ok(self.fee.try_into()?)
+		}
+	}
+
+	/// This is the msg that we will sign as part of the tx kernel.
+	/// If lock_height is 0 then build a plain kernel, otherwise build a height locked kernel.
+	pub fn msg_to_sign(&self) -> Result<secp::Message, Error> {
+		let msg = self.kernel_features()?.kernel_sig_msg()?;
 		Ok(msg)
 	}
 
 	/// Completes caller's part of round 2, completing signatures
 	pub fn fill_round_2(
 		&mut self,
-		secp: &secp::Secp256k1,
+		secp: &Secp256k1,
 		sec_key: &SecretKey,
 		sec_nonce: &SecretKey,
 		participant_id: usize,
@@ -532,8 +716,8 @@ impl Slate {
 			secp,
 			sec_key,
 			sec_nonce,
-			&self.pub_nonce_sum()?,
-			Some(&self.pub_blind_sum()?),
+			&self.pub_nonce_sum(secp)?,
+			Some(&self.pub_blind_sum(secp)?),
 			&self.msg_to_sign()?,
 		)?;
 		for i in 0..self.num_participants {
@@ -547,12 +731,12 @@ impl Slate {
 
 	/// Creates the final signature, callable by either the sender or recipient
 	/// (after phase 3: sender confirmation)
-	pub fn finalize<K>(&mut self, keychain: &K) -> Result<(), Error>
+	pub fn finalize<K>(&mut self, keychain: &K, height: u64) -> Result<(), Error>
 	where
 		K: Keychain,
 	{
 		let final_sig = self.finalize_signature(keychain.secp())?;
-		self.finalize_transaction(keychain, &final_sig)
+		self.finalize_transaction(keychain, &final_sig, height)
 	}
 
 	/// Return the participant with the given id
@@ -566,36 +750,36 @@ impl Slate {
 	}
 
 	/// Return the sum of public nonces
-	fn pub_nonce_sum(&self) -> Result<PublicKey, Error> {
+	pub fn pub_nonce_sum(&self, secp: &Secp256k1) -> Result<PublicKey, Error> {
 		let pub_nonces: Vec<&PublicKey> = self
 			.participant_data
 			.iter()
 			.map(|p| &p.public_nonce)
 			.collect();
 		if pub_nonces.len() == 0 {
-			return Err(
-				ErrorKind::GenericError(format!("Participant nonces cannot be empty")).into(),
-			);
+			return Err(Error::GenericError(format!(
+				"Participant nonces cannot be empty"
+			)));
 		}
-		match PublicKey::from_combination(pub_nonces) {
+		match PublicKey::from_combination(&secp, pub_nonces) {
 			Ok(k) => Ok(k),
 			Err(e) => Err(Error::from(e)),
 		}
 	}
 
 	/// Return the sum of public blinding factors
-	fn pub_blind_sum(&self) -> Result<PublicKey, Error> {
+	fn pub_blind_sum(&self, secp: &Secp256k1) -> Result<PublicKey, Error> {
 		let pub_blinds: Vec<&PublicKey> = self
 			.participant_data
 			.iter()
 			.map(|p| &p.public_blind_excess)
 			.collect();
 		if pub_blinds.len() == 0 {
-			return Err(
-				ErrorKind::GenericError(format!("Participant Blind sums cannot be empty")).into(),
-			);
+			return Err(Error::GenericError(format!(
+				"Participant Blind sums cannot be empty"
+			)));
 		}
-		match PublicKey::from_combination(pub_blinds) {
+		match PublicKey::from_combination(secp, pub_blinds) {
 			Ok(k) => Ok(k),
 			Err(e) => Err(Error::from(e)),
 		}
@@ -628,7 +812,7 @@ impl Slate {
 		let pub_key = PublicKey::from_secret_key(secp, &sec_key)?;
 		let pub_nonce = PublicKey::from_secret_key(secp, &sec_nonce)?;
 
-		let test_message_nonce = SecretKey::from_slice(&[1; 32])?;
+		let test_message_nonce = SecretKey::from_slice(secp, &[1; 32])?;
 		let message_nonce = match use_test_rng {
 			false => None,
 			true => Some(&test_message_nonce),
@@ -712,21 +896,23 @@ impl Slate {
 		// Generate a random kernel offset here
 		// and subtract it from the blind_sum so we create
 		// the aggsig context with the "split" key
-		self.tx.offset = match use_test_rng {
-			false => BlindingFactor::from_secret_key(SecretKey::new(&mut thread_rng())),
+		self.tx_or_err_mut()?.offset = match use_test_rng {
+			false => {
+				BlindingFactor::from_secret_key(SecretKey::new(keychain.secp(), &mut thread_rng()))
+			}
 			true => {
 				// allow for consistent test results
 				let mut test_rng = StepRng::new(1_234_567_890_u64, 1);
-				BlindingFactor::from_secret_key(SecretKey::new(&mut test_rng))
+				BlindingFactor::from_secret_key(SecretKey::new(keychain.secp(), &mut test_rng))
 			}
 		};
 
 		let blind_offset = keychain.blind_sum(
 			&BlindSum::new()
 				.add_blinding_factor(BlindingFactor::from_secret_key(sec_key.clone()))
-				.sub_blinding_factor(self.tx.offset.clone()),
+				.sub_blinding_factor(self.tx_or_err()?.offset.clone()),
 		)?;
-		*sec_key = blind_offset.secret_key()?;
+		*sec_key = blind_offset.secret_key(keychain.secp())?;
 		Ok(())
 	}
 
@@ -765,21 +951,19 @@ impl Slate {
 	}
 
 	/// Checks the fees in the transaction in the given slate are valid
-	fn check_fees(&self) -> Result<(), Error> {
+	fn check_fees(&self, height: u64) -> Result<(), Error> {
+		let tx = self.tx_or_err()?;
 		// double check the fee amount included in the partial tx
 		// we don't necessarily want to just trust the sender
 		// we could just overwrite the fee here (but we won't) due to the sig
-		let fee = tx_fee(
-			self.tx.inputs().len(),
-			self.tx.outputs().len(),
-			self.tx.kernels().len(),
-			None,
-		);
+		let fee = tx_fee(tx.inputs().len(), tx.outputs().len(), tx.kernels().len());
 
-		if fee > self.tx.fee() {
-			return Err(
-				ErrorKind::Fee(format!("Fee Dispute Error: {}, {}", self.tx.fee(), fee,)).into(),
-			);
+		if fee > tx.fee(height) {
+			return Err(Error::Fee(format!(
+				"Fee Dispute Error: {}, {}",
+				tx.fee(height),
+				fee,
+			)));
 		}
 
 		if fee > self.amount + self.fee {
@@ -789,14 +973,14 @@ impl Slate {
 				amount_to_hr_string(self.amount + self.fee, false)
 			);
 			info!("{}", reason);
-			return Err(ErrorKind::Fee(reason).into());
+			return Err(Error::Fee(reason));
 		}
 
 		Ok(())
 	}
 
 	/// Verifies all of the partial signatures in the Slate are valid
-	fn verify_part_sigs(&self, secp: &secp::Secp256k1) -> Result<(), Error> {
+	fn verify_part_sigs(&self, secp: &Secp256k1) -> Result<(), Error> {
 		// collect public nonces
 		for p in self.participant_data.iter() {
 			if p.is_complete() {
@@ -804,9 +988,9 @@ impl Slate {
 				aggsig::verify_partial_sig(
 					secp,
 					p.part_sig.as_ref().unwrap(),
-					&self.pub_nonce_sum()?,
+					&self.pub_nonce_sum(secp)?,
 					&p.public_blind_excess,
-					Some(&self.pub_blind_sum()?),
+					Some(&self.pub_blind_sum(secp)?),
 					&self.msg_to_sign()?,
 				)?;
 			}
@@ -816,7 +1000,7 @@ impl Slate {
 
 	/// Verifies any messages in the slate's participant data match their signatures
 	pub fn verify_messages(&self) -> Result<(), Error> {
-		let secp = secp::Secp256k1::with_caps(secp::ContextFlag::VerifyOnly);
+		let secp = Secp256k1::with_caps(ContextFlag::VerifyOnly);
 		for p in self.participant_data.iter() {
 			if let Some(msg) = &p.message {
 				let hashed = blake2b(secp::constants::MESSAGE_SIZE, &[], &msg.as_bytes()[..]);
@@ -825,10 +1009,9 @@ impl Slate {
 					None => {
 						error!("verify_messages - participant message doesn't have signature. Message: \"{}\"",
 						   String::from_utf8_lossy(&msg.as_bytes()[..]));
-						return Err(ErrorKind::Signature(
+						return Err(Error::Signature(
 							"Optional participant messages doesn't have signature".to_owned(),
-						)
-						.into());
+						));
 					}
 					Some(s) => s,
 				};
@@ -843,10 +1026,9 @@ impl Slate {
 				) {
 					error!("verify_messages - participant message doesn't match signature. Message: \"{}\"",
 						   String::from_utf8_lossy(&msg.as_bytes()[..]));
-					return Err(ErrorKind::Signature(
+					return Err(Error::Signature(
 						"Optional participant messages do not match signatures".to_owned(),
-					)
-					.into());
+					));
 				} else {
 					info!(
 						"verify_messages - signature verified ok. Participant message: \"{}\"",
@@ -875,12 +1057,12 @@ impl Slate {
 	///
 	/// Returns completed transaction ready for posting to the chain
 
-	pub fn finalize_signature(&mut self, secp: &secp::Secp256k1) -> Result<Signature, Error> {
+	pub fn finalize_signature(&mut self, secp: &Secp256k1) -> Result<Signature, Error> {
 		self.verify_part_sigs(secp)?;
 
 		let part_sigs = self.part_sigs();
-		let pub_nonce_sum = self.pub_nonce_sum()?;
-		let final_pubkey = self.pub_blind_sum()?;
+		let pub_nonce_sum = self.pub_nonce_sum(secp)?;
+		let final_pubkey = self.pub_blind_sum(secp)?;
 		// get the final signature
 		let final_sig = aggsig::add_signatures(secp, part_sigs, &pub_nonce_sum)?;
 
@@ -899,29 +1081,29 @@ impl Slate {
 	}
 
 	/// return the final excess
-	pub fn calc_excess<K>(&self, keychain: Option<&K>) -> Result<Commitment, Error>
+	pub fn calc_excess<K>(
+		&self,
+		secp: &Secp256k1,
+		keychain: Option<&K>,
+		height: u64,
+	) -> Result<Commitment, Error>
 	where
 		K: Keychain,
 	{
 		if self.compact_slate {
-			let sum = self.pub_blind_sum()?;
-			Ok(Commitment::from_pubkey(&sum)?)
+			let sum = self.pub_blind_sum(secp)?;
+			Ok(Commitment::from_pubkey(secp, &sum)?)
 		} else {
 			// Legacy method
-			let kernel_offset = &self.tx.offset;
-			let tx = self.tx.clone();
-			let overage = tx.fee() as i64;
+			let tx = self.tx_or_err()?.clone();
+			let kernel_offset = tx.offset.clone();
+			let overage = tx.fee(height) as i64;
 			let tx_excess = tx.sum_commitments(overage)?;
 
+			let secp = keychain.unwrap().secp();
 			// subtract the kernel_excess (built from kernel_offset)
-			let offset_excess = keychain
-				.unwrap()
-				.secp()
-				.commit(0, kernel_offset.secret_key()?)?;
-			Ok(secp::Secp256k1::commit_sum(
-				vec![tx_excess],
-				vec![offset_excess],
-			)?)
+			let offset_excess = secp.commit(0, kernel_offset.secret_key(secp)?)?;
+			Ok(secp.commit_sum(vec![tx_excess], vec![offset_excess])?)
 		}
 	}
 
@@ -930,22 +1112,27 @@ impl Slate {
 		&mut self,
 		keychain: &K,
 		final_sig: &secp::Signature,
+		height: u64,
 	) -> Result<(), Error>
 	where
 		K: Keychain,
 	{
-		self.check_fees()?;
+		self.check_fees(height)?;
 		// build the final excess based on final tx and offset
-		let final_excess = self.calc_excess(Some(keychain))?;
+		let final_excess = self.calc_excess(keychain.secp(), Some(keychain), height)?;
 
 		debug!("Final Tx excess: {:?}", final_excess);
 
-		let mut final_tx = self.tx.clone();
+		let final_tx = self.tx_or_err()?;
 
 		// update the tx kernel to reflect the offset excess and sig
 		assert_eq!(final_tx.kernels().len(), 1);
-		final_tx.body.kernels[0].excess = final_excess.clone();
-		final_tx.body.kernels[0].excess_sig = final_sig.clone();
+
+		let mut kernel = final_tx.kernels()[0];
+		kernel.excess = final_excess;
+		kernel.excess_sig = final_sig.clone();
+
+		let final_tx = final_tx.clone().replace_kernel(kernel);
 
 		// confirm the kernel verifies successfully before proceeding
 		debug!("Validating final transaction");
@@ -957,10 +1144,11 @@ impl Slate {
 
 		// confirm the overall transaction is valid (including the updated kernel)
 		// accounting for tx weight limits
-		let verifier_cache = Arc::new(RwLock::new(LruVerifierCache::new()));
-		final_tx.validate(Weighting::AsTransaction, verifier_cache)?;
+		final_tx.validate(Weighting::AsTransaction, height)?;
 
-		self.tx = final_tx;
+		// replace our slate tx with the new one with updated kernel
+		self.tx = Some(final_tx);
+
 		Ok(())
 	}
 }
@@ -977,7 +1165,10 @@ impl Serialize for Slate {
 			3 => v3.serialize(serializer),
 			// left as a reminder
 			2 => {
-				let v2 = SlateV2::from(&v3);
+				let v2 = match SlateV2::try_from(&v3) {
+					Ok(s) => s,
+					Err(e) => return Err(S::Error::custom(format!("{}", e))),
+				};
 				v2.serialize(serializer)
 			}
 			v => Err(S::Error::custom(format!("Unknown slate version {}", v))),
@@ -1035,6 +1226,7 @@ impl From<Slate> for SlateV3 {
 			version_info,
 			payment_proof,
 			offset: tx_offset,
+			kernel_features,
 		} = slate;
 		let participant_data = map_vec!(participant_data, |data| ParticipantDataV3::from(data));
 		let version_info = VersionCompatInfoV3::from(&version_info);
@@ -1042,15 +1234,21 @@ impl From<Slate> for SlateV3 {
 			Some(p) => Some(PaymentInfoV3::from(&p)),
 			None => None,
 		};
-		let mut tx = TransactionV3::from(tx);
-		if compact_slate {
-			// for compact the Slate offset is dominate
-			tx.offset = tx_offset;
-		}
+		let tx = match tx {
+			Some(t) => {
+				let mut t = TransactionV3::from(t);
+				if compact_slate {
+					// for compact the Slate offset is dominate
+					t.offset = tx_offset;
+				}
+				Some(t)
+			}
+			None => None,
+		};
 		SlateV3 {
 			num_participants,
 			id,
-			tx,
+			tx: tx,
 			amount,
 			fee,
 			height,
@@ -1062,6 +1260,7 @@ impl From<Slate> for SlateV3 {
 			version_info,
 			payment_proof,
 			compact_slate: if compact_slate { Some(true) } else { None },
+			kernel_features,
 		}
 	}
 }
@@ -1082,10 +1281,10 @@ impl From<&Slate> for SlateV3 {
 			version_info,
 			payment_proof,
 			offset: tx_offset,
+			kernel_features,
 		} = slate;
 		let num_participants = *num_participants;
 		let id = *id;
-		let mut tx = TransactionV3::from(tx);
 		let amount = *amount;
 		let fee = *fee;
 		let height = *height;
@@ -1097,10 +1296,18 @@ impl From<&Slate> for SlateV3 {
 			Some(p) => Some(PaymentInfoV3::from(p)),
 			None => None,
 		};
-		if *compact_slate {
-			// for compact the Slate offset is dominate
-			tx.offset = tx_offset.clone();
-		}
+		let tx = match tx {
+			Some(t) => {
+				let mut t = TransactionV3::from(t);
+				if *compact_slate {
+					// for compact the Slate offset is dominate
+					t.offset = tx_offset.clone();
+				}
+				Some(t)
+			}
+			None => None,
+		};
+
 		SlateV3 {
 			num_participants,
 			id,
@@ -1116,6 +1323,7 @@ impl From<&Slate> for SlateV3 {
 			version_info,
 			payment_proof,
 			compact_slate: if *compact_slate { Some(true) } else { None },
+			kernel_features: *kernel_features,
 		}
 	}
 }
@@ -1257,7 +1465,7 @@ impl From<&TxKernel> for TxKernelV3 {
 	fn from(kernel: &TxKernel) -> TxKernelV3 {
 		let (features, fee, lock_height) = match kernel.features {
 			KernelFeatures::Plain { fee } => (CompatKernelFeatures::Plain, fee, 0),
-			KernelFeatures::Coinbase => (CompatKernelFeatures::Coinbase, 0, 0),
+			KernelFeatures::Coinbase => (CompatKernelFeatures::Coinbase, FeeFields::zero(), 0),
 			KernelFeatures::HeightLocked { fee, lock_height } => {
 				(CompatKernelFeatures::HeightLocked, fee, lock_height)
 			}
@@ -1271,7 +1479,7 @@ impl From<&TxKernel> for TxKernelV3 {
 		};
 		TxKernelV3 {
 			features,
-			fee,
+			fee: fee.into(),
 			lock_height,
 			excess: kernel.excess,
 			excess_sig: kernel.excess_sig,
@@ -1340,16 +1548,18 @@ impl From<&PaymentInfoV3> for PaymentInfo {
 	}
 }
 
-impl From<TransactionV3> for Transaction {
-	fn from(tx: TransactionV3) -> Transaction {
+impl TryFrom<TransactionV3> for Transaction {
+	type Error = Error;
+	fn try_from(tx: TransactionV3) -> Result<Transaction, Error> {
 		let TransactionV3 { offset, body } = tx;
-		let body = TransactionBody::from(&body);
-		Transaction { offset, body }
+		let body = TransactionBody::try_from(&body)?;
+		Ok(Transaction { offset, body })
 	}
 }
 
-impl From<&TransactionBodyV3> for TransactionBody {
-	fn from(body: &TransactionBodyV3) -> TransactionBody {
+impl TryFrom<&TransactionBodyV3> for TransactionBody {
+	type Error = Error;
+	fn try_from(body: &TransactionBodyV3) -> Result<TransactionBody, Error> {
 		let TransactionBodyV3 {
 			inputs,
 			outputs,
@@ -1358,12 +1568,15 @@ impl From<&TransactionBodyV3> for TransactionBody {
 
 		let inputs = map_vec!(inputs, |inp| Input::from(inp));
 		let outputs = map_vec!(outputs, |out| Output::from(out));
-		let kernels = map_vec!(kernels, |kern| TxKernel::from(kern));
-		TransactionBody {
+		let mut kernels_tx: Vec<TxKernel> = Vec::new();
+		for kern in kernels {
+			kernels_tx.push(TxKernel::try_from(kern)?);
+		}
+		Ok(TransactionBody {
 			inputs: Inputs::FeaturesAndCommit(inputs),
 			outputs,
-			kernels,
-		}
+			kernels: kernels_tx,
+		})
 	}
 }
 
@@ -1388,9 +1601,17 @@ impl From<&OutputV3> for Output {
 	}
 }
 
-impl From<&TxKernelV3> for TxKernel {
-	fn from(kernel: &TxKernelV3) -> TxKernel {
+impl TryFrom<&TxKernelV3> for TxKernel {
+	type Error = Error;
+
+	fn try_from(kernel: &TxKernelV3) -> Result<TxKernel, Error> {
 		let (fee, lock_height) = (kernel.fee, kernel.lock_height);
+		let fee = if fee == 0 {
+			FeeFields::zero()
+		} else {
+			fee.try_into()?
+		};
+
 		let features = match kernel.features {
 			CompatKernelFeatures::Plain => KernelFeatures::Plain { fee },
 			CompatKernelFeatures::Coinbase => KernelFeatures::Coinbase,
@@ -1400,11 +1621,11 @@ impl From<&TxKernelV3> for TxKernel {
 				relative_height: NRDRelativeHeight::new(lock_height).unwrap(),
 			},
 		};
-		TxKernel {
+		Ok(TxKernel {
 			features,
 			excess: kernel.excess,
 			excess_sig: kernel.excess_sig,
-		}
+		})
 	}
 }
 

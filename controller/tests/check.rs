@@ -1,4 +1,4 @@
-// Copyright 2019 The Grin Developers
+// Copyright 2021 The Grin Developers
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -25,8 +25,8 @@ use self::core::global;
 use grin_wallet_libwallet as libwallet;
 use impls::test_framework::{self, LocalWalletClient};
 use impls::{PathToSlatePutter, SlatePutter};
-use libwallet::proof::proofaddress;
 use libwallet::{InitTxArgs, NodeClient};
+use std::sync::atomic::Ordering;
 use std::thread;
 use std::time::Duration;
 use util::ZeroingString;
@@ -34,6 +34,7 @@ use util::ZeroingString;
 #[macro_use]
 mod common;
 use common::{clean_output_dir, create_wallet_proxy, setup};
+use grin_wallet_util::grin_util::secp::Secp256k1;
 
 macro_rules! send_to_dest {
 	($a:expr, $m: expr, $b:expr, $c:expr, $d:expr) => {
@@ -53,6 +54,8 @@ fn scan_impl(test_dir: &'static str) -> Result<(), wallet::Error> {
 	// Create a new proxy to simulate server and wallet responses
 	let mut wallet_proxy = create_wallet_proxy(test_dir);
 	let chain = wallet_proxy.chain.clone();
+	let stopper = wallet_proxy.running.clone();
+	let secp = Secp256k1::new();
 
 	// Create a new wallet test client, and set its queues to communicate with the
 	// proxy
@@ -120,7 +123,7 @@ fn scan_impl(test_dir: &'static str) -> Result<(), wallet::Error> {
 		assert_eq!(wallet1_info.total, bh * reward);
 		assert_eq!(wallet1_info.amount_currently_spendable, (bh - cm) * reward);
 		// check tx log as well
-		let (_, txs) = api.retrieve_txs(m, true, None, None)?;
+		let (_, txs) = api.retrieve_txs(m, true, None, None, None)?;
 		let (c, _) = libwallet::TxLogEntry::sum_confirmed(&txs);
 		assert_eq!(wallet1_info.total, c);
 		assert_eq!(txs.len(), bh as usize);
@@ -152,7 +155,7 @@ fn scan_impl(test_dir: &'static str) -> Result<(), wallet::Error> {
 	wallet::controller::owner_single_use(Some(wallet1.clone()), mask1, None, |api, m| {
 		// For MWC we don't 'refresh_from_node'. Otherwise issue will be corrected
 		let (_, wallet1_info) = api.retrieve_summary_info(m, false, 1)?;
-		let (_, txs) = api.retrieve_txs(m, false, None, None)?;
+		let (_, txs) = api.retrieve_txs(m, false, None, None, None)?;
 		let (c, _) = libwallet::TxLogEntry::sum_confirmed(&txs);
 		assert!(wallet1_info.total != c);
 		Ok(())
@@ -191,17 +194,9 @@ fn scan_impl(test_dir: &'static str) -> Result<(), wallet::Error> {
 		};
 		let slate = api.init_send_tx(m, &args, 1)?;
 
-		let sec_key = {
-			let mut w_lock = api.wallet_inst.lock();
-			let w = w_lock.lc_provider()?.wallet_inst()?;
-			let k = w.keychain(m)?;
-			let sec_key = proofaddress::payment_proof_address_dalek_secret(&k, None)?;
-			sec_key
-		};
-
 		// output tx file
 		let send_file = format!("{}/part_tx_1.tx", test_dir);
-		PathToSlatePutter::build_plain(Some(send_file.into())).put_tx(&slate, &sec_key, true)?;
+		PathToSlatePutter::build_plain(Some(send_file.into())).put_tx(&slate, None, true, &secp)?;
 		api.tx_lock_outputs(m, &slate, None, 0)?;
 		Ok(())
 	})?;
@@ -229,12 +224,12 @@ fn scan_impl(test_dir: &'static str) -> Result<(), wallet::Error> {
 	})?;
 
 	// let logging finish
+	stopper.store(false, Ordering::Relaxed);
 	thread::sleep(Duration::from_millis(200));
 	Ok(())
 }
 
 fn two_wallets_one_seed_impl(test_dir: &'static str) -> Result<(), wallet::Error> {
-	setup(test_dir);
 	global::set_local_chain_type(global::ChainTypes::AutomatedTesting);
 	let seed_phrase = "affair pistol cancel crush garment candy ancient flag work \
 	                   market crush dry stand focus mutual weapon offer ceiling rival turn team spring \
@@ -244,6 +239,7 @@ fn two_wallets_one_seed_impl(test_dir: &'static str) -> Result<(), wallet::Error
 	// Create a new proxy to simulate server and wallet responses
 	let mut wallet_proxy = create_wallet_proxy(test_dir);
 	let chain = wallet_proxy.chain.clone();
+	let stopper = wallet_proxy.running.clone();
 
 	// Create a new wallet test client, and set its queues to communicate with the
 	// proxy
@@ -390,7 +386,7 @@ fn two_wallets_one_seed_impl(test_dir: &'static str) -> Result<(), wallet::Error
 
 	// Do some mining
 	let mut bh = 20u64;
-	let base_amount = consensus::MILLI_GRIN;
+	let base_amount = consensus::MILLI_MWC;
 	let _ = test_framework::award_blocks_to_wallet(
 		&chain,
 		miner.clone(),
@@ -768,6 +764,7 @@ fn two_wallets_one_seed_impl(test_dir: &'static str) -> Result<(), wallet::Error
 	})?;
 
 	// let logging finish
+	stopper.store(false, Ordering::Relaxed);
 	thread::sleep(Duration::from_millis(200));
 	Ok(())
 }
@@ -778,6 +775,7 @@ fn output_scanning_impl(test_dir: &'static str) -> Result<(), wallet::Error> {
 	global::set_local_chain_type(global::ChainTypes::AutomatedTesting);
 	let mut wallet_proxy = create_wallet_proxy(test_dir);
 	let chain = wallet_proxy.chain.clone();
+	let stopper = wallet_proxy.running.clone();
 	// Create a new wallet test client, and set its queues to communicate with the
 	// proxy
 	create_wallet_and_add!(
@@ -854,6 +852,9 @@ fn output_scanning_impl(test_dir: &'static str) -> Result<(), wallet::Error> {
 		assert_eq!(outputs.2.len(), 16);
 	}
 
+	// let logging finish
+	stopper.store(false, Ordering::Relaxed);
+	thread::sleep(Duration::from_millis(200));
 	Ok(())
 }
 
@@ -862,7 +863,7 @@ fn scan() {
 	let test_dir = "test_output/scan";
 	setup(test_dir);
 	if let Err(e) = scan_impl(test_dir) {
-		panic!("Libwallet Error: {} - {}", e, e.backtrace().unwrap());
+		panic!("Libwallet Error: {}", e);
 	}
 	clean_output_dir(test_dir);
 }
@@ -872,7 +873,7 @@ fn two_wallets_one_seed() {
 	let test_dir = "test_output/two_wallets_one_seed";
 	setup(test_dir);
 	if let Err(e) = two_wallets_one_seed_impl(test_dir) {
-		panic!("Libwallet Error: {} - {}", e, e.backtrace().unwrap());
+		panic!("Libwallet Error: {}", e);
 	}
 	clean_output_dir(test_dir);
 }
@@ -882,7 +883,7 @@ fn output_scanning() {
 	let test_dir = "test_output/output_scanning";
 	setup(test_dir);
 	if let Err(e) = output_scanning_impl(test_dir) {
-		panic!("Libwallet Error: {} - {}", e, e.backtrace().unwrap());
+		panic!("Libwallet Error: {}", e);
 	}
 	clean_output_dir(test_dir);
 }

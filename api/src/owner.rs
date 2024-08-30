@@ -1,4 +1,4 @@
-// Copyright 2019 The Grin Developers
+// Copyright 2021 The Grin Developers
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,6 +19,7 @@ use ed25519_dalek::PublicKey as DalekPublicKey;
 use uuid::Uuid;
 
 use crate::config::{MQSConfig, TorConfig, WalletConfig};
+use crate::core::core::OutputFeatures;
 use crate::core::core::Transaction;
 use crate::core::global;
 use crate::impls::create_sender;
@@ -32,14 +33,17 @@ use crate::libwallet::swap::fsm::state::{StateEtaInfo, StateId, StateProcessResp
 use crate::libwallet::swap::types::{Action, Currency, SwapTransactionsConfirmations};
 use crate::libwallet::swap::{message::Message, swap::Swap, swap::SwapJournalRecord};
 use crate::libwallet::{
-	AcctPathMapping, Error, ErrorKind, InitTxArgs, IssueInvoiceTxArgs, NodeClient,
+	AcctPathMapping, BuiltOutput, Error, InitTxArgs, IssueInvoiceTxArgs, NodeClient,
 	NodeHeightResult, OutputCommitMapping, PaymentProof, Slate, SlatePurpose, SlateVersion,
-	SwapStartArgs, TxLogEntry, VersionedSlate, WalletInfo, WalletInst, WalletLCProvider,
+	SwapStartArgs, TxLogEntry, VersionedSlate, ViewWallet, WalletInfo, WalletInst,
+	WalletLCProvider,
 };
 use crate::util::logger::LoggingConfig;
 use crate::util::secp::key::SecretKey;
 use crate::util::{from_hex, Mutex, ZeroingString};
 use grin_wallet_util::grin_util::secp::key::PublicKey;
+use grin_wallet_util::grin_util::static_secp_instance;
+use libwallet::RetrieveTxQueryArgs;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, Sender};
 use std::sync::Arc;
@@ -71,6 +75,8 @@ where
 	pub wallet_inst: Arc<Mutex<Box<dyn WalletInst<'static, L, C, K>>>>,
 	/// Flag to normalize some output during testing. Can mostly be ignored.
 	pub doctest_mode: bool,
+	/// retail TLD during doctest
+	pub doctest_retain_tld: bool,
 	/// Share ECDH key
 	pub shared_key: Arc<Mutex<Option<SecretKey>>>,
 	/// Update thread
@@ -139,11 +145,13 @@ where
 	/// ```
 	/// use grin_wallet_util::grin_keychain as keychain;
 	/// use grin_wallet_util::grin_util as util;
+	/// use grin_wallet_util::grin_core;
 	/// use grin_wallet_api as api;
 	/// use grin_wallet_config as config;
 	/// use grin_wallet_impls as impls;
 	/// use grin_wallet_libwallet as libwallet;
 	///
+	/// use grin_core::global;
 	/// use keychain::ExtKeychain;
 	/// use tempfile::tempdir;
 	///
@@ -156,7 +164,7 @@ where
 	/// use libwallet::WalletInst;
 	/// use config::parse_node_address_string;
 	///
-	/// grin_wallet_util::grin_core::global::set_local_chain_type(grin_wallet_util::grin_core::global::ChainTypes::AutomatedTesting);
+	/// global::set_local_chain_type(global::ChainTypes::AutomatedTesting);
 	///
 	/// let mut wallet_config = WalletConfig::default();
 	/// # let dir = tempdir().map_err(|e| format!("{:#?}", e)).unwrap();
@@ -226,6 +234,7 @@ where
 		Owner {
 			wallet_inst,
 			doctest_mode: false,
+			doctest_retain_tld: false,
 			shared_key: Arc::new(Mutex::new(None)),
 			updater,
 			updater_running,
@@ -480,6 +489,9 @@ where
 	/// the transaction log entry of id `i`.
 	/// * `tx_slate_id` - If `Some(uuid)`, only return transactions associated with
 	/// the given [`Slate`](../grin_wallet_libwallet/slate/struct.Slate.html) uuid.
+	/// * `tx_query_args` - If provided, use advanced query arguments as documented in
+	/// (../grin_wallet_libwallet/types.struct.RetrieveTxQueryArgs.html). If either
+	/// `tx_id` or `tx_slate_id` is provided in the same call, this argument is ignored
 	///
 	/// # Returns
 	/// * `(bool, Vec<TxLogEntry)` - A tuple:
@@ -500,7 +512,7 @@ where
 	/// let tx_slate_id = None;
 	///
 	/// // Return all TxLogEntries
-	/// let result = api_owner.retrieve_txs(None, update_from_node, tx_id, tx_slate_id);
+	/// let result = api_owner.retrieve_txs(None, update_from_node, tx_id, tx_slate_id, None);
 	///
 	/// if let Ok((was_updated, tx_log_entries)) = result {
 	///     //...
@@ -513,6 +525,7 @@ where
 		refresh_from_node: bool,
 		tx_id: Option<u32>,
 		tx_slate_id: Option<Uuid>,
+		tx_query_args: Option<RetrieveTxQueryArgs>,
 	) -> Result<(bool, Vec<TxLogEntry>), Error> {
 		let tx = {
 			let t = self.status_tx.lock();
@@ -529,14 +542,15 @@ where
 			refresh_from_node,
 			tx_id,
 			tx_slate_id,
+			tx_query_args,
 		)?;
 		if self.doctest_mode {
 			res.1 = res
 				.1
 				.into_iter()
 				.map(|mut t| {
-					t.confirmation_ts = Some(Utc.ymd(2019, 1, 15).and_hms(16, 1, 26));
-					t.creation_ts = Utc.ymd(2019, 1, 15).and_hms(16, 1, 26);
+					t.confirmation_ts = Some(Utc.with_ymd_and_hms(2019, 1, 15, 16, 1, 26).unwrap());
+					t.creation_ts = Utc.with_ymd_and_hms(2019, 1, 15, 16, 1, 26).unwrap();
 					t
 				})
 				.collect();
@@ -696,19 +710,17 @@ where
 		//minimum_confirmations cannot be zero.
 		let minimum_confirmations = args.minimum_confirmations.clone();
 		if minimum_confirmations < 1 {
-			return Err(ErrorKind::ClientCallback(
+			return Err(Error::ClientCallback(
 				"Minimum_confirmations can not be smaller than 1".to_owned(),
-			)
-			.into());
+			));
 		}
 
 		match args.send_args.clone() {
 			Some(sa) => {
 				if sa.post_tx && !sa.finalize {
-					return Err(ErrorKind::ClientCallback(
+					return Err(Error::ClientCallback(
 						"Transcations can not be posted without being finalized!".to_owned(),
-					)
-					.into());
+					));
 				}
 			}
 			None => {}
@@ -730,16 +742,13 @@ where
 					let comm_adapter =
 						create_sender(&sa.method, &sa.dest, &sa.apisecret, tor_config_lock.clone())
 							.map_err(|e| {
-								ErrorKind::GenericError(format!("Unable to create a sender, {}", e))
+								Error::GenericError(format!("Unable to create a sender, {}", e))
 							})?;
 
 					let other_wallet_version = comm_adapter
 						.check_other_wallet_version(&sa.dest)
 						.map_err(|e| {
-							ErrorKind::GenericError(format!(
-								"Unable to get other wallet info, {}",
-								e
-							))
+							Error::GenericError(format!("Unable to get other wallet info, {}", e))
 						})?;
 
 					if let Some(other_wallet_version) = &other_wallet_version {
@@ -768,25 +777,29 @@ where
 
 				match sender_info {
 					Some((sender, other_wallet_info)) => {
-						let slatepack_secret = {
+						let (slatepack_secret, height, secp) = {
 							let mut w_lock = self.wallet_inst.lock();
 							let w = w_lock.lc_provider()?.wallet_inst()?;
 							let keychain = w.keychain(keychain_mask)?;
+							let (height, _, _) = w.w2n_client().get_chain_tip()?;
 							let slatepack_secret =
 								proofaddress::payment_proof_address_dalek_secret(&keychain, None)?;
-							slatepack_secret
+							(slatepack_secret, height, keychain.secp().clone())
 						};
 
 						slate = sender
 							.send_tx(
+								true,
 								&slate,
 								SlatePurpose::SendInitial,
 								&slatepack_secret,
 								recipient,
 								other_wallet_info,
+								height,
+								&secp,
 							)
 							.map_err(|e| {
-								ErrorKind::ClientCallback(format!(
+								Error::ClientCallback(format!(
 									"Unable to send slate {} with {}, {}",
 									slate.id, sa.method, e
 								))
@@ -794,10 +807,9 @@ where
 					}
 					None => {
 						error!("unsupported payment method: {}", sa.method);
-						return Err(ErrorKind::ClientCallback(
+						return Err(Error::ClientCallback(
 							"unsupported payment method".to_owned(),
-						)
-						.into());
+						));
 					}
 				};
 
@@ -826,7 +838,7 @@ where
 				);
 
 				if sa.post_tx {
-					self.post_tx(keychain_mask, &slate.tx, sa.fluff)?;
+					self.post_tx(keychain_mask, slate.tx_or_err()?, sa.fluff)?;
 				}
 				println!(
 					"slate [{}] posted successfully in owner_api",
@@ -949,10 +961,9 @@ where
 		//minimum_confirmations cannot be zero.
 		let minimum_confirmations = args.minimum_confirmations.clone();
 		if minimum_confirmations < 1 {
-			return Err(ErrorKind::ClientCallback(
+			return Err(Error::ClientCallback(
 				"minimum_confirmations can not smaller than 1".to_owned(),
-			)
-			.into());
+			));
 		}
 		let mut w_lock = self.wallet_inst.lock();
 		let w = w_lock.lc_provider()?.wallet_inst()?;
@@ -1109,7 +1120,7 @@ where
 		let mut w_lock = self.wallet_inst.lock();
 		let w = w_lock.lc_provider()?.wallet_inst()?;
 		let (slate_res, _context) =
-			owner::finalize_tx(&mut **w, keychain_mask, &slate, true, self.doctest_mode)?;
+			owner::finalize_tx(&mut **w, keychain_mask, slate, true, self.doctest_mode)?;
 
 		Ok(slate_res)
 	}
@@ -1162,7 +1173,7 @@ where
 	///		// Retrieve slate back from recipient
 	///		//
 	///		let res = api_owner.finalize_tx(None, &slate);
-	///		let res = api_owner.post_tx(None, &slate.tx, true);
+	///		let res = api_owner.post_tx(None, slate.tx_or_err().unwrap(), true);
 	/// }
 	/// ```
 
@@ -1282,7 +1293,7 @@ where
 	/// let tx_slate_id = None;
 	///
 	/// // Return all TxLogEntries
-	/// let result = api_owner.retrieve_txs(None, update_from_node, tx_id, tx_slate_id);
+	/// let result = api_owner.retrieve_txs(None, update_from_node, tx_id, tx_slate_id, None);
 	///
 	/// if let Ok((was_updated, tx_log_entries)) = result {
 	///     let stored_tx = api_owner.get_stored_tx(None, &tx_log_entries[0]).unwrap();
@@ -1373,6 +1384,88 @@ where
 			let _ = w.keychain(keychain_mask)?;
 		}
 		owner::verify_slate_messages(slate)
+	}
+
+	/// Return the rewind hash of the wallet.
+	/// The rewind hash when shared, help third-party to retrieve informations (outputs, balance, ...) that belongs to this wallet.
+	///
+	/// # Arguments
+	///
+	/// * `keychain_mask` - Wallet secret mask to XOR against the stored wallet seed before using, if
+	/// being used.
+	///
+	/// # Returns
+	/// * `Ok(String)` if successful
+	/// * or [`libwallet::Error`](../grin_wallet_libwallet/struct.Error.html) if an error is encountered.
+
+	/// # Example
+	/// Set up as in [`new`](struct.Owner.html#method.new) method above.
+	/// ```
+	/// # grin_wallet_api::doctest_helper_setup_doc_env!(wallet, wallet_config);
+	///
+	/// let mut api_owner = Owner::new(wallet.clone(), None, None);
+	/// let result = api_owner.scan(
+	///     None,
+	///     Some(20000),
+	///     false,
+	/// );
+	///
+	/// if let Ok(_) = result {
+	///     // Wallet outputs should be consistent with what's on chain
+	///     // ...
+	/// }
+	/// ```
+
+	pub fn get_rewind_hash(&self, keychain_mask: Option<&SecretKey>) -> Result<String, Error> {
+		owner::get_rewind_hash(self.wallet_inst.clone(), keychain_mask)
+	}
+
+	/// Scans the entire UTXO set from the node, identify which outputs belong to the given rewind hash view wallet.
+	///
+	/// This function can be used to retrieve outputs informations (outputs, balance, ...) from a rewind hash view wallet.
+	///
+	/// This operation scans the entire chain, and is expected to be time intensive. It is imperative
+	/// that no other processes should be trying to use the wallet at the same time this function is
+	/// running.
+	///
+	/// # Arguments
+	///
+	/// * `rewind_hash` - Rewind hash of a wallet, used to retrieve the output of a third-party wallet.
+	/// * `start_height` - If provided, the height of the first block from which to start scanning.
+	/// The scan will start from block 1 if this is not provided.
+	///
+	/// # Returns
+	/// * `Ok(ViewWallet)` if successful
+	/// * or [`libwallet::Error`](../grin_wallet_libwallet/struct.Error.html) if an error is encountered.
+
+	/// # Example
+	/// Set up as in [`new`](struct.Owner.html#method.new) method above.
+	/// ```
+	/// # grin_wallet_api::doctest_helper_setup_doc_env!(wallet, wallet_config);
+	///
+	/// let mut api_owner = Owner::new(wallet.clone(), None, None);
+	/// let result = api_owner.scan(
+	///     None,
+	///     Some(20000),
+	///     false,
+	/// );
+	///
+	/// if let Ok(_) = result {
+	///     // Wallet outputs should be consistent with what's on chain
+	///     // ...
+	/// }
+	/// ```
+
+	pub fn scan_rewind_hash(
+		&self,
+		rewind_hash: String,
+		start_height: Option<u64>,
+	) -> Result<ViewWallet, Error> {
+		let tx = {
+			let t = self.status_tx.lock();
+			t.clone()
+		};
+		owner::scan_rewind_hash(self.wallet_inst.clone(), rewind_hash, start_height, &tx)
 	}
 
 	/// Scans the entire UTXO set from the node, identify which outputs belong to the given wallet
@@ -1552,7 +1645,7 @@ where
 	pub fn get_top_level_directory(&self) -> Result<String, Error> {
 		let mut w_lock = self.wallet_inst.lock();
 		let lc = w_lock.lc_provider()?;
-		if self.doctest_mode {
+		if self.doctest_mode && !self.doctest_retain_tld {
 			Ok("/doctest/dir".to_owned())
 		} else {
 			lc.get_top_level_directory()
@@ -1805,7 +1898,10 @@ where
 	) -> Result<Option<SecretKey>, Error> {
 		// just return a representative string for doctest mode
 		if self.doctest_mode {
+			let secp_inst = static_secp_instance();
+			let secp = secp_inst.lock();
 			return Ok(Some(SecretKey::from_slice(
+				&secp,
 				&from_hex("d096b3cb75986b3b13f80b8f5243a9edf0af4c74ac37578c5a12cfb5b59b1868")
 					.unwrap(),
 			)?));
@@ -2277,8 +2373,9 @@ where
 		&self,
 		_keychain_mask: Option<&SecretKey>,
 		tx_id: Option<u32>,
+		tx_slate_id: Option<Uuid>,
 	) -> Result<TxProof, Error> {
-		owner::get_stored_tx_proof(self.wallet_inst.clone(), tx_id)
+		owner::get_stored_tx_proof(self.wallet_inst.clone(), tx_id, tx_slate_id)
 	}
 
 	/// Verifies a [PaymentProof](../grin_wallet_libwallet/api_impl/types/struct.PaymentProof.html)
@@ -2347,6 +2444,7 @@ where
 		// Updating wallet state first because we need to select outputs.
 		owner::update_wallet_state(self.wallet_inst.clone(), keychain_mask, &None)?;
 		owner_swap::swap_start(self.wallet_inst.clone(), keychain_mask, params)
+			.map_err(|e| e.into())
 	}
 
 	pub fn swap_create_from_offer(
@@ -2359,6 +2457,7 @@ where
 			keychain_mask,
 			message_filename,
 		)
+		.map_err(|e| e.into())
 	}
 
 	/// List all available swap operations. SwapId & Status
@@ -2368,6 +2467,7 @@ where
 		do_check: bool,
 	) -> Result<(Vec<owner_swap::SwapListInfo>, Vec<Swap>), Error> {
 		owner_swap::swap_list(self.wallet_inst.clone(), keychain_mask, do_check)
+			.map_err(|e| e.into())
 	}
 
 	/// Delete swap trade
@@ -2377,6 +2477,7 @@ where
 		swap_id: String,
 	) -> Result<(), Error> {
 		owner_swap::swap_delete(self.wallet_inst.clone(), keychain_mask, &swap_id)
+			.map_err(|e| e.into())
 	}
 	/// Retrieve swap trade
 	pub fn swap_get(
@@ -2385,6 +2486,7 @@ where
 		swap_id: String,
 	) -> Result<Swap, Error> {
 		owner_swap::swap_get(self.wallet_inst.clone(), keychain_mask, &swap_id)
+			.map_err(|e| e.into())
 	}
 
 	/// Adjust the sate of swap trade.
@@ -2417,6 +2519,7 @@ where
 			eth_infura_project_id,
 			tag,
 		)
+		.map_err(|e| e.into())
 	}
 
 	/// Dump swap file content
@@ -2426,11 +2529,12 @@ where
 		swap_id: String,
 	) -> Result<String, Error> {
 		owner_swap::swap_dump(self.wallet_inst.clone(), keychain_mask, &swap_id)
+			.map_err(|e| e.into())
 	}
 
 	/// dump ethereum info
 	pub fn eth_info(&self, currency: Currency) -> Result<(String, String, String), Error> {
-		owner_eth::info(self.wallet_inst.clone(), currency)
+		owner_eth::info(self.wallet_inst.clone(), currency).map_err(|e| e.into())
 	}
 
 	/// ethereum transfer
@@ -2439,7 +2543,7 @@ where
 		dest: Option<String>,
 		currency: Currency,
 		amount: Option<String>,
-	) -> Result<(), libwallet::swap::ErrorKind> {
+	) -> Result<(), libwallet::swap::Error> {
 		owner_eth::transfer(self.wallet_inst.clone(), currency, dest, amount)
 	}
 
@@ -2478,6 +2582,7 @@ where
 			eth_infura_project_id,
 			false,
 		)
+		.map_err(|e| e.into())
 	}
 
 	/// Get a status of the transactions that involved into the swap.
@@ -2501,6 +2606,7 @@ where
 			erc20_swap_contract_address,
 			eth_infura_project_id,
 		)
+		.map_err(|e| e.into())
 	}
 
 	pub fn swap_process<F>(
@@ -2517,7 +2623,7 @@ where
 		eth_infura_project_id: Option<String>,
 	) -> Result<(StateProcessRespond, Vec<Swap>), Error>
 	where
-		F: FnOnce(Message, String, String) -> Result<(bool, String), crate::libwallet::Error>
+		F: FnOnce(Message, String, String) -> Result<(bool, String), libwallet::swap::Error>
 			+ 'static,
 	{
 		owner_swap::swap_process(
@@ -2534,6 +2640,7 @@ where
 			eth_infura_project_id,
 			false,
 		)
+		.map_err(|e| e.into())
 	}
 
 	/// Process swap income message
@@ -2543,6 +2650,7 @@ where
 		message: String,
 	) -> Result<Option<Message>, Error> {
 		owner_swap::swap_income_message(self.wallet_inst.clone(), keychain_mask, &message, None)
+			.map_err(|e| e.into())
 	}
 
 	// decryipt income slate. It is the common routine for most API calls that accept the slates
@@ -2556,11 +2664,11 @@ where
 			let (slate_from, content, sender, _receiver) = self
 				.decrypt_slatepack(keychain_mask, in_slate, None)
 				.map_err(|e| {
-					ErrorKind::SlatepackDecodeError(format!("Unable to decrypt a slatepack, {}", e))
+					Error::SlatepackDecodeError(format!("Unable to decrypt a slatepack, {}", e))
 				})?;
 			(slate_from, Some(content), sender)
 		} else {
-			let slate_from = in_slate.into_slate_plain().map_err(|e| e.kind())?;
+			let slate_from = in_slate.into_slate_plain(false)?;
 			(slate_from, None, None)
 		};
 		Ok((slate_from, content, sender))
@@ -2610,6 +2718,18 @@ where
 			use_test_rng,
 		)
 	}
+
+	/// Builds an output
+	pub fn build_output(
+		&self,
+		keychain_mask: Option<&SecretKey>,
+		features: OutputFeatures,
+		amount: u64,
+	) -> Result<BuiltOutput, Error> {
+		let mut w_lock = self.wallet_inst.lock();
+		let w = w_lock.lc_provider()?.wallet_inst()?;
+		owner::build_output(&mut **w, keychain_mask, features, amount)
+	}
 }
 
 #[doc(hidden)]
@@ -2624,6 +2744,8 @@ macro_rules! doctest_helper_setup_doc_env {
 		use grin_wallet_util::grin_keychain as keychain;
 		use grin_wallet_util::grin_util as util;
 
+		use grin_core::global;
+
 		use keychain::ExtKeychain;
 		use tempfile::tempdir;
 
@@ -2637,9 +2759,13 @@ macro_rules! doctest_helper_setup_doc_env {
 
 		use uuid::Uuid;
 
-		grin_wallet_util::grin_core::global::set_local_chain_type(
-			grin_wallet_util::grin_core::global::ChainTypes::AutomatedTesting,
-			);
+		// Set our local chain_type for testing.
+		global::set_local_chain_type(global::ChainTypes::AutomatedTesting);
+
+		// don't run on windows CI, which gives very inconsistent results
+		if cfg!(windows) {
+			return;
+		}
 
 		let dir = tempdir().map_err(|e| format!("{:#?}", e)).unwrap();
 		let dir = dir
@@ -2655,7 +2781,7 @@ macro_rules! doctest_helper_setup_doc_env {
 		let node_client = HTTPNodeClient::new(node_list, None).unwrap();
 		let mut wallet = Box::new(
 			DefaultWalletImpl::<'static, HTTPNodeClient>::new(node_client.clone()).unwrap(),
-			)
+		)
 			as Box<
 				WalletInst<
 					'static,
@@ -2663,7 +2789,7 @@ macro_rules! doctest_helper_setup_doc_env {
 					HTTPNodeClient,
 					ExtKeychain,
 				>,
-				>;
+			>;
 		let lc = wallet.lc_provider().unwrap();
 		let _ = lc.set_top_level_directory(&wallet_config.data_file_dir);
 		lc.open_wallet(None, pw, false, false, None);

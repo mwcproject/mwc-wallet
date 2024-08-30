@@ -14,7 +14,8 @@
 
 use crate::swap::fsm::state::{Input, State, StateEtaInfo, StateId, StateProcessRespond};
 use crate::swap::types::SwapTransactionsConfirmations;
-use crate::swap::{Context, ErrorKind, Swap};
+use crate::swap::{Context, Error, Swap};
+use grin_wallet_util::grin_util::secp::Secp256k1;
 use std::collections::HashMap;
 
 /// Swap State machine
@@ -31,7 +32,7 @@ impl<'a> StateMachine<'a> {
 			let _ = state_map.insert(st.get_state_id(), st);
 		}
 
-		#[cfg(build = "debug")]
+		#[cfg(debug_assertions)]
 		for st in state_map.values() {
 			assert!(state_map.contains_key(&st.get_state_id()));
 			if let Some(state) = st.get_prev_swap_state() {
@@ -46,11 +47,11 @@ impl<'a> StateMachine<'a> {
 	}
 
 	/// Check if this trade can be cancelled.
-	pub fn is_cancellable(&self, swap: &Swap) -> Result<bool, ErrorKind> {
+	pub fn is_cancellable(&self, swap: &Swap) -> Result<bool, Error> {
 		let state = self
 			.state_map
 			.get(&swap.state)
-			.ok_or(ErrorKind::SwapStateMachineError(format!(
+			.ok_or(Error::SwapStateMachineError(format!(
 				"Unknown state {:?}",
 				swap.state
 			)))?;
@@ -68,8 +69,10 @@ impl<'a> StateMachine<'a> {
 		input: Input,
 		swap: &mut Swap,
 		context: &Context,
+		height: u64,
 		tx_conf: &SwapTransactionsConfirmations,
-	) -> Result<StateProcessRespond, ErrorKind> {
+		secp: &Secp256k1,
+	) -> Result<StateProcessRespond, Error> {
 		debug!(
 			"Swap {} processing state {:?} for Input {:?}",
 			swap.id, swap.state, input
@@ -78,23 +81,23 @@ impl<'a> StateMachine<'a> {
 		let state = self
 			.state_map
 			.get_mut(&swap.state)
-			.ok_or(ErrorKind::SwapStateMachineError(format!(
+			.ok_or(Error::SwapStateMachineError(format!(
 				"Unknown state {:?}",
 				swap.state
 			)))?;
-		let mut respond = state.process(input, swap, context, tx_conf)?;
+		let mut respond = state.process(input, swap, context, height, tx_conf, secp)?;
 
 		while respond.next_state_id != swap.state {
 			debug!("New state: {:?}", swap.state);
 			swap.state = respond.next_state_id.clone();
-			let state =
-				self.state_map
-					.get_mut(&swap.state)
-					.ok_or(ErrorKind::SwapStateMachineError(format!(
-						"Unknown state {:?}",
-						swap.state
-					)))?;
-			respond = state.process(Input::Check, swap, context, tx_conf)?;
+			let state = self
+				.state_map
+				.get_mut(&swap.state)
+				.ok_or(Error::SwapStateMachineError(format!(
+					"Unknown state {:?}",
+					swap.state
+				)))?;
+			respond = state.process(Input::Check, swap, context, height, tx_conf, secp)?;
 		}
 		respond.journal = swap.journal.clone();
 
@@ -103,11 +106,15 @@ impl<'a> StateMachine<'a> {
 	}
 
 	/// Build a roadmap for the swap process
-	pub fn get_swap_roadmap(&self, swap: &Swap) -> Result<Vec<StateEtaInfo>, ErrorKind> {
+	pub fn get_swap_roadmap(
+		&self,
+		swap: &Swap,
+		secp: &Secp256k1,
+	) -> Result<Vec<StateEtaInfo>, Error> {
 		let state = self
 			.state_map
 			.get(&swap.state)
-			.ok_or(ErrorKind::SwapStateMachineError(format!(
+			.ok_or(Error::SwapStateMachineError(format!(
 				"Unknown state {:?}",
 				swap.state
 			)))?;
@@ -121,17 +128,17 @@ impl<'a> StateMachine<'a> {
 			let prev_state = self
 				.state_map
 				.get(&psid)
-				.ok_or(ErrorKind::SwapStateMachineError(format!(
+				.ok_or(Error::SwapStateMachineError(format!(
 					"Unknown state {:?}",
 					psid
 				)))?;
-			if let Some(info) = prev_state.get_eta(swap) {
+			if let Some(info) = prev_state.get_eta(swap, secp) {
 				result.insert(0, info);
 			}
 			prev_state_id = prev_state.get_prev_swap_state();
 		}
 		// current state
-		if let Some(info) = state.get_eta(swap) {
+		if let Some(info) = state.get_eta(swap, secp) {
 			result.push(info.active());
 		}
 		// going forward
@@ -141,11 +148,11 @@ impl<'a> StateMachine<'a> {
 			let next_state = self
 				.state_map
 				.get(&nsid)
-				.ok_or(ErrorKind::SwapStateMachineError(format!(
+				.ok_or(Error::SwapStateMachineError(format!(
 					"Unknown state {:?}",
 					nsid
 				)))?;
-			if let Some(info) = next_state.get_eta(swap) {
+			if let Some(info) = next_state.get_eta(swap, secp) {
 				result.push(info);
 			}
 			next_state_id = next_state.get_next_swap_state();

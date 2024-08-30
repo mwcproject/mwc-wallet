@@ -1,4 +1,4 @@
-// Copyright 2019 The Grin Developers
+// Copyright 2021 The Grin Developers
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -24,12 +24,13 @@ extern crate grin_wallet_libwallet as libwallet;
 
 use grin_wallet_util::grin_core::global;
 use impls::test_framework::{self, LocalWalletClient};
+use std::sync::atomic::Ordering;
 use std::thread;
 use std::time::Duration;
 
 #[macro_use]
 mod common;
-use common::{clean_output_dir, create_wallet_proxy, setup};
+use common::{clean_output_dir, create_wallet_proxy, setup, setup_global_chain_type};
 
 /// updater thread test impl
 fn updater_thread_test_impl(test_dir: &'static str) -> Result<(), wallet::Error> {
@@ -37,6 +38,7 @@ fn updater_thread_test_impl(test_dir: &'static str) -> Result<(), wallet::Error>
 	// Create a new proxy to simulate server and wallet responses
 	let mut wallet_proxy = create_wallet_proxy(test_dir);
 	let chain = wallet_proxy.chain.clone();
+	let stopper = wallet_proxy.running.clone();
 
 	// Create a new wallet test client, and set its queues to communicate with the
 	// proxy
@@ -94,9 +96,6 @@ fn updater_thread_test_impl(test_dir: &'static str) -> Result<(), wallet::Error>
 	let _ =
 		test_framework::award_blocks_to_wallet(&chain, wallet1.clone(), mask1, bh as usize, false);
 
-	// Update runs in a separate thread, so we can't do the local chain type
-	global::init_global_chain_type(global::ChainTypes::AutomatedTesting);
-
 	let owner_api = api::Owner::new(wallet1, None, None);
 	owner_api.start_updater(mask1, Duration::from_secs(5))?;
 
@@ -107,16 +106,21 @@ fn updater_thread_test_impl(test_dir: &'static str) -> Result<(), wallet::Error>
 	assert!(messages.len() >= 15); // grin has 32 lines, mwc has 25 lines.  We don't want ot validate content, it will change. Just checking that it alive.
 
 	owner_api.stop_updater()?;
+	stopper.store(false, Ordering::Relaxed);
 	thread::sleep(Duration::from_secs(2));
 	Ok(())
 }
 
 #[test]
 fn updater_thread() {
+	// The "updater" kicks off a new thread so we need to ensure the global chain_type
+	// is set for this to work correctly.
+	setup_global_chain_type();
+
 	let test_dir = "test_output/updater_thread";
 	setup(test_dir);
 	if let Err(e) = updater_thread_test_impl(test_dir) {
-		panic!("Libwallet Error: {} - {}", e, e.backtrace().unwrap());
+		panic!("Libwallet Error: {}", e);
 	}
 	clean_output_dir(test_dir);
 }

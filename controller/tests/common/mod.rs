@@ -1,4 +1,4 @@
-// Copyright 2019 The Grin Developers
+// Copyright 2021 The Grin Developers
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -25,7 +25,6 @@ use self::keychain::ExtKeychain;
 use self::libwallet::WalletInst;
 use impls::test_framework::{LocalWalletClient, WalletProxy};
 use impls::{DefaultLCProvider, DefaultWalletImpl};
-use std::fs;
 use std::sync::Arc;
 use util::secp::key::SecretKey;
 use util::{Mutex, ZeroingString};
@@ -74,13 +73,31 @@ macro_rules! open_wallet_and_add {
 	};
 }
 pub fn clean_output_dir(test_dir: &str) {
-	let _ = fs::remove_dir_all(test_dir);
+	let path = std::path::Path::new(test_dir);
+	if path.is_dir() {
+		#[cfg(target_os = "windows")]
+		{
+			let _ = remove_dir_all::remove_dir_all(test_dir);
+		}
+		#[cfg(not(target_os = "windows"))]
+		{
+			remove_dir_all::remove_dir_all(test_dir).unwrap();
+		}
+	}
 }
 
 pub fn setup(test_dir: &str) {
 	util::init_test_logger();
 	clean_output_dir(test_dir);
 	global::set_local_chain_type(global::ChainTypes::AutomatedTesting);
+}
+
+/// Some tests require the global chain_type to be configured due to threads being spawned internally.
+/// It is recommended to avoid relying on this if at all possible as global chain_type
+/// leaks across multiple tests and will likely have unintended consequences.
+#[allow(dead_code)]
+pub fn setup_global_chain_type() {
+	global::init_global_chain_type(global::ChainTypes::AutomatedTesting);
 }
 
 pub fn create_wallet_proxy(

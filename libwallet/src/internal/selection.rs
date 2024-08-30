@@ -1,4 +1,4 @@
-// Copyright 2019 The Grin Developers
+// Copyright 2021 The Grin Developers
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,7 +14,7 @@
 
 //! Selection of inputs for building transactions
 
-use crate::error::{Error, ErrorKind};
+use crate::error::Error;
 use crate::grin_core::core::amount_to_hr_string;
 use crate::grin_core::libtx::{
 	build,
@@ -30,28 +30,6 @@ use crate::slate::Slate;
 use crate::types::*;
 use grin_wallet_util::grin_util as util;
 use std::collections::HashMap;
-use std::sync::RwLock;
-
-lazy_static! {
-	/// Base fee units for all transaction. We want to be able to regulate them if in future
-	/// MWC price will go up, the base fee better to be adjustedable. Normally miners are
-	/// dictating the fees.
-	static ref BASE_FEE: RwLock<Option<u64>> = RwLock::new(None);
-}
-
-/// Set from config base fee units for all transaction.
-pub fn set_base_fee(base_fee: u64) {
-	let mut fee = BASE_FEE.write().unwrap();
-	(*fee).replace(base_fee);
-}
-
-/// Read base fee units
-pub fn get_base_fee() -> u64 {
-	BASE_FEE
-		.read()
-		.unwrap()
-		.unwrap_or(crate::grin_core::libtx::DEFAULT_BASE_FEE)
-}
 
 /// Initialize a transaction on the sender side, returns a corresponding
 /// libwallet transaction slate with the appropriate inputs selected,
@@ -77,6 +55,7 @@ pub fn build_send_tx<'a, T: ?Sized, C, K>(
 	exclude_change_outputs: bool,
 	change_output_minimum_confirmations: u64,
 	message: Option<String>,
+	amount_includes_fee: bool,
 ) -> Result<Context, Error>
 where
 	T: WalletBackend<'a, C, K>,
@@ -87,6 +66,7 @@ where
 		wallet,
 		keychain_mask,
 		slate.amount,
+		amount_includes_fee,
 		min_fee,
 		slate.height,
 		minimum_confirmations,
@@ -100,6 +80,11 @@ where
 		change_output_minimum_confirmations,
 		true, // Legacy value is true
 	)?;
+	if amount_includes_fee {
+		slate.amount = slate.amount.checked_sub(fee).ok_or(Error::GenericError(
+			"Transaction amount is too small to include fee".into(),
+		))?;
+	};
 
 	// Update the fee on the slate so we account for this when building the tx.
 	slate.fee = fee;
@@ -123,7 +108,7 @@ where
 		// Legacy part
 		Context::with_excess(
 			keychain.secp(),
-			blinding.secret_key()?,
+			blinding.secret_key(keychain.secp())?,
 			&parent_key_id,
 			use_test_nonce,
 			participant_id,
@@ -228,7 +213,7 @@ where
 
 		t.address = address;
 
-		if let Ok(e) = slate.calc_excess(Some(&keychain)) {
+		if let Ok(e) = slate.calc_excess(keychain.secp(), Some(&keychain), current_height) {
 			t.kernel_excess = Some(e)
 		}
 		if let Some(e) = excess_override {
@@ -261,10 +246,9 @@ where
 			let sender_address_path = match context.payment_proof_derivation_index {
 				Some(p) => p,
 				None => {
-					return Err(ErrorKind::PaymentProof(
+					return Err(Error::PaymentProof(
 						"Payment proof derivation index required".to_owned(),
-					)
-					.into());
+					));
 				}
 			};
 			// MQS type because public key is requred
@@ -306,7 +290,10 @@ where
 		batch.commit()?;
 		t
 	};
-	wallet.store_tx(&format!("{}", tx_entry.tx_slate_id.unwrap()), &slate.tx)?;
+	wallet.store_tx(
+		&format!("{}", tx_entry.tx_slate_id.unwrap()),
+		slate.tx_or_err()?,
+	)?;
 	Ok(())
 }
 
@@ -350,7 +337,7 @@ where
 		}
 		if sum != slate.amount {
 			println!("mismatch sum = {}, amount = {}", sum, slate.amount);
-			return Err(ErrorKind::AmountMismatch {
+			return Err(Error::AmountMismatch {
 				amount: slate.amount,
 				sum: sum,
 			})?;
@@ -388,11 +375,10 @@ where
 	debug_assert!(key_vec_amounts.len() == num_outputs);
 
 	if slate.amount == 0 || num_outputs == 0 || key_vec_amounts.len() != num_outputs {
-		return Err(ErrorKind::GenericError(format!(
+		return Err(Error::GenericError(format!(
 			"Unable to build transaction for amount {} and outputs number {}",
 			slate.amount, num_outputs
-		))
-		.into());
+		)));
 	}
 
 	let keychain = wallet.keychain(keychain_mask)?;
@@ -425,7 +411,7 @@ where
 		// Legacy model
 		Context::with_excess(
 			keychain.secp(),
-			blinding.secret_key()?,
+			blinding.secret_key(keychain.secp())?,
 			&parent_key_id,
 			use_test_rng,
 			participant_id,
@@ -447,7 +433,7 @@ where
 		let commit = wallet.calc_commit_for_cache(keychain_mask, kva.1, &kva.0)?;
 		if let Some(cm) = commit.clone() {
 			commit_ped.push(Commitment::from_vec(util::from_hex(&cm).map_err(|e| {
-				ErrorKind::GenericError(format!("Output commit parse error, {}", e))
+				Error::GenericError(format!("Output commit parse error, {}", e))
 			})?));
 		}
 		commit_vec.push(commit);
@@ -464,7 +450,7 @@ where
 	t.messages = messages;
 	t.ttl_cutoff_height = slate.ttl_cutoff_height;
 	//add the offset to the database tx record.
-	let offset_skey = slate.tx.offset.secret_key()?;
+	let offset_skey = slate.tx_or_err()?.offset.secret_key(keychain.secp())?;
 	let offset_commit = keychain.secp().commit(0, offset_skey)?;
 	t.kernel_offset = Some(offset_commit);
 
@@ -473,7 +459,7 @@ where
 	}
 
 	// when invoicing, this will be invalid
-	if let Ok(e) = slate.calc_excess(Some(&keychain)) {
+	if let Ok(e) = slate.calc_excess(keychain.secp(), Some(&keychain), current_height) {
 		t.kernel_excess = Some(e)
 	}
 	t.kernel_lookup_min_height = Some(current_height);
@@ -510,6 +496,7 @@ pub fn select_send_tx<'a, T: ?Sized, C, K, B>(
 	wallet: &mut T,
 	keychain_mask: Option<&SecretKey>,
 	amount: u64,
+	amount_includes_fee: bool,
 	min_fee: &Option<u64>,
 	current_height: u64,
 	minimum_confirmations: u64,
@@ -540,6 +527,7 @@ where
 	let (coins, _total, amount, fee) = select_coins_and_fee(
 		wallet,
 		amount,
+		amount_includes_fee,
 		min_fee,
 		current_height,
 		minimum_confirmations,
@@ -573,6 +561,7 @@ where
 pub fn select_coins_and_fee<'a, T: ?Sized, C, K>(
 	wallet: &mut T,
 	amount: u64,
+	amount_includes_fee: bool,
 	min_fee: &Option<u64>,
 	current_height: u64,
 	minimum_confirmations: u64,
@@ -613,7 +602,7 @@ where
 	);
 
 	if coins.len() + routputs + change_outputs > max_outputs {
-		return Err(ErrorKind::TooLargeSlate(max_outputs))?;
+		return Err(Error::TooLargeSlate(max_outputs))?;
 	}
 
 	// sender is responsible for setting the fee on the partial tx
@@ -626,13 +615,16 @@ where
 	// First attempt to spend without change
 	assert!(routputs >= 1); // Normally it is 1
 
-	let mut fee = tx_fee(coins.len(), routputs, 1, Some(get_base_fee()));
+	let mut fee = tx_fee(coins.len(), routputs, 1);
 	if let Some(min_fee) = min_fee {
 		fee = std::cmp::max(*min_fee, fee);
 	}
 
 	let mut total: u64 = coins.iter().map(|c| c.value).sum();
-	let mut amount_with_fee = amount + fee;
+	let mut amount_with_fee = match amount_includes_fee {
+		true => amount,
+		false => amount + fee,
+	};
 
 	let num_outputs = change_outputs + routputs;
 
@@ -640,11 +632,14 @@ where
 
 	// We need to add a change address or amount with fee is more than total
 	if total != amount_with_fee {
-		fee = tx_fee(coins.len(), num_outputs, 1, Some(get_base_fee()));
+		fee = tx_fee(coins.len(), num_outputs, 1);
 		if let Some(min_fee) = min_fee {
 			fee = std::cmp::max(*min_fee, fee);
 		}
-		amount_with_fee = amount + fee;
+		amount_with_fee = match amount_includes_fee {
+			true => amount,
+			false => amount + fee,
+		};
 
 		// Here check if we have enough outputs for the amount including fee otherwise
 		// look for other outputs and check again
@@ -667,12 +662,15 @@ where
 				change_output_minimum_confirmations,
 			)
 			.1;
-			fee = tx_fee(coins.len(), num_outputs, 1, Some(get_base_fee()));
+			fee = tx_fee(coins.len(), num_outputs, 1);
 			if let Some(min_fee) = min_fee {
 				fee = std::cmp::max(*min_fee, fee);
 			}
 			total = coins.iter().map(|c| c.value).sum();
-			amount_with_fee = amount + fee;
+			amount_with_fee = match amount_includes_fee {
+				true => amount,
+				false => amount + fee,
+			};
 
 			// Checking if new solution is better (has more outputs)
 			// Don't checking outputs limit because light overcounting is fine
@@ -682,7 +680,7 @@ where
 		}
 
 		if total < amount_with_fee {
-			return Err(ErrorKind::NotEnoughFunds {
+			return Err(Error::NotEnoughFunds {
 				available: total as u64,
 				available_disp: amount_to_hr_string(total, true),
 				needed: amount_with_fee as u64,
@@ -690,7 +688,15 @@ where
 			})?;
 		}
 	}
-	Ok((coins, total, amount, fee))
+	// If original amount includes fee, the new amount should
+	// be reduced, to accommodate the fee.
+	let new_amount = match amount_includes_fee {
+		true => amount.checked_sub(fee).ok_or(Error::GenericError(
+			"Transaction amount is too small to include fee".into(),
+		))?,
+		false => amount,
+	};
+	Ok((coins, total, new_amount, fee))
 }
 
 /// Selects inputs and change for a transaction
@@ -858,10 +864,12 @@ where
 	// amount, the wallet should allow going over it to satisfy what the user
 	// wants to send. So the wallet considers max_outputs more of a soft limit.
 	if eligible.len() > max_outputs {
-		for window in eligible.windows(max_outputs) {
-			let windowed_eligibles = window.to_vec();
-			if let Some(outputs) = select_from(amount, select_all, windowed_eligibles) {
-				return (max_available, outputs);
+		if max_outputs > 0 {
+			for window in eligible.windows(max_outputs) {
+				let windowed_eligibles = window.to_vec();
+				if let Some(outputs) = select_from(amount, select_all, windowed_eligibles) {
+					return (max_available, outputs);
+				}
 			}
 		}
 		// Not exist in any window of which total amount >= amount.
@@ -952,24 +960,34 @@ where
 	)?;
 
 	let mut parts = vec![];
-	for (id, _, value) in &context.get_inputs() {
-		let input = wallet.iter().find(|out| out.key_id == *id);
-		if let Some(i) = input {
-			if i.is_coinbase {
-				parts.push(build::coinbase_input(*value, i.key_id.clone()));
+	let inputs_data: HashMap<Identifier, u64> = context
+		.get_inputs()
+		.iter()
+		.map(|(id, _, value)| (id.clone(), value.clone()))
+		.collect();
+
+	wallet.iter().for_each(|out| {
+		if let Some(value) = inputs_data.get(&out.key_id) {
+			if out.is_coinbase {
+				parts.push(build::coinbase_input(*value, out.key_id.clone()));
 			} else {
-				parts.push(build::input(*value, i.key_id.clone()));
+				parts.push(build::input(*value, out.key_id.clone()));
 			}
 		}
-	}
-	for (id, _, value) in &context.get_outputs() {
-		let output = wallet.iter().find(|out| out.key_id == *id);
-		if let Some(i) = output {
-			parts.push(build::output(*value, i.key_id.clone()));
+	});
+
+	let output_data: HashMap<Identifier, u64> = context
+		.get_outputs()
+		.iter()
+		.map(|(id, _, value)| (id.clone(), value.clone()))
+		.collect();
+	wallet.iter().for_each(|out| {
+		if let Some(value) = output_data.get(&out.key_id) {
+			parts.push(build::output(*value, out.key_id.clone()));
 		}
-	}
+	});
 	slate.add_transaction_elements(&keychain, &ProofBuilder::new(&keychain), parts)?;
 	// restore the original offset
-	slate.tx.offset = slate.offset.clone();
+	slate.tx_or_err_mut()?.offset = slate.offset.clone();
 	Ok(())
 }

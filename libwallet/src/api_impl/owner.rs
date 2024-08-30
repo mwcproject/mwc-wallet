@@ -1,4 +1,4 @@
-// Copyright 2019 The Grin Develope;
+// Copyright 2021 The Grin Develope;
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,24 +17,29 @@
 use uuid::Uuid;
 
 use crate::grin_core::core::hash::Hashed;
-use crate::grin_core::core::Transaction;
+use crate::grin_core::core::{Output, OutputFeatures, Transaction};
+use crate::grin_core::libtx::proof;
+use crate::grin_keychain::ViewKey;
 use crate::grin_util::secp::key::SecretKey;
 use crate::grin_util::Mutex;
+use crate::grin_util::ToHex;
 
 use crate::api_impl::owner_updater::StatusMessage;
-use crate::grin_keychain::{Identifier, Keychain};
+use crate::grin_keychain::{BlindingFactor, Identifier, Keychain, SwitchCommitmentType};
 use crate::grin_util::secp::key::PublicKey;
 
 use crate::internal::{keys, scan, selection, tx, updater};
 use crate::slate::{PaymentInfo, Slate};
 use crate::types::{
 	AcctPathMapping, Context, NodeClient, OutputData, TxLogEntry, WalletBackend, WalletInfo,
+	FLAG_NEW_WALLET,
 };
+use crate::Error;
 use crate::{
-	wallet_lock, InitTxArgs, IssueInvoiceTxArgs, NodeHeightResult, OutputCommitMapping,
-	PaymentProof, ScannedBlockInfo, TxLogEntryType, WalletInst, WalletLCProvider,
+	wallet_lock, BuiltOutput, InitTxArgs, IssueInvoiceTxArgs, NodeHeightResult,
+	OutputCommitMapping, PaymentProof, RetrieveTxQueryArgs, ScannedBlockInfo, TxLogEntryType,
+	ViewWallet, WalletInst, WalletLCProvider,
 };
-use crate::{Error, ErrorKind};
 
 use crate::proof::tx_proof::{pop_proof_for_slate, TxProof};
 use ed25519_dalek::PublicKey as DalekPublicKey;
@@ -81,6 +86,23 @@ where
 	K: Keychain + 'a,
 {
 	w.set_parent_key_id_by_name(label)
+}
+
+/// Hash of the wallet root public key
+pub fn get_rewind_hash<'a, L, C, K>(
+	wallet_inst: Arc<Mutex<Box<dyn WalletInst<'a, L, C, K>>>>,
+	keychain_mask: Option<&SecretKey>,
+) -> Result<String, Error>
+where
+	L: WalletLCProvider<'a, C, K>,
+	C: NodeClient + 'a,
+	K: Keychain + 'a,
+{
+	wallet_lock!(wallet_inst, w);
+	let keychain = w.keychain(keychain_mask)?;
+	let root_public_key = keychain.public_root_key();
+	let rewind_hash = ViewKey::rewind_hash(keychain.secp(), root_public_key).to_hex();
+	Ok(rewind_hash)
 }
 
 /// Retrieve the MQS address for the wallet
@@ -162,6 +184,7 @@ where
 			keychain_mask,
 			tx_id,
 			None,
+			None,
 			Some(&parent_key_id),
 			false,
 			None,
@@ -195,6 +218,7 @@ pub fn retrieve_txs<'a, L, C, K>(
 	refresh_from_node: bool,
 	tx_id: Option<u32>,
 	tx_slate_id: Option<Uuid>,
+	query_args: Option<RetrieveTxQueryArgs>,
 ) -> Result<(bool, Vec<TxLogEntry>), Error>
 where
 	L: WalletLCProvider<'a, C, K>,
@@ -214,6 +238,7 @@ where
 		keychain_mask,
 		tx_id,
 		tx_slate_id,
+		query_args,
 		Some(&parent_key_id),
 		false,
 		None,
@@ -263,10 +288,9 @@ where
 	K: Keychain + 'a,
 {
 	if tx_id.is_none() && tx_slate_id.is_none() {
-		return Err(ErrorKind::PaymentProofRetrieval(
-			"Transaction ID or Slate UUID must be specified".into(),
-		)
-		.into());
+		return Err(Error::PaymentProofRetrieval(
+			"Transaction ID or Slate UUID must be specified".to_owned(),
+		));
 	}
 	if refresh_from_node {
 		update_wallet_state(wallet_inst.clone(), keychain_mask, status_send_channel)?
@@ -280,19 +304,21 @@ where
 		refresh_from_node,
 		tx_id,
 		tx_slate_id,
+		None,
 	)?;
 	if txs.1.len() != 1 {
-		return Err(ErrorKind::PaymentProofRetrieval("Transaction doesn't exist".into()).into());
+		return Err(Error::PaymentProofRetrieval(
+			"Transaction doesn't exist".to_owned(),
+		));
 	}
 	// Pull out all needed fields, returning an error if they're not present
 	let tx = txs.1[0].clone();
 	let proof = match tx.payment_proof {
 		Some(p) => p,
 		None => {
-			return Err(ErrorKind::PaymentProofRetrieval(
-				"Transaction does not contain a payment proof".into(),
-			)
-			.into());
+			return Err(Error::PaymentProofRetrieval(
+				"Transaction does not contain a payment proof".to_owned(),
+			));
 		}
 	};
 	let amount = if tx.amount_credited >= tx.amount_debited {
@@ -307,28 +333,25 @@ where
 	let excess = match tx.kernel_excess {
 		Some(e) => e,
 		None => {
-			return Err(ErrorKind::PaymentProofRetrieval(
-				"Transaction does not contain kernel excess".into(),
-			)
-			.into());
+			return Err(Error::PaymentProofRetrieval(
+				"Transaction does not contain kernel excess".to_owned(),
+			));
 		}
 	};
 	let r_sig = match proof.receiver_signature {
 		Some(e) => e,
 		None => {
-			return Err(ErrorKind::PaymentProofRetrieval(
-				"Proof does not contain receiver signature ".into(),
-			)
-			.into());
+			return Err(Error::PaymentProofRetrieval(
+				"Proof does not contain receiver signature ".to_owned(),
+			));
 		}
 	};
 	let s_sig = match proof.sender_signature {
 		Some(e) => e,
 		None => {
-			return Err(ErrorKind::PaymentProofRetrieval(
-				"Proof does not contain sender signature ".into(),
-			)
-			.into());
+			return Err(Error::PaymentProofRetrieval(
+				"Proof does not contain sender signature ".to_owned(),
+			));
 		}
 	};
 	Ok(PaymentProof {
@@ -344,42 +367,53 @@ where
 pub fn get_stored_tx_proof<'a, L, C, K>(
 	wallet_inst: Arc<Mutex<Box<dyn WalletInst<'a, L, C, K>>>>,
 	id: Option<u32>,
+	tx_slate_id: Option<Uuid>,
 ) -> Result<TxProof, Error>
 where
 	L: WalletLCProvider<'a, C, K>,
 	C: NodeClient + 'a,
 	K: Keychain + 'a,
 {
-	if id.is_none() {
-		return Err(
-			ErrorKind::PaymentProofRetrieval("Transaction ID must be specified".into()).into(),
-		);
+	if id.is_none() && tx_slate_id.is_none() {
+		return Err(Error::PaymentProofRetrieval(
+			"Transaction ID must be specified".into(),
+		));
 	}
-	let tx_id = id.unwrap();
 	wallet_lock!(wallet_inst, w);
 	let parent_key_id = w.parent_key_id();
 	let txs: Vec<TxLogEntry> = updater::retrieve_txs(
 		&mut **w,
 		None,
-		Some(tx_id),
+		id,
+		tx_slate_id,
 		None,
 		Some(&parent_key_id),
 		false,
 		None,
 		None,
 	)
-	.map_err(|e| ErrorKind::StoredTransactionError(format!("{}", e)))?;
-	if txs.len() != 1 {
-		return Err(ErrorKind::GenericError(format!(
+	.map_err(|e| Error::StoredTransactionError(format!("{}", e)))?;
+
+	let tx_name = match id {
+		Some(id) => id.to_string(),
+		None => match tx_slate_id {
+			Some(id) => format!("{}", id),
+			None => "Unknown".into(),
+		},
+	};
+
+	if txs.len() == 0 {
+		return Err(Error::GenericError(format!(
 			"Unable to find tx, {}",
-			tx_id
+			tx_name
 		)))?;
 	}
+	// in case of many (self send) the first transaction is what we need
 	let uuid = txs[0].tx_slate_id.ok_or_else(|| {
-		ErrorKind::GenericError(format!("Unable to find slateId for txId, {}", tx_id))
+		Error::GenericError(format!("Unable to find slateId for txId, {}", tx_name))
 	})?;
 	let proof = TxProof::get_stored_tx_proof(w.get_data_file_dir(), &uuid.to_string())
-		.map_err(|e| ErrorKind::TransactionHasNoProof(format!("{}", e)))?;
+		.map_err(|e| Error::TransactionHasNoProof(format!("{}", e)))?;
 	return Ok(proof);
 }
 
@@ -435,6 +469,7 @@ where
 		let (total, fee) = tx::estimate_send_tx(
 			&mut *w,
 			args.amount,
+			args.amount_includes_fee.unwrap_or(false),
 			&args.min_fee,
 			args.minimum_confirmations,
 			args.max_outputs as usize,
@@ -456,11 +491,10 @@ where
 	let h = slate.height;
 	let mut context = if args.late_lock.unwrap_or(false) {
 		if !slate.compact_slate {
-			return Err(ErrorKind::GenericError(
+			return Err(Error::GenericError(
 				"Lock later feature available only with a slatepack (compact slate) model"
 					.to_string(),
-			)
-			.into());
+			));
 		}
 
 		tx::create_late_lock_context(
@@ -492,6 +526,7 @@ where
 			routputs,
 			args.exclude_change_outputs.unwrap_or(false),
 			args.minimum_confirmations_change_outputs,
+			args.amount_includes_fee.unwrap_or(false),
 		)?
 	};
 
@@ -529,9 +564,9 @@ where
 	}
 
 	// mwc713 payment proof support.
-	context.input_commits = slate.tx.inputs_committed();
+	context.input_commits = slate.tx_or_err()?.inputs_committed();
 
-	for output in slate.tx.outputs() {
+	for output in slate.tx_or_err()?.outputs() {
 		context.output_commits.push(output.commitment());
 	}
 
@@ -644,6 +679,7 @@ where
 		keychain_mask,
 		None,
 		Some(ret_slate.id),
+		None,
 		Some(&parent_key_id),
 		use_test_rng,
 		None,
@@ -651,7 +687,10 @@ where
 	)?;
 	for t in &tx {
 		if t.tx_type == TxLogEntryType::TxSent {
-			return Err(ErrorKind::TransactionAlreadyReceived(ret_slate.id.to_string()).into());
+			return Err(Error::TransactionAlreadyReceived(ret_slate.id.to_string()));
+		}
+		if t.tx_type == TxLogEntryType::TxSentCancelled {
+			return Err(Error::TransactionWasCancelled(ret_slate.id.to_string()));
 		}
 	}
 
@@ -665,7 +704,8 @@ where
 	};
 
 	// update slate current height
-	ret_slate.height = w.w2n_client().get_chain_tip()?.0;
+	let (height, _, _) = w.w2n_client().get_chain_tip()?;
+	ret_slate.height = height;
 
 	// update ttl if desired
 	if let Some(b) = &args.ttl_blocks {
@@ -693,6 +733,7 @@ where
 		1,
 		args.exclude_change_outputs.unwrap_or(false),
 		args.minimum_confirmations_change_outputs,
+		false,
 	)?;
 
 	if slate.compact_slate {
@@ -712,7 +753,8 @@ where
 
 		// needs to be stored as we're removing sig data for return trip. this needs to be present
 		// when locking transaction context and updating tx log with excess later
-		context.calculated_excess = Some(ret_slate.calc_excess(Some(&keychain))?);
+		context.calculated_excess =
+			Some(ret_slate.calc_excess(keychain.secp(), Some(&keychain), height)?);
 
 		// if self-sending, merge contexts
 		if let Ok(c) = context_res {
@@ -850,6 +892,7 @@ where
 			args.exclude_change_outputs.unwrap_or(false),
 			args.minimum_confirmations_change_outputs,
 			args.message,
+			false,
 		)?;
 
 		// Add inputs and outputs to original context
@@ -922,7 +965,7 @@ where
 	K: Keychain + 'a,
 {
 	if !perform_refresh_from_node(wallet_inst.clone(), keychain_mask, status_send_channel)? {
-		return Err(ErrorKind::TransactionCancellationError(
+		return Err(Error::TransactionCancellationError(
 			"Can't contact running MWC node. Not Cancelling.",
 		))?;
 	}
@@ -979,6 +1022,46 @@ pub fn verify_slate_messages(slate: &Slate) -> Result<(), Error> {
 	slate.verify_messages()
 }
 
+/// Scan outputs with the rewind hash of a third-party wallet.
+/// Help to retrieve outputs information that belongs it
+pub fn scan_rewind_hash<'a, L, C, K>(
+	wallet_inst: Arc<Mutex<Box<dyn WalletInst<'a, L, C, K>>>>,
+	rewind_hash: String,
+	start_height: Option<u64>,
+	status_send_channel: &Option<Sender<StatusMessage>>,
+) -> Result<ViewWallet, Error>
+where
+	L: WalletLCProvider<'a, C, K>,
+	C: NodeClient + 'a,
+	K: Keychain + 'a,
+{
+	let is_hex = rewind_hash.chars().all(|c| c.is_ascii_hexdigit());
+	let rewind_hash = rewind_hash.to_lowercase();
+	if !(is_hex && rewind_hash.len() == 64) {
+		let msg = format!("Invalid Rewind Hash");
+		return Err(Error::RewindHash(msg));
+	}
+
+	let tip = {
+		wallet_lock!(wallet_inst, w);
+		w.w2n_client().get_chain_tip()?
+	};
+
+	let start_height = match start_height {
+		Some(h) => h,
+		None => 1,
+	};
+
+	let info = scan::scan_rewind_hash(
+		wallet_inst,
+		rewind_hash,
+		start_height,
+		tip.0,
+		status_send_channel,
+	)?;
+	Ok(info)
+}
+
 /// check repair
 /// Accepts a wallet inst instead of a raw wallet so it can
 /// lock as little as possible
@@ -1008,7 +1091,7 @@ where
 	)?;
 
 	if tip_height == 0 {
-		return Err(ErrorKind::NodeNotReady)?;
+		return Err(Error::NodeNotReady)?;
 	}
 
 	if has_reorg {
@@ -1197,10 +1280,6 @@ where
 
 	// Wallet update logic doesn't handle truncating of the blockchain. That happen when node in sync or in reorg-sync
 	// In this case better to inform user and do nothing. Sync is useless in any case.
-
-	// Checking if keychain mask correct. Issue that sometimes update_wallet_state doesn't need it and it is a security problem
-	let _ = w.batch(keychain_mask)?;
-
 	let (tip_height, tip_hash, _) = match w.w2n_client().get_chain_tip() {
 		Ok(t) => t,
 		Err(_) => {
@@ -1212,6 +1291,29 @@ where
 			return Ok((0, String::new(), ScannedBlockInfo::empty(), false));
 		}
 	};
+
+	let mut neeed_init_last_scaned = false;
+	{
+		// Checking if keychain mask correct. Issue that sometimes update_wallet_state doesn't need it and it is a security problem
+		let mut batch = w.batch(keychain_mask)?;
+		if batch.load_flag(FLAG_NEW_WALLET, true)? {
+			neeed_init_last_scaned = true;
+		}
+		batch.commit()?;
+	}
+
+	if neeed_init_last_scaned {
+		// Let's still scan for last 100 blocks. That might be a mining wallet like tests has.
+		if tip_height > 100 {
+			let header = w.w2n_client().get_header_info(tip_height - 100)?;
+			let blocks: Vec<ScannedBlockInfo> =
+				vec![ScannedBlockInfo::new(header.height, header.hash)];
+
+			let mut batch = w.batch(keychain_mask)?;
+			batch.save_last_scanned_blocks(header.height, &blocks)?;
+			batch.commit()?;
+		}
+	}
 
 	let blocks = w.last_scanned_blocks()?;
 
@@ -1329,33 +1431,23 @@ where
 		has_reorg,
 	)?;
 
-	// Checking if tip was changed. In this case we need to retry. Retry will be handles naturally optimal
-	let mut tip_was_changed = false;
+	// Note: retry logic, if tip was changed, is not needed, Problem that for busy wallet, like miner it could take a while.
+	// Try to make optional, goes through the code and found that for all branches it is not critical.
 	{
 		wallet_lock!(wallet_inst, w);
 
-		if let Ok((after_tip_height, after_tip_hash, _)) = w.w2n_client().get_chain_tip() {
+		// checking if node is online
+		if w.w2n_client().get_chain_tip().is_ok() {
 			// Since we are still online, we can save the scan status
 			{
 				let mut batch = w.batch(keychain_mask)?;
 				batch.save_last_scanned_blocks(last_scanned_block.height, &blocks)?;
 				batch.commit()?;
 			}
-
-			if after_tip_height == tip_height && after_tip_hash == tip_hash {
-				return Ok(true);
-			} else {
-				tip_was_changed = true;
-			}
+			return Ok(true);
 		}
 	}
 
-	if tip_was_changed {
-		// Since head was chaged, we need to update it
-		return update_wallet_state(wallet_inst, keychain_mask, &status_send_channel);
-	}
-
-	// wasn't be able to confirm the tip. Scan is failed, scan height not updated.
 	Ok(false)
 }
 
@@ -1379,7 +1471,7 @@ where
 
 	if let Some(e) = slate.ttl_cutoff_height {
 		if last_confirmed_height >= e {
-			return Err(ErrorKind::TransactionExpired.into());
+			return Err(Error::TransactionExpired);
 		}
 	}
 	Ok(())
@@ -1408,18 +1500,16 @@ where
 	// Check kernel exists
 	match client.get_kernel(&proof.excess, None, None) {
 		Err(e) => {
-			return Err(ErrorKind::PaymentProof(format!(
+			return Err(Error::PaymentProof(format!(
 				"Error retrieving kernel from chain: {}",
 				e
-			))
-			.into());
+			)));
 		}
 		Ok(None) => {
-			return Err(ErrorKind::PaymentProof(format!(
+			return Err(Error::PaymentProof(format!(
 				"Transaction kernel with excess {:?} not found on chain",
 				proof.excess
-			))
-			.into());
+			)));
 		}
 		Ok(Some(_)) => {}
 	};
@@ -1429,19 +1519,21 @@ where
 	//	std::str::from_utf8(&msg).unwrap(),
 	crypto::verify_signature(
 		&msg,
-		&crypto::signature_from_string(&proof.recipient_sig).unwrap(),
+		&crypto::signature_from_string(&proof.recipient_sig, keychain.secp()).unwrap(),
 		&recipient_pubkey,
+		keychain.secp(),
 	)
-	.map_err(|e| ErrorKind::TxProofVerifySignature(format!("{}", e)))?;
+	.map_err(|e| Error::TxProofVerifySignature(format!("{}", e)))?;
 
 	let sender_pubkey = proof.sender_address.public_key()?;
 
 	crypto::verify_signature(
 		&msg,
-		&crypto::signature_from_string(&proof.sender_sig).unwrap(),
+		&crypto::signature_from_string(&proof.sender_sig, keychain.secp()).unwrap(),
 		&sender_pubkey,
+		keychain.secp(),
 	)
-	.map_err(|e| ErrorKind::TxProofVerifySignature(format!("{}", e)))?;
+	.map_err(|e| Error::TxProofVerifySignature(format!("{}", e)))?;
 
 	let my_address_pubkey = proofaddress::payment_proof_address_pubkey(&keychain)?;
 	let sender_mine = my_address_pubkey == sender_pubkey;
@@ -1475,4 +1567,43 @@ where
 		_minimum_confirmations,
 	)?;
 	Ok(())
+}
+
+/// Builds an output for the wallet's next available key
+pub fn build_output<'a, T: ?Sized, C, K>(
+	w: &mut T,
+	keychain_mask: Option<&SecretKey>,
+	features: OutputFeatures,
+	amount: u64,
+) -> Result<BuiltOutput, Error>
+where
+	T: WalletBackend<'a, C, K>,
+	C: NodeClient + 'a,
+	K: Keychain + 'a,
+{
+	let k = w.keychain(keychain_mask)?;
+
+	let key_id = keys::next_available_key(&mut *w, keychain_mask)?;
+
+	let blind = k.derive_key(amount, &key_id, SwitchCommitmentType::Regular)?;
+	let commit = k.secp().commit(amount, blind.clone())?;
+
+	let proof_builder = proof::ProofBuilder::new(&k);
+	let proof = proof::create(
+		&k,
+		&proof_builder,
+		amount,
+		&key_id,
+		SwitchCommitmentType::Regular,
+		commit,
+		None,
+	)?;
+
+	let output = Output::new(features, commit, proof);
+
+	Ok(BuiltOutput {
+		blind: BlindingFactor::from_secret_key(blind),
+		key_id: key_id,
+		output: output,
+	})
 }

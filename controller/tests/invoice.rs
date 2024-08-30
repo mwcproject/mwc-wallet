@@ -1,4 +1,4 @@
-// Copyright 2019 The Grin Developers
+// Copyright 2021 The Grin Developers
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -23,6 +23,7 @@ use grin_wallet_util::grin_core::global;
 
 use impls::test_framework::{self, LocalWalletClient};
 use libwallet::{InitTxArgs, IssueInvoiceTxArgs, Slate};
+use std::sync::atomic::Ordering;
 use std::thread;
 use std::time::Duration;
 
@@ -36,6 +37,7 @@ fn invoice_tx_impl(test_dir: &'static str) -> Result<(), wallet::Error> {
 	// Create a new proxy to simulate server and wallet responses
 	let mut wallet_proxy = create_wallet_proxy(test_dir);
 	let chain = wallet_proxy.chain.clone();
+	let stopper = wallet_proxy.running.clone();
 
 	create_wallet_and_add!(
 		client1,
@@ -133,7 +135,7 @@ fn invoice_tx_impl(test_dir: &'static str) -> Result<(), wallet::Error> {
 
 	// wallet 1 posts so wallet 2 doesn't get the mined amount
 	wallet::controller::owner_single_use(Some(wallet1.clone()), mask1, None, |api, m| {
-		api.post_tx(m, &slate.tx, false)?;
+		api.post_tx(m, slate.tx_or_err()?, false)?;
 		Ok(())
 	})?;
 	bh += 1;
@@ -144,7 +146,7 @@ fn invoice_tx_impl(test_dir: &'static str) -> Result<(), wallet::Error> {
 	// Check transaction log for wallet 2
 	wallet::controller::owner_single_use(Some(wallet2.clone()), mask2, None, |api, m| {
 		let (_, wallet2_info) = api.retrieve_summary_info(m, true, 1)?;
-		let (refreshed, txs) = api.retrieve_txs(m, true, None, None)?;
+		let (refreshed, txs) = api.retrieve_txs(m, true, None, None, None)?;
 		assert!(refreshed);
 		assert!(txs.len() == 1);
 		println!(
@@ -160,7 +162,7 @@ fn invoice_tx_impl(test_dir: &'static str) -> Result<(), wallet::Error> {
 	// exists
 	wallet::controller::owner_single_use(Some(wallet1.clone()), mask1, None, |api, m| {
 		let (_, wallet1_info) = api.retrieve_summary_info(m, true, 1)?;
-		let (refreshed, txs) = api.retrieve_txs(m, true, None, None)?;
+		let (refreshed, txs) = api.retrieve_txs(m, true, None, None, None)?;
 		assert!(refreshed);
 		assert_eq!(txs.len() as u64, bh + 1);
 		println!(
@@ -200,10 +202,48 @@ fn invoice_tx_impl(test_dir: &'static str) -> Result<(), wallet::Error> {
 		Ok(())
 	})?;
 
+	// test that payee can only cancel once
 	let _ = test_framework::award_blocks_to_wallet(&chain, wallet1.clone(), mask1, 3, false);
 	//bh += 3;
 
+	wallet::controller::owner_single_use(Some(wallet2.clone()), mask2, None, |api, m| {
+		// Wallet 2 inititates an invoice transaction, requesting payment
+		let args = IssueInvoiceTxArgs {
+			amount: reward * 2,
+			..Default::default()
+		};
+		slate = api.issue_invoice_tx(m, &args)?;
+		Ok(())
+	})?;
+
+	let orig_slate = slate.clone();
+
+	wallet::controller::owner_single_use(Some(wallet1.clone()), mask1, None, |api, m| {
+		// Wallet 1 receives the invoice transaction
+		let args = InitTxArgs {
+			src_acct_name: None,
+			amount: slate.amount,
+			minimum_confirmations: 2,
+			max_outputs: 500,
+			num_change_outputs: 1,
+			selection_strategy_is_use_all: true,
+			..Default::default()
+		};
+		slate = api.process_invoice_tx(m, &slate, &args)?;
+		api.tx_lock_outputs(m, &slate, None, 1)?;
+
+		// Wallet 1 cancels the invoice transaction
+		api.cancel_tx(m, None, Some(slate.id))?;
+
+		// Wallet 1 attempts to repay again
+		let res = api.process_invoice_tx(m, &orig_slate, &args);
+		assert!(res.is_err());
+
+		Ok(())
+	})?;
+
 	// let logging finish
+	stopper.store(false, Ordering::Relaxed);
 	thread::sleep(Duration::from_millis(200));
 
 	Ok(())

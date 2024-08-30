@@ -17,7 +17,7 @@ use super::ethereum::EthUpdate;
 use super::multisig::ParticipantData as MultisigParticipant;
 use super::ser::*;
 use super::types::{Currency, Network};
-use super::ErrorKind;
+use super::Error;
 use crate::grin_core::libtx::secp_ser;
 use crate::grin_util::secp::key::{PublicKey, SecretKey};
 use crate::grin_util::secp::Signature;
@@ -25,6 +25,7 @@ use crate::proof::message::EncryptedMessage;
 use crate::proof::proofaddress::ProvableAddress;
 use crate::{ParticipantData as TxParticipant, VersionedSlate};
 use chrono::{DateTime, Utc};
+use grin_wallet_util::grin_util::secp::Secp256k1;
 use uuid::Uuid;
 
 /// Swap message that is used for Seller/Buyer interaction
@@ -54,10 +55,10 @@ impl Message {
 	}
 
 	/// Unwrap message as Offer
-	pub fn unwrap_offer(self) -> Result<(Uuid, OfferUpdate, SecondaryUpdate), ErrorKind> {
+	pub fn unwrap_offer(self) -> Result<(Uuid, OfferUpdate, SecondaryUpdate), Error> {
 		match self.inner {
 			Update::Offer(u) => Ok((self.id, u, self.inner_secondary)),
-			_ => Err(ErrorKind::UnexpectedMessageType(format!(
+			_ => Err(Error::UnexpectedMessageType(format!(
 				"expecting Update::Offer, get {:?}",
 				self.inner
 			))),
@@ -73,12 +74,10 @@ impl Message {
 	}
 
 	/// Unwrap message as Accepted Offer
-	pub fn unwrap_accept_offer(
-		self,
-	) -> Result<(Uuid, AcceptOfferUpdate, SecondaryUpdate), ErrorKind> {
+	pub fn unwrap_accept_offer(self) -> Result<(Uuid, AcceptOfferUpdate, SecondaryUpdate), Error> {
 		match self.inner {
 			Update::AcceptOffer(u) => Ok((self.id, u, self.inner_secondary)),
-			_ => Err(ErrorKind::UnexpectedMessageType(format!(
+			_ => Err(Error::UnexpectedMessageType(format!(
 				"expecting Update::AcceptOffer, get {:?}",
 				self.inner
 			))),
@@ -86,12 +85,10 @@ impl Message {
 	}
 
 	/// Unwrap message as Init Redeem
-	pub fn unwrap_init_redeem(
-		self,
-	) -> Result<(Uuid, InitRedeemUpdate, SecondaryUpdate), ErrorKind> {
+	pub fn unwrap_init_redeem(self) -> Result<(Uuid, InitRedeemUpdate, SecondaryUpdate), Error> {
 		match self.inner {
 			Update::InitRedeem(u) => Ok((self.id, u, self.inner_secondary)),
-			_ => Err(ErrorKind::UnexpectedMessageType(format!(
+			_ => Err(Error::UnexpectedMessageType(format!(
 				"expecting Update::InitRedeem, get {:?}",
 				self.inner
 			))),
@@ -99,10 +96,10 @@ impl Message {
 	}
 
 	/// Unwrap message as Redeem
-	pub fn unwrap_redeem(self) -> Result<(Uuid, RedeemUpdate, SecondaryUpdate), ErrorKind> {
+	pub fn unwrap_redeem(self) -> Result<(Uuid, RedeemUpdate, SecondaryUpdate), Error> {
 		match self.inner {
 			Update::Redeem(u) => Ok((self.id, u, self.inner_secondary)),
-			_ => Err(ErrorKind::UnexpectedMessageType(format!(
+			_ => Err(Error::UnexpectedMessageType(format!(
 				"expecting Update::Redeem, get {:?}",
 				self.inner
 			))),
@@ -110,17 +107,16 @@ impl Message {
 	}
 
 	/// Message to Json String
-	pub fn to_json(&self) -> Result<String, ErrorKind> {
+	pub fn to_json(&self) -> Result<String, Error> {
 		let str = serde_json::to_string(&self)
-			.map_err(|e| ErrorKind::Serde(format!("Unable to serialize a message, {}", e)))?;
+			.map_err(|e| Error::Serde(format!("Unable to serialize a message, {}", e)))?;
 		Ok(str)
 	}
 
 	/// Build message from Json
-	pub fn from_json(s: &str) -> Result<Message, ErrorKind> {
-		Ok(serde_json::from_str(s).map_err(|e| {
-			ErrorKind::Serde(format!("Unable to parse Swap Message from {}, {}", s, e))
-		})?)
+	pub fn from_json(s: &str) -> Result<Message, Error> {
+		Ok(serde_json::from_str(s)
+			.map_err(|e| Error::Serde(format!("Unable to parse Swap Message from {}, {}", s, e)))?)
 	}
 }
 
@@ -229,18 +225,18 @@ pub enum SecondaryUpdate {
 
 impl SecondaryUpdate {
 	/// Helper to extract BtcUpdate with type validation
-	pub fn unwrap_btc(self) -> Result<BtcUpdate, ErrorKind> {
+	pub fn unwrap_btc(self) -> Result<BtcUpdate, Error> {
 		match self {
 			SecondaryUpdate::BTC(d) => Ok(d),
-			_ => Err(ErrorKind::UnexpectedCoinType),
+			_ => Err(Error::UnexpectedCoinType),
 		}
 	}
 
 	/// Helper to extract EthUpdate with type validation
-	pub fn unwrap_eth(self) -> Result<EthUpdate, ErrorKind> {
+	pub fn unwrap_eth(self) -> Result<EthUpdate, Error> {
 		match self {
 			SecondaryUpdate::ETH(d) => Ok(d),
-			_ => Err(ErrorKind::UnexpectedCoinType),
+			_ => Err(Error::UnexpectedCoinType),
 		}
 	}
 }
@@ -260,33 +256,34 @@ impl SwapMessage {
 		_challenge: String,
 		_signature: String,
 		secret_key: &SecretKey,
-	) -> Result<Message, ErrorKind> {
+		secp: &Secp256k1,
+	) -> Result<Message, Error> {
 		let public_key = from.public_key().map_err(|e| {
-			ErrorKind::TradeEncDecError(format!(
+			Error::TradeEncDecError(format!(
 				"Unable to build public key for address {}, {}",
 				from, e
 			))
 		})?;
 
 		let encrypted_message: EncryptedMessage = serde_json::from_str(&message).map_err(|e| {
-			ErrorKind::TradeEncDecError(format!(
+			Error::TradeEncDecError(format!(
 				"Failed to extract the encrypted message from the received message {}, {}",
 				message, e
 			))
 		})?;
 
 		let key = encrypted_message
-			.key(&public_key, secret_key)
+			.key(&public_key, secret_key, &secp)
 			.map_err(|e| {
-				ErrorKind::TradeEncDecError(format!("Unable to build the signature, {}", e))
+				Error::TradeEncDecError(format!("Unable to build the signature, {}", e))
 			})?;
 
 		let decrypted_message = encrypted_message.decrypt_with_key(&key).map_err(|e| {
-			ErrorKind::TradeEncDecError(format!("Unable to decrypt the swap message, {}", e))
+			Error::TradeEncDecError(format!("Unable to decrypt the swap message, {}", e))
 		})?;
 
 		let swap = serde_json::from_str(&decrypted_message).map_err(|e| {
-			ErrorKind::TradeEncDecError(format!(
+			Error::TradeEncDecError(format!(
 				"Unable to build the swap message from the received message, {}",
 				e
 			))

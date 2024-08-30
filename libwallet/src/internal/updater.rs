@@ -1,4 +1,4 @@
-// Copyright 2019 The Grin Developers
+// Copyright 2021 The Grin Developers
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,7 +18,7 @@
 use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
 
-use crate::error::{Error, ErrorKind};
+use crate::error::Error;
 use crate::grin_core::consensus::reward;
 use crate::grin_core::core::{Output, TxKernel};
 use crate::grin_core::global;
@@ -32,7 +32,12 @@ use crate::internal::keys;
 use crate::types::{
 	NodeClient, OutputData, OutputStatus, TxLogEntry, TxLogEntryType, WalletBackend, WalletInfo,
 };
-use crate::{BlockFees, CbData, OutputCommitMapping};
+use crate::{
+	BlockFees, CbData, OutputCommitMapping, RetrieveTxQueryArgs, RetrieveTxQuerySortField,
+	RetrieveTxQuerySortOrder,
+};
+
+use num_bigint::BigInt;
 
 /// Retrieve all of the outputs (doesn't attempt to update from node)
 pub fn retrieve_outputs<'a, T: ?Sized, C, K>(
@@ -94,7 +99,7 @@ where
 
 	for out in outputs {
 		// Filtering out Unconfirmed from cancelled (not active) transactions
-		if out.status == OutputStatus::Unconfirmed
+		if (out.status == OutputStatus::Unconfirmed || out.status == OutputStatus::Reverted)
 			&& !tx_log_is_active
 				.get(&out.tx_log_entry.clone().unwrap_or(std::u32::MAX))
 				.unwrap_or(&true)
@@ -104,7 +109,7 @@ where
 
 		let commit = match out.commit.clone() {
 			Some(c) => pedersen::Commitment::from_vec(util::from_hex(&c).map_err(|e| {
-				ErrorKind::GenericError(format!("Unable to parse HEX commit {}, {}", c, e))
+				Error::GenericError(format!("Unable to parse HEX commit {}, {}", c, e))
 			})?),
 			None => keychain // TODO: proper support for different switch commitment schemes
 				.commit(out.value, &out.key_id, SwitchCommitmentType::Regular)?,
@@ -138,6 +143,237 @@ where
 	}
 }
 
+/// Apply advanced filtering to resultset from retrieve_txs below
+pub fn apply_advanced_tx_list_filtering<'a, T: ?Sized, C, K>(
+	wallet: &mut T,
+	query_args: &RetrieveTxQueryArgs,
+) -> Vec<TxLogEntry>
+where
+	T: WalletBackend<'a, C, K>,
+	C: NodeClient + 'a,
+	K: Keychain + 'a,
+{
+	// Apply simple bool, GTE or LTE fields
+	let txs_iter: Box<dyn Iterator<Item = TxLogEntry>> = Box::new(
+		wallet
+			.tx_log_iter()
+			.filter(|tx_entry| {
+				if let Some(v) = query_args.exclude_cancelled {
+					if v {
+						tx_entry.tx_type != TxLogEntryType::TxReceivedCancelled
+							&& tx_entry.tx_type != TxLogEntryType::TxSentCancelled
+					} else {
+						true
+					}
+				} else {
+					true
+				}
+			})
+			.filter(|tx_entry| {
+				if let Some(v) = query_args.include_outstanding_only {
+					if v {
+						!tx_entry.confirmed
+					} else {
+						true
+					}
+				} else {
+					true
+				}
+			})
+			.filter(|tx_entry| {
+				if let Some(v) = query_args.include_confirmed_only {
+					if v {
+						tx_entry.confirmed
+					} else {
+						true
+					}
+				} else {
+					true
+				}
+			})
+			.filter(|tx_entry| {
+				if let Some(v) = query_args.include_sent_only {
+					if v {
+						tx_entry.tx_type == TxLogEntryType::TxSent
+							|| tx_entry.tx_type == TxLogEntryType::TxSentCancelled
+					} else {
+						true
+					}
+				} else {
+					true
+				}
+			})
+			.filter(|tx_entry| {
+				if let Some(v) = query_args.include_received_only {
+					if v {
+						tx_entry.tx_type == TxLogEntryType::TxReceived
+							|| tx_entry.tx_type == TxLogEntryType::TxReceivedCancelled
+					} else {
+						true
+					}
+				} else {
+					true
+				}
+			})
+			.filter(|tx_entry| {
+				if let Some(v) = query_args.include_coinbase_only {
+					if v {
+						tx_entry.tx_type == TxLogEntryType::ConfirmedCoinbase
+					} else {
+						true
+					}
+				} else {
+					true
+				}
+			})
+			.filter(|tx_entry| {
+				if let Some(v) = query_args.include_reverted_only {
+					if v {
+						tx_entry.tx_type == TxLogEntryType::TxReverted
+					} else {
+						true
+					}
+				} else {
+					true
+				}
+			})
+			.filter(|tx_entry| {
+				if let Some(v) = query_args.min_id {
+					tx_entry.id >= v
+				} else {
+					true
+				}
+			})
+			.filter(|tx_entry| {
+				if let Some(v) = query_args.max_id {
+					tx_entry.id <= v
+				} else {
+					true
+				}
+			})
+			.filter(|tx_entry| {
+				if let Some(v) = query_args.min_amount {
+					if tx_entry.tx_type == TxLogEntryType::TxSent
+						|| tx_entry.tx_type == TxLogEntryType::TxSentCancelled
+					{
+						BigInt::from(tx_entry.amount_debited)
+							- BigInt::from(tx_entry.amount_credited)
+							>= BigInt::from(v)
+					} else {
+						BigInt::from(tx_entry.amount_credited)
+							- BigInt::from(tx_entry.amount_debited)
+							>= BigInt::from(v)
+					}
+				} else {
+					true
+				}
+			})
+			.filter(|tx_entry| {
+				if let Some(v) = query_args.max_amount {
+					if tx_entry.tx_type == TxLogEntryType::TxSent
+						|| tx_entry.tx_type == TxLogEntryType::TxSentCancelled
+					{
+						BigInt::from(tx_entry.amount_debited)
+							- BigInt::from(tx_entry.amount_credited)
+							<= BigInt::from(v)
+					} else {
+						BigInt::from(tx_entry.amount_credited)
+							- BigInt::from(tx_entry.amount_debited)
+							<= BigInt::from(v)
+					}
+				} else {
+					true
+				}
+			})
+			.filter(|tx_entry| {
+				if let Some(v) = query_args.min_creation_timestamp {
+					tx_entry.creation_ts >= v
+				} else {
+					true
+				}
+			})
+			.filter(|tx_entry| {
+				if let Some(v) = query_args.min_confirmed_timestamp {
+					tx_entry.creation_ts <= v
+				} else {
+					true
+				}
+			})
+			.filter(|tx_entry| {
+				if let Some(v) = query_args.min_confirmed_timestamp {
+					if let Some(t) = tx_entry.confirmation_ts {
+						t >= v
+					} else {
+						true
+					}
+				} else {
+					true
+				}
+			})
+			.filter(|tx_entry| {
+				if let Some(v) = query_args.max_confirmed_timestamp {
+					if let Some(t) = tx_entry.confirmation_ts {
+						t <= v
+					} else {
+						true
+					}
+				} else {
+					true
+				}
+			}),
+	);
+
+	let mut return_txs: Vec<TxLogEntry> = txs_iter.collect();
+
+	// Now apply requested sorting
+	if let Some(ref s) = query_args.sort_field {
+		match s {
+			RetrieveTxQuerySortField::Id => {
+				return_txs.sort_by_key(|tx| tx.id);
+			}
+			RetrieveTxQuerySortField::CreationTimestamp => {
+				return_txs.sort_by_key(|tx| tx.creation_ts);
+			}
+			RetrieveTxQuerySortField::ConfirmationTimestamp => {
+				return_txs.sort_by_key(|tx| tx.confirmation_ts);
+			}
+			RetrieveTxQuerySortField::TotalAmount => {
+				return_txs.sort_by_key(|tx| {
+					if tx.tx_type == TxLogEntryType::TxSent
+						|| tx.tx_type == TxLogEntryType::TxSentCancelled
+					{
+						BigInt::from(tx.amount_debited) - BigInt::from(tx.amount_credited)
+					} else {
+						BigInt::from(tx.amount_credited) - BigInt::from(tx.amount_debited)
+					}
+				});
+			}
+			RetrieveTxQuerySortField::AmountCredited => {
+				return_txs.sort_by_key(|tx| tx.amount_credited);
+			}
+			RetrieveTxQuerySortField::AmountDebited => {
+				return_txs.sort_by_key(|tx| tx.amount_debited);
+			}
+		}
+	} else {
+		return_txs.sort_by_key(|tx| tx.id);
+	}
+
+	if let Some(ref s) = query_args.sort_order {
+		match s {
+			RetrieveTxQuerySortOrder::Desc => return_txs.reverse(),
+			_ => {}
+		}
+	}
+
+	// Apply limit if requested
+	if let Some(l) = query_args.limit {
+		return_txs = return_txs.into_iter().take(l as usize).collect()
+	}
+
+	return_txs
+}
+
 /// Retrieve all of the transaction entries, or a particular entry
 /// if `parent_key_id` is set, only return entries from that key
 pub fn retrieve_txs<'a, T: ?Sized, C, K>(
@@ -145,6 +381,7 @@ pub fn retrieve_txs<'a, T: ?Sized, C, K>(
 	_keychain_mask: Option<&SecretKey>,
 	tx_id: Option<u32>,
 	tx_slate_id: Option<Uuid>,
+	query_args: Option<RetrieveTxQueryArgs>,
 	parent_key_id: Option<&Identifier>,
 	outstanding_only: bool,
 	pagination_start: Option<u32>,
@@ -155,38 +392,46 @@ where
 	C: NodeClient + 'a,
 	K: Keychain + 'a,
 {
-	let mut txs: Vec<TxLogEntry> = wallet
-		.tx_log_iter()
-		.filter(|tx_entry| {
-			let f_pk = match parent_key_id {
-				Some(k) => tx_entry.parent_key_id == *k,
-				None => true,
-			};
-			let f_tx_id = match tx_id {
-				Some(i) => tx_entry.id == i,
-				None => true,
-			};
-			let f_txs = match tx_slate_id {
-				Some(t) => tx_entry.tx_slate_id == Some(t),
-				None => true,
-			};
-			let f_outstanding = match outstanding_only {
-				true => {
-					!tx_entry.confirmed
-						&& (tx_entry.tx_type == TxLogEntryType::TxReceived
-							|| tx_entry.tx_type == TxLogEntryType::TxSent)
-				}
-				false => true,
-			};
-			// Miners doesn't like the fact that CoinBase tx can be unconfirmed. That is we are hiding them fir Rest API and for UI
-			let non_confirmed_coinbase =
-				!tx_entry.confirmed && (tx_entry.tx_type == TxLogEntryType::ConfirmedCoinbase);
+	let mut txs;
+	// Adding in new transaction list query logic. If `tx_id` or `tx_slate_id`
+	// is provided, then `query_args` is ignored and old logic is followed.
+	if query_args.is_some() && tx_id.is_none() && tx_slate_id.is_none() {
+		txs = apply_advanced_tx_list_filtering(wallet, &query_args.unwrap())
+	} else {
+		txs = wallet
+			.tx_log_iter()
+			.filter(|tx_entry| {
+				let f_pk = match parent_key_id {
+					Some(k) => tx_entry.parent_key_id == *k,
+					None => true,
+				};
+				let f_tx_id = match tx_id {
+					Some(i) => tx_entry.id == i,
+					None => true,
+				};
+				let f_txs = match tx_slate_id {
+					Some(t) => tx_entry.tx_slate_id == Some(t),
+					None => true,
+				};
+				let f_outstanding = match outstanding_only {
+					true => {
+						!tx_entry.confirmed
+							&& (tx_entry.tx_type == TxLogEntryType::TxReceived
+								|| tx_entry.tx_type == TxLogEntryType::TxSent
+								|| tx_entry.tx_type == TxLogEntryType::TxReverted)
+					}
+					false => true,
+				};
+				// Miners doesn't like the fact that CoinBase tx can be unconfirmed. That is we are hiding them for Rest API and for UI
+				let non_confirmed_coinbase =
+					!tx_entry.confirmed && (tx_entry.tx_type == TxLogEntryType::ConfirmedCoinbase);
 
-			f_pk && f_tx_id && f_txs && f_outstanding && !non_confirmed_coinbase
-		})
-		.collect();
+				f_pk && f_tx_id && f_txs && f_outstanding && !non_confirmed_coinbase
+			})
+			.collect();
 
-	txs.sort_by_key(|tx| tx.creation_ts);
+		txs.sort_by_key(|tx| tx.creation_ts);
+	}
 
 	if pagination_start.is_some() || pagination_len.is_some() {
 		let pag_len = pagination_len.unwrap_or(txs.len() as u32);
@@ -217,7 +462,7 @@ where
 pub fn cancel_tx_and_outputs<'a, T: ?Sized, C, K>(
 	wallet: &mut T,
 	keychain_mask: Option<&SecretKey>,
-	tx: TxLogEntry,
+	mut tx: TxLogEntry,
 	outputs: Vec<OutputData>,
 	parent_key_id: &Identifier,
 ) -> Result<(), Error>
@@ -230,20 +475,23 @@ where
 
 	for mut o in outputs {
 		// unlock locked outputs
-		//if o.status == OutputStatus::Unconfirmed {   WMC don't delete outputs, we want to keep them mapped to cancelled trasactions
+		//if o.status == OutputStatus::Unconfirmed || o.status == OutputStatus::Reverted {   WMC don't delete outputs, we want to keep them mapped to cancelled trasactions
 		//	batch.delete(&o.key_id, &o.mmr_index)?;
 		//}
 		if o.status == OutputStatus::Locked {
 			o.status = OutputStatus::Unspent;
 			batch.save(o)?;
+		} else if o.status == OutputStatus::Reverted {
+			o.status = OutputStatus::Unconfirmed;
+			batch.save(o)?;
 		}
 	}
-	let mut tx = tx;
-	if tx.tx_type == TxLogEntryType::TxSent {
-		tx.tx_type = TxLogEntryType::TxSentCancelled;
-	}
-	if tx.tx_type == TxLogEntryType::TxReceived {
-		tx.tx_type = TxLogEntryType::TxReceivedCancelled;
+	match tx.tx_type {
+		TxLogEntryType::TxSent => tx.tx_type = TxLogEntryType::TxSentCancelled,
+		TxLogEntryType::TxReceived | TxLogEntryType::TxReverted => {
+			tx.tx_type = TxLogEntryType::TxReceivedCancelled
+		}
+		_ => {}
 	}
 	batch.save_tx_log_entry(tx, parent_key_id)?;
 	batch.commit()?;
@@ -280,6 +528,7 @@ where
 	let mut awaiting_finalization_total = 0;
 	let mut unconfirmed_total = 0;
 	let mut locked_total = 0;
+	let mut reverted_total = 0;
 
 	for out in outputs {
 		match out.status {
@@ -312,6 +561,7 @@ where
 			OutputStatus::Locked => {
 				locked_total += out.value;
 			}
+			OutputStatus::Reverted => reverted_total += out.value,
 			OutputStatus::Spent => {}
 		}
 	}
@@ -325,6 +575,7 @@ where
 		amount_immature: immature_total,
 		amount_locked: locked_total,
 		amount_currently_spendable: unspent_total,
+		amount_reverted: reverted_total,
 	})
 }
 

@@ -1,4 +1,4 @@
-// Copyright 2019 The Grin Developers
+// Copyright 2021 The Grin Developers
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -29,17 +29,18 @@ use crate::proof::crypto::Hex;
 use crate::proof::proofaddress;
 use crate::proof::proofaddress::{get_address_index, ProvableAddress};
 use crate::proof::tx_proof::{push_proof_for_slate, TxProof};
-use crate::signature::Signature as otherSignature;
 use crate::slate::Slate;
 use crate::types::{Context, NodeClient, StoredProofInfo, TxLogEntryType, WalletBackend};
+use crate::Error;
 use crate::InitTxArgs;
-use crate::{Error, ErrorKind};
 use ed25519_dalek::Keypair as DalekKeypair;
 use ed25519_dalek::PublicKey as DalekPublicKey;
 use ed25519_dalek::SecretKey as DalekSecretKey;
 use ed25519_dalek::Signature as DalekSignature;
 use ed25519_dalek::{Signer, Verifier};
+use grin_wallet_util::grin_util::secp::Secp256k1;
 use grin_wallet_util::OnionV3Address;
+use std::convert::TryFrom;
 
 // static for incrementing test UUIDs
 lazy_static! {
@@ -61,7 +62,7 @@ where
 	C: NodeClient + 'a,
 	K: Keychain + 'a,
 {
-	let current_height = wallet.w2n_client().get_chain_tip()?.0;
+	let (current_height, _, _) = wallet.w2n_client().get_chain_tip()?;
 	let mut slate = Slate::blank(num_participants, compact_slate);
 	if let Some(b) = ttl_blocks {
 		slate.ttl_cutoff_height = Some(current_height + b);
@@ -90,8 +91,9 @@ where
 	}
 
 	// Set the lock_height explicitly to 0 here.
+	// Set the features explicitly to 0 here.
 	// This will generate a Plain kernel (rather than a HeightLocked kernel).
-	slate.lock_height = 0;
+	slate.reset_lock_height();
 
 	Ok(slate)
 }
@@ -101,6 +103,7 @@ where
 pub fn estimate_send_tx<'a, T: ?Sized, C, K>(
 	wallet: &mut T,
 	amount: u64,
+	amount_includes_fee: bool,
 	min_fee: &Option<u64>,
 	minimum_confirmations: u64,
 	max_outputs: usize,
@@ -124,7 +127,7 @@ where
 	K: Keychain + 'a,
 {
 	// Get lock height
-	let current_height = wallet.w2n_client().get_chain_tip()?.0;
+	let (current_height, _, _) = wallet.w2n_client().get_chain_tip()?;
 	// ensure outputs we're selecting are up to date
 
 	// Sender selects outputs into a new slate and save our corresponding keys in
@@ -137,6 +140,7 @@ where
 	let (_coins, total, _amount, fee) = selection::select_coins_and_fee(
 		wallet,
 		amount,
+		amount_includes_fee,
 		min_fee,
 		current_height,
 		minimum_confirmations,
@@ -172,6 +176,7 @@ pub fn add_inputs_to_slate<'a, T: ?Sized, C, K>(
 	routputs: usize,               // Number of resulting outputs. Normally it is 1
 	exclude_change_outputs: bool,
 	change_output_minimum_confirmations: u64,
+	amount_includes_fee: bool,
 ) -> Result<Context, Error>
 where
 	T: WalletBackend<'a, C, K>,
@@ -206,6 +211,7 @@ where
 		exclude_change_outputs,
 		change_output_minimum_confirmations,
 		message.clone(),
+		amount_includes_fee,
 	)?;
 
 	// Generate a kernel offset and subtract from our context's secret key. Store
@@ -299,7 +305,8 @@ where
 
 		// update excess in stored transaction
 		let mut batch = wallet.batch(keychain_mask)?;
-		tx.kernel_excess = Some(slate.calc_excess(Some(&keychain))?);
+		tx.kernel_excess =
+			Some(slate.calc_excess(keychain.secp(), Some(&keychain), current_height)?);
 		batch.save_tx_log_entry(tx.clone(), &parent_key_id)?;
 		batch.commit()?;
 	}
@@ -331,6 +338,7 @@ where
 	let (_coins, _total, _amount, fee) = selection::select_coins_and_fee(
 		wallet,
 		init_tx_args.amount,
+		init_tx_args.amount_includes_fee.unwrap_or(false),
 		&init_tx_args.min_fee,
 		current_height,
 		init_tx_args.minimum_confirmations,
@@ -407,9 +415,11 @@ where
 	let keychain = wallet.keychain(keychain_mask)?;
 	slate.fill_round_2(keychain.secp(), sec_key, sec_nonce, participant_id)?;
 
+	let (current_height, _, _) = wallet.w2n_client().get_chain_tip()?;
+
 	// Final transaction can be built by anyone at this stage
 	trace!("Slate to finalize is: {:?}", slate);
-	slate.finalize(&keychain)?;
+	slate.finalize(&keychain, current_height)?;
 	Ok(())
 }
 
@@ -437,33 +447,38 @@ where
 		keychain_mask,
 		tx_id,
 		tx_slate_id,
+		None,
 		Some(&parent_key_id),
 		false,
 		None,
 		None,
 	)?;
-	if tx_vec.len() != 1 {
-		return Err(ErrorKind::TransactionDoesntExist(tx_id_string).into());
+	if tx_vec.is_empty() {
+		return Err(Error::TransactionDoesntExist(tx_id_string));
 	}
-	let tx = tx_vec[0].clone();
-	if tx.tx_type != TxLogEntryType::TxSent && tx.tx_type != TxLogEntryType::TxReceived {
-		return Err(ErrorKind::TransactionNotCancellable(tx_id_string).into());
+	// there are can be several transactions with a same txid (send file to self).
+	// In such case we need to cancel all of them
+	for tx in tx_vec {
+		match tx.tx_type {
+			TxLogEntryType::TxSent | TxLogEntryType::TxReceived | TxLogEntryType::TxReverted => {}
+			_ => return Err(Error::TransactionNotCancellable(tx_id_string)),
+		}
+		if tx.confirmed {
+			return Err(Error::TransactionNotCancellable(tx_id_string));
+		}
+		// get outputs associated with tx
+		let res = updater::retrieve_outputs(
+			wallet,
+			keychain_mask,
+			false,
+			Some(&tx),
+			&parent_key_id,
+			None,
+			None,
+		)?;
+		let outputs = res.iter().map(|m| m.output.clone()).collect();
+		updater::cancel_tx_and_outputs(wallet, keychain_mask, tx, outputs, parent_key_id)?;
 	}
-	if tx.confirmed {
-		return Err(ErrorKind::TransactionNotCancellable(tx_id_string).into());
-	}
-	// get outputs associated with tx
-	let res = updater::retrieve_outputs(
-		wallet,
-		keychain_mask,
-		false,
-		Some(&tx),
-		&parent_key_id,
-		None,
-		None,
-	)?;
-	let outputs = res.iter().map(|m| m.output.clone()).collect();
-	updater::cancel_tx_and_outputs(wallet, keychain_mask, tx, outputs, parent_key_id)?;
 	Ok(())
 }
 
@@ -487,6 +502,7 @@ where
 		None,
 		Some(slate.id),
 		None,
+		None,
 		false,
 		None,
 		None,
@@ -505,33 +521,35 @@ where
 	}
 	let mut tx = match tx {
 		Some(t) => t,
-		None => return Err(ErrorKind::TransactionDoesntExist(slate.id.to_string()).into()),
+		None => return Err(Error::TransactionDoesntExist(slate.id.to_string())),
 	};
 
 	if tx.tx_slate_id.is_none() {
-		return Err(ErrorKind::GenericError(
+		return Err(Error::GenericError(
 			"Transaction doesn't have stored tx slate id".to_string(),
-		)
-		.into());
+		));
 	}
 
-	wallet.store_tx(&format!("{}", tx.tx_slate_id.unwrap()), &slate.tx)?;
+	wallet.store_tx(&format!("{}", tx.tx_slate_id.unwrap()), slate.tx_or_err()?)?;
 	let parent_key = tx.parent_key_id.clone();
 
 	let keychain = wallet.keychain(keychain_mask)?;
 
+	let (current_height, _, _) = wallet.w2n_client().get_chain_tip()?;
+
 	if slate.compact_slate {
-		tx.kernel_excess = Some(slate.calc_excess(Some(&keychain))?);
+		tx.kernel_excess =
+			Some(slate.calc_excess(keychain.secp(), Some(&keychain), current_height)?);
 	} else {
-		tx.kernel_excess = Some(slate.tx.body.kernels[0].excess);
+		tx.kernel_excess = Some(slate.tx_or_err()?.body.kernels[0].excess);
 	}
 
-	if let Some(ref p) = slate.payment_proof {
+	if let Some(ref p) = slate.clone().payment_proof {
 		let derivation_index = match context.payment_proof_derivation_index {
 			Some(i) => i,
 			None => get_address_index(),
 		};
-		let excess = slate.calc_excess(Some(&keychain))?;
+		let excess = slate.calc_excess(keychain.secp(), Some(&keychain), current_height)?;
 		//sender address.
 		let sender_address_secret_key =
 			proofaddress::payment_proof_address_secret(&keychain, Some(derivation_index))?;
@@ -548,6 +566,7 @@ where
 			p.sender_address.clone(),
 			p.receiver_address.clone(),
 			sender_address_secret_key,
+			keychain.secp(),
 		)?;
 		tx.payment_proof = Some(StoredProofInfo {
 			receiver_address: p.receiver_address.clone(),
@@ -558,7 +577,7 @@ where
 		})
 	}
 
-	wallet.store_tx(&format!("{}", slate.id), &slate.tx)?;
+	wallet.store_tx(&format!("{}", slate.id), slate.tx_or_err()?)?;
 
 	let mut batch = wallet.batch(keychain_mask)?;
 	batch.save_tx_log_entry(tx, &parent_key)?;
@@ -583,12 +602,13 @@ where
 		None,
 		Some(slate.id),
 		None,
+		None,
 		false,
 		None,
 		None,
 	)?;
 	if tx_vec.is_empty() {
-		return Err(ErrorKind::TransactionDoesntExist(slate.id.to_string()).into());
+		return Err(Error::TransactionDoesntExist(slate.id.to_string()));
 	}
 	let mut batch = wallet.batch(keychain_mask)?;
 	for mut tx in tx_vec.into_iter() {
@@ -634,7 +654,7 @@ pub fn payment_proof_message(
 //		amount,
 //		pedersen::Commitment::from_vec(commit_bytes.to_vec()),
 //		DalekPublicKey::from_bytes(&sender_address_bytes)
-//			.map_err(|e| ErrorKind::Signature(format!("Failed to build public key, {}", e)))?,
+//			.map_err(|e| Error::Signature(format!("Failed to build public key, {}", e)))?,
 //	))
 //}
 
@@ -646,13 +666,14 @@ pub fn create_payment_proof_signature(
 	sender_address: ProvableAddress,
 	receiver_address: ProvableAddress,
 	sec_key: SecretKey,
+	secp: &Secp256k1,
 ) -> Result<String, Error> {
 	let message_ser = payment_proof_message(amount, kernel_commitment, sender_address.public_key)?;
 	if receiver_address.public_key.len() == 52 {
 		//this is mqs address
 		let mut challenge = String::new();
 		challenge.push_str(&message_ser);
-		let signature = crypto::sign_challenge(&challenge, &sec_key)?;
+		let signature = crypto::sign_challenge(&challenge, &sec_key, secp)?;
 		let signature = signature.to_hex();
 		Ok(signature)
 	} else {
@@ -660,7 +681,7 @@ pub fn create_payment_proof_signature(
 		let d_skey = match DalekSecretKey::from_bytes(&sec_key.0) {
 			Ok(k) => k,
 			Err(e) => {
-				return Err(ErrorKind::ED25519Key(format!("{}", e)).into());
+				return Err(Error::ED25519Key(format!("{}", e)));
 			}
 		};
 		let pub_key: DalekPublicKey = (&d_skey).into();
@@ -693,45 +714,42 @@ where
 		None,
 		Some(slate.id),
 		None,
+		None,
 		false,
 		None,
 		None,
 	)?;
 
 	if tx_vec.is_empty() {
-		return Err(ErrorKind::PaymentProof(
+		return Err(Error::PaymentProof(
 			"TxLogEntry with original proof info not found (is account correct?)".to_owned(),
-		)
-		.into());
+		));
 	}
 
 	let orig_proof_info = tx_vec[0].clone().payment_proof;
 
 	if orig_proof_info.is_some() && slate.payment_proof.is_none() {
-		return Err(ErrorKind::PaymentProof(
+		return Err(Error::PaymentProof(
 			"Expected Payment Proof for this Transaction is not present".to_owned(),
-		)
-		.into());
+		));
 	}
 
-	if let Some(ref p) = slate.payment_proof {
+	if let Some(ref p) = slate.clone().payment_proof {
 		let orig_proof_info = match orig_proof_info {
-			Some(p) => p,
+			Some(p) => p.clone(),
 			None => {
-				return Err(ErrorKind::PaymentProof(
+				return Err(Error::PaymentProof(
 					"Original proof info not stored in tx".to_owned(),
-				)
-				.into());
+				));
 			}
 		};
 		let keychain = wallet.keychain(keychain_mask)?;
 		let index = match context.payment_proof_derivation_index {
 			Some(i) => i,
 			None => {
-				return Err(ErrorKind::PaymentProof(
+				return Err(Error::PaymentProof(
 					"Payment proof derivation index required".to_owned(),
-				)
-				.into());
+				));
 			}
 		};
 		// Normal public key is needed
@@ -742,81 +760,81 @@ where
 		)?;
 
 		if p.sender_address.public_key != orig_sender_a.public_key {
-			return Err(ErrorKind::PaymentProof(
+			return Err(Error::PaymentProof(
 				"Sender address on slate does not match original sender address".to_owned(),
-			)
-			.into());
+			));
 		}
 
 		if orig_proof_info.receiver_address.public_key != p.receiver_address.public_key
 			&& orig_proof_info.receiver_address.public_key != p.sender_address.public_key
 		{
-			return Err(ErrorKind::PaymentProof(
+			return Err(Error::PaymentProof(
 				"Recipient address on slate does not match original recipient address".to_owned(),
-			)
-			.into());
+			));
 		}
+
+		let (current_height, _, _) = wallet.w2n_client().get_chain_tip()?;
 
 		//build the message which was used to generated receiver signature.
 		let msg = payment_proof_message(
 			slate.amount,
-			&slate.calc_excess(Some(&keychain))?,
+			&slate.calc_excess(keychain.secp(), Some(&keychain), current_height)?,
 			orig_sender_a.public_key.clone(),
 		)?;
 		let sig = match p.clone().receiver_signature {
 			Some(s) => s,
 			None => {
-				return Err(ErrorKind::PaymentProof(
+				return Err(Error::PaymentProof(
 					"Recipient did not provide requested proof signature".to_owned(),
-				)
-				.into());
+				));
 			}
 		};
 		//verify the proof signature
 		if p.receiver_address.public_key.len() == 52 {
 			let signature_ser = util::from_hex(&sig).map_err(|e| {
-				ErrorKind::TxProofGenericError(format!(
+				Error::TxProofGenericError(format!(
 					"Unable to build signature from HEX {}, {}",
 					&sig, e
 				))
 			})?;
-			let signature = Signature::from_der(&signature_ser).map_err(|e| {
-				ErrorKind::TxProofGenericError(format!("Unable to build signature, {}", e))
+			let signature = Signature::from_der(keychain.secp(), &signature_ser).map_err(|e| {
+				Error::TxProofGenericError(format!("Unable to build signature, {}", e))
 			})?;
 			debug!(
 				"the receiver pubkey is {}",
 				p.receiver_address.clone().public_key
 			);
 			let receiver_pubkey = p.receiver_address.public_key().map_err(|e| {
-				ErrorKind::TxProofGenericError(format!("Unable to get receiver address, {}", e))
+				Error::TxProofGenericError(format!("Unable to get receiver address, {}", e))
 			})?;
-			crypto::verify_signature(&msg, &signature, &receiver_pubkey)
-				.map_err(|e| ErrorKind::TxProofVerifySignature(format!("{}", e)))?;
+			crypto::verify_signature(&msg, &signature, &receiver_pubkey, keychain.secp())
+				.map_err(|e| Error::TxProofVerifySignature(format!("{}", e)))?;
 		} else {
 			//the signature is generated using Dalek public key
 
 			let dalek_sig_vec = util::from_hex(&sig).map_err(|e| {
-				ErrorKind::TxProofGenericError(format!(
+				Error::TxProofGenericError(format!(
 					"Unable to deserialize tor payment proof signature, {}",
 					e
 				))
 			})?;
 
-			let dalek_sig = DalekSignature::from_bytes(dalek_sig_vec.as_ref()).map_err(|e| {
-				ErrorKind::TxProofGenericError(format!(
+			let dalek_sig_vec: &[u8] = &dalek_sig_vec;
+			let dalek_sig = DalekSignature::try_from(dalek_sig_vec).map_err(|e| {
+				Error::TxProofGenericError(format!(
 					"Unable to deserialize tor payment proof receiver signature, {}",
 					e
 				))
 			})?;
 
 			let receiver_dalek_pub_key = p.receiver_address.tor_public_key().map_err(|e| {
-				ErrorKind::TxProofGenericError(format!(
+				Error::TxProofGenericError(format!(
 					"Unable to deserialize tor payment proof receiver address, {}",
 					e
 				))
 			})?;
 			if let Err(e) = receiver_dalek_pub_key.verify(&msg.as_bytes(), &dalek_sig) {
-				return Err(ErrorKind::PaymentProof(format!(
+				return Err(Error::PaymentProof(format!(
 					"Invalid proof signature, {}",
 					e
 				)))?;
@@ -832,7 +850,7 @@ where
 			//this should be a tor sending
 			let onion_address = OnionV3Address::from_private(&sender_address_secret_key.0)
 				.map_err(|e| {
-					ErrorKind::TxProofGenericError(format!(
+					Error::TxProofGenericError(format!(
 						"Unable to generate onion address for sender address, {}",
 						e
 					))
@@ -845,9 +863,10 @@ where
 			&sender_address_secret_key,
 			&orig_sender_a,
 			onion_address_str,
+			keychain.secp(),
 		)
 		.map_err(|e| {
-			ErrorKind::TxProofVerifySignature(format!("Cannot create tx_proof using slate, {}", e))
+			Error::TxProofVerifySignature(format!("Cannot create tx_proof using slate, {}", e))
 		})?;
 
 		debug!("tx_proof = {:?}", tx_proof);
@@ -858,10 +877,10 @@ where
 
 #[cfg(test)]
 mod test {
-	use crate::grin_core::core::committed::Committed;
 	use crate::grin_core::core::KernelFeatures;
 	use crate::grin_core::libtx::{build, ProofBuilder};
 	use crate::grin_keychain::{ExtKeychain, ExtKeychainPath, Keychain};
+	use grin_wallet_util::grin_core::core::FeeFields;
 
 	#[test]
 	// demonstrate that input.commitment == referenced output.commitment
@@ -872,29 +891,31 @@ mod test {
 		let key_id1 = ExtKeychainPath::new(1, 1, 0, 0, 0).to_identifier();
 
 		let tx1 = build::transaction(
-			KernelFeatures::Plain { fee: 0 },
-			&vec![build::output(105, key_id1.clone())],
+			KernelFeatures::Plain {
+				fee: FeeFields::zero(),
+			},
+			&[build::output(105, key_id1.clone())],
 			&keychain,
 			&builder,
 		)
 		.unwrap();
 		let tx2 = build::transaction(
-			KernelFeatures::Plain { fee: 0 },
-			&vec![build::input(105, key_id1.clone())],
+			KernelFeatures::Plain {
+				fee: FeeFields::zero(),
+			},
+			&[build::input(105, key_id1.clone())],
 			&keychain,
 			&builder,
 		)
 		.unwrap();
 
-		assert_eq!(tx1.outputs_committed()[0], tx2.inputs_committed()[0]);
+		let inputs: Vec<_> = tx2.inputs().into();
+		assert_eq!(tx1.outputs()[0].commitment(), inputs[0].commitment());
 	}
 
 	/*
 	#[test]
 	fn payment_proof_construction() {
-		let secp_inst = static_secp_instance();
-		let secp = secp_inst.lock();
-
 		let identifier = ExtKeychainPath::new(1, 1, 0, 0, 0).to_identifier();
 		let keychain = ExtKeychain::from_random_seed(true).unwrap();
 		let sender_address_secret_key =
@@ -942,7 +963,6 @@ mod test {
 		)
 		.unwrap();
 
-		let secp = Secp256k1::new();
 		let signature = util::from_hex(&sig).unwrap();
 		let signature = Signature::from_der(&secp, &signature).unwrap();
 		assert!(crypto::verify_signature(&msg, &signature, &public_key).is_ok());

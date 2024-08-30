@@ -1,4 +1,4 @@
-// Copyright 2019 The Grin Developers
+// Copyright 2021 The Grin Developers
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,13 +20,15 @@ use crate::libwallet::{
 };
 use crate::util::secp::key::SecretKey;
 use crate::util::{from_hex, to_base64, Mutex};
-use crate::{Error, ErrorKind};
+use crate::Error;
 use futures::channel::oneshot;
 use grin_wallet_api::JsonId;
+use grin_wallet_config::types::{TorBridgeConfig, TorProxyConfig};
 use grin_wallet_util::OnionV3Address;
 use hyper::body;
 use hyper::header::HeaderValue;
 use hyper::{Body, Request, Response, StatusCode};
+use qr_code::QrCode;
 use serde::{Deserialize, Serialize};
 use serde_json;
 
@@ -46,37 +48,93 @@ use crate::config::{MQSConfig, TorConfig};
 use crate::core::global;
 use crate::impls::tor::config as tor_config;
 use crate::impls::tor::process as tor_process;
+use crate::impls::tor::{bridge as tor_bridge, proxy as tor_proxy};
 use crate::keychain::Keychain;
 use chrono::Utc;
 use easy_jsonrpc_mw::{Handler, MaybeReply};
+use ed25519_dalek::PublicKey as DalekPublicKey;
 use grin_wallet_impls::tor;
-use grin_wallet_libwallet::internal::selection;
 use grin_wallet_libwallet::proof::crypto;
 use grin_wallet_libwallet::proof::proofaddress;
+use grin_wallet_libwallet::proof::proofaddress::ProvableAddress;
 use grin_wallet_util::grin_core::core::TxKernel;
 use grin_wallet_util::grin_p2p;
 use grin_wallet_util::grin_p2p::libp2p_connection;
 use grin_wallet_util::grin_util::secp::pedersen::Commitment;
+use grin_wallet_util::grin_util::secp::{ContextFlag, Secp256k1};
+use grin_wallet_util::grin_util::static_secp_instance;
 use std::collections::HashMap;
+use std::convert::TryFrom;
 use std::net::{SocketAddr, SocketAddrV4};
 use std::pin::Pin;
 use std::sync::mpsc::Sender;
 use std::sync::{Arc, RwLock};
 use std::thread;
+use std::thread::JoinHandle;
 
 lazy_static! {
 	pub static ref MWC_OWNER_BASIC_REALM: HeaderValue =
 		HeaderValue::from_str("Basic realm=MWC-OwnerAPI").unwrap();
-	static ref FOREIGN_API_RUNNING: RwLock<bool> = RwLock::new(false);
-	static ref OWNER_API_RUNNING: RwLock<bool> = RwLock::new(false);
+
+	// Pairs with API Server and optional thread to wait. Server need to send signal to stop, thread needed for waiting
+	static ref FOREIGN_API: Arc<Mutex<(Option<ApiServer>, Option<JoinHandle<()>>)>> = Arc::new(Mutex::new((None,None)));
+	static ref OWNER_API: Arc<Mutex<(Option<ApiServer>, Option<JoinHandle<()>>)>> = Arc::new(Mutex::new((None,None)));
 }
 
 pub fn is_foreign_api_running() -> bool {
-	*FOREIGN_API_RUNNING.read().unwrap()
+	FOREIGN_API.lock().0.is_some()
 }
 
 pub fn is_owner_api_running() -> bool {
-	*OWNER_API_RUNNING.read().unwrap()
+	OWNER_API.lock().0.is_some()
+}
+
+pub fn set_foreign_api_server(api_server: Option<ApiServer>) {
+	set_api_server(&FOREIGN_API, api_server)
+}
+
+pub fn set_foreign_api_thread(thread: JoinHandle<()>) {
+	set_api_thread(&FOREIGN_API, thread)
+}
+
+pub fn set_owner_api_server(api_server: Option<ApiServer>) {
+	set_api_server(&OWNER_API, api_server)
+}
+
+pub fn set_owner_api_thread(thread: JoinHandle<()>) {
+	set_api_thread(&OWNER_API, thread)
+}
+
+fn set_api_server(
+	api: &Arc<Mutex<(Option<ApiServer>, Option<JoinHandle<()>>)>>,
+	api_server: Option<ApiServer>,
+) {
+	// Stopping prev server. That is a point to store it this way
+	{
+		let mut lock = api.lock();
+		let (ref mut prev_server, ref mut prev_thread) = &mut *lock;
+		if let Some(mut prev_server) = prev_server.take() {
+			prev_server.stop();
+		}
+		if let Some(prev_thread) = prev_thread.take() {
+			let _ = prev_thread.join();
+		}
+	}
+
+	if let Some(new_server) = api_server {
+		let mut lock = api.lock();
+		let (ref mut server, ref mut thread) = &mut *lock;
+
+		server.replace(new_server);
+		let _ = thread.take(); // thread just removed, no waiting even if it exist
+	}
+}
+
+fn set_api_thread(
+	api: &Arc<Mutex<(Option<ApiServer>, Option<JoinHandle<()>>)>>,
+	thread: JoinHandle<()>,
+) {
+	api.lock().1.replace(thread);
 }
 
 // This function has to use libwallet errots because of callback and runs on libwallet side
@@ -95,7 +153,7 @@ fn check_middleware(
 			}
 			if let Some(s) = slate {
 				if bhv > 3 && s.version_info.block_header_version < GRIN_BLOCK_HEADER_VERSION {
-					Err(crate::libwallet::ErrorKind::Compatibility(
+					Err(crate::libwallet::Error::Compatibility(
 						"Incoming Slate is not compatible with this wallet. \
 						 Please upgrade the node or use a different one."
 							.into(),
@@ -123,11 +181,10 @@ where
 	let lc = w_lock.lc_provider()?;
 	let w_inst = lc.wallet_inst()?;
 	let k = w_inst.keychain((&mask).as_ref())?;
-	let sec_key = proofaddress::payment_proof_address_dalek_secret(&k, None).map_err(|e| {
-		ErrorKind::TorConfig(format!("Unable to build key for onion address, {}", e))
-	})?;
+	let sec_key = proofaddress::payment_proof_address_dalek_secret(&k, None)
+		.map_err(|e| Error::TorConfig(format!("Unable to build key for onion address, {}", e)))?;
 	let onion_addr = OnionV3Address::from_private(sec_key.as_bytes())
-		.map_err(|e| ErrorKind::GenericError(format!("Unable to build Onion address, {}", e)))?;
+		.map_err(|e| Error::GenericError(format!("Unable to build Onion address, {}", e)))?;
 	Ok(format!("{}", onion_addr))
 }
 
@@ -140,6 +197,8 @@ pub fn init_tor_listener<L, C, K>(
 	libp2p_listener_port: &Option<u16>,
 	tor_base: Option<&str>,
 	tor_log_file: &Option<String>,
+	bridge: TorBridgeConfig,
+	tor_proxy: TorProxyConfig,
 ) -> Result<(tor_process::TorProcess, SecretKey), Error>
 where
 	L: WalletLCProvider<'static, C, K> + 'static,
@@ -159,11 +218,31 @@ where
 		format!("{}/tor/listener", lc.get_top_level_directory()?)
 	};
 
-	let sec_key = proofaddress::payment_proof_address_secret(&k, None).map_err(|e| {
-		ErrorKind::TorConfig(format!("Unable to build key for onion address, {}", e))
-	})?;
+	let sec_key = proofaddress::payment_proof_address_secret(&k, None)
+		.map_err(|e| Error::TorConfig(format!("Unable to build key for onion address, {}", e)))?;
 	let onion_address = OnionV3Address::from_private(&sec_key.0)
-		.map_err(|e| ErrorKind::TorConfig(format!("Unable to build onion address, {}", e)))?;
+		.map_err(|e| Error::TorConfig(format!("Unable to build onion address, {}", e)))?;
+
+	let mut hm_tor_bridge: HashMap<String, String> = HashMap::new();
+	let mut tor_timeout = 200;
+	if bridge.bridge_line.is_some() {
+		tor_timeout = 300;
+		let bridge_config = tor_bridge::TorBridge::try_from(bridge)
+			.map_err(|e| Error::TorConfig(format!("{}", e)))?;
+		hm_tor_bridge = bridge_config
+			.to_hashmap()
+			.map_err(|e| Error::TorConfig(format!("{}", e)))?;
+	}
+
+	let mut hm_tor_poxy: HashMap<String, String> = HashMap::new();
+	if tor_proxy.transport.is_some() || tor_proxy.allowed_port.is_some() {
+		let proxy_config = tor_proxy::TorProxy::try_from(tor_proxy)
+			.map_err(|e| Error::TorConfig(format!("{}", e)))?;
+		hm_tor_poxy = proxy_config
+			.to_hashmap()
+			.map_err(|e| Error::TorConfig(format!("{}", e)))?;
+	}
+
 	warn!(
 		"Starting TOR Hidden Service for API listener at address {}, binding to {}",
 		onion_address, addr
@@ -176,19 +255,19 @@ where
 		libp2p_listener_port,
 		&vec![sec_key.clone()],
 		tor_log_file,
+		hm_tor_bridge,
+		hm_tor_poxy,
 	)
-	.map_err(|e| ErrorKind::TorConfig(format!("Failed to configure tor, {}", e).into()))?;
+	.map_err(|e| Error::TorConfig(format!("Failed to configure tor, {}", e)))?;
 	// Start TOR process
 	let tor_path = format!("{}/torrc", tor_dir);
 	process
 		.torrc_path(&tor_path)
 		.working_dir(&tor_dir)
-		.timeout(200)
+		.timeout(tor_timeout)
 		.completion_percent(100)
 		.launch()
-		.map_err(|e| {
-			ErrorKind::TorProcess(format!("Unable to start tor at {}, {}", tor_path, e).into())
-		})?;
+		.map_err(|e| Error::TorProcess(format!("Unable to start tor at {}, {}", tor_path, e)))?;
 
 	tor::status::set_tor_address(Some(format!("{}", onion_address)));
 
@@ -215,10 +294,9 @@ where
 			let wallet = match wallet {
 				Some(w) => w,
 				None => {
-					return Err(ErrorKind::GenericError(format!(
+					return Err(Error::GenericError(format!(
 						"Instantiated wallet or Owner API context must be provided"
-					))
-					.into())
+					)))
 				}
 			};
 			f(&mut Owner::new(wallet, None, None), keychain_mask)?
@@ -341,7 +419,8 @@ where
 		&self,
 		from: &dyn Address,
 		slate: &mut Slate,
-		dest_acct_name: Option<&str>,
+		dest_acct_name: &Option<String>,
+		secp: &Secp256k1,
 	) -> Result<(), Error> {
 		let owner_api = Owner::new(self.wallet.clone(), None, None);
 		let foreign_api = Foreign::new(self.wallet.clone(), None, None);
@@ -349,18 +428,18 @@ where
 
 		if slate.num_participants > slate.participant_data.len() {
 			//TODO: this needs to be changed to properly figure out if this slate is an invoice or a send
-			if slate.tx.inputs().len() == 0 {
+			if slate.tx_or_err()?.inputs().len() == 0 {
 				// mwc-wallet doesn't support invoices
-				Err(ErrorKind::DoesNotAcceptInvoices)?;
+				Err(Error::DoesNotAcceptInvoices)?;
 
 				// reject by default unless wallet is set to auto accept invoices under a certain threshold
 
 				let max_auto_accept_invoice = self
 					.max_auto_accept_invoice
-					.ok_or(ErrorKind::DoesNotAcceptInvoices)?;
+					.ok_or(Error::DoesNotAcceptInvoices)?;
 
 				if slate.amount > max_auto_accept_invoice {
-					Err(ErrorKind::InvoiceAmountTooBig(slate.amount))?;
+					Err(Error::InvoiceAmountTooBig(slate.amount))?;
 				}
 
 				if global::is_mainnet() {
@@ -371,36 +450,37 @@ where
 				let params = grin_wallet_libwallet::InitTxArgs {
 					src_acct_name: None, //it will be set in the implementation layer.
 					amount: slate.amount,
+					amount_includes_fee: None,
 					minimum_confirmations: 10,
 					max_outputs: 500,
 					num_change_outputs: 1,
-					/// If `true`, attempt to use up as many outputs as
-					/// possible to create the transaction, up the 'soft limit' of `max_outputs`. This helps
-					/// to reduce the size of the UTXO set and the amount of data stored in the wallet, and
-					/// minimizes fees. This will generally result in many inputs and a large change output(s),
-					/// usually much larger than the amount being sent. If `false`, the transaction will include
-					/// as many outputs as are needed to meet the amount, (and no more) starting with the smallest
-					/// value outputs.
+					// If `true`, attempt to use up as many outputs as
+					// possible to create the transaction, up the 'soft limit' of `max_outputs`. This helps
+					// to reduce the size of the UTXO set and the amount of data stored in the wallet, and
+					// minimizes fees. This will generally result in many inputs and a large change output(s),
+					// usually much larger than the amount being sent. If `false`, the transaction will include
+					// as many outputs as are needed to meet the amount, (and no more) starting with the smallest
+					// value outputs.
 					selection_strategy_is_use_all: false,
 					message: None,
-					/// Optionally set the output target slate version (acceptable
-					/// down to the minimum slate version compatible with the current. If `None` the slate
-					/// is generated with the latest version.
+					// Optionally set the output target slate version (acceptable
+					// down to the minimum slate version compatible with the current. If `None` the slate
+					// is generated with the latest version.
 					target_slate_version: None,
-					/// Number of blocks from current after which TX should be ignored
+					// Number of blocks from current after which TX should be ignored
 					ttl_blocks: None,
-					/// If set, require a payment proof for the particular recipient
+					// If set, require a payment proof for the particular recipient
 					payment_proof_recipient_address: None,
 					address: Some(from.get_full_name()),
-					/// If true, just return an estimate of the resulting slate, containing fees and amounts
-					/// locked without actually locking outputs or creating the transaction. Note if this is set to
-					/// 'true', the amount field in the slate will contain the total amount locked, not the provided
-					/// transaction amount
+					// If true, just return an estimate of the resulting slate, containing fees and amounts
+					// locked without actually locking outputs or creating the transaction. Note if this is set to
+					// 'true', the amount field in the slate will contain the total amount locked, not the provided
+					// transaction amount
 					estimate_only: None,
 					exclude_change_outputs: Some(false),
 					minimum_confirmations_change_outputs: 1,
-					/// Sender arguments. If present, the underlying function will also attempt to send the
-					/// transaction to a destination and optionally finalize the result
+					// Sender arguments. If present, the underlying function will also attempt to send the
+					// transaction to a destination and optionally finalize the result
 					send_args: None,
 					outputs: None,
 					// Lack later flag. Require compact slate workflow
@@ -422,7 +502,7 @@ where
 				let s = foreign_api
 					.receive_tx(slate, Some(from.get_full_name()), dest_acct_name, None)
 					.map_err(|e| {
-						ErrorKind::LibWallet(format!(
+						Error::LibWallet(format!(
 							"Unable to process incoming slate, receive_tx failed, {}",
 							e
 						))
@@ -435,7 +515,7 @@ where
 				.lock()
 				.as_ref()
 				.expect("call set_publisher() method!!!")
-				.post_slate(slate, from)
+				.post_slate(slate, from, secp)
 				.map_err(|e| {
 					self.do_log_error(format!("ERROR: Unable to send slate back, {}", e));
 					e
@@ -475,7 +555,7 @@ where
 		let mask = self.keychain_mask.lock().clone();
 
 		let msg_str = serde_json::to_string(&swapmessage).map_err(|e| {
-			ErrorKind::ProcessSwapMessageError(format!(
+			Error::ProcessSwapMessageError(format!(
 				"Error in processing incoming swap message from mqs, {}",
 				e
 			))
@@ -534,7 +614,13 @@ where
 			));
 		};
 
-		let result = self.process_incoming_slate(from, slate, None);
+		let secp = {
+			let secp_inst = static_secp_instance();
+			let secp = secp_inst.lock().clone();
+			secp
+		};
+
+		let result = self.process_incoming_slate(from, slate, &None, &secp);
 
 		//send the message back
 		match result {
@@ -602,7 +688,7 @@ where
 
 	//start mwcmqs listener
 	start_mwcmqs_listener(wallet, mqs_config, wait_for_thread, keychain_mask, true)
-		.map_err(|e| ErrorKind::GenericError(format!("cannot start mqs listener, {}", e)).into())
+		.map_err(|e| Error::GenericError(format!("cannot start mqs listener, {}", e)))
 }
 
 /// Start the mqs listener
@@ -619,9 +705,9 @@ where
 	K: Keychain + 'static,
 {
 	if grin_wallet_impls::adapters::get_mwcmqs_brocker().is_some() {
-		return Err(
-			ErrorKind::GenericError("mwcmqs listener is already running".to_string()).into(),
-		);
+		return Err(Error::GenericError(
+			"mwcmqs listener is already running".to_string(),
+		));
 	}
 
 	// make sure wallet is not locked, if it is try to unlock with no passphrase
@@ -640,7 +726,9 @@ where
 
 	let mwcmqs_secret_key =
 		controller_derive_address_key(wallet.clone(), keychain_mask.lock().as_ref())?;
-	let mwc_pub_key = crypto::public_key_from_secret_key(&mwcmqs_secret_key)?;
+
+	let secp = Secp256k1::with_caps(ContextFlag::Full);
+	let mwc_pub_key = crypto::public_key_from_secret_key(&secp, &mwcmqs_secret_key)?;
 
 	let mwcmqs_address = MWCMQSAddress::new(
 		proofaddress::ProvableAddress::from_pub_key(&mwc_pub_key),
@@ -674,13 +762,13 @@ where
 	let thread = thread::Builder::new()
 		.name("mwcmqs-broker".to_string())
 		.spawn(move || {
-			if let Err(e) = cloned_subscriber.start() {
+			if let Err(e) = cloned_subscriber.start(&secp) {
 				let err_str = format!("Unable to start mwcmqs controller, {}", e);
 				error!("{}", err_str);
 				panic!("{}", err_str);
 			}
 		})
-		.map_err(|e| ErrorKind::GenericError(format!("Unable to start mwcmqs broker, {}", e)))?;
+		.map_err(|e| Error::GenericError(format!("Unable to start mwcmqs broker, {}", e)))?;
 
 	// Publishing this running MQS service
 	crate::impls::init_mwcmqs_access_data(mwcmqs_publisher.clone(), mwcmqs_subscriber.clone());
@@ -715,15 +803,15 @@ where
 		running_foreign = true;
 	}
 
-	if *OWNER_API_RUNNING.read().unwrap() {
-		return Err(
-			ErrorKind::GenericError("Owner API is already up and running".to_string()).into(),
-		);
+	if is_owner_api_running() {
+		return Err(Error::GenericError(
+			"Owner API is already up and running".to_string(),
+		));
 	}
-	if running_foreign && *FOREIGN_API_RUNNING.read().unwrap() {
-		return Err(
-			ErrorKind::GenericError("Foreign API is already up and running".to_string()).into(),
-		);
+	if running_foreign && is_foreign_api_running() {
+		return Err(Error::GenericError(
+			"Foreign API is already up and running".to_string(),
+		));
 	}
 
 	//I don't know why but it seems the warn message in controller.rs will get printed to console.
@@ -750,15 +838,11 @@ where
 
 	router
 		.add_route("/v2/owner", Arc::new(api_handler_v2))
-		.map_err(|e| {
-			ErrorKind::GenericError(format!("Router failed to add route /v2/owner, {}", e))
-		})?;
+		.map_err(|e| Error::GenericError(format!("Router failed to add route /v2/owner, {}", e)))?;
 
 	router
 		.add_route("/v3/owner", Arc::new(api_handler_v3))
-		.map_err(|e| {
-			ErrorKind::GenericError(format!("Router failed to add route /v3/owner, {}", e))
-		})?;
+		.map_err(|e| Error::GenericError(format!("Router failed to add route /v3/owner, {}", e)))?;
 
 	// If so configured, add the foreign API to the same port
 	if running_foreign {
@@ -767,7 +851,7 @@ where
 		router
 			.add_route("/v2/foreign", Arc::new(foreign_api_handler_v2))
 			.map_err(|e| {
-				ErrorKind::GenericError(format!("Router failed to add route /v2/foreign, {}", e))
+				Error::GenericError(format!("Router failed to add route /v2/foreign, {}", e))
 			})?;
 	}
 	let api_chan: &'static mut (oneshot::Sender<()>, oneshot::Receiver<()>) =
@@ -777,21 +861,21 @@ where
 	let socket_addr: SocketAddr = addr.parse().expect("unable to parse socket address");
 	let api_thread = apis
 		.start(socket_addr, router, tls_config, api_chan)
-		.map_err(|e| ErrorKind::GenericError(format!("API thread failed to start, {}", e)))?;
+		.map_err(|e| Error::GenericError(format!("API thread failed to start, {}", e)))?;
 	warn!("HTTP Owner listener started.");
 
-	*OWNER_API_RUNNING.write().unwrap() = true;
+	set_owner_api_server(Some(apis));
 	if running_foreign {
-		*FOREIGN_API_RUNNING.write().unwrap() = true;
+		set_foreign_api_server(Some(ApiServer::new()));
 	}
 
 	let res = api_thread
 		.join()
-		.map_err(|e| ErrorKind::GenericError(format!("API thread panicked :{:?}", e)).into());
+		.map_err(|e| Error::GenericError(format!("API thread panicked :{:?}", e)));
 
-	*OWNER_API_RUNNING.write().unwrap() = false;
+	set_owner_api_server(None);
 	if running_foreign {
-		*FOREIGN_API_RUNNING.write().unwrap() = false;
+		set_foreign_api_server(None);
 	}
 
 	res
@@ -817,7 +901,7 @@ where
 	};
 
 	let tor_addr: SocketAddrV4 = socks_proxy_addr.parse().map_err(|e| {
-		ErrorKind::GenericError(format!(
+		Error::GenericError(format!(
 			"Unable to parse tor socks address {}, {}",
 			socks_proxy_addr, e
 		))
@@ -899,7 +983,7 @@ where
 					tor_addr.port(),
 					&tor_secret,
 					libp2p_listen_port as u16,
-					selection::get_base_fee(),
+					global::get_accept_fee_base(),
 					validation_fn.clone(),
 					stop_mutex.clone(),
 				);
@@ -919,9 +1003,7 @@ where
 				}
 			}
 		})
-		.map_err(|e| {
-			ErrorKind::GenericError(format!("Unable to start libp2p_node server, {}", e))
-		})?;
+		.map_err(|e| Error::GenericError(format!("Unable to start libp2p_node server, {}", e)))?;
 
 	Ok(())
 }
@@ -937,24 +1019,30 @@ pub fn foreign_listener<L, C, K>(
 	socks_proxy_addr: &str,
 	libp2p_listen_port: &Option<u16>,
 	tor_log_file: &Option<String>,
+	tor_bridge: TorBridgeConfig,
+	tor_proxy: TorProxyConfig,
 ) -> Result<(), Error>
 where
 	L: WalletLCProvider<'static, C, K> + 'static,
 	C: NodeClient + 'static,
 	K: Keychain + 'static,
 {
-	if *FOREIGN_API_RUNNING.read().unwrap() {
-		return Err(
-			ErrorKind::GenericError("Foreign API is already up and running".to_string()).into(),
-		);
+	if is_foreign_api_running() {
+		return Err(Error::GenericError(
+			"Foreign API is already up and running".to_string(),
+		));
 	}
 
-	// Check if wallet has been opened first
-	{
+	// Check if wallet has been opened first, get slatepack public key
+	let slatepack_pk = {
 		let mut w_lock = wallet.lock();
-		let lc = w_lock.lc_provider()?;
-		let _ = lc.wallet_inst()?;
-	}
+		let w = w_lock.lc_provider()?.wallet_inst()?;
+		let keychain = w.keychain(keychain_mask.lock().as_ref())?;
+		let slatepack_secret = proofaddress::payment_proof_address_dalek_secret(&keychain, None)?;
+		let slatepack_pk = DalekPublicKey::from(&slatepack_secret);
+		slatepack_pk
+	};
+
 	// need to keep in scope while the main listener is running
 	let tor_info = match use_tor {
 		true => match init_tor_listener(
@@ -965,11 +1053,13 @@ where
 			libp2p_listen_port,
 			None,
 			tor_log_file,
+			tor_bridge,
+			tor_proxy,
 		) {
 			Ok((tp, tor_secret)) => Some((tp, tor_secret)),
 			Err(e) => {
 				warn!("Unable to start TOR listener; Check that TOR executable is installed and on your path");
-				warn!("Tor Error: {}", e);
+				error!("Tor Error: {}", e);
 				warn!("Listener will be available via HTTP only");
 				None
 			}
@@ -983,7 +1073,7 @@ where
 	router
 		.add_route("/v2/foreign", Arc::new(api_handler_v2))
 		.map_err(|e| {
-			ErrorKind::GenericError(format!("Router failed to add route /v2/foreign, {}", e))
+			Error::GenericError(format!("Router failed to add route /v2/foreign, {}", e))
 		})?;
 
 	let api_chan: &'static mut (oneshot::Sender<()>, oneshot::Receiver<()>) =
@@ -994,10 +1084,23 @@ where
 	let api_thread = apis
 		// Assuming you have a variable `channel_pair` of the required type
 		.start(socket_addr, router, tls_config, api_chan)
-		.map_err(|e| ErrorKind::GenericError(format!("API thread failed to start, {}", e)))?;
+		.map_err(|e| Error::GenericError(format!("API thread failed to start, {}", e)))?;
 
 	warn!("HTTP Foreign listener started.");
-	*FOREIGN_API_RUNNING.write().unwrap() = true;
+
+	{
+		let address = ProvableAddress::from_tor_pub_key(&slatepack_pk);
+		let qr_string = match QrCode::new(address.public_key.clone()) {
+			Ok(qr) => qr.to_string(false, 3),
+			Err(_) => "Failed to generate QR code!".to_string(),
+		};
+		warn!(
+			"Slatepack Address is: {}\n{}",
+			address.public_key, qr_string
+		);
+	}
+
+	set_foreign_api_server(Some(apis));
 
 	// Starting libp2p listener
 	let tor_process = if tor_info.is_some() && libp2p_listen_port.is_some() {
@@ -1017,9 +1120,10 @@ where
 
 	let res = api_thread
 		.join()
-		.map_err(|e| ErrorKind::GenericError(format!("API thread panicked :{:?}", e)).into());
+		.map_err(|e| Error::GenericError(format!("API thread panicked :{:?}", e)));
 
-	*FOREIGN_API_RUNNING.write().unwrap() = false;
+	set_foreign_api_server(None);
+	tor::status::set_tor_address(None);
 
 	// Stopping tor, we failed to start in any case
 	if let Some(mut tor_process) = tor_process {
@@ -1141,38 +1245,17 @@ pub struct OwnerV3Helpers;
 impl OwnerV3Helpers {
 	/// Checks whether a request is to init the secure API
 	pub fn is_init_secure_api(val: &serde_json::Value) -> bool {
-		if let Some(m) = val["method"].as_str() {
-			match m {
-				"init_secure_api" => true,
-				_ => false,
-			}
-		} else {
-			false
-		}
+		matches!(val["method"].as_str(), Some("init_secure_api"))
 	}
 
 	/// Checks whether a request is to open the wallet
 	pub fn is_open_wallet(val: &serde_json::Value) -> bool {
-		if let Some(m) = val["method"].as_str() {
-			match m {
-				"open_wallet" => true,
-				_ => false,
-			}
-		} else {
-			false
-		}
+		matches!(val["method"].as_str(), Some("open_wallet"))
 	}
 
 	/// Checks whether a request is an encrypted request
 	pub fn is_encrypted_request(val: &serde_json::Value) -> bool {
-		if let Some(m) = val["method"].as_str() {
-			match m {
-				"encrypted_request_v3" => true,
-				_ => false,
-			}
-		} else {
-			false
-		}
+		matches!(val["method"].as_str(), Some("encrypted_request_v3"))
 	}
 
 	/// whether encryption is enabled
@@ -1216,7 +1299,8 @@ impl OwnerV3Helpers {
 				Ok(k) => k,
 				Err(_) => return,
 			};
-			let sk = match SecretKey::from_slice(&key_bytes) {
+			let secp = Secp256k1::with_caps(ContextFlag::None);
+			let sk = match SecretKey::from_slice(&secp, &key_bytes) {
 				Ok(s) => s,
 				Err(_) => return,
 			};
@@ -1251,7 +1335,7 @@ impl OwnerV3Helpers {
 		})?;
 		let id = enc_req.id.clone();
 		let res = enc_req.decrypt(&shared_key).map_err(|e| {
-			EncryptionErrorResponse::new(1, -32002, &format!("Decryption error: {}", e.kind()))
+			EncryptionErrorResponse::new(1, -32002, &format!("Decryption error: {}", e))
 				.as_json_value()
 		})?;
 		Ok((id, res))
@@ -1274,7 +1358,7 @@ impl OwnerV3Helpers {
 		}
 		let shared_key = share_key_ref.as_ref().unwrap();
 		let enc_res = EncryptedResponse::from_json(id, res, &shared_key).map_err(|e| {
-			EncryptionErrorResponse::new(1, -32003, &format!("Encryption Error: {}", e.kind()))
+			EncryptionErrorResponse::new(1, -32003, &format!("Encryption Error: {}", e))
 				.as_json_value()
 		})?;
 		let res = enc_res.as_json_value().map_err(|e| {
@@ -1664,8 +1748,8 @@ where
 {
 	let body = body::to_bytes(req.into_body())
 		.await
-		.map_err(|e| ErrorKind::GenericError(format!("Failed to read request, {}", e)))?;
+		.map_err(|e| Error::GenericError(format!("Failed to read request, {}", e)))?;
 
 	serde_json::from_reader(&body[..])
-		.map_err(|e| ErrorKind::GenericError(format!("Invalid request body, {}", e)).into())
+		.map_err(|e| Error::GenericError(format!("Invalid request body, {}", e)))
 }

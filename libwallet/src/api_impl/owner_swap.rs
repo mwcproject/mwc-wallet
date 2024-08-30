@@ -23,14 +23,14 @@ use crate::grin_keychain::ExtKeychainPath;
 use crate::grin_keychain::{Identifier, Keychain, SwitchCommitmentType};
 use crate::grin_util::to_hex;
 use crate::internal::selection;
-use crate::swap::error::ErrorKind;
+use crate::swap::error::Error;
 use crate::swap::fsm::state::{Input, StateEtaInfo, StateId, StateProcessRespond};
 use crate::swap::message::{Message, SecondaryUpdate, Update};
 use crate::swap::swap::{Swap, SwapJournalRecord};
 use crate::swap::types::{Action, Currency, Network, Role, SwapTransactionsConfirmations};
 use crate::swap::{trades, BuyApi, Context, SwapApi};
 use crate::types::NodeClient;
-use crate::{get_receive_account, owner_eth, Error};
+use crate::{get_receive_account, owner_eth};
 use crate::{
 	wallet_lock, OutputData, OutputStatus, Slate, SwapStartArgs, TxLogEntry, TxLogEntryType,
 	WalletBackend, WalletInst, WalletLCProvider,
@@ -111,10 +111,12 @@ where
 	let ethereum_wallet = w.get_ethereum_wallet()?.clone();
 	let keychain = w.keychain(keychain_mask)?;
 	let skey = get_swap_storage_key(&keychain)?;
-	let height = node_client.get_chain_tip()?.0;
+	let (height, _, _) = node_client.get_chain_tip()?;
 
 	if height == 0 {
-		return Err(ErrorKind::Generic("MWC node is syncing and not ready yet".to_string()).into());
+		return Err(Error::Generic(
+			"MWC node is syncing and not ready yet".to_string(),
+		));
 	}
 
 	let mut swap_reserved_amount = 0;
@@ -137,7 +139,7 @@ where
 				if swap.posted_lock.is_none() {
 					// So funds are not posted, transaction doesn't exist and outpuyts are not locked.
 					// We have to exclude those outputs
-					for inp in swap.lock_slate.tx.inputs_committed() {
+					for inp in swap.lock_slate.tx_or_err()?.inputs_committed() {
 						let in_commit = to_hex(&inp.0);
 						if let Some(amount) = outs.remove(&in_commit) {
 							swap_reserved_amount += amount;
@@ -207,6 +209,7 @@ where
 		crate::internal::selection::select_coins_and_fee(
 			&mut **w,
 			params.mwc_amount,
+			false,
 			&None,
 			height,
 			params.minimum_confirmations.unwrap_or(10),
@@ -276,7 +279,9 @@ where
 
 	swap.secondary_fee = secondary_fee;
 	if secondary_fee <= 0.0 {
-		return Err(ErrorKind::Generic("Invalid secondary transaction fee".to_string()).into());
+		return Err(Error::Generic(
+			"Invalid secondary transaction fee".to_string(),
+		));
 	}
 
 	if !secondary_currency.is_btc_family() && !params.dry_run {
@@ -288,7 +293,9 @@ where
 				"WARNING. {} gases should be keeped. Now {} ethers in your ethereum wallet!",
 				swap_reserved_gas_amount, balance_gwei
 			);
-			return Err(ErrorKind::Generic("No enough ether as gas for swap".to_string()).into());
+			return Err(Error::Generic(
+				"No enough ether as gas for swap".to_string(),
+			));
 		}
 	}
 
@@ -296,11 +303,10 @@ where
 	let _l = swap_lock.lock();
 	if trades::get_swap_trade(swap_id.as_str(), &skey, &*swap_lock).is_ok() {
 		// Should be impossible, uuid suppose to be unique. But we don't want to overwrite anything
-		return Err(ErrorKind::TradeIoError(
+		return Err(Error::TradeIoError(
 			swap_id.clone(),
 			"This trade record already exist".to_string(),
-		)
-		.into());
+		));
 	}
 
 	if params.dry_run {
@@ -544,13 +550,13 @@ where
 					return Ok((swap.state.clone(), Action::None));
 				}
 				_ => {
-					return Err(ErrorKind::Generic("Non BTC family coins".to_string()).into());
+					return Err(Error::Generic("Non BTC family coins".to_string()));
 				}
 			}
 		}
 		"eth_infura_project_id" => match swap.secondary_currency.is_btc_family() {
 			true => {
-				return Err(ErrorKind::Generic("Not Ethereum family coins".to_string()).into());
+				return Err(Error::Generic("Not Ethereum family coins".to_string()));
 			}
 			_ => {
 				let eth_swap_contract_address = trades::get_eth_swap_contract_address(
@@ -582,10 +588,9 @@ where
 		},
 		"destination" => {
 			if method.is_none() || destination.is_none() {
-				return Err(ErrorKind::Generic(
+				return Err(Error::Generic(
 					"Please define both '--method' and '--dest' values".to_string(),
-				)
-				.into());
+				));
 			}
 			let method = method.unwrap();
 
@@ -596,11 +601,10 @@ where
 		}
 		"secondary_address" => {
 			if secondary_address.is_none() {
-				return Err(ErrorKind::Generic(
+				return Err(Error::Generic(
 					"Please define '--buyer_refund_address' or '--secondary_address' values"
 						.to_string(),
-				)
-				.into());
+				));
 			}
 
 			let secondary_address = secondary_address.unwrap();
@@ -621,18 +625,16 @@ where
 		}
 		"secondary_fee" => {
 			if secondary_fee.is_none() {
-				return Err(ErrorKind::Generic(
+				return Err(Error::Generic(
 					"Please define '--secondary_fee' values".to_string(),
-				)
-				.into());
+				));
 			}
 
 			let secondary_fee = secondary_fee.unwrap();
 			if secondary_fee <= 0.0 {
-				return Err(ErrorKind::Generic(
+				return Err(Error::Generic(
 					"Please define positive '--secondary_fee' value".to_string(),
-				)
-				.into());
+				));
 			}
 
 			if !swap.secondary_currency.is_btc_family() {
@@ -642,9 +644,9 @@ where
 					secondary_fee, balance_gwei
 				);
 				if secondary_fee > balance_gwei as f32 {
-					return Err(
-						ErrorKind::Generic("No enough ether as gas for swap".to_string()).into(),
-					);
+					return Err(Error::Generic(
+						"No enough ether as gas for swap".to_string(),
+					));
 				}
 			}
 
@@ -654,7 +656,7 @@ where
 		}
 		"tag" => {
 			if tag.is_none() {
-				return Err(ErrorKind::Generic("Please define '--tag' values".to_string()).into());
+				return Err(Error::Generic("Please define '--tag' values".to_string()));
 			}
 
 			swap.tag = tag;
@@ -705,18 +707,26 @@ where
 
 	let mut fsm = swap_api.get_fsm(&keychain, &swap);
 
+	let (height, _, _) = node_client.get_chain_tip()?;
+
 	match adjust_cmd {
 		"cancel" => {
 			if !fsm.is_cancellable(&swap)? {
-				return Err(ErrorKind::Generic(
+				return Err(Error::Generic(
 					"Swap Trade is not cancellable at current stage".to_string(),
-				)
-				.into());
+				));
 			}
 
 			// Cancelling the trade
 			let tx_conf = swap_api.request_tx_confirmations(&keychain, &swap)?;
-			let resp = fsm.process(Input::Cancel, &mut swap, &context, &tx_conf)?;
+			let resp = fsm.process(
+				Input::Cancel,
+				&mut swap,
+				&context,
+				height,
+				&tx_conf,
+				keychain.secp(),
+			)?;
 			trades::store_swap_trade(&context, &swap, &skey, &*swap_lock)?;
 
 			return Ok((swap.state.clone(), resp.action.unwrap_or(Action::None)));
@@ -724,11 +734,10 @@ where
 		adjusted_state => {
 			let state = StateId::from_cmd_str(adjusted_state)?;
 			if !fsm.has_state(&state) {
-				return Err(ErrorKind::Generic(format!(
+				return Err(Error::Generic(format!(
 					"State {} is invalid for this trade",
 					adjusted_state
-				))
-				.into());
+				)));
 			}
 			swap.add_journal_message(format!("State is manually adjusted to {}", adjusted_state));
 			swap.state = state;
@@ -736,7 +745,14 @@ where
 			swap.wait_for_backup1 = true; // Don't want to go forward
 
 			let tx_conf = swap_api.request_tx_confirmations(&keychain, &swap)?;
-			let resp = fsm.process(Input::Check, &mut swap, &context, &tx_conf)?;
+			let resp = fsm.process(
+				Input::Check,
+				&mut swap,
+				&context,
+				height,
+				&tx_conf,
+				keychain.secp(),
+			)?;
 			trades::store_swap_trade(&context, &swap, &skey, &*swap_lock)?;
 
 			return Ok((swap.state.clone(), resp.action.unwrap_or(Action::None)));
@@ -787,10 +803,9 @@ where
 	// Checking if MWC node is available
 	let mwc_tip = node_client.get_chain_tip()?.0;
 	if mwc_tip == 0 {
-		return Err(ErrorKind::Generic(
+		return Err(Error::Generic(
 			"Unable contact healthy MWC node. The node probably in sync process".to_string(),
-		)
-		.into());
+		));
 	}
 
 	let swap_id = trades::import_trade(trade_file_name, &skey, &*swap_lock)?;
@@ -880,11 +895,11 @@ where
 	let tx_conf = swap_api.request_tx_confirmations(&keychain, &swap)?;
 	if tx_conf.mwc_tip == 0 {
 		// here the swap trade is written, there is not much what we can do
-		return Err(ErrorKind::Generic("Unable contact healthy MWC node. Please fix the problem and retry to restore this swap trade".to_string()).into());
+		return Err(Error::Generic("Unable contact healthy MWC node. Please fix the problem and retry to restore this swap trade".to_string()));
 	}
 	if tx_conf.secondary_tip == 0 {
 		// here the swap trade is written, there is not much what we can do
-		return Err(ErrorKind::Generic(format!("Unable contact {} ElectrumX node. Please fix the problem and retry to restore this swap trade", swap.secondary_currency)).into());
+		return Err(Error::Generic(format!("Unable contact {} ElectrumX node. Please fix the problem and retry to restore this swap trade", swap.secondary_currency)));
 	}
 
 	if swap.is_seller() {
@@ -929,6 +944,7 @@ where
 	C: NodeClient + 'a,
 	K: Keychain + 'a,
 {
+	let (height, _, _) = node_client.get_chain_tip()?;
 	let swap_api = match swap.secondary_currency.is_btc_family() {
 		true => {
 			let (uri1, uri2) = trades::get_electrumx_uri(
@@ -970,9 +986,16 @@ where
 	let mut fsm = swap_api.get_fsm(keychain, swap);
 	let tx_conf = swap_api.request_tx_confirmations(keychain, swap)?;
 	let start_locked = swap.other_lock_first_done;
-	let resp = fsm.process(Input::Check, swap, &context, &tx_conf)?;
+	let resp = fsm.process(
+		Input::Check,
+		swap,
+		&context,
+		height,
+		&tx_conf,
+		keychain.secp(),
+	)?;
 
-	let eta = fsm.get_swap_roadmap(swap)?;
+	let eta = fsm.get_swap_roadmap(swap, keychain.secp())?;
 
 	Ok((
 		resp.next_state_id,
@@ -1260,6 +1283,8 @@ where
 		}
 	}
 
+	let (height, _, _) = node_client.get_chain_tip()?;
+
 	let swap_api = match swap.secondary_currency.is_btc_family() {
 		true => {
 			let (uri1, uri2) = trades::get_electrumx_uri(
@@ -1303,7 +1328,14 @@ where
 	let tx_conf = swap_api.request_tx_confirmations(&keychain, swap)?;
 	let mut fsm = swap_api.get_fsm(&keychain, swap);
 	let other_lock_first_changed = swap.other_lock_first_done;
-	let mut process_respond = fsm.process(Input::Check, swap, &context, &tx_conf)?;
+	let mut process_respond = fsm.process(
+		Input::Check,
+		swap,
+		&context,
+		height,
+		&tx_conf,
+		keychain.secp(),
+	)?;
 
 	let cancelled_swaps = if other_lock_first_changed != swap.other_lock_first_done {
 		cancel_trades_by_tag(&keychain, &swap)?
@@ -1325,7 +1357,14 @@ where
 				swap.communication_method.clone(),
 				swap.communication_address.clone(),
 			)?;
-			let process_respond = fsm.process(Input::Execute, swap, &context, &tx_conf)?;
+			let process_respond = fsm.process(
+				Input::Execute,
+				swap,
+				&context,
+				height,
+				&tx_conf,
+				keychain.secp(),
+			)?;
 			swap.append_to_last_message(&format!(", {}", dest_str));
 			if has_ack {
 				match process_respond.action.clone().unwrap() {
@@ -1339,14 +1378,14 @@ where
 		Action::SellerWaitingForOfferMessage
 		| Action::SellerWaitingForInitRedeemMessage
 		| Action::BuyerWaitingForRedeemMessage => {
-			let message_fn = message_file_name.ok_or(ErrorKind::Generic("Wallet is waiting for the response from the Buyer. Make sure that your wallet is online and able to receive the messages. If you are using files for messages exchange, please specify income message file name with '--message_file_name' value".to_string()))?;
+			let message_fn = message_file_name.ok_or(Error::Generic("Wallet is waiting for the response from the Buyer. Make sure that your wallet is online and able to receive the messages. If you are using files for messages exchange, please specify income message file name with '--message_file_name' value".to_string()))?;
 
 			let mut file = File::open(message_fn.clone()).map_err(|e| {
-				ErrorKind::Generic(format!("Unable to open file {}, {}", message_fn, e))
+				Error::Generic(format!("Unable to open file {}, {}", message_fn, e))
 			})?;
 			let mut contents = String::new();
 			file.read_to_string(&mut contents).map_err(|e| {
-				ErrorKind::Generic(format!(
+				Error::Generic(format!(
 					"Unable to read a message from the file {}, {}",
 					message_fn, e
 				))
@@ -1355,11 +1394,10 @@ where
 
 			let message = Message::from_json(&contents)?;
 			if message.id != swap.id {
-				return Err(ErrorKind::Generic(format!(
+				return Err(Error::Generic(format!(
 					"Message id {} doesn't match selected trade id",
 					message.id
-				))
-				.into());
+				)));
 			}
 
 			swap_income_message(
@@ -1370,12 +1408,19 @@ where
 			)?;
 		}
 		Action::BuyerDepositToContractAccount => {
-			process_respond = fsm.process(Input::Execute, swap, &context, &tx_conf)?;
+			process_respond = fsm.process(
+				Input::Execute,
+				swap,
+				&context,
+				height,
+				&tx_conf,
+				keychain.secp(),
+			)?;
 		}
 		Action::SellerPublishMwcLockTx => {
 			wallet_lock!(wallet_inst, w);
 			// Checking if transaction is already created.
-			let kernel = &swap.lock_slate.tx.body.kernels[0].excess;
+			let kernel = &swap.lock_slate.tx_or_err()?.body.kernels[0].excess;
 			if w.tx_log_iter()
 				.filter(|tx| tx.kernel_excess.filter(|c| c == kernel).is_some())
 				.count() == 0
@@ -1405,21 +1450,42 @@ where
 				)?;
 			}
 
-			process_respond = fsm.process(Input::Execute, swap, &context, &tx_conf)?;
+			process_respond = fsm.process(
+				Input::Execute,
+				swap,
+				&context,
+				height,
+				&tx_conf,
+				keychain.secp(),
+			)?;
 		}
 		Action::SellerPublishTxSecondaryRedeem {
 			currency: _,
 			address: _,
 		} => {
-			process_respond = fsm.process(Input::Execute, swap, &context, &tx_conf)?;
+			process_respond = fsm.process(
+				Input::Execute,
+				swap,
+				&context,
+				height,
+				&tx_conf,
+				keychain.secp(),
+			)?;
 		}
 		Action::BuyerPublishMwcRedeemTx => {
-			process_respond = fsm.process(Input::Execute, swap, &context, &tx_conf)?;
+			process_respond = fsm.process(
+				Input::Execute,
+				swap,
+				&context,
+				height,
+				&tx_conf,
+				keychain.secp(),
+			)?;
 
 			wallet_lock!(wallet_inst, w);
 
 			// Checking if this transaction already exist
-			let kernel = &swap.redeem_slate.tx.body.kernels[0].excess;
+			let kernel = &swap.redeem_slate.tx_or_err()?.body.kernels[0].excess;
 			if w.tx_log_iter()
 				.filter(|tx| tx.kernel_excess.filter(|c| c == kernel).is_some())
 				.count() == 0
@@ -1437,11 +1503,18 @@ where
 			}
 		}
 		Action::SellerPublishMwcRefundTx => {
-			process_respond = fsm.process(Input::Execute, swap, &context, &tx_conf)?;
+			process_respond = fsm.process(
+				Input::Execute,
+				swap,
+				&context,
+				height,
+				&tx_conf,
+				keychain.secp(),
+			)?;
 
 			wallet_lock!(wallet_inst, w);
 
-			let kernel = &swap.refund_slate.tx.body.kernels[0].excess;
+			let kernel = &swap.refund_slate.tx_or_err()?.body.kernels[0].excess;
 			if w.tx_log_iter()
 				.filter(|tx| tx.kernel_excess.filter(|c| c == kernel).is_some())
 				.count() == 0
@@ -1464,14 +1537,20 @@ where
 		} => {
 			//only btc family need to check refund address.
 			if swap.secondary_currency.is_btc_family() && swap.unwrap_buyer()?.is_none() {
-				return Err(ErrorKind::Generic(format!(
+				return Err(Error::Generic(format!(
 					"Please specify '--buyer_refund_address' {} address for your refund",
 					swap.secondary_currency
-				))
-				.into());
+				)));
 			}
 
-			process_respond = fsm.process(Input::Execute, swap, &context, &tx_conf)?;
+			process_respond = fsm.process(
+				Input::Execute,
+				swap,
+				&context,
+				height,
+				&tx_conf,
+				keychain.secp(),
+			)?;
 		}
 		_ => (), // Nothing to do
 	}
@@ -1582,16 +1661,16 @@ where
 	t.amount_credited = slate.amount;
 	t.address = Some(tx_name);
 	t.num_outputs = 1;
-	t.output_commits = slate.tx.outputs_committed();
+	t.output_commits = slate.tx_or_err()?.outputs_committed();
 	t.messages = None;
 	t.ttl_cutoff_height = None;
 	// when invoicing, this will be invalid
-	assert!(slate.tx.body.kernels.len() == 1);
-	t.kernel_excess = Some(slate.tx.body.kernels[0].excess);
+	assert!(slate.tx_or_err()?.body.kernels.len() == 1);
+	t.kernel_excess = Some(slate.tx_or_err()?.body.kernels[0].excess);
 	t.kernel_lookup_min_height = Some(slate.height);
 	batch.save_tx_log_entry(t, parent_key_id)?;
 
-	assert!(slate.tx.body.outputs.len() == 1);
+	assert!(slate.tx_or_err()?.body.outputs.len() == 1);
 
 	// Creating output for that
 	batch.save(OutputData {
@@ -1599,11 +1678,11 @@ where
 		key_id: output_key_id.clone(),
 		mmr_index: None,
 		n_child: output_key_id.to_path().last_path_index(),
-		commit: Some(to_hex(&slate.tx.outputs_committed()[0].0)),
+		commit: Some(to_hex(&slate.tx_or_err()?.outputs_committed()[0].0)),
 		value: slate.amount,
 		status: OutputStatus::Unconfirmed,
 		height: slate.height,
-		lock_height: slate.lock_height,
+		lock_height: slate.calc_lock_height(),
 		is_coinbase: false,
 		tx_log_entry: Some(log_id),
 	})?;
@@ -1623,12 +1702,11 @@ where
 	K: Keychain + 'a,
 {
 	// Updating wallet state first because we need to select outputs.
-	let mut file = File::open(message_filename.clone()).map_err(|e| {
-		ErrorKind::Generic(format!("Unable to open file {}, {}", message_filename, e))
-	})?;
+	let mut file = File::open(message_filename.clone())
+		.map_err(|e| Error::Generic(format!("Unable to open file {}, {}", message_filename, e)))?;
 	let mut contents = String::new();
 	file.read_to_string(&mut contents).map_err(|e| {
-		ErrorKind::Generic(format!(
+		Error::Generic(format!(
 			"Unable to read a message from the file {}, {}",
 			message_filename, e
 		))
@@ -1638,9 +1716,9 @@ where
 	// but first let's check if the message type matching expected
 	let message = Message::from_json(&contents)?;
 	if !message.is_offer() {
-		return Err(
-			ErrorKind::Generic("Expected offer message, get different one".to_string()).into(),
-		);
+		return Err(Error::Generic(
+			"Expected offer message, get different one".to_string(),
+		));
 	}
 
 	swap_income_message(wallet_inst, keychain_mask, &contents, None)?;
@@ -1669,7 +1747,7 @@ where
 	K: Keychain + 'a,
 {
 	let json_msg: serde_json::Value = serde_json::from_str(message)
-		.map_err(|e| ErrorKind::Generic(format!("Unable to parse json request, {}", e)))?;
+		.map_err(|e| Error::Generic(format!("Unable to parse json request, {}", e)))?;
 
 	// For response we need to enumerate all swaps. Let's start from that
 	let swap_id = trades::list_swap_trades()?;
@@ -1693,9 +1771,10 @@ where
 		let from = json_get_str(&json_msg, "from");
 		let offer_id = json_get_str(&json_msg, "offer_id");
 		if from.is_empty() || offer_id.is_empty() {
-			return Err(
-				ErrorKind::Generic(format!("Incomplete marketplace message {}", message)).into(),
-			);
+			return Err(Error::Generic(format!(
+				"Incomplete marketplace message {}",
+				message
+			)));
 		}
 
 		if ONLINE_OFFERS.read().unwrap().contains_key(&offer_id) {
@@ -1714,9 +1793,10 @@ where
 		let from = json_get_str(&json_msg, "from");
 		let offer_id = json_get_str(&json_msg, "offer_id");
 		if from.is_empty() || offer_id.is_empty() {
-			return Err(
-				ErrorKind::Generic(format!("Incomplete marketplace message {}", message)).into(),
-			);
+			return Err(Error::Generic(format!(
+				"Incomplete marketplace message {}",
+				message
+			)));
 		}
 		println!("Get fail_bidding message from {} for {}", from, offer_id);
 		// Let's cancel swap if we sell. For Buy we can't cancel automatically
@@ -1769,8 +1849,16 @@ where
 				let mut fsm = swap_api.get_fsm(&keychain, &swap);
 
 				if fsm.is_cancellable(&swap)? {
+					let (height, _, _) = node_client.get_chain_tip()?;
 					let tx_conf = swap_api.request_tx_confirmations(&keychain, &swap)?;
-					let _resp = fsm.process(Input::Cancel, &mut swap, &context, &tx_conf)?;
+					let _resp = fsm.process(
+						Input::Cancel,
+						&mut swap,
+						&context,
+						height,
+						&tx_conf,
+						keychain.secp(),
+					)?;
 					trades::store_swap_trade(&context, &swap, &skey, &*swap_lock)?;
 				} else {
 					warn!(
@@ -1786,11 +1874,10 @@ where
 		}
 		"".to_string()
 	} else {
-		return Err(ErrorKind::Generic(format!(
+		return Err(Error::Generic(format!(
 			"marketplace message contains unknown command {}, message: {}",
 			command, message
-		))
-		.into());
+		)));
 	};
 	debug!("marketplace_message response: {}", response);
 	Ok(response)
@@ -1835,14 +1922,14 @@ where
 
 	let ack_msg = match &message.inner {
 		Update::None => {
-			return Err(
-				ErrorKind::Generic("Get empty message, nothing to process".to_string()).into(),
-			)
+			return Err(Error::Generic(
+				"Get empty message, nothing to process".to_string(),
+			))
 		}
 		Update::Offer(offer_update) => {
 			// We get an offer
 			if trades::get_swap_trade(swap_id.as_str(), &skey, &*lock).is_ok() {
-				return Err( ErrorKind::Generic(format!("trade with SwapID {} already exist. Probably you already processed this message", swap_id)).into());
+				return Err( Error::Generic(format!("trade with SwapID {} already exist. Probably you already processed this message", swap_id)));
 			}
 
 			let mut swap_api = match offer_update.secondary_currency.is_btc_family() {
@@ -1927,11 +2014,10 @@ where
 					}
 				}
 				_ => {
-					return Err(ErrorKind::Generic(format!(
+					return Err(Error::Generic(format!(
 						"Get unknown message group {} at 'MessageAcknowledge'",
 						msg_id
-					))
-					.into())
+					)))
 				}
 			}
 			trades::store_swap_trade(&context, &swap, &skey, &*lock)?;
@@ -1978,7 +2064,15 @@ where
 				_ => 2,
 			};
 			swap.wait_for_backup1 = true; // Processing message pessimistic way. We don't want to trigger any action
-			fsm.process(Input::IncomeMessage(message), &mut swap, &context, &tx_conf)?;
+			let (height, _, _) = node_client.get_chain_tip()?;
+			fsm.process(
+				Input::IncomeMessage(message),
+				&mut swap,
+				&context,
+				height,
+				&tx_conf,
+				keychain.secp(),
+			)?;
 			trades::store_swap_trade(&context, &swap, &skey, &*lock)?;
 			println!("INFO: Processed income message for SwapId {}", swap.id);
 

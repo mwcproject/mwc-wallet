@@ -1,4 +1,4 @@
-// Copyright 2019 The Grin Developers
+// Copyright 2021 The Grin Developers
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,7 +13,7 @@
 // limitations under the License.
 
 //! Wallet key management functions
-use crate::error::{Error, ErrorKind};
+use crate::error::Error;
 use crate::grin_keychain::{ChildNumber, ExtKeychain, Identifier, Keychain};
 use crate::grin_util::secp::key::SecretKey;
 use crate::types::{AcctPathMapping, NodeClient, WalletBackend};
@@ -75,12 +75,12 @@ where
 {
 	let label = label.to_string();
 	if let Some(_) = wallet.acct_path_iter().find(|l| l.label == label) {
-		return Err(ErrorKind::AccountLabelAlreadyExists(label.clone()).into());
+		return Err(Error::AccountLabelAlreadyExists(label.clone()));
 	}
 
 	let old_label = old_label.to_string();
 	if old_label == "default" {
-		return Err(ErrorKind::AccountDefaultCannotBeRenamed.into());
+		return Err(Error::AccountDefaultCannotBeRenamed);
 	}
 
 	let found = wallet
@@ -93,7 +93,7 @@ where
 		batch.rename_acct_path(accounts, &old_label, &label)?;
 		batch.commit()?;
 	} else {
-		return Err(ErrorKind::AccountLabelNotExists(old_label.clone()).into());
+		return Err(Error::AccountLabelNotExists(old_label.clone()));
 	}
 
 	Ok(())
@@ -112,7 +112,7 @@ where
 {
 	let label = label.to_owned();
 	if wallet.acct_path_iter().any(|l| l.label == label) {
-		return Err(ErrorKind::AccountLabelAlreadyExists(label).into());
+		return Err(Error::AccountLabelAlreadyExists(label));
 	}
 
 	// We're always using paths at m/k/0 for parent keys for output derivations
@@ -124,7 +124,7 @@ where
 	let id = (1..65536)
 		.filter(|v| !acc_ids.contains(v))
 		.next()
-		.ok_or(ErrorKind::GenericError(
+		.ok_or(Error::GenericError(
 			"Unable create a new account. Too many already exist".to_string(),
 		))?;
 

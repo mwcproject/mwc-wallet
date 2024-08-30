@@ -13,11 +13,11 @@
 // limitations under the License.
 
 use crate::grin_p2p::libp2p_connection;
-use crate::util::secp;
 use crate::util::RwLock;
-use crate::{Error, ErrorKind};
+use crate::Error;
 use chrono::Utc;
 use grin_wallet_libwallet::IntegrityContext;
+use grin_wallet_util::grin_util::secp::Secp256k1;
 use libp2p::gossipsub::IdentTopic as Topic;
 use std::thread;
 use uuid::Uuid;
@@ -82,11 +82,10 @@ pub fn add_broadcasting_messages(
 		.next()
 		.is_some()
 	{
-		return Err(ErrorKind::ArgumentError(format!(
+		return Err(Error::ArgumentError(format!(
 			"Message with integrity_ctx {} is already exist",
 			integrity_ctx.tx_uuid
-		))
-		.into());
+		)));
 	}
 
 	// we are good to add a new message
@@ -108,10 +107,10 @@ pub fn add_broadcasting_messages(
 			let _thread = thread::Builder::new()
 				.name("broadcasting_messages".to_string())
 				.spawn(|| {
+					let secp = Secp256k1::new();
 					loop {
 						thread::sleep(core::time::Duration::from_secs(1));
 						let cur_time = Utc::now().timestamp();
-						let secp = secp::Secp256k1::new();
 						{
 							let mut messages = MESSAGING_BROADCASTING.write();
 							if messages.is_empty() {
@@ -136,6 +135,7 @@ pub fn add_broadcasting_messages(
 												&tor_pk,
 												&signature,
 												msg.message.as_bytes(),
+												&secp,
 											) {
 												Ok(enc_data) => {
 													if libp2p_connection::publish_message(
@@ -167,7 +167,7 @@ pub fn add_broadcasting_messages(
 					*BROADCASTING_RUNNUNG.write() = false;
 				})
 				.map_err(|e| {
-					ErrorKind::GenericError(format!(
+					Error::GenericError(format!(
 						"Unable to start broadcasting_messages thread, {}",
 						e
 					))

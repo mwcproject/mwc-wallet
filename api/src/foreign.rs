@@ -1,4 +1,4 @@
-// Copyright 2019 The Grin Developers
+// Copyright 2021 The Grin Developers
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -103,6 +103,7 @@ where
 	/// ```
 	/// use grin_wallet_util::grin_keychain as keychain;
 	/// use grin_wallet_util::grin_util as util;
+	/// use grin_wallet_util::grin_core;
 	/// use grin_wallet_api as api;
 	/// use grin_wallet_config as config;
 	/// use grin_wallet_impls as impls;
@@ -114,13 +115,15 @@ where
 	/// use std::sync::Arc;
 	/// use util::{Mutex, ZeroingString};
 	///
+	/// use grin_core::global;
+	///
 	/// use api::Foreign;
 	/// use config::WalletConfig;
 	/// use impls::{DefaultWalletImpl, DefaultLCProvider, HTTPNodeClient};
 	/// use libwallet::WalletInst;
 	/// use grin_wallet_config::parse_node_address_string;
 	///
-	/// grin_wallet_util::grin_core::global::set_local_chain_type(grin_wallet_util::grin_core::global::ChainTypes::AutomatedTesting);
+	/// global::set_local_chain_type(global::ChainTypes::AutomatedTesting);
 	///
 	/// let mut wallet_config = WalletConfig::default();
 	/// # let dir = tempdir().map_err(|e| format!("{:#?}", e)).unwrap();
@@ -387,7 +390,7 @@ where
 	///
 	/// // . . .
 	/// // Obtain a sent slate somehow
-	/// let result = api_foreign.receive_tx(&slate, None, None, None);
+	/// let result = api_foreign.receive_tx(&slate, None, &None, None);
 	///
 	/// if let Ok(slate) = result {
 	///     // Send back to recipient somehow
@@ -399,7 +402,7 @@ where
 		&self,
 		slate: &Slate,
 		address: Option<String>,
-		dest_acct_name: Option<&str>,
+		dest_acct_name: &Option<String>,
 		message: Option<String>,
 	) -> Result<Slate, Error> {
 		let mut w_lock = self.wallet_inst.lock();
@@ -561,9 +564,11 @@ macro_rules! doctest_helper_setup_doc_env_foreign {
 		use grin_wallet_config as config;
 		use grin_wallet_impls as impls;
 		use grin_wallet_libwallet as libwallet;
+		use grin_wallet_util::grin_core;
 		use grin_wallet_util::grin_keychain as keychain;
 		use grin_wallet_util::grin_util as util;
 
+		use grin_core::global;
 		use keychain::ExtKeychain;
 		use tempfile::tempdir;
 
@@ -575,9 +580,18 @@ macro_rules! doctest_helper_setup_doc_env_foreign {
 		use impls::{DefaultLCProvider, DefaultWalletImpl, HTTPNodeClient};
 		use libwallet::{BlockFees, IssueInvoiceTxArgs, Slate, WalletInst};
 
-		grin_wallet_util::grin_core::global::set_local_chain_type(
-			grin_wallet_util::grin_core::global::ChainTypes::AutomatedTesting,
-		);
+		// don't run on windows CI, which gives very inconsistent results
+		if cfg!(windows) {
+			return;
+		}
+
+		// Set our local chain_type for testing.
+		global::set_local_chain_type(global::ChainTypes::AutomatedTesting);
+
+		// don't run on windows CI, which gives very inconsistent results
+		if cfg!(windows) {
+			return;
+		}
 
 		let dir = tempdir().map_err(|e| format!("{:#?}", e)).unwrap();
 		let dir = dir

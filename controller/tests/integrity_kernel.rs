@@ -44,6 +44,7 @@ use grin_wallet_util::grin_util::secp::pedersen::Commitment;
 use grin_wallet_util::grin_util::secp::Message;
 use libp2p::identity::Keypair;
 use std::collections::HashMap;
+use std::convert::TryInto;
 
 /// self send impl
 fn integrity_kernel_impl(test_dir: &'static str) -> Result<(), wallet::Error> {
@@ -210,7 +211,8 @@ fn integrity_kernel_impl(test_dir: &'static str) -> Result<(), wallet::Error> {
 	// Let's verify if Integrity context match the Tx Kernels.
 	let txs = {
 		wallet_inst!(wallet1, w);
-		let mut txs = updater::retrieve_txs(&mut **w, mask1, None, None, None, false, None, None)?;
+		let mut txs =
+			updater::retrieve_txs(&mut **w, mask1, None, None, None, None, false, None, None)?;
 
 		txs.retain(|t| t.tx_type == TxLogEntryType::TxSent);
 		txs
@@ -246,7 +248,7 @@ fn integrity_kernel_impl(test_dir: &'static str) -> Result<(), wallet::Error> {
 	for _i in 0..20 {
 		let (excess1, signature1) = integrity_context1.calc_kernel_excess(&secp, &peer_pk)?;
 		assert_eq!(excess1, kernel1);
-		let pk1 = excess1.to_pubkey().unwrap();
+		let pk1 = excess1.to_pubkey(&secp).unwrap();
 		// Validating the message
 
 		assert_eq!(signatures.contains(&signature1), false);
@@ -257,7 +259,7 @@ fn integrity_kernel_impl(test_dir: &'static str) -> Result<(), wallet::Error> {
 
 		let (excess2, signature2) = integrity_context2.calc_kernel_excess(&secp, &peer_pk)?;
 		assert_eq!(excess2, kernel2);
-		let pk2 = excess2.to_pubkey().unwrap();
+		let pk2 = excess2.to_pubkey(&secp).unwrap();
 		// Validating the message
 		assert_eq!(signatures.contains(&signature2), false);
 		signatures.push(signature2.clone());
@@ -275,17 +277,22 @@ fn integrity_kernel_impl(test_dir: &'static str) -> Result<(), wallet::Error> {
 	println!("kernel_excess: {}", util::to_hex(&kernel_excess.0));
 	println!(
 		"signature: {}",
-		util::to_hex(&signature.serialize_compact())
+		util::to_hex(&signature.serialize_compact(&secp))
 	);
 
 	// Build message for p2p network
-	let libp2p_message =
-		libp2p_connection::build_integrity_message(&kernel_excess, &peer_pk, &signature, &message)
-			.unwrap();
+	let libp2p_message = libp2p_connection::build_integrity_message(
+		&kernel_excess,
+		&peer_pk,
+		&signature,
+		&message,
+		&secp,
+	)
+	.unwrap();
 
 	let output_validation_fn = |_kernel: &Commitment| {
 		Ok(Some(TxKernel::with_features(KernelFeatures::Plain {
-			fee: 100_000_000,
+			fee: (100_000_000 as u64).try_into().unwrap(),
 		})))
 	};
 	let output_validation_fn = std::sync::Arc::new(output_validation_fn);
@@ -296,6 +303,7 @@ fn integrity_kernel_impl(test_dir: &'static str) -> Result<(), wallet::Error> {
 		output_validation_fn.clone(),
 		&mut HashMap::new(),
 		1_000_000,
+		&secp,
 	);
 	// PeerId can be anyting. because of forward it can change
 	let validate_ok2 = libp2p_connection::validate_integrity_message(
@@ -304,6 +312,7 @@ fn integrity_kernel_impl(test_dir: &'static str) -> Result<(), wallet::Error> {
 		output_validation_fn.clone(),
 		&mut HashMap::new(),
 		1_000_000,
+		&secp,
 	);
 	assert!(validate_ok.is_ok());
 	assert_eq!(validate_ok.unwrap().0, 100_000_000);
@@ -329,7 +338,7 @@ fn wallet_integrity_kernel() {
 	let test_dir = "test_output/integrity_kernel";
 	setup(test_dir);
 	if let Err(e) = integrity_kernel_impl(test_dir) {
-		panic!("Libwallet Error: {} - {}", e, e.backtrace().unwrap());
+		panic!("Libwallet Error: {}", e);
 	}
 	clean_output_dir(test_dir);
 }

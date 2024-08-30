@@ -1,4 +1,4 @@
-// Copyright 2020 The Grin Developers
+// Copyright 2021 The Grin Developers
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,6 +19,7 @@
 pub struct GetTipResp {
 	pub height: u64,
 	pub last_block_pushed: String,
+	#[allow(dead_code)]
 	pub prev_block_to_last: String,
 	pub total_difficulty: u64,
 }

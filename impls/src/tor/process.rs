@@ -1,4 +1,4 @@
-// Copyright 2019 The Grin Developers
+// Copyright 2021 The Grin Developers
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -49,7 +49,6 @@ extern crate chrono;
 extern crate regex;
 extern crate timer;
 
-use failure::Fail;
 use regex::Regex;
 use std::fs::{self, File};
 use std::io;
@@ -59,43 +58,33 @@ use std::path::{Path, MAIN_SEPARATOR};
 use std::process::{Child, ChildStdout, Command, Stdio};
 use std::sync::mpsc::channel;
 use std::thread;
-use sysinfo::{Process, ProcessExt, Signal};
+use sysinfo::{Process, ProcessExt, System, SystemExt};
 
 #[cfg(windows)]
 const TOR_EXE_NAME: &str = "tor.exe";
 #[cfg(not(windows))]
 const TOR_EXE_NAME: &str = "tor";
 
-#[derive(Fail, Debug)]
+#[derive(thiserror::Error, Debug)]
 pub enum Error {
-	#[fail(display = "Tor process error, {}", _0)]
+	#[error("Tor process error, {0}")]
 	Process(String),
-	#[fail(display = "Tor IO error, {}, {}", _0, _1)]
+	#[error("Tor IO error, {0}, {1}")]
 	IO(String, io::Error),
-	#[fail(display = "Tor PID error, {}", _0)]
+	#[error("Tor PID error, {0}")]
 	PID(String),
-	#[fail(display = "Tor Reported Error {}, and warnings: {:?}", _0, _1)]
+	#[error("Tor Reported Error {0}, and warnings: {1:?}")]
 	Tor(String, Vec<String>),
-	#[fail(display = "Tor invalid log line: {}", _0)]
+	#[error("Tor invalid log line: {0}")]
 	InvalidLogLine(String),
-	#[fail(display = "Tor invalid bootstrap line: {}", _0)]
+	#[error("Tor invalid bootstrap line: {0}")]
 	InvalidBootstrapLine(String),
-	#[fail(display = "Tor regex error {}, {}", _0, _1)]
+	#[error("Tor regex error {0}, {1}")]
 	Regex(String, regex::Error),
-	#[fail(display = "Tor process not running")]
+	#[error("Tor process not running")]
 	ProcessNotStarted,
-	#[fail(display = "Waiting for tor respond timeout")]
+	#[error("Waiting for tor respond timeout")]
 	Timeout,
-}
-
-#[cfg(windows)]
-fn get_process(pid: i32) -> Process {
-	Process::new(pid as usize, None, 0)
-}
-
-#[cfg(not(windows))]
-fn get_process(pid: i32) -> Process {
-	Process::new(pid, None, 0)
 }
 
 pub struct TorProcess {
@@ -107,6 +96,7 @@ pub struct TorProcess {
 	working_dir: Option<String>,
 	pub stdout: Option<BufReader<ChildStdout>>,
 	pub process: Option<Child>,
+	sys: System,
 }
 
 impl TorProcess {
@@ -120,6 +110,7 @@ impl TorProcess {
 			working_dir: None,
 			stdout: None,
 			process: None,
+			sys: System::new(),
 		}
 	}
 
@@ -137,6 +128,11 @@ impl TorProcess {
 			Ok(val) => Some(val),
 			Err(_) => None,
 		}
+	}
+
+	fn get_process(&mut self, pid: i32) -> Option<&Process> {
+		self.sys.refresh_all();
+		self.sys.process((pid as usize).into())
 	}
 
 	pub fn tor_cmd(&mut self, tor_cmd: &str) -> &mut Self {
@@ -195,8 +191,9 @@ impl TorProcess {
 				let pid = pid.parse::<i32>().map_err(|err| {
 					Error::PID(format!("Pid value {} is invalid, {:?}", pid, err))
 				})?;
-				let process = get_process(pid);
-				let _ = process.kill(Signal::Kill);
+				if let Some(p) = self.get_process(pid) {
+					let _ = p.kill();
+				}
 			}
 		}
 		if let Some(ref torrc_path) = self.torrc_path {
@@ -214,7 +211,7 @@ impl TorProcess {
 			})?;
 
 		if let Some(ref d) = self.working_dir {
-			// split out the process id, so if we don't exit cleanly
+			// Split out the process id, so if we don't exit cleanly
 			// we can take it down on the next run
 			let pid_file_name = format!("{}{}pid", d, MAIN_SEPARATOR);
 			let mut file = File::create(pid_file_name.clone()).map_err(|err| {

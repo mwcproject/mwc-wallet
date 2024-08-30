@@ -1,4 +1,4 @@
-// Copyright 2019 The Grin Developers
+// Copyright 2021 The Grin Developers
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -41,8 +41,9 @@ mod common;
 use common::{
 	clean_output_dir, derive_ecdh_key, execute_command, execute_command_no_setup,
 	initial_setup_wallet, instantiate_wallet, send_request, send_request_enc, setup,
-	RetrieveSummaryInfoResp,
+	setup_global_chain_type, RetrieveSummaryInfoResp,
 };
+use grin_wallet_util::grin_util::secp::Secp256k1;
 
 #[test]
 fn owner_v3_lifecycle() -> Result<(), grin_wallet_controller::Error> {
@@ -52,11 +53,11 @@ fn owner_v3_lifecycle() -> Result<(), grin_wallet_controller::Error> {
 		return Ok(());
 	}
 
+	setup_global_chain_type();
+
+	let secp = Secp256k1::new();
 	let test_dir = "target/test_output/owner_v3_lifecycle";
 	setup(test_dir);
-	// Need setup global because testing owner API that runs in a separate thread
-	global::init_global_chain_type(global::ChainTypes::AutomatedTesting);
-	global::set_local_chain_type(global::ChainTypes::AutomatedTesting);
 
 	let yml = load_yaml!("../src/bin/mwc-wallet.yml");
 	let app = App::from_yaml(yml);
@@ -155,7 +156,7 @@ fn owner_v3_lifecycle() -> Result<(), grin_wallet_controller::Error> {
 
 	assert!(res.is_ok());
 	let value: ECDHPubkey = res.unwrap();
-	let shared_key = derive_ecdh_key(sec_key_str, &value.ecdh_pubkey);
+	let shared_key = derive_ecdh_key(sec_key_str, &value.ecdh_pubkey, &secp);
 
 	// 2) get the top level directory, should default to ~/.grin/auto
 	let req = include_str!("data/v3_reqs/get_top_level.req.json");
@@ -388,7 +389,7 @@ fn owner_v3_lifecycle() -> Result<(), grin_wallet_controller::Error> {
 	)?;
 	println!("RES 15: {:?}", res);
 	assert!(res.is_ok());
-	let mut slate: Slate = res.unwrap().into_slate_plain()?;
+	let mut slate: Slate = res.unwrap().into_slate_plain(false)?;
 
 	// give this slate over to wallet 2 manually
 	grin_wallet_controller::controller::owner_single_use(

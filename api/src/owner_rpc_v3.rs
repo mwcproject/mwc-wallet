@@ -1,4 +1,4 @@
-// Copyright 2019 The Grin Developers
+// Copyright 2021 The Grin Developers
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,14 +16,15 @@
 use uuid::Uuid;
 
 use crate::config::{MQSConfig, TorConfig, WalletConfig};
+use crate::core::core::OutputFeatures;
 use crate::core::core::Transaction;
 use crate::core::global;
 use crate::keychain::{Identifier, Keychain};
 use crate::libwallet::slate_versions::v3::TransactionV3;
 use crate::libwallet::{
-	AcctPathMapping, ErrorKind, InitTxArgs, IssueInvoiceTxArgs, NodeClient, NodeHeightResult,
-	OutputCommitMapping, PaymentProof, Slate, SlatePurpose, SlateVersion, StatusMessage,
-	TxLogEntry, VersionedSlate, WalletInfo, WalletLCProvider,
+	AcctPathMapping, Amount, BuiltOutput, Error, InitTxArgs, IssueInvoiceTxArgs, NodeClient,
+	NodeHeightResult, OutputCommitMapping, PaymentProof, Slate, SlatePurpose, SlateVersion,
+	StatusMessage, TxLogEntry, VersionedSlate, ViewWallet, WalletInfo, WalletLCProvider,
 };
 use crate::types::{SlatepackInfo, TxLogEntryAPI};
 use crate::util;
@@ -35,8 +36,9 @@ use crate::{ECDHPubkey, Owner, Token};
 use easy_jsonrpc_mw;
 use ed25519_dalek::PublicKey as DalekPublicKey;
 use grin_wallet_libwallet::proof::proofaddress::ProvableAddress;
+use libwallet::RetrieveTxQueryArgs;
 use rand::thread_rng;
-use std::error::Error;
+use std::convert::TryFrom;
 use std::time::Duration;
 
 /// Public definition used to generate Owner jsonrpc api.
@@ -81,7 +83,7 @@ pub trait OwnerRpcV3 {
 	# , true, 4, false, false, false, false, true);
 	```
 	*/
-	fn accounts(&self, token: Token) -> Result<Vec<AcctPathMapping>, ErrorKind>;
+	fn accounts(&self, token: Token) -> Result<Vec<AcctPathMapping>, Error>;
 
 	/**
 	Networked version of [Owner::create_account_path](struct.Owner.html#method.create_account_path).
@@ -114,7 +116,7 @@ pub trait OwnerRpcV3 {
 	# ,true, 4, false, false, false, false, true);
 	```
 	 */
-	fn create_account_path(&self, token: Token, label: &String) -> Result<Identifier, ErrorKind>;
+	fn create_account_path(&self, token: Token, label: &String) -> Result<Identifier, Error>;
 
 	/**
 	Networked version of [Owner::set_active_account](struct.Owner.html#method.set_active_account).
@@ -147,7 +149,7 @@ pub trait OwnerRpcV3 {
 	# , true, 4, false, false, false, false, true);
 	```
 	 */
-	fn set_active_account(&self, token: Token, label: &String) -> Result<(), ErrorKind>;
+	fn set_active_account(&self, token: Token, label: &String) -> Result<(), Error>;
 
 	/**
 	Networked version of [Owner::retrieve_outputs](struct.Owner.html#method.retrieve_outputs).
@@ -218,13 +220,14 @@ pub trait OwnerRpcV3 {
 	# , true, 2, false, false, false, false, true);
 	```
 	*/
+
 	fn retrieve_outputs(
 		&self,
 		token: Token,
 		include_spent: bool,
 		refresh_from_node: bool,
 		tx_id: Option<u32>,
-	) -> Result<(bool, Vec<OutputCommitMapping>), ErrorKind>;
+	) -> Result<(bool, Vec<OutputCommitMapping>), Error>;
 
 	/**
 	Networked version of [Owner::retrieve_txs](struct.Owner.html#method.retrieve_txs).
@@ -277,9 +280,11 @@ pub trait OwnerRpcV3 {
 				  "output_height": 1,
 				  "parent_key_id": "0200000000000000000000000000000000",
 				  "payment_proof": null,
+				  "reverted_after": null,
 				  "stored_tx": null,
 				  "ttl_cutoff_height": null,
 				  "tx_slate_id": null,
+				  "reverted_after": null,
 				  "tx_type": "ConfirmedCoinbase"
 				},
 				{
@@ -304,6 +309,116 @@ pub trait OwnerRpcV3 {
 				  "output_height": 2,
 				  "parent_key_id": "0200000000000000000000000000000000",
 				  "payment_proof": null,
+				  "reverted_after": null,
+				  "stored_tx": null,
+				  "ttl_cutoff_height": null,
+				  "reverted_after": null,
+				  "tx_slate_id": null,
+				  "tx_type": "ConfirmedCoinbase"
+				}
+			  ]
+			]
+		  }
+		}
+	# "#
+	# , true, 2, false, false, false, false, true);
+	```
+
+	 */
+
+	fn retrieve_txs(
+		&self,
+		token: Token,
+		refresh_from_node: bool,
+		tx_id: Option<u32>,
+		tx_slate_id: Option<Uuid>,
+	) -> Result<(bool, Vec<TxLogEntryAPI>), Error>;
+
+	/**
+	Networked version of [Owner::retrieve_txs](struct.Owner.html#method.retrieve_txs), which passes only the `tx_query_args`
+	parameter. See  (../grin_wallet_libwallet/types.struct.RetrieveTxQueryArgs.html)
+
+	```
+		# grin_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
+		# r#"
+		{
+			"jsonrpc": "2.0",
+			"method": "query_txs",
+			"params": {
+				"token": "d202964900000000d302964900000000d402964900000000d502964900000000",
+				"refresh_from_node": true,
+				"query": {
+					"min_id": 0,
+					"max_id": 100,
+					"min_amount": "0",
+					"max_amount": "60000000000",
+					"sort_field": "Id",
+					"sort_order": "Asc"
+				}
+			},
+			"id": 1
+		}
+		# "#
+		# ,
+		# r#"
+		{
+		  "id": 1,
+		  "jsonrpc": "2.0",
+		  "result": {
+			"Ok": [
+			  true,
+			  [
+				{
+				  "address": null,
+				  "amount_credited": "2380952380",
+				  "amount_debited": "0",
+				  "confirmation_ts": "2019-01-15T16:01:26Z",
+				  "confirmed": true,
+				  "creation_ts": "2019-01-15T16:01:26Z",
+				  "fee": null,
+				  "id": 0,
+				  "input_commits": [],
+				  "kernel_excess": "099beea8f814120ac8c559027e55cb26986ae40e279e3093a7d4a52d827a23f0e7",
+				  "kernel_lookup_min_height": 1,
+				  "kernel_offset": null,
+				  "messages": null,
+				  "num_inputs": 0,
+				  "num_outputs": 1,
+				  "output_commits": [
+					"0910c1752100733bae49e877286835aab76d5856ef8139b6c6e3f51798aa461b03"
+				  ],
+				  "output_height": 1,
+				  "parent_key_id": "0200000000000000000000000000000000",
+				  "payment_proof": null,
+				  "reverted_after": null,
+				  "stored_tx": null,
+				  "ttl_cutoff_height": null,
+				  "tx_slate_id": null,
+				  "tx_type": "ConfirmedCoinbase"
+				},
+				{
+				  "address": null,
+				  "amount_credited": "2380952380",
+				  "amount_debited": "0",
+				  "confirmation_ts": "2019-01-15T16:01:26Z",
+				  "confirmed": true,
+				  "creation_ts": "2019-01-15T16:01:26Z",
+				  "fee": null,
+				  "id": 1,
+				  "input_commits": [],
+				  "kernel_excess": "09f7677adc7caf8bb44a4ee27d27dfe9ffa1010847a18b182bbb7100bb02f9259e",
+				  "kernel_lookup_min_height": 2,
+				  "kernel_offset": null,
+				  "messages": null,
+				  "num_inputs": 0,
+				  "num_outputs": 1,
+				  "output_commits": [
+					"098778ce2243fa34e5876c8cb7f6dbbbd6a5649c1561973a807a6811941c12363c"
+				  ],
+				  "output_height": 2,
+				  "parent_key_id": "0200000000000000000000000000000000",
+				  "payment_proof": null,
+				  "reverted_after": null,
 				  "stored_tx": null,
 				  "ttl_cutoff_height": null,
 				  "tx_slate_id": null,
@@ -316,15 +431,15 @@ pub trait OwnerRpcV3 {
 	# "#
 	# , true, 2, false, false, false, false, true);
 	```
+
 	*/
 
-	fn retrieve_txs(
+	fn query_txs(
 		&self,
 		token: Token,
 		refresh_from_node: bool,
-		tx_id: Option<u32>,
-		tx_slate_id: Option<Uuid>,
-	) -> Result<(bool, Vec<TxLogEntryAPI>), ErrorKind>;
+		query: RetrieveTxQueryArgs,
+	) -> Result<(bool, Vec<TxLogEntryAPI>), Error>;
 
 	/**
 	Networked version of [Owner::retrieve_summary_info](struct.Owner.html#method.retrieve_summary_info).
@@ -357,6 +472,7 @@ pub trait OwnerRpcV3 {
 			"amount_currently_spendable": "2380952380",
 			"amount_immature": "7142857140",
 			"amount_locked": "0",
+			"amount_reverted": "0",
 			"last_confirmed_height": "4",
 			"minimum_confirmations": "1",
 			"total": "9523809520"
@@ -374,7 +490,7 @@ pub trait OwnerRpcV3 {
 		token: Token,
 		refresh_from_node: bool,
 		minimum_confirmations: u64,
-	) -> Result<(bool, WalletInfo), ErrorKind>;
+	) -> Result<(bool, WalletInfo), Error>;
 
 	/**
 	Networked version of [Owner::init_send_tx](struct.Owner.html#method.init_send_tx).
@@ -726,7 +842,7 @@ pub trait OwnerRpcV3 {
 	```
 	*/
 
-	fn init_send_tx(&self, token: Token, args: InitTxArgs) -> Result<VersionedSlate, ErrorKind>;
+	fn init_send_tx(&self, token: Token, args: InitTxArgs) -> Result<VersionedSlate, Error>;
 
 	/**
 	Networked version of [Owner::issue_invoice_tx](struct.Owner.html#method.issue_invoice_tx).
@@ -922,7 +1038,116 @@ pub trait OwnerRpcV3 {
 		&self,
 		token: Token,
 		args: IssueInvoiceTxArgs,
-	) -> Result<VersionedSlate, ErrorKind>;
+	) -> Result<VersionedSlate, Error>;
+
+	/**
+	Networked version of [Owner::get_rewind_hash](struct.Owner.html#method.get_rewind_hash).
+	```
+	# grin_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
+	# r#"
+	{
+		"jsonrpc": "2.0",
+		"method": "get_rewind_hash",
+		"params": {
+			"token": "d202964900000000d302964900000000d402964900000000d502964900000000"
+		},
+		"id": 1
+	}
+	# "#
+	# ,
+	# r#"
+	{
+		"id":1,
+		"jsonrpc":"2.0",
+		"result":{
+			"Ok":"c820c52a492b7db511c752035483d0e50e8fd3ec62544f1b99638e220a4682de"
+		}
+	}
+	# "#
+	# ,true, 0, false, false, false, false, false);
+	```
+	 */
+	fn get_rewind_hash(&self, token: Token) -> Result<String, Error>;
+
+	/**
+	Networked version of [Owner::scan_rewind_hash](struct.Owner.html#method.scan_rewind_hash).
+	```
+	# grin_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
+	# r#"
+	{
+		"jsonrpc": "2.0",
+		"method": "scan_rewind_hash",
+		"params": {
+			"rewind_hash": "c820c52a492b7db511c752035483d0e50e8fd3ec62544f1b99638e220a4682de",
+			"start_height": 1
+		},
+		"id": 1
+	}
+	# "#
+	# ,
+	# r#"
+	{
+		"id":1,
+		"jsonrpc":"2.0",
+		"result":{
+			"Ok":{
+				"last_pmmr_index":8,
+				"output_result": [
+				  {
+					"commit": "0910c1752100733bae49e877286835aab76d5856ef8139b6c6e3f51798aa461b03",
+					"height": 1,
+					"is_coinbase": true,
+					"lock_height": 4,
+					"mmr_index": 1,
+					"value": 2380952380
+				 },
+			   {
+				 "commit": "098778ce2243fa34e5876c8cb7f6dbbbd6a5649c1561973a807a6811941c12363c",
+				 "height": 2,
+				 "is_coinbase": true,
+				 "lock_height": 5,
+				 "mmr_index": 2,
+				 "value": 2380952380
+			   },
+			   {
+				 "commit": "09c22771c700c9ccc1feea8fb151b4e496607bb442f1e1e7bb93992f6422886954",
+				 "height": 3,
+				 "is_coinbase": true,
+				 "lock_height": 6,
+				 "mmr_index": 4,
+				 "value": 2380952380
+			   },
+			   {
+				 "commit": "0834ced7ae2dbf08f2008ff99fe0f447863405c0622233ece68d39e2ae02f7bf0c",
+				 "height": 4,
+				 "is_coinbase": true,
+				 "lock_height": 7,
+				 "mmr_index": 5,
+				 "value": 2380952380
+			   },
+			   {
+				 "commit": "08e0404fe044830d8f5be9953be5c70b5b7d525e4ecd3973437d9d6005ea5cd2bc",
+				 "height": 5,
+				 "is_coinbase": true,
+				 "lock_height": 8,
+				 "mmr_index": 8,
+				 "value": 2380952380
+			   }
+			 ],
+			 "rewind_hash": "c820c52a492b7db511c752035483d0e50e8fd3ec62544f1b99638e220a4682de",
+			 "total_balance": 11904761900
+			}
+		}
+	 }
+	# "#
+	# ,true, 5, false, false, false, false, false);
+	```
+	 */
+	fn scan_rewind_hash(
+		&self,
+		rewind_hash: String,
+		start_height: Option<u64>,
+	) -> Result<ViewWallet, Error>;
 
 	/**
 	Networked version of [Owner::process_invoice_tx](struct.Owner.html#method.process_invoice_tx).
@@ -1274,7 +1499,7 @@ pub trait OwnerRpcV3 {
 		token: Token,
 		slate: VersionedSlate,
 		args: InitTxArgs,
-	) -> Result<VersionedSlate, ErrorKind>;
+	) -> Result<VersionedSlate, Error>;
 
 	/**
 	Networked version of [Owner::tx_lock_outputs](struct.Owner.html#method.tx_lock_outputs).
@@ -1452,7 +1677,7 @@ pub trait OwnerRpcV3 {
 		token: Token,
 		slate: VersionedSlate,
 		participant_id: usize,
-	) -> Result<(), ErrorKind>;
+	) -> Result<(), Error>;
 
 	/**
 	Networked version of [Owner::finalize_tx](struct.Owner.html#method.finalize_tx).
@@ -1811,8 +2036,7 @@ pub trait OwnerRpcV3 {
 	# , true, 5, true, true, false, false, true);
 	```
 	 */
-	fn finalize_tx(&self, token: Token, slate: VersionedSlate)
-		-> Result<VersionedSlate, ErrorKind>;
+	fn finalize_tx(&self, token: Token, slate: VersionedSlate) -> Result<VersionedSlate, Error>;
 
 	/**
 	Networked version of [Owner::post_tx](struct.Owner.html#method.post_tx).
@@ -1880,7 +2104,7 @@ pub trait OwnerRpcV3 {
 	```
 	 */
 
-	fn post_tx(&self, token: Token, tx: TransactionV3, fluff: bool) -> Result<(), ErrorKind>;
+	fn post_tx(&self, token: Token, tx: TransactionV3, fluff: bool) -> Result<(), Error>;
 
 	/**
 	Networked version of [Owner::cancel_tx](struct.Owner.html#method.cancel_tx).
@@ -1943,7 +2167,7 @@ pub trait OwnerRpcV3 {
 		token: Token,
 		tx_id: Option<u32>,
 		tx_slate_id: Option<Uuid>,
-	) -> Result<(), ErrorKind>;
+	) -> Result<(), Error>;
 
 	/**
 	Networked version of [Owner::get_stored_tx](struct.Owner.html#method.get_stored_tx).
@@ -2017,7 +2241,7 @@ pub trait OwnerRpcV3 {
 		&self,
 		token: Token,
 		tx: &TxLogEntryAPI,
-	) -> Result<Option<TransactionV3>, ErrorKind>;
+	) -> Result<Option<TransactionV3>, Error>;
 
 	/**
 	Networked version of [Owner::verify_slate_messages](struct.Owner.html#method.verify_slate_messages).
@@ -2099,7 +2323,7 @@ pub trait OwnerRpcV3 {
 	# ,true, 0 ,false, false, false, false, true);
 	```
 	*/
-	fn verify_slate_messages(&self, token: Token, slate: VersionedSlate) -> Result<(), ErrorKind>;
+	fn verify_slate_messages(&self, token: Token, slate: VersionedSlate) -> Result<(), Error>;
 
 	/**
 	Networked version of [Owner::scan](struct.Owner.html#method.scan).
@@ -2137,7 +2361,7 @@ pub trait OwnerRpcV3 {
 		token: Token,
 		start_height: Option<u64>,
 		delete_unconfirmed: bool,
-	) -> Result<(), ErrorKind>;
+	) -> Result<(), Error>;
 
 	/**
 	Networked version of [Owner::node_height](struct.Owner.html#method.node_height).
@@ -2171,7 +2395,7 @@ pub trait OwnerRpcV3 {
 	# , true, 5, false, false, false, false, true);
 	```
 	 */
-	fn node_height(&self, token: Token) -> Result<NodeHeightResult, ErrorKind>;
+	fn node_height(&self, token: Token) -> Result<NodeHeightResult, Error>;
 
 	/**
 		Initializes the secure JSON-RPC API. This function must be called and a shared key
@@ -2225,7 +2449,7 @@ pub trait OwnerRpcV3 {
 
 	*/
 
-	fn init_secure_api(&self, ecdh_pubkey: ECDHPubkey) -> Result<ECDHPubkey, ErrorKind>;
+	fn init_secure_api(&self, ecdh_pubkey: ECDHPubkey) -> Result<ECDHPubkey, Error>;
 
 	/**
 	Networked version of [Owner::get_top_level_directory](struct.Owner.html#method.get_top_level_directory).
@@ -2255,7 +2479,7 @@ pub trait OwnerRpcV3 {
 	```
 	*/
 
-	fn get_top_level_directory(&self) -> Result<String, ErrorKind>;
+	fn get_top_level_directory(&self) -> Result<String, Error>;
 
 	/**
 	Networked version of [Owner::set_top_level_directory](struct.Owner.html#method.set_top_level_directory).
@@ -2285,7 +2509,7 @@ pub trait OwnerRpcV3 {
 	```
 	*/
 
-	fn set_top_level_directory(&self, dir: String) -> Result<(), ErrorKind>;
+	fn set_top_level_directory(&self, dir: String) -> Result<(), Error>;
 
 	/**
 	Networked version of [Owner::create_config](struct.Owner.html#method.create_config).
@@ -2362,7 +2586,7 @@ pub trait OwnerRpcV3 {
 		logging_config: Option<LoggingConfig>,
 		tor_config: Option<TorConfig>,
 		mqs_config: Option<MQSConfig>,
-	) -> Result<(), ErrorKind>;
+	) -> Result<(), Error>;
 
 	/**
 	Networked version of [Owner::create_wallet](struct.Owner.html#method.create_wallet).
@@ -2401,7 +2625,7 @@ pub trait OwnerRpcV3 {
 		mnemonic: Option<String>,
 		mnemonic_length: u32,
 		password: String,
-	) -> Result<(), ErrorKind>;
+	) -> Result<(), Error>;
 
 	/**
 	Networked version of [Owner::open_wallet](struct.Owner.html#method.open_wallet).
@@ -2432,7 +2656,7 @@ pub trait OwnerRpcV3 {
 	```
 	*/
 
-	fn open_wallet(&self, name: Option<String>, password: String) -> Result<Token, ErrorKind>;
+	fn open_wallet(&self, name: Option<String>, password: String) -> Result<Token, Error>;
 
 	/**
 	Networked version of [Owner::close_wallet](struct.Owner.html#method.close_wallet).
@@ -2462,7 +2686,7 @@ pub trait OwnerRpcV3 {
 	```
 	*/
 
-	fn close_wallet(&self, name: Option<String>) -> Result<(), ErrorKind>;
+	fn close_wallet(&self, name: Option<String>) -> Result<(), Error>;
 
 	/**
 	Networked version of [Owner::get_mnemonic](struct.Owner.html#method.get_mnemonic).
@@ -2493,7 +2717,7 @@ pub trait OwnerRpcV3 {
 	```
 	*/
 
-	fn get_mnemonic(&self, name: Option<String>, password: String) -> Result<String, ErrorKind>;
+	fn get_mnemonic(&self, name: Option<String>, password: String) -> Result<String, Error>;
 
 	/**
 	Networked version of [Owner::change_password](struct.Owner.html#method.change_password).
@@ -2524,12 +2748,7 @@ pub trait OwnerRpcV3 {
 	# , true, 0, false, false, false, false, true);
 	```
 	*/
-	fn change_password(
-		&self,
-		name: Option<String>,
-		old: String,
-		new: String,
-	) -> Result<(), ErrorKind>;
+	fn change_password(&self, name: Option<String>, old: String, new: String) -> Result<(), Error>;
 
 	/**
 	Networked version of [Owner::delete_wallet](struct.Owner.html#method.delete_wallet).
@@ -2558,7 +2777,7 @@ pub trait OwnerRpcV3 {
 	# , true, 0, false, false, false, false, true);
 	```
 	*/
-	fn delete_wallet(&self, name: Option<String>) -> Result<(), ErrorKind>;
+	fn delete_wallet(&self, name: Option<String>) -> Result<(), Error>;
 
 	/**
 	Networked version of [Owner::start_updated](struct.Owner.html#method.start_updater).
@@ -2589,7 +2808,7 @@ pub trait OwnerRpcV3 {
 	```
 	*/
 
-	fn start_updater(&self, token: Token, frequency: u32) -> Result<(), ErrorKind>;
+	fn start_updater(&self, token: Token, frequency: u32) -> Result<(), Error>;
 
 	/**
 	Networked version of [Owner::stop_updater](struct.Owner.html#method.stop_updater).
@@ -2616,7 +2835,7 @@ pub trait OwnerRpcV3 {
 	# , true, 0, false, false, false, false, true);
 	```
 	*/
-	fn stop_updater(&self) -> Result<(), ErrorKind>;
+	fn stop_updater(&self) -> Result<(), Error>;
 
 	/**
 	Networked version of [Owner::get_updater_messages](struct.Owner.html#method.get_updater_messages).
@@ -2646,7 +2865,7 @@ pub trait OwnerRpcV3 {
 	```
 	*/
 
-	fn get_updater_messages(&self, count: u32) -> Result<Vec<StatusMessage>, ErrorKind>;
+	fn get_updater_messages(&self, count: u32) -> Result<Vec<StatusMessage>, Error>;
 
 	/**
 	Networked version of [Owner::get_mqs_address](struct.Owner.html#method.get_mqs_address).
@@ -2680,7 +2899,7 @@ pub trait OwnerRpcV3 {
 	```
 	*/
 
-	fn get_mqs_address(&self, token: Token) -> Result<ProvableAddress, ErrorKind>;
+	fn get_mqs_address(&self, token: Token) -> Result<ProvableAddress, Error>;
 
 	/**
 	Networked version of [Owner::get_wallet_public_address](struct.Owner.html#method.get_wallet_public_address).
@@ -2714,7 +2933,7 @@ pub trait OwnerRpcV3 {
 	```
 	*/
 
-	fn get_wallet_public_address(&self, token: Token) -> Result<ProvableAddress, ErrorKind>;
+	fn get_wallet_public_address(&self, token: Token) -> Result<ProvableAddress, Error>;
 
 	/**
 	Networked version of [Owner::retrieve_payment_proof](struct.Owner.html#method.retrieve_payment_proof).
@@ -2811,7 +3030,7 @@ pub trait OwnerRpcV3 {
 		refresh_from_node: bool,
 		tx_id: Option<u32>,
 		tx_slate_id: Option<Uuid>,
-	) -> Result<PaymentProof, ErrorKind>;
+	) -> Result<PaymentProof, Error>;
 
 	/**
 	Networked version of [Owner::verify_payment_proof](struct.Owner.html#method.verify_payment_proof).
@@ -2908,7 +3127,7 @@ pub trait OwnerRpcV3 {
 		&self,
 		token: Token,
 		proof: PaymentProof,
-	) -> Result<(bool, bool), ErrorKind>;
+	) -> Result<(bool, bool), Error>;
 
 	/**
 	Networked version of [Owner::set_tor_config](struct.Owner.html#method.set_tor_config).
@@ -2942,7 +3161,51 @@ pub trait OwnerRpcV3 {
 	# , true, 0, false, false, false, false, true);
 	```
 	*/
-	fn set_tor_config(&self, tor_config: Option<TorConfig>) -> Result<(), ErrorKind>;
+	fn set_tor_config(&self, tor_config: Option<TorConfig>) -> Result<(), Error>;
+
+	/**
+	Networked version of [Owner::build_output](struct.Owner.html#method.build_output).
+	```
+	# grin_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
+	# r#"
+	{
+		"jsonrpc": "2.0",
+		"method": "build_output",
+		"params": {
+			"token": "d202964900000000d302964900000000d402964900000000d502964900000000",
+			"features": "Plain",
+			"amount":  "60000000000"
+		},
+		"id": 1
+	}
+	# "#
+	# ,
+	# r#"
+	{
+		"id": 1,
+		"jsonrpc": "2.0",
+		"result": {
+			"Ok": {
+				"blind": "089705aa74b638ee391e295d227c534a50dd58e603bca97a4404747cf8a5a189",
+				"key_id": "0300000000000000000000000000000000",
+				"output": {
+					"commit": "08e1da9e6dc4d6e808a718b2f110a991dd775d65ce5ae408a4e1f002a4961aa9e7",
+					"features": "Plain",
+					"proof": "4b5d6fb1b4d143fc50c83aef61c5410be760a395ed71f3424f7746bf5ee0539ae299569d99b73ea6583b1057834551faa0ac8cfe34c75431b86d6f37dec1ff070fc01f44babf0d3446781564ff7a143242ea67cb4ff7b11fe399735695c3fe70b40b71f31b04cf73b1d1f3430fb53a8c9f990fae48c09b42f8212d60a2d3ce0b8ea4dc0d37a82c3f328162ab8d50f48c28cb9a721a87a40aa3915bf9fffc0cd820e15b758e8565ad7fbf22d03711dc83f98e7c9f955d9398a1c75bc96df2ee64751592953cced38527b3f68282d2ca2fdf2994fbd93a1642fb9d265d57c3cf7df01501da569f2b4e606a1c3084c807a39947a3e1fd41b0647891e1f64842a2b98e694b93857e30691e0b0bca7bc49dec9d6af1003a40b3431ae0bcae8454a438523d066dcac4f194d8370c5ba6567830f302e1ec2607b8d1720bb6c6c57c549f1a3ef7ad2b54dfdd0178329e0723b8a55b438a1e43a984c072d6505aa5e193042d9703484c8383e78d9553684fad5e399f11f8ae6577e4ac4e3c2478e3fd8df0164600b4816b2167c2bf5b9fd7dd29cc1041fccbf1392240fd7c1dc39dd1ebc86b882a383dfe683e9f029d40b2829e3bf56b9760e1d81b7ad4a9066b1c01ccbea6b196154443cacedaccd5ff4fd25cbd9a8f0d271d5688bbe4b956fd34d3413d0478ac9400f6f1ff3890dea10be072d2d48bfa69a6e1e1b6fffaa9db4663eb1ecc26da331072877eb6d4a05a41584d44ed5d2a96a98727563bf180768940c99a15e9183ae927f47f2c0e13d9c00d7ebf0dacb1b6c139d3e18701d10c9d1ef300eeeab756eaa4584c3f5fb42793f7c2517601ae31d887c177eec8bce35c0aa16ba6991fd885deb9ff7b44ffd489f8e9e9d0717141501143c027d33e8a4baf6d85c859ff8a04d1aafbb3d1a97dc6c8ee3642ec41b8e43a137b43c8e60d69a6f19eb9749e"
+				}
+			}
+		}
+	}
+	# "#
+	# , true, 0, false, false, false, false, true);
+	```
+	 */
+	fn build_output(
+		&self,
+		token: Token,
+		features: OutputFeatures,
+		amount: Amount,
+	) -> Result<BuiltOutput, Error>;
 
 	/**
 	Networked version of [Owner::encode_slatepack_message](struct.Owner.html#method.encode_slatepack_message).
@@ -3114,7 +3377,7 @@ pub trait OwnerRpcV3 {
 		content: SlatePurpose,
 		recipient: Option<ProvableAddress>,
 		address_index: Option<u32>,
-	) -> Result<String, ErrorKind>;
+	) -> Result<String, Error>;
 
 	/**
 	Networked version of [Owner::decode_slatepack_message](struct.Owner.html#method.decode_slatepack_message).
@@ -3292,7 +3555,7 @@ pub trait OwnerRpcV3 {
 		token: Token,
 		message: String,
 		address_index: Option<u32>,
-	) -> Result<SlatepackInfo, ErrorKind>;
+	) -> Result<SlatepackInfo, Error>;
 }
 
 impl<L, C, K> OwnerRpcV3 for Owner<L, C, K>
@@ -3301,18 +3564,16 @@ where
 	C: NodeClient + 'static,
 	K: Keychain + 'static,
 {
-	fn accounts(&self, token: Token) -> Result<Vec<AcctPathMapping>, ErrorKind> {
-		Owner::accounts(self, (&token.keychain_mask).as_ref()).map_err(|e| e.kind())
+	fn accounts(&self, token: Token) -> Result<Vec<AcctPathMapping>, Error> {
+		Owner::accounts(self, (&token.keychain_mask).as_ref())
 	}
 
-	fn create_account_path(&self, token: Token, label: &String) -> Result<Identifier, ErrorKind> {
+	fn create_account_path(&self, token: Token, label: &String) -> Result<Identifier, Error> {
 		Owner::create_account_path(self, (&token.keychain_mask).as_ref(), label)
-			.map_err(|e| e.kind())
 	}
 
-	fn set_active_account(&self, token: Token, label: &String) -> Result<(), ErrorKind> {
+	fn set_active_account(&self, token: Token, label: &String) -> Result<(), Error> {
 		Owner::set_active_account(self, (&token.keychain_mask).as_ref(), label)
-			.map_err(|e| e.kind())
 	}
 
 	fn retrieve_outputs(
@@ -3321,7 +3582,7 @@ where
 		include_spent: bool,
 		refresh_from_node: bool,
 		tx_id: Option<u32>,
-	) -> Result<(bool, Vec<OutputCommitMapping>), ErrorKind> {
+	) -> Result<(bool, Vec<OutputCommitMapping>), Error> {
 		Owner::retrieve_outputs(
 			self,
 			(&token.keychain_mask).as_ref(),
@@ -3329,7 +3590,6 @@ where
 			refresh_from_node,
 			tx_id,
 		)
-		.map_err(|e| e.kind())
 	}
 
 	fn retrieve_txs(
@@ -3338,15 +3598,39 @@ where
 		refresh_from_node: bool,
 		tx_id: Option<u32>,
 		tx_slate_id: Option<Uuid>,
-	) -> Result<(bool, Vec<TxLogEntryAPI>), ErrorKind> {
+	) -> Result<(bool, Vec<TxLogEntryAPI>), Error> {
 		Owner::retrieve_txs(
 			self,
 			(&token.keychain_mask).as_ref(),
 			refresh_from_node,
 			tx_id,
 			tx_slate_id,
+			None,
 		)
-		.map_err(|e| e.kind())
+		.map(|(b, tx)| {
+			(
+				b,
+				tx.iter()
+					.map(|t| TxLogEntryAPI::from_txlogemtry(t))
+					.collect(),
+			)
+		})
+	}
+
+	fn query_txs(
+		&self,
+		token: Token,
+		refresh_from_node: bool,
+		query: RetrieveTxQueryArgs,
+	) -> Result<(bool, Vec<TxLogEntryAPI>), Error> {
+		Owner::retrieve_txs(
+			self,
+			(&token.keychain_mask).as_ref(),
+			refresh_from_node,
+			None,
+			None,
+			Some(query),
+		)
 		.map(|(b, tx)| {
 			(
 				b,
@@ -3362,35 +3646,32 @@ where
 		token: Token,
 		refresh_from_node: bool,
 		minimum_confirmations: u64,
-	) -> Result<(bool, WalletInfo), ErrorKind> {
+	) -> Result<(bool, WalletInfo), Error> {
 		Owner::retrieve_summary_info(
 			self,
 			(&token.keychain_mask).as_ref(),
 			refresh_from_node,
 			minimum_confirmations,
 		)
-		.map_err(|e| e.kind())
 	}
 
-	fn init_send_tx(&self, token: Token, args: InitTxArgs) -> Result<VersionedSlate, ErrorKind> {
-		let slate = Owner::init_send_tx(self, (&token.keychain_mask).as_ref(), &args, 1)
-			.map_err(|e| e.kind())?;
+	fn init_send_tx(&self, token: Token, args: InitTxArgs) -> Result<VersionedSlate, Error> {
+		let slate = Owner::init_send_tx(self, (&token.keychain_mask).as_ref(), &args, 1)?;
 		// Return plain slate. If caller don't want sent slate with this API, than probvably caller want
 		// handle the workflow in lower level.
 		// If caller did send with thius API - then the slate is just for logging. For logging it is
 		// better to have plain slate so it can be readable.
 		let version = slate.lowest_version();
 		Ok(VersionedSlate::into_version_plain(slate, version)
-			.map_err(|e| ErrorKind::SlatepackEncodeError(format!("{}", e)))?)
+			.map_err(|e| Error::SlatepackEncodeError(format!("{}", e)))?)
 	}
 
 	fn issue_invoice_tx(
 		&self,
 		token: Token,
 		args: IssueInvoiceTxArgs,
-	) -> Result<VersionedSlate, ErrorKind> {
-		let slate = Owner::issue_invoice_tx(self, (&token.keychain_mask).as_ref(), &args)
-			.map_err(|e| e.kind())?;
+	) -> Result<VersionedSlate, Error> {
+		let slate = Owner::issue_invoice_tx(self, (&token.keychain_mask).as_ref(), &args)?;
 
 		// Invoice slate respond does a slatepack encoding if recipient is defined.
 
@@ -3408,7 +3689,7 @@ where
 			self.doctest_mode,
 		)
 		.map_err(|e| {
-			ErrorKind::SlatepackEncodeError(format!("Unable to encode the slatepack, {}", e))
+			Error::SlatepackEncodeError(format!("Unable to encode the slatepack, {}", e))
 		})?;
 		Ok(res_slate)
 	}
@@ -3418,15 +3699,15 @@ where
 		token: Token,
 		in_slate: VersionedSlate,
 		args: InitTxArgs,
-	) -> Result<VersionedSlate, ErrorKind> {
+	) -> Result<VersionedSlate, Error> {
 		let version = in_slate.version();
 		let (slate_from, content, sender) =
 			Owner::decrypt_versioned_slate(self, (&token.keychain_mask).as_ref(), in_slate)
-				.map_err(|e| ErrorKind::SlatepackDecodeError(format!("{}", e)))?;
+				.map_err(|e| Error::SlatepackDecodeError(format!("{}", e)))?;
 
 		if let Some(content) = &content {
 			if *content != SlatePurpose::InvoiceInitial {
-				return Err(ErrorKind::SlatepackDecodeError(format!(
+				return Err(Error::SlatepackDecodeError(format!(
 					"Expecting InvoiceInitial slate content, get {:?}",
 					content
 				)));
@@ -3434,8 +3715,7 @@ where
 		}
 
 		let out_slate =
-			Owner::process_invoice_tx(self, (&token.keychain_mask).as_ref(), &slate_from, &args)
-				.map_err(|e| e.kind())?;
+			Owner::process_invoice_tx(self, (&token.keychain_mask).as_ref(), &slate_from, &args)?;
 
 		let res_slate = Owner::encrypt_slate(
 			self,
@@ -3448,23 +3728,18 @@ where
 			self.doctest_mode,
 		)
 		.map_err(|e| {
-			ErrorKind::SlatepackEncodeError(format!("Unable to encode the slatepack, {}", e))
+			Error::SlatepackEncodeError(format!("Unable to encode the slatepack, {}", e))
 		})?;
 		Ok(res_slate)
 	}
 
-	fn finalize_tx(
-		&self,
-		token: Token,
-		in_slate: VersionedSlate,
-	) -> Result<VersionedSlate, ErrorKind> {
+	fn finalize_tx(&self, token: Token, in_slate: VersionedSlate) -> Result<VersionedSlate, Error> {
 		let version = in_slate.version();
 		let (slate_from, _content, sender) =
 			Owner::decrypt_versioned_slate(self, (&token.keychain_mask).as_ref(), in_slate)
-				.map_err(|e| ErrorKind::SlatepackDecodeError(format!("{}", e)))?;
+				.map_err(|e| Error::SlatepackDecodeError(format!("{}", e)))?;
 
-		let out_slate = Owner::finalize_tx(self, (&token.keychain_mask).as_ref(), &slate_from)
-			.map_err(|e| e.kind())?;
+		let out_slate = Owner::finalize_tx(self, (&token.keychain_mask).as_ref(), &slate_from)?;
 
 		let res_slate = Owner::encrypt_slate(
 			self,
@@ -3477,7 +3752,7 @@ where
 			self.doctest_mode,
 		)
 		.map_err(|e| {
-			ErrorKind::SlatepackEncodeError(format!("Unable to encode the slatepack, {}", e))
+			Error::SlatepackEncodeError(format!("Unable to encode the slatepack, {}", e))
 		})?;
 		Ok(res_slate)
 	}
@@ -3487,10 +3762,10 @@ where
 		token: Token,
 		in_slate: VersionedSlate,
 		participant_id: usize,
-	) -> Result<(), ErrorKind> {
+	) -> Result<(), Error> {
 		let (slate_from, _content, _sender) =
 			Owner::decrypt_versioned_slate(self, (&token.keychain_mask).as_ref(), in_slate)
-				.map_err(|e| ErrorKind::SlatepackDecodeError(format!("{}", e)))?;
+				.map_err(|e| Error::SlatepackDecodeError(format!("{}", e)))?;
 
 		Owner::tx_lock_outputs(
 			self,
@@ -3499,7 +3774,6 @@ where
 			None, // RPC doesn't support address
 			participant_id,
 		)
-		.map_err(|e| e.kind())
 	}
 
 	fn cancel_tx(
@@ -3507,16 +3781,15 @@ where
 		token: Token,
 		tx_id: Option<u32>,
 		tx_slate_id: Option<Uuid>,
-	) -> Result<(), ErrorKind> {
+	) -> Result<(), Error> {
 		Owner::cancel_tx(self, (&token.keychain_mask).as_ref(), tx_id, tx_slate_id)
-			.map_err(|e| e.kind())
 	}
 
 	fn get_stored_tx(
 		&self,
 		token: Token,
 		tx: &TxLogEntryAPI,
-	) -> Result<Option<TransactionV3>, ErrorKind> {
+	) -> Result<Option<TransactionV3>, Error> {
 		Owner::get_stored_tx(
 			self,
 			(&token.keychain_mask).as_ref(),
@@ -3557,31 +3830,42 @@ where
 			),
 		)
 		.map(|x| x.map(TransactionV3::from))
-		.map_err(|e| e.kind())
 	}
 
-	fn post_tx(&self, token: Token, tx: TransactionV3, fluff: bool) -> Result<(), ErrorKind> {
+	fn post_tx(&self, token: Token, tx: TransactionV3, fluff: bool) -> Result<(), Error> {
 		Owner::post_tx(
 			self,
 			(&token.keychain_mask).as_ref(),
-			&Transaction::from(tx),
+			&Transaction::try_from(tx).map_err(|e| {
+				Error::GenericError(format!("Unable convert V3 transaction, {}", e))
+			})?,
 			fluff,
 		)
-		.map_err(|e| e.kind())
 	}
 
-	fn verify_slate_messages(&self, token: Token, slate: VersionedSlate) -> Result<(), ErrorKind> {
+	fn verify_slate_messages(&self, token: Token, slate: VersionedSlate) -> Result<(), Error> {
 		if slate.is_slatepack() {
-			return Err(ErrorKind::SlatepackDecodeError(
+			return Err(Error::SlatepackDecodeError(
 				"verify_slate_messages is not applicable for slatepack".to_string(),
 			));
 		}
 		let slate = slate
-			.into_slate_plain()
-			.map_err(|e| ErrorKind::SlatepackDecodeError(format!("{}", e)))?;
+			.into_slate_plain(true)
+			.map_err(|e| Error::SlatepackDecodeError(format!("{}", e)))?;
 
 		Owner::verify_slate_messages(self, (&token.keychain_mask).as_ref(), &Slate::from(slate))
-			.map_err(|e| e.kind())
+	}
+
+	fn get_rewind_hash(&self, token: Token) -> Result<String, Error> {
+		Owner::get_rewind_hash(self, (&token.keychain_mask).as_ref())
+	}
+
+	fn scan_rewind_hash(
+		&self,
+		rewind_hash: String,
+		start_height: Option<u64>,
+	) -> Result<ViewWallet, Error> {
+		Owner::scan_rewind_hash(self, rewind_hash, start_height)
 	}
 
 	fn scan(
@@ -3589,43 +3873,42 @@ where
 		token: Token,
 		start_height: Option<u64>,
 		delete_unconfirmed: bool,
-	) -> Result<(), ErrorKind> {
+	) -> Result<(), Error> {
 		Owner::scan(
 			self,
 			(&token.keychain_mask).as_ref(),
 			start_height,
 			delete_unconfirmed,
 		)
-		.map_err(|e| e.kind())
 	}
 
-	fn node_height(&self, token: Token) -> Result<NodeHeightResult, ErrorKind> {
-		Owner::node_height(self, (&token.keychain_mask).as_ref()).map_err(|e| e.kind())
+	fn node_height(&self, token: Token) -> Result<NodeHeightResult, Error> {
+		Owner::node_height(self, (&token.keychain_mask).as_ref())
 	}
 
 	// we have to use e.description  because of the bug at rust-secp256k1-zkp
 	#[allow(deprecated)]
 
-	fn init_secure_api(&self, ecdh_pubkey: ECDHPubkey) -> Result<ECDHPubkey, ErrorKind> {
+	fn init_secure_api(&self, ecdh_pubkey: ECDHPubkey) -> Result<ECDHPubkey, Error> {
 		let secp_inst = static_secp_instance();
 		let secp = secp_inst.lock();
-		let sec_key = SecretKey::new(&mut thread_rng());
+		let sec_key = SecretKey::new(&secp, &mut thread_rng());
 
 		let mut shared_pubkey = ecdh_pubkey.ecdh_pubkey;
 		shared_pubkey
 			.mul_assign(&secp, &sec_key)
-			.map_err(|e| ErrorKind::Secp(format!("{}", e.description())))?;
+			.map_err(|e| Error::Secp(format!("{}", e)))?;
 
-		let x_coord = shared_pubkey.serialize_vec(true);
-		let shared_key = SecretKey::from_slice(&x_coord[1..])
-			.map_err(|e| ErrorKind::Secp(format!("{}", e.description())))?;
+		let x_coord = shared_pubkey.serialize_vec(&secp, true);
+		let shared_key = SecretKey::from_slice(&secp, &x_coord[1..])
+			.map_err(|e| Error::Secp(format!("{}", e)))?;
 		{
 			let mut s = self.shared_key.lock();
 			*s = Some(shared_key);
 		}
 
 		let pub_key = PublicKey::from_secret_key(&secp, &sec_key)
-			.map_err(|e| ErrorKind::Secp(format!("{}", e.description())))?;
+			.map_err(|e| Error::Secp(format!("{}", e)))?;
 
 		Ok(ECDHPubkey {
 			ecdh_pubkey: pub_key,
@@ -3634,12 +3917,12 @@ where
 
 	#[warn(deprecated)]
 
-	fn get_top_level_directory(&self) -> Result<String, ErrorKind> {
-		Owner::get_top_level_directory(self).map_err(|e| e.kind())
+	fn get_top_level_directory(&self) -> Result<String, Error> {
+		Owner::get_top_level_directory(self)
 	}
 
-	fn set_top_level_directory(&self, dir: String) -> Result<(), ErrorKind> {
-		Owner::set_top_level_directory(self, &dir).map_err(|e| e.kind())
+	fn set_top_level_directory(&self, dir: String) -> Result<(), Error> {
+		Owner::set_top_level_directory(self, &dir)
 	}
 
 	fn create_config(
@@ -3649,7 +3932,7 @@ where
 		logging_config: Option<LoggingConfig>,
 		tor_config: Option<TorConfig>,
 		mqs_config: Option<MQSConfig>,
-	) -> Result<(), ErrorKind> {
+	) -> Result<(), Error> {
 		Owner::create_config(
 			self,
 			&chain_type,
@@ -3658,7 +3941,6 @@ where
 			tor_config,
 			mqs_config,
 		)
-		.map_err(|e| e.kind())
 	}
 
 	fn create_wallet(
@@ -3667,7 +3949,7 @@ where
 		mnemonic: Option<String>,
 		mnemonic_length: u32,
 		password: String,
-	) -> Result<(), ErrorKind> {
+	) -> Result<(), Error> {
 		let n = name.as_ref().map(|s| s.as_str());
 		let m = match mnemonic {
 			Some(s) => Some(ZeroingString::from(s)),
@@ -3681,36 +3963,28 @@ where
 			ZeroingString::from(password),
 			None,
 		)
-		.map_err(|e| e.kind())
 	}
 
-	fn open_wallet(&self, name: Option<String>, password: String) -> Result<Token, ErrorKind> {
+	fn open_wallet(&self, name: Option<String>, password: String) -> Result<Token, Error> {
 		let n = name.as_ref().map(|s| s.as_str());
-		let sec_key = Owner::open_wallet(self, n, ZeroingString::from(password), true, None)
-			.map_err(|e| e.kind())?;
+		let sec_key = Owner::open_wallet(self, n, ZeroingString::from(password), true, None)?;
 		Ok(Token {
 			keychain_mask: sec_key,
 		})
 	}
 
-	fn close_wallet(&self, name: Option<String>) -> Result<(), ErrorKind> {
+	fn close_wallet(&self, name: Option<String>) -> Result<(), Error> {
 		let n = name.as_ref().map(|s| s.as_str());
-		Owner::close_wallet(self, n).map_err(|e| e.kind())
+		Owner::close_wallet(self, n)
 	}
 
-	fn get_mnemonic(&self, name: Option<String>, password: String) -> Result<String, ErrorKind> {
+	fn get_mnemonic(&self, name: Option<String>, password: String) -> Result<String, Error> {
 		let n = name.as_ref().map(|s| s.as_str());
-		let res = Owner::get_mnemonic(self, n, ZeroingString::from(password), None)
-			.map_err(|e| e.kind())?;
+		let res = Owner::get_mnemonic(self, n, ZeroingString::from(password), None)?;
 		Ok((&*res).to_string())
 	}
 
-	fn change_password(
-		&self,
-		name: Option<String>,
-		old: String,
-		new: String,
-	) -> Result<(), ErrorKind> {
+	fn change_password(&self, name: Option<String>, old: String, new: String) -> Result<(), Error> {
 		let n = name.as_ref().map(|s| s.as_str());
 		Owner::change_password(
 			self,
@@ -3719,42 +3993,38 @@ where
 			ZeroingString::from(new),
 			None,
 		)
-		.map_err(|e| e.kind())
 	}
 
-	fn delete_wallet(&self, name: Option<String>) -> Result<(), ErrorKind> {
+	fn delete_wallet(&self, name: Option<String>) -> Result<(), Error> {
 		let n = name.as_ref().map(|s| s.as_str());
-		Owner::delete_wallet(self, n).map_err(|e| e.kind())
+		Owner::delete_wallet(self, n)
 	}
 
-	fn start_updater(&self, token: Token, frequency: u32) -> Result<(), ErrorKind> {
+	fn start_updater(&self, token: Token, frequency: u32) -> Result<(), Error> {
 		Owner::start_updater(
 			self,
 			(&token.keychain_mask).as_ref(),
 			Duration::from_millis(frequency as u64),
 		)
-		.map_err(|e| e.kind())
 	}
 
-	fn stop_updater(&self) -> Result<(), ErrorKind> {
-		Owner::stop_updater(self).map_err(|e| e.kind())
+	fn stop_updater(&self) -> Result<(), Error> {
+		Owner::stop_updater(self)
 	}
 
-	fn get_updater_messages(&self, count: u32) -> Result<Vec<StatusMessage>, ErrorKind> {
-		Owner::get_updater_messages(self, count as usize).map_err(|e| e.kind())
+	fn get_updater_messages(&self, count: u32) -> Result<Vec<StatusMessage>, Error> {
+		Owner::get_updater_messages(self, count as usize)
 	}
 
-	fn get_mqs_address(&self, token: Token) -> Result<ProvableAddress, ErrorKind> {
-		let address =
-			Owner::get_mqs_address(self, (&token.keychain_mask).as_ref()).map_err(|e| e.kind())?;
+	fn get_mqs_address(&self, token: Token) -> Result<ProvableAddress, Error> {
+		let address = Owner::get_mqs_address(self, (&token.keychain_mask).as_ref())?;
 		let public_proof_address = ProvableAddress::from_pub_key(&address);
 		println!("mqs_address address {}", public_proof_address.public_key);
 		Ok(public_proof_address)
 	}
 
-	fn get_wallet_public_address(&self, token: Token) -> Result<ProvableAddress, ErrorKind> {
-		let address = Owner::get_wallet_public_address(self, (&token.keychain_mask).as_ref())
-			.map_err(|e| e.kind())?;
+	fn get_wallet_public_address(&self, token: Token) -> Result<ProvableAddress, Error> {
+		let address = Owner::get_wallet_public_address(self, (&token.keychain_mask).as_ref())?;
 		let address = ProvableAddress::from_tor_pub_key(&address);
 		println!("wallet_public_address address {}", address.public_key);
 		Ok(address)
@@ -3766,7 +4036,7 @@ where
 		refresh_from_node: bool,
 		tx_id: Option<u32>,
 		tx_slate_id: Option<Uuid>,
-	) -> Result<PaymentProof, ErrorKind> {
+	) -> Result<PaymentProof, Error> {
 		Owner::retrieve_payment_proof(
 			self,
 			(&token.keychain_mask).as_ref(),
@@ -3774,21 +4044,28 @@ where
 			tx_id,
 			tx_slate_id,
 		)
-		.map_err(|e| e.kind())
 	}
 
 	fn verify_payment_proof(
 		&self,
 		token: Token,
 		proof: PaymentProof,
-	) -> Result<(bool, bool), ErrorKind> {
+	) -> Result<(bool, bool), Error> {
 		Owner::verify_payment_proof(self, (&token.keychain_mask).as_ref(), &proof)
-			.map_err(|e| e.kind())
 	}
 
-	fn set_tor_config(&self, tor_config: Option<TorConfig>) -> Result<(), ErrorKind> {
+	fn set_tor_config(&self, tor_config: Option<TorConfig>) -> Result<(), Error> {
 		Owner::set_tor_config(self, tor_config);
 		Ok(())
+	}
+
+	fn build_output(
+		&self,
+		token: Token,
+		features: OutputFeatures,
+		amount: Amount,
+	) -> Result<BuiltOutput, Error> {
+		Owner::build_output(self, (&token.keychain_mask).as_ref(), features, amount.0)
 	}
 
 	fn encode_slatepack_message(
@@ -3798,15 +4075,15 @@ where
 		content: SlatePurpose,
 		recipient: Option<ProvableAddress>,
 		address_index: Option<u32>,
-	) -> Result<String, ErrorKind> {
+	) -> Result<String, Error> {
 		// Expected Slate in Json (plain) format
-		let slate = slate.into_slate_plain().map_err(|e| {
-			ErrorKind::SlatepackDecodeError(format!("Expected to get slate in Json format, {}", e))
+		let slate = slate.into_slate_plain(false).map_err(|e| {
+			Error::SlatepackDecodeError(format!("Expected to get slate in Json format, {}", e))
 		})?;
 
 		let recipient: Option<DalekPublicKey> = match recipient {
 			Some(recipient) => Some(recipient.tor_public_key().map_err(|e| {
-				ErrorKind::SlatepackEncodeError(format!("Expecting recipient tor address, {}", e))
+				Error::SlatepackEncodeError(format!("Expecting recipient tor address, {}", e))
 			})?),
 			None => None,
 		};
@@ -3820,13 +4097,12 @@ where
 			recipient,
 			address_index,
 			self.doctest_mode,
-		)
-		.map_err(|e| e.kind())?;
+		)?;
 
 		if let VersionedSlate::SP(message) = vslate {
 			return Ok(message);
 		} else {
-			return Err(ErrorKind::SlatepackEncodeError(
+			return Err(Error::SlatepackEncodeError(
 				"Unable to encode the slate, internal error".to_string(),
 			));
 		}
@@ -3837,20 +4113,18 @@ where
 		token: Token,
 		message: String,
 		address_index: Option<u32>,
-	) -> Result<SlatepackInfo, ErrorKind> {
+	) -> Result<SlatepackInfo, Error> {
 		let (slate, content, sender, recipient) = Owner::decrypt_slatepack(
 			&self,
 			(&token.keychain_mask).as_ref(),
 			VersionedSlate::SP(message),
 			address_index,
-		)
-		.map_err(|e| e.kind())?;
+		)?;
 
 		let slate_version = slate.lowest_version();
 
-		let vslate = VersionedSlate::into_version_plain(slate, slate_version).map_err(|e| {
-			ErrorKind::SlatepackDecodeError(format!("Unable to convert slate, {}", e))
-		})?;
+		let vslate = VersionedSlate::into_version_plain(slate, slate_version)
+			.map_err(|e| Error::SlatepackDecodeError(format!("Unable to convert slate, {}", e)))?;
 
 		Ok(SlatepackInfo {
 			slate: vslate,

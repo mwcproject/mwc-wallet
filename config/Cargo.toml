@@ -1,6 +1,6 @@
 [package]
 name = "grin_wallet_config"
-version = "4.4.0"
+version = "5.3.1"
 authors = ["Grin Developers <mimblewimble@lists.launchpad.net>"]
 description = "Configuration for grin wallet , a simple, private and scalable cryptocurrency implementation based on the MimbleWimble chain format."
 license = "Apache-2.0"
@@ -10,15 +10,14 @@ workspace = ".."
 edition = "2018"
 
 [dependencies]
-rand = "0.5"
+rand = "0.6"
 serde = "1"
-failure = "0.1"
-failure_derive = "0.1"
-dirs = "1"
-toml = "0.4"
+dirs = "2.0"
+toml = "0.5"
 serde_derive = "1"
+thiserror = "1"
 
-grin_wallet_util = { path = "../util", version = "4.4.0" }
+grin_wallet_util = { path = "../util", version = "5.3.1" }
 
 [dev-dependencies]
-pretty_assertions = "0.5.1"
+pretty_assertions = "0.6"

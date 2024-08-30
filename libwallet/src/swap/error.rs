@@ -15,231 +15,189 @@
 use super::multisig;
 use crate::grin_core::core::committed;
 use crate::grin_util::secp;
-use failure::Fail;
-use std::error::Error as StdError;
 use std::io;
 
 /// Swap crate errors
-#[derive(Clone, Eq, PartialEq, Debug, Fail)]
-pub enum ErrorKind {
+#[derive(Clone, Eq, PartialEq, Debug, thiserror::Error)]
+pub enum Error {
 	/// ElectrumX connection URI is not setup
-	#[fail(
-		display = "ElectrumX {} URI is not defined. Please specify it at wallet config or with swap arguments",
-		_0
-	)]
+	#[error("ElectrumX {0} URI is not defined. Please specify it at wallet config or with swap arguments")]
 	UndefinedElectrumXURI(String),
 	/// Unexpected state or status. Business logic is broken
-	#[fail(display = "Swap Unexpected action, {}", _0)]
+	#[error("Swap Unexpected action, {0}")]
 	UnexpectedAction(String),
 	/// Unexpected network
-	#[fail(display = "Swap Unexpected network {}", _0)]
+	#[error("Swap Unexpected network {0}")]
 	UnexpectedNetwork(String),
 	/// Unexpected role. Business logic is broken
-	#[fail(display = "Swap Unexpected role, {}", _0)]
+	#[error("Swap Unexpected role, {0}")]
 	UnexpectedRole(String),
 	/// Not enough MWC to start swap
-	#[fail(display = "Insufficient funds. Required: {}, available: {}", _0, _1)]
+	#[error("Insufficient funds. Required: {0}, available: {1}")]
 	InsufficientFunds(u64, u64),
 	/// Message type is wrong. Business logic is broken or another party messing up with us.
-	#[fail(display = "Swap Unexpected message type, {}", _0)]
+	#[error("Swap Unexpected message type, {0}")]
 	UnexpectedMessageType(String),
 	/// Likely BTC data is not initialized. Or workflow for your new currenly is not defined
-	#[fail(display = "Swap Unexpected secondary coin type")]
+	#[error("Swap Unexpected secondary coin type")]
 	UnexpectedCoinType,
 	/// Yours swap version is different from other party. Somebody need to make an upgrade
-	#[fail(
-		display = "Swap engines version are different. Other party has version {}, you has {}. To make a deal, you need to have the same versions.",
-		_0, _1
-	)]
+	#[error("Swap engines version are different. Other party has version {0}, you has {1}. To make a deal, you need to have the same versions.")]
 	IncompatibleVersion(u8, u8),
 	/// Message from different swap. Probably other party messing up with us.
-	#[fail(display = "Mismatch between swap and message IDs")]
+	#[error("Mismatch between swap and message IDs")]
 	MismatchedId,
 	/// Unable to parse the amount string
-	#[fail(display = "Invalid amount string, {}", _0)]
+	#[error("Invalid amount string, {0}")]
 	InvalidAmountString(String),
 	/// Wrong currency name
-	#[fail(display = "Swap Invalid currency: {}", _0)]
+	#[error("Swap Invalid currency: {0}")]
 	InvalidCurrency(String),
 	/// Lock slate can't be locked
-	#[fail(display = "Invalid lock height for Swap lock tx")]
+	#[error("Invalid lock height for Swap lock tx")]
 	InvalidLockHeightLockTx,
 	/// Schnorr signature is invalid
-	#[fail(display = "Swap Invalid adaptor signature (Schnorr signature)")]
+	#[error("Swap Invalid adaptor signature (Schnorr signature)")]
 	InvalidAdaptorSignature,
 	/// swap.refund is not defined
-	#[fail(display = "Swap secondary currency data not complete")]
+	#[error("Swap secondary currency data not complete")]
 	SecondaryDataIncomplete,
 	/// Expected singe call for that
-	#[fail(display = "Swap function should only be called once, {}", _0)]
+	#[error("Swap function should only be called once, {0}")]
 	OneShot(String),
 	/// Swap is already finalized
-	#[fail(display = "Swap is not active (finalized or cancelled)")]
+	#[error("Swap is not active (finalized or cancelled)")]
 	NotActive,
 	/// Multisig error
-	#[fail(display = "Swap Multisig error: {}", _0)]
-	Multisig(multisig::ErrorKind),
+	#[error("Swap Multisig error: {0}")]
+	Multisig(#[from] multisig::Error),
 	/// Keychain failed
-	#[fail(display = "Swap Keychain error: {}", _0)]
-	Keychain(crate::grin_keychain::Error),
+	#[error("Swap Keychain error: {0}")]
+	Keychain(#[from] crate::grin_keychain::Error),
 	/// LibWallet error
-	#[fail(display = "Swap LibWallet error: {}", _0)]
-	LibWallet(crate::ErrorKind),
+	#[error("Swap LibWallet error: {0}")]
+	LibWallet(String),
 	/// Secp issue
-	#[fail(display = "Swap Secp error: {}", _0)]
-	Secp(String),
+	#[error("Swap Secp error: {0}")]
+	Secp(#[from] secp::Error),
 	/// IO error
-	#[fail(display = "Swap I/O: {}", _0)]
+	#[error("Swap I/O: {0}")]
 	IO(String),
 	/// Serde error
-	#[fail(display = "Swap Serde error: {}", _0)]
+	#[error("Swap Serde error: {0}")]
 	Serde(String),
 	/// Rps error
-	#[fail(display = "Swap Rpc error: {}", _0)]
+	#[error("Swap Rpc error: {0}")]
 	Rpc(String),
 	/// Electrum Node client error
-	#[fail(display = "Electrum Node error, {}", _0)]
+	#[error("Electrum Node error, {0}")]
 	ElectrumNodeClient(String),
 	/// Requested swap trade not found
-	#[fail(display = "Swap trade {} not found", _0)]
+	#[error("Swap trade {0} not found")]
 	TradeNotFound(String),
 	/// swap trade IO error
-	#[fail(display = "Swap trade {} IO error, {}", _0, _1)]
+	#[error("Swap trade {0} IO error, {1}")]
 	TradeIoError(String, String),
 	/// swap trade encryption/decryption error
-	#[fail(display = "Swap trade {} encryption/decryption error", _0)]
+	#[error("Swap trade {0} encryption/decryption error")]
 	TradeEncDecError(String),
 	/// Message validation error. Likely somebody trying to cheat with as
-	#[fail(display = "Invalid Message data, {}", _0)]
+	#[error("Invalid Message data, {0}")]
 	InvalidMessageData(String),
 	/// Invalid Swap state input
-	#[fail(display = "Invalid Swap state input, {}", _0)]
+	#[error("Invalid Swap state input, {0}")]
 	InvalidSwapStateInput(String),
 	/// Invalid Swap state input
-	#[fail(display = "Swap state machine error, {}", _0)]
+	#[error("Swap state machine error, {0}")]
 	SwapStateMachineError(String),
 	/// Generic error
-	#[fail(display = "Swap generic error, {}", _0)]
+	#[error("Swap generic error, {0}")]
 	Generic(String),
 
+	/// Message sending issues
+	#[error("Message sending error, {0}")]
+	MessageSender(String),
+
 	/// BCH tweks related error
-	#[fail(display = "BCH error, {}", _0)]
+	#[error("BCH error, {0}")]
 	BchError(String),
 
 	/// Infura Node client error
-	#[fail(
-		display = "Infura Project Id not defined. Please specify it at wallet config or with swap arguments"
+	#[error(
+		"Infura Project Id not defined. Please specify it at wallet config or with swap arguments"
 	)]
 	UndefinedInfuraProjectId,
 	/// Eth SWap Contract Address error
-	#[fail(
-		display = "Eth Swap Contract Address is not defined. Please specify it at wallet config or with swap arguments"
-	)]
+	#[error("Eth Swap Contract Address is not defined. Please specify it at wallet config or with swap arguments")]
 	UndefinedEthSwapContractAddress,
 	/// ERC20 Swap Contract Address error
-	#[fail(
-		display = "ERC20 Swap Contract Address is not defined. Please specify it at wallet config or with swap arguments"
-	)]
+	#[error("ERC20 Swap Contract Address is not defined. Please specify it at wallet config or with swap arguments")]
 	UndefinedERC20SwapContractAddress,
 	/// Infura Node error
-	#[fail(display = "Infura Node error, {}", _0)]
+	#[error("Infura Node error, {0}")]
 	InfuraNodeClient(String),
 	/// Invalid Swap Trade Index
-	#[fail(display = "Ethereum Swap Trade Index error")]
+	#[error("Ethereum Swap Trade Index error")]
 	InvalidEthSwapTradeIndex,
 	/// Invalid Eth Address
-	#[fail(display = "Ethereum Address error")]
+	#[error("Ethereum Address error")]
 	InvalidEthAddress,
 	/// Eth balance is not enough
-	#[fail(display = "Eth Wallet Balance is not enough")]
+	#[error("Eth Wallet Balance is not enough")]
 	EthBalanceNotEnough,
 	/// ERC20 Token balance is not enough
-	#[fail(display = "ERC20 Token {} Balance is not enough", _0)]
+	#[error("ERC20 Token {0} Balance is not enough")]
 	ERC20TokenBalanceNotEnough(String),
 	/// Invalid Tx Hash
-	#[fail(display = "Invalid Eth Transaction Hash")]
+	#[error("Invalid Eth Transaction Hash")]
 	InvalidTxHash,
 	/// Contract error
-	#[fail(display = "Call Swap Contract error: {}", _0)]
+	#[error("Call Swap Contract error: {0}")]
 	EthContractCallError(String),
 	/// Retrieve TransactionRecipt error
-	#[fail(display = "Retrieve Eth TransactionReceipt error")]
+	#[error("Retrieve Eth TransactionReceipt error")]
 	EthRetrieveTransReciptError,
 	/// Unsupported ERC-20 Token
-	#[fail(display = "Unsupported ERC20 Token: {}", _0)]
+	#[error("Unsupported ERC20 Token: {0}")]
 	EthUnsupportedERC20TokenError(String),
 	/// ERC-20 Token Approve Failed
-	#[fail(display = "ERC20 Token Approve Failed!")]
+	#[error("ERC20 Token Approve Failed!")]
 	EthERC20TokenApproveError,
 	/// Refund Time Not Arrived
-	#[fail(display = "Refund Time Not Arrived")]
+	#[error("Refund Time Not Arrived")]
 	EthRefundTimeNotArrived,
 	/// Transaction in Pending status
-	#[fail(display = "Transaction Not Confirmed")]
+	#[error("Transaction Not Confirmed")]
 	EthTransactionInPending,
-}
-
-impl ErrorKind {
-	/// Check if this error network related
-	pub fn is_network_error(&self) -> bool {
-		use ErrorKind::*;
-		format!("");
-		match self {
-			Rpc(_) | ElectrumNodeClient(_) | LibWallet(crate::ErrorKind::Node(_)) => true,
-			_ => false,
-		}
-	}
-}
-
-impl From<crate::grin_keychain::Error> for ErrorKind {
-	fn from(error: crate::grin_keychain::Error) -> ErrorKind {
-		ErrorKind::Keychain(error)
-	}
-}
-
-impl From<multisig::ErrorKind> for ErrorKind {
-	fn from(error: multisig::ErrorKind) -> ErrorKind {
-		ErrorKind::Multisig(error)
-	}
-}
-
-impl From<crate::Error> for ErrorKind {
-	fn from(error: crate::Error) -> ErrorKind {
-		ErrorKind::LibWallet(error.kind())
-	}
-}
-
-// we have to use e.description  because of the bug at rust-secp256k1-zkp
-#[allow(deprecated)]
-
-impl From<secp::Error> for ErrorKind {
-	fn from(error: secp::Error) -> ErrorKind {
-		// secp::Error to_string is broken, in past biilds.
-		ErrorKind::Secp(format!("{}", error.description()))
-	}
 }
 
 #[warn(deprecated)]
 
-impl From<io::Error> for ErrorKind {
-	fn from(error: io::Error) -> ErrorKind {
-		ErrorKind::IO(format!("{}", error))
+impl From<io::Error> for Error {
+	fn from(error: io::Error) -> Error {
+		Error::IO(format!("{}", error))
 	}
 }
 
-impl From<serde_json::Error> for ErrorKind {
-	fn from(error: serde_json::Error) -> ErrorKind {
-		ErrorKind::Serde(format!("{}", error))
+impl From<serde_json::Error> for Error {
+	fn from(error: serde_json::Error) -> Error {
+		Error::Serde(format!("{}", error))
 	}
 }
 
-impl From<committed::Error> for ErrorKind {
-	fn from(error: committed::Error) -> ErrorKind {
+impl From<committed::Error> for Error {
+	fn from(error: committed::Error) -> Error {
 		match error {
 			committed::Error::Keychain(e) => e.into(),
 			committed::Error::Secp(e) => e.into(),
-			e => ErrorKind::Generic(format!("{}", e)),
+			e => Error::Generic(format!("{}", e)),
 		}
+	}
+}
+
+impl From<crate::Error> for Error {
+	fn from(error: crate::Error) -> Error {
+		Error::LibWallet(format!("{}", error))
 	}
 }
 

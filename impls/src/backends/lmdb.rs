@@ -1,4 +1,4 @@
-// Copyright 2019 The Grin Developers
+// Copyright 2021 The Grin Developers
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -29,14 +29,15 @@ use crate::store::{self, option_to_not_found, to_key, to_key_u64, u64_to_key};
 use crate::core::core::Transaction;
 use crate::core::ser;
 use crate::libwallet::{
-	swap::ethereum::EthereumWallet, AcctPathMapping, Context, Error, ErrorKind, NodeClient,
-	OutputData, ScannedBlockInfo, TxLogEntry, TxProof, WalletBackend, WalletOutputBatch,
+	swap::ethereum::EthereumWallet, AcctPathMapping, Context, Error, NodeClient, OutputData,
+	ScannedBlockInfo, TxLogEntry, TxProof, WalletBackend, WalletOutputBatch,
 };
 use crate::util::secp::constants::SECRET_KEY_SIZE;
 use crate::util::secp::key::SecretKey;
-use crate::util::{self, secp};
+use crate::util::{self, ToHex};
 
 use grin_wallet_libwallet::IntegrityContext;
+use grin_wallet_util::grin_core::ser::DeserializationMode;
 use rand::rngs::mock::StepRng;
 use rand::thread_rng;
 
@@ -53,6 +54,7 @@ const ACCOUNT_PATH_MAPPING_PREFIX: u8 = b'a';
 const LAST_SCANNED_BLOCK: u8 = b'm'; // pre v3.0 was l
 const LAST_WORKING_NODE_INDEX: u8 = b'n';
 const INTEGRITY_CONTEXT_PREFIX: u8 = b'g';
+const FLAGS: u8 = b'f'; // pre v3.0 was l
 
 /// test to see if database files exist in the current directory. If so,
 /// use a DB backend for all operations
@@ -209,9 +211,9 @@ where
 					let mask_value = match use_test_rng {
 						true => {
 							let mut test_rng = StepRng::new(1_234_567_890_u64, 1);
-							secp::key::SecretKey::new(&mut test_rng)
+							SecretKey::new(k.secp(), &mut test_rng)
 						}
-						false => secp::key::SecretKey::new(&mut thread_rng()),
+						false => SecretKey::new(k.secp(), &mut thread_rng()),
 					};
 					k.mask_master_key(&mask_value)?;
 					Some(mask_value)
@@ -246,11 +248,11 @@ where
 				hasher.update(&root_key.0[..]);
 				if *self.master_checksum != Some(hasher.finalize()) {
 					error!("Supplied keychain mask is invalid");
-					return Err(ErrorKind::InvalidKeychainMask.into());
+					return Err(Error::InvalidKeychainMask);
 				}
 				Ok(k_masked)
 			}
-			None => Err(ErrorKind::KeychainDoesntExist.into()),
+			None => Err(Error::KeychainDoesntExist),
 		}
 	}
 
@@ -271,12 +273,12 @@ where
 		/*if self.config.no_commit_cache == Some(true) {
 			Ok(None)
 		} else {*/
-		Ok(Some(util::to_hex(
-			&self
-				.keychain(keychain_mask)?
+		Ok(Some(
+			self.keychain(keychain_mask)?
 				.commit(amount, &id, SwitchCommitmentType::Regular)?
-				.0, // TODO: proper support for different switch commitment schemes
-		)))
+				.0
+				.to_hex(), // TODO: proper support for different switch commitment schemes
+		))
 		/*}*/
 	}
 
@@ -288,7 +290,7 @@ where
 			self.set_parent_key_id(a.path);
 			Ok(())
 		} else {
-			Err(ErrorKind::UnknownAccountLabel(label).into())
+			Err(Error::UnknownAccountLabel(label))
 		}
 	}
 
@@ -306,16 +308,36 @@ where
 			Some(i) => to_key_u64(OUTPUT_PREFIX, &mut id.to_bytes().to_vec(), *i),
 			None => to_key(OUTPUT_PREFIX, &mut id.to_bytes().to_vec()),
 		};
-		option_to_not_found(self.db.get_ser(&key), || format!("Key Id: {}", id))
+		option_to_not_found(self.db.get_ser(&key, None), || format!("Key Id: {}", id))
 			.map_err(|e| e.into())
 	}
 
 	fn iter<'a>(&'a self) -> Box<dyn Iterator<Item = OutputData> + 'a> {
-		Box::new(self.db.iter(&[OUTPUT_PREFIX]).unwrap().map(|o| o.1))
+		let protocol_version = self.db.protocol_version();
+		let prefix_iter = self.db.iter(&[OUTPUT_PREFIX], move |_, mut v| {
+			ser::deserialize(
+				&mut v,
+				protocol_version,
+				ser::DeserializationMode::default(),
+			)
+			.map_err(From::from)
+		});
+		let iter = prefix_iter.expect("deserialize").into_iter();
+		Box::new(iter)
 	}
 
 	fn tx_log_iter<'a>(&'a self) -> Box<dyn Iterator<Item = TxLogEntry> + 'a> {
-		Box::new(self.db.iter(&[TX_LOG_ENTRY_PREFIX]).unwrap().map(|o| o.1))
+		let protocol_version = self.db.protocol_version();
+		let prefix_iter = self.db.iter(&[TX_LOG_ENTRY_PREFIX], move |_, mut v| {
+			ser::deserialize(
+				&mut v,
+				protocol_version,
+				ser::DeserializationMode::default(),
+			)
+			.map_err(From::from)
+		});
+		let iter = prefix_iter.expect("deserialize").into_iter();
+		Box::new(iter)
 	}
 
 	fn get_private_context(
@@ -332,7 +354,7 @@ where
 		let (blind_xor_key, nonce_xor_key) =
 			private_ctx_xor_keys(&self.keychain(keychain_mask)?, slate_id)?;
 
-		let mut ctx: Context = option_to_not_found(self.db.get_ser(&ctx_key), || {
+		let mut ctx: Context = option_to_not_found(self.db.get_ser(&ctx_key, None), || {
 			format!("Slate id: {:x?}", slate_id.to_vec())
 		})?;
 
@@ -345,17 +367,24 @@ where
 	}
 
 	fn acct_path_iter<'a>(&'a self) -> Box<dyn Iterator<Item = AcctPathMapping> + 'a> {
-		Box::new(
-			self.db
-				.iter(&[ACCOUNT_PATH_MAPPING_PREFIX])
-				.unwrap()
-				.map(|o| o.1),
-		)
+		let protocol_version = self.db.protocol_version();
+		let prefix_iter = self
+			.db
+			.iter(&[ACCOUNT_PATH_MAPPING_PREFIX], move |_, mut v| {
+				ser::deserialize(
+					&mut v,
+					protocol_version,
+					ser::DeserializationMode::default(),
+				)
+				.map_err(From::from)
+			});
+		let iter = prefix_iter.expect("deserialize").into_iter();
+		Box::new(iter)
 	}
 
 	fn get_acct_path(&self, label: String) -> Result<Option<AcctPathMapping>, Error> {
 		let acct_key = to_key(ACCOUNT_PATH_MAPPING_PREFIX, &mut label.as_bytes().to_vec());
-		self.db.get_ser(&acct_key).map_err(|e| e.into())
+		self.db.get_ser(&acct_key, None).map_err(|e| e.into())
 	}
 
 	fn store_tx(&self, uuid: &str, tx: &Transaction) -> Result<(), Error> {
@@ -365,7 +394,7 @@ where
 			.join(filename);
 		let path_buf = Path::new(&path).to_path_buf();
 		let mut stored_tx = File::create(path_buf)?;
-		let tx_hex = util::to_hex(&ser::ser_vec(tx, ser::ProtocolVersion(1))?);
+		let tx_hex = ser::ser_vec(tx, ser::ProtocolVersion(1)).unwrap().to_hex();
 		stored_tx.write_all(&tx_hex.as_bytes())?;
 		stored_tx.sync_all()?;
 		Ok(())
@@ -374,7 +403,10 @@ where
 	fn get_stored_tx(&self, entry: &TxLogEntry) -> Result<Option<Transaction>, Error> {
 		let filename = match entry.stored_tx.clone() {
 			Some(f) => f,
-			None => return Ok(None),
+			None => match entry.tx_slate_id {
+				Some(uuid) => format!("{}.mwctx", uuid),
+				None => return Ok(None),
+			},
 		};
 		let path = path::Path::new(&self.data_file_dir)
 			.join(TX_SAVE_DIR)
@@ -382,7 +414,7 @@ where
 
 		match path.to_str() {
 			Some(s) => Ok(Some(self.load_stored_tx(s)?)),
-			None => Err(ErrorKind::GenericError(
+			None => Err(Error::GenericError(
 				"Unable to build transaction path".to_string(),
 			))?,
 		}
@@ -398,9 +430,9 @@ where
 					.join(TX_SAVE_DIR)
 					.join(filename);
 
-				let trans = self.load_stored_tx(path.to_str().ok_or(
-					ErrorKind::GenericError("Unable to build transaction path".to_string()),
-				)?)?;
+				let trans = self.load_stored_tx(path.to_str().ok_or(Error::GenericError(
+					"Unable to build transaction path".to_string(),
+				))?)?;
 				Ok(trans)
 			};
 
@@ -414,13 +446,16 @@ where
 		let mut content = String::new();
 		tx_f.read_to_string(&mut content)?;
 		let tx_bin = util::from_hex(&content).map_err(|e| {
-			ErrorKind::StoredTransactionError(format!("Unable to decode the data, {}", e))
+			Error::StoredTransactionError(format!("Unable to decode the data, {}", e))
 		})?;
-		Ok(
-			ser::deserialize(&mut &tx_bin[..], ser::ProtocolVersion(1)).map_err(|e| {
-				ErrorKind::StoredTransactionError(format!("Unable to deserialize the data, {}", e))
-			})?,
+		Ok(ser::deserialize(
+			&mut &tx_bin[..],
+			ser::ProtocolVersion(1),
+			ser::DeserializationMode::default(),
 		)
+		.map_err(|e| {
+			Error::StoredTransactionError(format!("Unable to deserialize the data, {}", e))
+		})?)
 	}
 
 	fn batch<'a>(
@@ -446,7 +481,7 @@ where
 		let index = {
 			let batch = self.db.batch()?;
 			let deriv_key = to_key(DERIV_PREFIX, &mut parent_key_id.to_bytes().to_vec());
-			match batch.get_ser(&deriv_key)? {
+			match batch.get_ser(&deriv_key, None)? {
 				Some(idx) => idx,
 				None => 0,
 			}
@@ -464,7 +499,7 @@ where
 		let mut deriv_idx = {
 			let batch = self.db.batch()?;
 			let deriv_key = to_key(DERIV_PREFIX, &mut self.parent_key_id.to_bytes().to_vec());
-			match batch.get_ser(&deriv_key)? {
+			match batch.get_ser(&deriv_key, None)? {
 				Some(idx) => idx,
 				None => 0,
 			}
@@ -490,7 +525,7 @@ where
 			CONFIRMED_HEIGHT_PREFIX,
 			&mut self.parent_key_id.to_bytes().to_vec(),
 		);
-		let last_confirmed_height = match batch.get_ser(&height_key)? {
+		let last_confirmed_height = match batch.get_ser(&height_key, None)? {
 			Some(h) => h,
 			None => 0,
 		};
@@ -499,9 +534,13 @@ where
 
 	fn last_scanned_blocks<'a>(&mut self) -> Result<Vec<ScannedBlockInfo>, Error> {
 		let batch = self.db.batch()?;
+		let protocol_version = self.db.protocol_version();
 		let mut blocks: Vec<ScannedBlockInfo> = batch
-			.iter(&[LAST_SCANNED_BLOCK])
-			.unwrap()
+			.iter(&[LAST_SCANNED_BLOCK], move |k, mut v| {
+				ser::deserialize(&mut v, protocol_version, DeserializationMode::default())
+					.map(|pos| (k.to_vec(), pos))
+					.map_err(From::from)
+			})?
 			.map(|o| o.1)
 			.collect();
 
@@ -526,10 +565,9 @@ where
 		if self.ethereum_wallet.is_some() {
 			Ok(self.ethereum_wallet.clone().unwrap())
 		} else {
-			Err(
-				ErrorKind::EthereumWalletError("Ethereum Wallet Not Generated!!!".to_string())
-					.into(),
-			)
+			Err(Error::EthereumWalletError(
+				"Ethereum Wallet Not Generated!!!".to_string(),
+			))
 		}
 	}
 }
@@ -575,22 +613,27 @@ where
 			Some(i) => to_key_u64(OUTPUT_PREFIX, &mut id.to_bytes().to_vec(), *i),
 			None => to_key(OUTPUT_PREFIX, &mut id.to_bytes().to_vec()),
 		};
-		option_to_not_found(self.db.borrow().as_ref().unwrap().get_ser(&key), || {
-			format!("Key ID: {}", id)
-		})
+		option_to_not_found(
+			self.db.borrow().as_ref().unwrap().get_ser(&key, None),
+			|| format!("Key ID: {}", id),
+		)
 		.map_err(|e| e.into())
 	}
 
 	fn iter(&self) -> Box<dyn Iterator<Item = OutputData>> {
-		Box::new(
-			self.db
-				.borrow()
-				.as_ref()
-				.unwrap()
-				.iter(&[OUTPUT_PREFIX])
-				.unwrap()
-				.map(|o| o.1),
-		)
+		let db = self.db.borrow();
+		let db = db.as_ref().unwrap();
+		let protocol_version = db.protocol_version();
+		let prefix_iter = db.iter(&[OUTPUT_PREFIX], move |_, mut v| {
+			ser::deserialize(
+				&mut v,
+				protocol_version,
+				ser::DeserializationMode::default(),
+			)
+			.map_err(From::from)
+		});
+		let iter = prefix_iter.expect("deserialize").into_iter();
+		Box::new(iter)
 	}
 
 	fn delete(&mut self, id: &Identifier, mmr_index: &Option<u64>) -> Result<(), Error> {
@@ -608,7 +651,13 @@ where
 
 	fn next_tx_log_id(&mut self, parent_key_id: &Identifier) -> Result<u32, Error> {
 		let tx_id_key = to_key(TX_LOG_ID_PREFIX, &mut parent_key_id.to_bytes().to_vec());
-		let last_tx_log_id = match self.db.borrow().as_ref().unwrap().get_ser(&tx_id_key)? {
+		let last_tx_log_id = match self
+			.db
+			.borrow()
+			.as_ref()
+			.unwrap()
+			.get_ser(&tx_id_key, None)?
+		{
 			Some(t) => t,
 			None => 0,
 		};
@@ -621,15 +670,19 @@ where
 	}
 
 	fn tx_log_iter(&self) -> Box<dyn Iterator<Item = TxLogEntry>> {
-		Box::new(
-			self.db
-				.borrow()
-				.as_ref()
-				.unwrap()
-				.iter(&[TX_LOG_ENTRY_PREFIX])
-				.unwrap()
-				.map(|o| o.1),
-		)
+		let db = self.db.borrow();
+		let db = db.as_ref().unwrap();
+		let protocol_version = db.protocol_version();
+		let prefix_iter = db.iter(&[TX_LOG_ENTRY_PREFIX], move |_, mut v| {
+			ser::deserialize(
+				&mut v,
+				protocol_version,
+				ser::DeserializationMode::default(),
+			)
+			.map_err(From::from)
+		});
+		let iter = prefix_iter.expect("deserialize").into_iter();
+		Box::new(iter)
 	}
 
 	fn save_last_confirmed_height(
@@ -658,11 +711,15 @@ where
 
 		let br = self.db.borrow();
 		let db = br.as_ref().unwrap();
+		let protocol_version = db.protocol_version();
 
 		// Cleaning up the head blocks...
 		let mut heights: Vec<u64> = db
-			.iter(&[LAST_SCANNED_BLOCK])
-			.unwrap()
+			.iter(&[LAST_SCANNED_BLOCK], move |k, mut v| {
+				ser::deserialize(&mut v, protocol_version, DeserializationMode::default())
+					.map(|pos| (k.to_vec(), pos))
+					.map_err(From::from)
+			})?
 			.map(|o: (Vec<u8>, ScannedBlockInfo)| o.1.height)
 			.collect();
 
@@ -699,6 +756,31 @@ where
 		Ok(())
 	}
 
+	/// Save safe flag into DB
+	fn save_flag(&mut self, flag: u64) -> Result<(), Error> {
+		let key = u64_to_key(FLAGS, flag);
+
+		self.db.borrow().as_ref().unwrap().put_ser(&key, &flag)?;
+
+		Ok(())
+	}
+
+	/// Load and optionally delete the flag from DB
+	fn load_flag(&mut self, flag: u64, delete: bool) -> Result<bool, Error> {
+		let br = self.db.borrow();
+		let db = br.as_ref().unwrap();
+
+		let key = u64_to_key(FLAGS, flag);
+		let index: Option<u64> = db.get_ser(&key, None)?;
+
+		let has_flag = index.is_some();
+
+		if has_flag & delete {
+			db.delete(&key)?;
+		}
+		Ok(has_flag)
+	}
+
 	/// Save the last used good node index
 	fn save_last_working_node_index(&mut self, node_index: u8) -> Result<(), Error> {
 		let node_index_key = u64_to_key(LAST_WORKING_NODE_INDEX, 0 as u64);
@@ -719,7 +801,7 @@ where
 			.borrow()
 			.as_ref()
 			.unwrap()
-			.get_ser(&node_index_key)?;
+			.get_ser(&node_index_key, None)?;
 		let last_working_node_index = match index {
 			Some(ind) => ind as u8, //the normal index started from 1. 0 is error
 			None => 0,
@@ -801,15 +883,19 @@ where
 	}
 
 	fn acct_path_iter(&self) -> Box<dyn Iterator<Item = AcctPathMapping>> {
-		Box::new(
-			self.db
-				.borrow()
-				.as_ref()
-				.unwrap()
-				.iter(&[ACCOUNT_PATH_MAPPING_PREFIX])
-				.unwrap()
-				.map(|o| o.1),
-		)
+		let db = self.db.borrow();
+		let db = db.as_ref().unwrap();
+		let protocol_version = db.protocol_version();
+		let prefix_iter = db.iter(&[ACCOUNT_PATH_MAPPING_PREFIX], move |_, mut v| {
+			ser::deserialize(
+				&mut v,
+				protocol_version,
+				ser::DeserializationMode::default(),
+			)
+			.map_err(From::from)
+		});
+		let iter = prefix_iter.expect("deserialize").into_iter();
+		Box::new(iter)
 	}
 
 	fn lock_output(&mut self, out: &mut OutputData) -> Result<(), Error> {
@@ -893,10 +979,10 @@ where
 		let ctx_key = to_key(INTEGRITY_CONTEXT_PREFIX, &mut slate_id.to_vec());
 		let (blind_xor_key, _nonce_xor_key) = private_ctx_xor_keys(self.keychain(), slate_id)?;
 
-		let mut ctx: IntegrityContext =
-			option_to_not_found(self.db.borrow().as_ref().unwrap().get_ser(&ctx_key), || {
-				format!("Slate id: {:x?}", slate_id.to_vec())
-			})?;
+		let mut ctx: IntegrityContext = option_to_not_found(
+			self.db.borrow().as_ref().unwrap().get_ser(&ctx_key, None),
+			|| format!("Slate id: {:x?}", slate_id.to_vec()),
+		)?;
 
 		for i in 0..SECRET_KEY_SIZE {
 			ctx.sec_key.0[i] ^= blind_xor_key[i];

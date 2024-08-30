@@ -12,9 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::error::{Error, ErrorKind};
+use crate::error::Error;
 use crate::grin_keychain::base58;
 use crate::grin_util::secp::key::PublicKey;
+use grin_wallet_util::grin_util::secp::{ContextFlag, Secp256k1};
 
 ///
 pub trait Base58<T> {
@@ -32,9 +33,8 @@ fn to_base58_check(data: &[u8], version: Vec<u8>) -> String {
 
 ///
 fn from_base58_check(data: &str, version_bytes: usize) -> Result<(Vec<u8>, Vec<u8>), Error> {
-	let payload: Vec<u8> = base58::from_check(data).map_err(|e| {
-		ErrorKind::Base58Error(format!("Unable decode base58 string {}, {}", data, e))
-	})?;
+	let payload: Vec<u8> = base58::from_check(data)
+		.map_err(|e| Error::Base58Error(format!("Unable decode base58 string {}, {}", data, e)))?;
 	Ok((
 		payload[..version_bytes].to_vec(),
 		payload[version_bytes..].to_vec(),
@@ -42,8 +42,8 @@ fn from_base58_check(data: &str, version_bytes: usize) -> Result<(Vec<u8>, Vec<u
 }
 
 ///
-pub fn serialize_public_key(public_key: &PublicKey) -> Vec<u8> {
-	let ser = public_key.serialize_vec(true);
+pub fn serialize_public_key(secp: &Secp256k1, public_key: &PublicKey) -> Vec<u8> {
+	let ser = public_key.serialize_vec(secp, true);
 	ser[..].to_vec()
 }
 
@@ -52,16 +52,17 @@ impl Base58<PublicKey> for PublicKey {
 		let n_version = version_expect.len();
 		let (version_actual, key_bytes) = from_base58_check(str, n_version)?;
 		if version_actual != version_expect {
-			return Err(
-				ErrorKind::Base58Error("Address belong to another network".to_string()).into(),
-			);
+			return Err(Error::Base58Error(
+				"Address belong to another network".to_string(),
+			));
 		}
-		PublicKey::from_slice(&key_bytes).map_err(|e| {
-			ErrorKind::Base58Error(format!("Unable to build key from Base58, {}", e)).into()
-		})
+		let secp = Secp256k1::with_caps(ContextFlag::None);
+		PublicKey::from_slice(&secp, &key_bytes)
+			.map_err(|e| Error::Base58Error(format!("Unable to build key from Base58, {}", e)))
 	}
 
 	fn to_base58_check(&self, version: Vec<u8>) -> String {
-		to_base58_check(serialize_public_key(self).as_slice(), version)
+		let secp = Secp256k1::with_caps(ContextFlag::None);
+		to_base58_check(serialize_public_key(&secp, self).as_slice(), version)
 	}
 }

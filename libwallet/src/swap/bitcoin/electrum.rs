@@ -16,7 +16,7 @@ use super::client::*;
 use super::rpc::*;
 use crate::grin_util::{from_hex, to_hex};
 use crate::swap::types::Currency;
-use crate::swap::ErrorKind;
+use crate::swap::Error;
 use bitcoin::{OutPoint, Script, Txid};
 use bitcoin_hashes::sha256d::Hash;
 use serde::{Deserialize, Serialize};
@@ -33,11 +33,11 @@ struct ElectrumRpcClient {
 
 enum ElectrumError {
 	Response(ElectrumResponseError),
-	Other(ErrorKind),
+	Other(Error),
 }
 
-impl From<ErrorKind> for ElectrumError {
-	fn from(error: ErrorKind) -> ElectrumError {
+impl From<Error> for ElectrumError {
+	fn from(error: Error) -> ElectrumError {
 		ElectrumError::Other(error)
 	}
 }
@@ -48,11 +48,11 @@ impl From<ElectrumResponseError> for ElectrumError {
 	}
 }
 
-impl From<ElectrumError> for ErrorKind {
-	fn from(error: ElectrumError) -> ErrorKind {
+impl From<ElectrumError> for Error {
+	fn from(error: ElectrumError) -> Error {
 		match error {
 			ElectrumError::Response(e) => {
-				ErrorKind::ElectrumNodeClient(format!("ElectrumX error response: {}", e.message))
+				Error::ElectrumNodeClient(format!("ElectrumX error response: {}", e.message))
 			}
 			ElectrumError::Other(e) => e,
 		}
@@ -60,7 +60,7 @@ impl From<ElectrumError> for ErrorKind {
 }
 
 impl ElectrumRpcClient {
-	pub fn new(address: String) -> Result<Self, ErrorKind> {
+	pub fn new(address: String) -> Result<Self, Error> {
 		let mut client = Self {
 			inner: RpcClient::new(address)?,
 			id: 0,
@@ -81,10 +81,7 @@ impl ElectrumRpcClient {
 				if e.id.map(|res_id| res_id == id).unwrap_or(true) {
 					let err: ElectrumResponseError =
 						serde_json::from_value(e.error).map_err(|e| {
-							ErrorKind::ElectrumNodeClient(format!(
-								"ElectrumX error response, {}",
-								e
-							))
+							Error::ElectrumNodeClient(format!("ElectrumX error response, {}", e))
 						})?;
 					return Err(err.into());
 				}
@@ -94,7 +91,7 @@ impl ElectrumRpcClient {
 				if o.id.map(|res_id| res_id == id).unwrap_or(false) {
 					let res_copy = o.result.clone();
 					let obj: T = serde_json::from_value(o.result).map_err(|e| {
-						ErrorKind::ElectrumNodeClient(format!(
+						Error::ElectrumNodeClient(format!(
 							"Unable to decode response '{}', {}",
 							res_copy, e
 						))
@@ -103,7 +100,7 @@ impl ElectrumRpcClient {
 				}
 			}
 		};
-		Err(ErrorKind::ElectrumNodeClient(format!("No response received")).into())
+		Err(Error::ElectrumNodeClient(format!("No response received")).into())
 	}
 
 	fn next_id(&mut self) -> u32 {
@@ -111,7 +108,7 @@ impl ElectrumRpcClient {
 		self.id
 	}
 
-	fn version(&mut self) -> Result<Vec<String>, ErrorKind> {
+	fn version(&mut self) -> Result<Vec<String>, Error> {
 		let params = VersionRequestParams::new("Electrum 3.3.8".into(), "1.4".into());
 		let request = RpcRequest::new(self.next_id(), "server.version", params)?;
 		self.write(&request)?;
@@ -119,11 +116,11 @@ impl ElectrumRpcClient {
 		Ok(version)
 	}
 
-	fn write(&mut self, request: &RpcRequest) -> Result<(), ErrorKind> {
+	fn write(&mut self, request: &RpcRequest) -> Result<(), Error> {
 		self.inner.write(request)
 	}
 
-	pub fn unspent(&mut self, script_pubkey: &Script) -> Result<Vec<Utxo>, ErrorKind> {
+	pub fn unspent(&mut self, script_pubkey: &Script) -> Result<Vec<Utxo>, Error> {
 		let params = ScriptHashParams::new(script_pubkey);
 		let request = RpcRequest::new(self.next_id(), "blockchain.scripthash.listunspent", params)?;
 		self.write(&request)?;
@@ -132,20 +129,20 @@ impl ElectrumRpcClient {
 		Ok(utxos)
 	}
 
-	pub fn post_tx(&mut self, tx: Vec<u8>) -> Result<(), ErrorKind> {
+	pub fn post_tx(&mut self, tx: Vec<u8>) -> Result<(), Error> {
 		let params = BroadcastParams::new(tx);
 		let request = RpcRequest::new(self.next_id(), "blockchain.transaction.broadcast", params)?;
 		self.write(&request)?;
 		let hash: String = self.wait(request.id)?;
 		let hash = from_hex(hash.as_str()).map_err(|e| {
-			ErrorKind::ElectrumNodeClient(format!(
+			Error::ElectrumNodeClient(format!(
 				"Unable to post tx, wrong hash value {}, {}",
 				hash, e
 			))
 		})?;
 
 		if hash.len() != 32 {
-			return Err(ErrorKind::ElectrumNodeClient(format!(
+			return Err(Error::ElectrumNodeClient(format!(
 				"Unable to post tx, wrong hash {:?}",
 				hash
 			)));
@@ -154,10 +151,7 @@ impl ElectrumRpcClient {
 		Ok(())
 	}
 
-	pub fn transaction(
-		&mut self,
-		tx_hash: String,
-	) -> Result<Option<ElectrumTransaction>, ErrorKind> {
+	pub fn transaction(&mut self, tx_hash: String) -> Result<Option<ElectrumTransaction>, Error> {
 		let params = TransactionParams::new(tx_hash);
 		let request = RpcRequest::new(self.next_id(), "blockchain.transaction.get", params)?;
 		self.write(&request)?;
@@ -284,12 +278,12 @@ impl ElectrumNodeClient {
 		}
 	}
 	/// Connect to the ElectrumX node
-	pub fn connect(&mut self) -> Result<(), ErrorKind> {
+	pub fn connect(&mut self) -> Result<(), Error> {
 		self.client()?;
 		Ok(())
 	}
 
-	fn client(&mut self) -> Result<&mut ElectrumRpcClient, ErrorKind> {
+	fn client(&mut self) -> Result<&mut ElectrumRpcClient, Error> {
 		// Reset connection if it disconnected or if we haven't used it for a while
 		if self
 			.client
@@ -320,7 +314,7 @@ impl BtcNodeClient for ElectrumNodeClient {
 	}
 
 	/// Fetch the current chain height
-	fn height(&mut self) -> Result<u64, ErrorKind> {
+	fn height(&mut self) -> Result<u64, Error> {
 		// The proper way to do this is to download all the block headers
 		// and validate them. Since we assume the server can be trusted,
 		// instead we simply ask for the number of confirmations on the
@@ -333,18 +327,16 @@ impl BtcNodeClient for ElectrumNodeClient {
 		.to_owned();*/
 		let hash = self.check_tx_hash.clone();
 		let client = self.client()?;
-		let tx = client
-			.transaction(hash)?
-			.ok_or(ErrorKind::ElectrumNodeClient(
-				"Unable to determine height".into(),
-			))?;
-		tx.confirmations.ok_or(ErrorKind::ElectrumNodeClient(
+		let tx = client.transaction(hash)?.ok_or(Error::ElectrumNodeClient(
+			"Unable to determine height".into(),
+		))?;
+		tx.confirmations.ok_or(Error::ElectrumNodeClient(
 			"Unable to determine height".into(),
 		))
 	}
 
 	/// Fetch a list of unspent outputs belonging to this address
-	fn unspent(&mut self, currency: Currency, address: &String) -> Result<Vec<Output>, ErrorKind> {
+	fn unspent(&mut self, currency: Currency, address: &String) -> Result<Vec<Output>, Error> {
 		// A full SPV client should validate the Merkle proofs of the transactions
 		// that created these outputs
 		let client = self.client()?;
@@ -358,7 +350,7 @@ impl BtcNodeClient for ElectrumNodeClient {
 				.take(address.len() - prefix_len - 4 - 8)
 				.collect();
 			let script_bin = from_hex(&script_hex).map_err(|e| {
-				ErrorKind::Generic(format!(
+				Error::Generic(format!(
 					"Unable to convert bitcoin-script address '{}' into Script hex, {}",
 					address, e
 				))
@@ -392,12 +384,12 @@ impl BtcNodeClient for ElectrumNodeClient {
 		Ok(outputs)
 	}
 	/// Post BTC transaction
-	fn post_tx(&mut self, tx: Vec<u8>) -> Result<(), ErrorKind> {
+	fn post_tx(&mut self, tx: Vec<u8>) -> Result<(), Error> {
 		let client = self.client()?;
 		client.post_tx(tx)
 	}
 	/// Request a transaction from the node
-	fn transaction(&mut self, tx_hash: &Txid) -> Result<Option<u64>, ErrorKind> {
+	fn transaction(&mut self, tx_hash: &Txid) -> Result<Option<u64>, Error> {
 		let head_height = self.height()?;
 
 		let client = self.client()?;

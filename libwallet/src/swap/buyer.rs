@@ -18,7 +18,7 @@ use super::message::*;
 use super::swap;
 use super::swap::{tx_add_input, tx_add_output, Swap};
 use super::types::*;
-use super::{ErrorKind, Keychain, CURRENT_VERSION};
+use super::{Error, Keychain, CURRENT_VERSION};
 use crate::api_impl::owner_eth::get_eth_balance;
 use crate::grin_core::core::Committed;
 use crate::grin_core::core::KernelFeatures;
@@ -50,17 +50,14 @@ impl BuyApi {
 		offer: OfferUpdate,
 		secondary_update: SecondaryUpdate,
 		node_client: &C,
-	) -> Result<Swap, ErrorKind> {
+	) -> Result<Swap, Error> {
 		if offer.version != CURRENT_VERSION {
-			return Err(ErrorKind::IncompatibleVersion(
-				offer.version,
-				CURRENT_VERSION,
-			));
+			return Err(Error::IncompatibleVersion(offer.version, CURRENT_VERSION));
 		}
 
 		// Checking if the network match expected value
 		if offer.network != Network::current_network()? {
-			return Err(ErrorKind::UnexpectedNetwork(format!(
+			return Err(Error::UnexpectedNetwork(format!(
 				", get offer for wrong network {:?}",
 				offer.network
 			)));
@@ -72,53 +69,55 @@ impl BuyApi {
 
 		// Tolerating 15 seconds clock difference. We don't want surprises with clocks.
 		if offer.start_time.timestamp() > (now_ts + 15) {
-			return Err(ErrorKind::InvalidMessageData(
+			return Err(Error::InvalidMessageData(
 				"Buyer/Seller clock are out of sync".to_string(),
 			));
 		}
 
 		// Multisig tx needs to be unlocked and valid. Let's take a look at what we get.
-		let lock_slate: Slate = offer.lock_slate.into_slate_plain()?;
-		if lock_slate.lock_height > 0 {
-			return Err(ErrorKind::InvalidLockHeightLockTx);
+		let lock_slate: Slate = offer.lock_slate.into_slate_plain(true)?;
+		if lock_slate.get_lock_height() > 0 {
+			return Err(Error::InvalidLockHeightLockTx);
 		}
 		if lock_slate.amount != offer.primary_amount {
-			return Err(ErrorKind::InvalidMessageData(
+			return Err(Error::InvalidMessageData(
 				"Lock Slate amount doesn't match offer".to_string(),
 			));
 		}
 		if lock_slate.fee
 			!= tx_fee(
-				lock_slate.tx.body.inputs.len(),
-				lock_slate.tx.body.outputs.len() + 1,
+				lock_slate.tx_or_err()?.body.inputs.len(),
+				lock_slate.tx_or_err()?.body.outputs.len() + 1,
 				1,
-				None,
 			) {
-			return Err(ErrorKind::InvalidMessageData(
+			return Err(Error::InvalidMessageData(
 				"Lock Slate fee doesn't match expected value".to_string(),
 			));
 		}
 		if lock_slate.num_participants != 2 {
-			return Err(ErrorKind::InvalidMessageData(
+			return Err(Error::InvalidMessageData(
 				"Lock Slate participans doesn't match expected value".to_string(),
 			));
 		}
 
-		if lock_slate.tx.body.kernels.len() != 1 {
-			return Err(ErrorKind::InvalidMessageData(
+		if lock_slate.tx_or_err()?.body.kernels.len() != 1 {
+			return Err(Error::InvalidMessageData(
 				"Lock Slate invalid kernels".to_string(),
 			));
 		}
-		match lock_slate.tx.body.kernels[0].features {
+
+		let (current_height, _, _) = node_client.get_chain_tip()?;
+
+		match lock_slate.tx_or_err()?.body.kernels[0].features {
 			KernelFeatures::Plain { fee } => {
-				if fee != lock_slate.fee {
-					return Err(ErrorKind::InvalidMessageData(
+				if fee.fee(current_height) != lock_slate.fee {
+					return Err(Error::InvalidMessageData(
 						"Lock Slate invalid kernel fee".to_string(),
 					));
 				}
 			}
 			_ => {
-				return Err(ErrorKind::InvalidMessageData(
+				return Err(Error::InvalidMessageData(
 					"Lock Slate invalid kernel feature".to_string(),
 				))
 			}
@@ -126,20 +125,19 @@ impl BuyApi {
 
 		// Let's check inputs. They must exist, we want real inspent coins. We can't check amount, that will be later when we cound validate the sum.
 		// Height of the inputs is not important, we are relaying on locking transaction confirmations that is weaker.
-		if lock_slate.tx.body.inputs.is_empty() {
-			return Err(ErrorKind::InvalidMessageData(
+		if lock_slate.tx_or_err()?.body.inputs.is_empty() {
+			return Err(Error::InvalidMessageData(
 				"Lock Slate empty inputs".to_string(),
 			));
 		}
-		let res = node_client.get_outputs_from_node(&lock_slate.tx.inputs_committed())?;
-		if res.len() != lock_slate.tx.body.inputs.len() {
-			return Err(ErrorKind::InvalidMessageData(
+		let res = node_client.get_outputs_from_node(&lock_slate.tx_or_err()?.inputs_committed())?;
+		if res.len() != lock_slate.tx_or_err()?.body.inputs.len() {
+			return Err(Error::InvalidMessageData(
 				"Lock Slate inputs are not found at the chain".to_string(),
 			));
 		}
-		let height = node_client.get_chain_tip()?.0;
-		if lock_slate.height > height {
-			return Err(ErrorKind::InvalidMessageData(
+		if lock_slate.height > current_height {
+			return Err(Error::InvalidMessageData(
 				"Lock Slate height is invalid".to_string(),
 			));
 		}
@@ -147,42 +145,44 @@ impl BuyApi {
 		// Checking Refund slate.
 		// Refund tx needs to be locked until exactly as offer specify. For MWC we are expecting one block every 1 minute.
 		// So numbers should match with accuracy of few blocks.
-		// Note!!! We can't valiry exact number because we don't know what height seller get when he created the offer
-		let refund_slate: Slate = offer.refund_slate.into_slate_plain()?;
+		// Note!!! We can't verify exact number because we don't know what height seller get when he created the offer
+		let refund_slate: Slate = offer.refund_slate.into_slate_plain(true)?;
 		// expecting at least half of the interval
 
 		// Lock_height will be verified later
-		if refund_slate.tx.body.kernels.len() != 1 {
-			return Err(ErrorKind::InvalidMessageData(
+		if refund_slate.tx_or_err()?.body.kernels.len() != 1 {
+			return Err(Error::InvalidMessageData(
 				"Refund Slate invalid kernel".to_string(),
 			));
 		}
-		match refund_slate.tx.body.kernels[0].features {
+		match refund_slate.tx_or_err()?.body.kernels[0].features {
 			KernelFeatures::HeightLocked { fee, lock_height } => {
-				if fee != refund_slate.fee || lock_height != refund_slate.lock_height {
-					return Err(ErrorKind::InvalidMessageData(
+				if fee.fee(current_height) != refund_slate.fee
+					|| lock_height != refund_slate.get_lock_height_check()?
+				{
+					return Err(Error::InvalidMessageData(
 						"Refund Slate invalid kernel fee or height".to_string(),
 					));
 				}
 			}
 			_ => {
-				return Err(ErrorKind::InvalidMessageData(
+				return Err(Error::InvalidMessageData(
 					"Refund Slate invalid kernel feature".to_string(),
 				))
 			}
 		}
 		if refund_slate.num_participants != 2 {
-			return Err(ErrorKind::InvalidMessageData(
-				"Refund Slate participans doesn't match expected value".to_string(),
+			return Err(Error::InvalidMessageData(
+				"Refund Slate participants doesn't match expected value".to_string(),
 			));
 		}
 		if refund_slate.amount + refund_slate.fee != lock_slate.amount {
-			return Err(ErrorKind::InvalidMessageData(
+			return Err(Error::InvalidMessageData(
 				"Refund Slate amount doesn't match offer".to_string(),
 			));
 		}
-		if refund_slate.fee != tx_fee(1, 1, 1, None) {
-			return Err(ErrorKind::InvalidMessageData(
+		if refund_slate.fee != tx_fee(1, 1, 1) {
+			return Err(Error::InvalidMessageData(
 				"Refund Slate fee doesn't match expected value".to_string(),
 			));
 		}
@@ -217,8 +217,8 @@ impl BuyApi {
 			redeem_slate.id = Uuid::parse_str("78aa5af1-048e-4c49-8776-a2e66d4a460c").unwrap()
 		}
 
-		redeem_slate.fee = tx_fee(1, 1, 1, None);
-		redeem_slate.height = height;
+		redeem_slate.fee = tx_fee(1, 1, 1);
+		redeem_slate.height = current_height;
 		redeem_slate.amount = offer.primary_amount.saturating_sub(redeem_slate.fee);
 
 		redeem_slate.participant_data.push(offer.redeem_participant);
@@ -237,9 +237,9 @@ impl BuyApi {
 		if !offer.secondary_currency.is_btc_family() {
 			let balance_gwei = get_eth_balance(ethereum_wallet.unwrap())?;
 			if secondary_fee > balance_gwei as f32 {
-				return Err(
-					ErrorKind::Generic("No enough ether as gas for swap".to_string()).into(),
-				);
+				return Err(Error::Generic(
+					"No enough ether as gas for swap".to_string(),
+				));
 			}
 		}
 
@@ -367,10 +367,10 @@ impl BuyApi {
 		swap.add_journal_message("Received a swap offer".to_string());
 
 		// Minimum mwc heights
-		let expected_lock_height = height + (swap.get_time_mwc_lock() - now_ts) as u64 / 60;
+		let expected_lock_height = current_height + (swap.get_time_mwc_lock() - now_ts) as u64 / 60;
 
-		if swap.refund_slate.lock_height < expected_lock_height * 9 / 10 {
-			return Err(ErrorKind::InvalidMessageData(
+		if swap.refund_slate.get_lock_height_check()? < expected_lock_height * 9 / 10 {
+			return Err(Error::InvalidMessageData(
 				"Refund lock slate doesn't meet required number of confirmations".to_string(),
 			));
 		}
@@ -387,7 +387,7 @@ impl BuyApi {
 		keychain: &K,
 		swap: &mut Swap,
 		context: &Context,
-	) -> Result<(), ErrorKind> {
+	) -> Result<(), Error> {
 		assert!(!swap.is_seller());
 		Self::build_redeem_slate(keychain, swap, context)?;
 		Self::calculate_adaptor_signature(keychain, swap, context)?;
@@ -399,7 +399,7 @@ impl BuyApi {
 	pub fn accept_offer_message(
 		swap: &Swap,
 		inner_secondary: SecondaryUpdate,
-	) -> Result<Message, ErrorKind> {
+	) -> Result<Message, Error> {
 		let id = swap.participant_id;
 		swap.message(
 			Update::AcceptOffer(AcceptOfferUpdate {
@@ -407,7 +407,7 @@ impl BuyApi {
 				redeem_public: swap
 					.redeem_public
 					.clone()
-					.ok_or(ErrorKind::Generic("redeem_public is empty".to_string()))?,
+					.ok_or(Error::Generic("redeem_public is empty".to_string()))?,
 				lock_participant: swap.lock_slate.participant_data[id].clone(),
 				refund_participant: swap.refund_slate.participant_data[id].clone(),
 			}),
@@ -416,14 +416,14 @@ impl BuyApi {
 	}
 
 	/// Generate 'InitRedeem' slate message
-	pub fn init_redeem_message(swap: &Swap) -> Result<Message, ErrorKind> {
+	pub fn init_redeem_message(swap: &Swap) -> Result<Message, Error> {
 		swap.message(
 			Update::InitRedeem(InitRedeemUpdate {
 				redeem_slate: VersionedSlate::into_version_plain(
 					swap.redeem_slate.clone(),
 					SlateVersion::V2, // V2 should satify our needs, dont adding extra
 				)?,
-				adaptor_signature: swap.adaptor_signature.ok_or(ErrorKind::UnexpectedAction(
+				adaptor_signature: swap.adaptor_signature.ok_or(Error::UnexpectedAction(
 					"Buyer Fn init_redeem_message(), multisig is empty".to_string(),
 				))?,
 			}),
@@ -432,10 +432,7 @@ impl BuyApi {
 	}
 
 	/// Secret that unlocks the funds on both chains
-	pub fn redeem_secret<K: Keychain>(
-		keychain: &K,
-		context: &Context,
-	) -> Result<SecretKey, ErrorKind> {
+	pub fn redeem_secret<K: Keychain>(keychain: &K, context: &Context) -> Result<SecretKey, Error> {
 		let bcontext = context.unwrap_buyer()?;
 		let sec_key = keychain.derive_key(0, &bcontext.redeem, SwitchCommitmentType::None)?;
 
@@ -447,7 +444,7 @@ impl BuyApi {
 		swap: &mut Swap,
 		context: &Context,
 		part: MultisigParticipant,
-	) -> Result<(), ErrorKind> {
+	) -> Result<(), Error> {
 		let multisig_secret = swap.multisig_secret(keychain, context)?;
 		let multisig = &mut swap.multisig;
 
@@ -458,7 +455,7 @@ impl BuyApi {
 
 		// Round 1 + round 2
 		multisig.round_1(keychain.secp(), &multisig_secret)?;
-		let common_nonce = swap.common_nonce()?;
+		let common_nonce = swap.common_nonce(keychain.secp())?;
 		let multisig = &mut swap.multisig;
 		multisig.common_nonce = Some(common_nonce);
 		multisig.round_2(keychain.secp(), &multisig_secret)?;
@@ -471,12 +468,12 @@ impl BuyApi {
 		keychain: &K,
 		swap: &Swap,
 		context: &Context,
-	) -> Result<SecretKey, ErrorKind> {
+	) -> Result<SecretKey, Error> {
 		// Partial multisig output
 		let sum = BlindSum::new().add_blinding_factor(BlindingFactor::from_secret_key(
 			swap.multisig_secret(keychain, context)?,
 		));
-		let sec_key = keychain.blind_sum(&sum)?.secret_key()?;
+		let sec_key = keychain.blind_sum(&sum)?.secret_key(keychain.secp())?;
 
 		Ok(sec_key)
 	}
@@ -485,24 +482,23 @@ impl BuyApi {
 		keychain: &K,
 		swap: &mut Swap,
 		context: &Context,
-	) -> Result<(), ErrorKind> {
+	) -> Result<(), Error> {
 		let mut sec_key = Self::lock_tx_secret(keychain, swap, context)?;
 
 		// This function should only be called once
 		let slate = &mut swap.lock_slate;
 		if slate.participant_data.len() > 1 {
-			return Err(ErrorKind::OneShot(
+			return Err(Error::OneShot(
 				"Buyer Fn sign_lock_slate(), lock slate participant data is already initialized"
 					.to_string(),
-			)
-			.into());
+			));
 		}
 
 		// Add multisig output to slate (with invalid proof)
 		let mut proof = RangeProof::zero();
 		proof.plen = crate::grin_util::secp::constants::MAX_PROOF_SIZE;
 
-		tx_add_output(slate, swap.multisig.commit(keychain.secp())?, proof);
+		tx_add_output(slate, swap.multisig.commit(keychain.secp())?, proof)?;
 
 		// Sign slate
 		slate.fill_round_1(
@@ -528,12 +524,12 @@ impl BuyApi {
 		keychain: &K,
 		swap: &Swap,
 		context: &Context,
-	) -> Result<SecretKey, ErrorKind> {
+	) -> Result<SecretKey, Error> {
 		// Partial multisig input
 		let sum = BlindSum::new().sub_blinding_factor(BlindingFactor::from_secret_key(
 			swap.multisig_secret(keychain, context)?,
 		));
-		let sec_key = keychain.blind_sum(&sum)?.secret_key()?;
+		let sec_key = keychain.blind_sum(&sum)?.secret_key(keychain.secp())?;
 
 		Ok(sec_key)
 	}
@@ -542,18 +538,18 @@ impl BuyApi {
 		keychain: &K,
 		swap: &mut Swap,
 		context: &Context,
-	) -> Result<(), ErrorKind> {
+	) -> Result<(), Error> {
 		let commit = swap.multisig.commit(keychain.secp())?;
 		let mut sec_key = Self::refund_tx_secret(keychain, swap, context)?;
 
 		// This function should only be called once
 		let slate = &mut swap.refund_slate;
 		if slate.participant_data.len() > 1 {
-			return Err(ErrorKind::OneShot("Buyer Fn sign_refund_slate(), refund slate participant data is already initialized".to_string()).into());
+			return Err(Error::OneShot("Buyer Fn sign_refund_slate(), refund slate participant data is already initialized".to_string()));
 		}
 
 		// Add multisig input to slate
-		tx_add_input(slate, commit);
+		tx_add_input(slate, commit)?;
 
 		// Sign slate
 		slate.fill_round_1(
@@ -579,7 +575,7 @@ impl BuyApi {
 		keychain: &K,
 		swap: &Swap,
 		context: &Context,
-	) -> Result<SecretKey, ErrorKind> {
+	) -> Result<SecretKey, Error> {
 		let bcontext = context.unwrap_buyer()?;
 
 		// Partial multisig input, redeem output, offset
@@ -588,8 +584,8 @@ impl BuyApi {
 			.sub_blinding_factor(BlindingFactor::from_secret_key(
 				swap.multisig_secret(keychain, context)?,
 			))
-			.sub_blinding_factor(swap.redeem_slate.tx.offset.clone());
-		let sec_key = keychain.blind_sum(&sum)?.secret_key()?;
+			.sub_blinding_factor(swap.redeem_slate.tx_or_err()?.offset.clone());
+		let sec_key = keychain.blind_sum(&sum)?.secret_key(keychain.secp())?;
 
 		Ok(sec_key)
 	}
@@ -598,20 +594,20 @@ impl BuyApi {
 		keychain: &K,
 		swap: &mut Swap,
 		context: &Context,
-	) -> Result<(), ErrorKind> {
+	) -> Result<(), Error> {
 		let bcontext = context.unwrap_buyer()?;
 
 		// This function should only be called once
 		let slate = &mut swap.redeem_slate;
 		if slate.participant_data.len() > 1 {
-			return Err(ErrorKind::OneShot(
+			return Err(Error::OneShot(
 				"Buyer Fn build_redeem_slate(), redeem slate participant data is not empty"
 					.to_string(),
 			));
 		}
 
 		// Build slate
-		slate.fee = tx_fee(1, 1, 1, None);
+		slate.fee = tx_fee(1, 1, 1);
 		slate.amount = swap.primary_amount - slate.fee;
 		let mut elems = Vec::new();
 		elems.push(build::output(slate.amount, bcontext.output.clone()));
@@ -619,24 +615,25 @@ impl BuyApi {
 
 		#[cfg(test)]
 		{
-			slate.tx.offset = if is_test_mode() {
+			slate.tx_or_err_mut()?.offset = if is_test_mode() {
 				BlindingFactor::from_hex(
 					"90de4a3812c7b78e567548c86926820d838e7e0b43346b1ba63066cd5cc7d999",
 				)
 				.unwrap()
 			} else {
-				BlindingFactor::from_secret_key(SecretKey::new(&mut thread_rng()))
+				BlindingFactor::from_secret_key(SecretKey::new(keychain.secp(), &mut thread_rng()))
 			};
 		}
 
 		// Release Doesn't have any tweaking
 		#[cfg(not(test))]
 		{
-			slate.tx.offset = BlindingFactor::from_secret_key(SecretKey::new(&mut thread_rng()));
+			slate.tx_or_err_mut()?.offset =
+				BlindingFactor::from_secret_key(SecretKey::new(keychain.secp(), &mut thread_rng()));
 		}
 
 		// Add multisig input to slate
-		tx_add_input(slate, swap.multisig.commit(keychain.secp())?);
+		tx_add_input(slate, swap.multisig.commit(keychain.secp())?)?;
 
 		let mut sec_key = Self::redeem_tx_secret(keychain, swap, context)?;
 		let slate = &mut swap.redeem_slate;
@@ -660,7 +657,8 @@ impl BuyApi {
 		swap: &mut Swap,
 		context: &Context,
 		part: TxParticipant,
-	) -> Result<(), ErrorKind> {
+		height: u64,
+	) -> Result<(), Error> {
 		let id = swap.participant_id;
 		let other_id = swap.other_participant_id();
 		let sec_key = Self::redeem_tx_secret(keychain, swap, context)?;
@@ -670,10 +668,10 @@ impl BuyApi {
 		if slate
 			.participant_data
 			.get(id)
-			.ok_or(ErrorKind::UnexpectedAction("Buyer Fn finalize_redeem_slate() redeem slate participant data is not initialized for this party".to_string()))?
+			.ok_or(Error::UnexpectedAction("Buyer Fn finalize_redeem_slate() redeem slate participant data is not initialized for this party".to_string()))?
 			.is_complete()
 		{
-			return Err(ErrorKind::OneShot("Buyer Fn finalize_redeem_slate() redeem slate is already initialized".to_string()).into());
+			return Err(Error::OneShot("Buyer Fn finalize_redeem_slate() redeem slate is already initialized".to_string()));
 		}
 
 		// Replace participant
@@ -681,7 +679,7 @@ impl BuyApi {
 			slate
 				.participant_data
 				.get_mut(other_id)
-				.ok_or(ErrorKind::UnexpectedAction("Buyer Fn finalize_redeem_slate() redeem slate participant data is not initialized for other party".to_string()))?,
+				.ok_or(Error::UnexpectedAction("Buyer Fn finalize_redeem_slate() redeem slate participant data is not initialized for other party".to_string()))?,
 			part,
 		);
 
@@ -692,7 +690,7 @@ impl BuyApi {
 			&context.redeem_nonce,
 			swap.participant_id,
 		)?;
-		slate.finalize(keychain)?;
+		slate.finalize(keychain, height)?;
 
 		Ok(())
 	}
@@ -701,16 +699,17 @@ impl BuyApi {
 		keychain: &K,
 		swap: &mut Swap,
 		context: &Context,
-	) -> Result<(), ErrorKind> {
+	) -> Result<(), Error> {
 		// This function should only be called once
 		if swap.adaptor_signature.is_some() {
-			return Err(ErrorKind::OneShot(
+			return Err(Error::OneShot(
 				"Buyer calculate_adaptor_signature(), miltisig is already initialized".to_string(),
 			));
 		}
 
 		let sec_key = Self::redeem_tx_secret(keychain, swap, context)?;
-		let (pub_nonce_sum, pub_blind_sum, message) = swap.redeem_tx_fields(&swap.redeem_slate)?;
+		let (pub_nonce_sum, pub_blind_sum, message) =
+			swap.redeem_tx_fields(&swap.redeem_slate, keychain.secp())?;
 
 		let adaptor_signature = aggsig::sign_single(
 			keychain.secp(),

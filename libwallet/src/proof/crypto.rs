@@ -14,16 +14,18 @@
 
 use grin_wallet_util::grin_util::secp::key::{PublicKey, SecretKey};
 use grin_wallet_util::grin_util::secp::pedersen::Commitment;
-use grin_wallet_util::grin_util::secp::{Message, Secp256k1, Signature};
+use grin_wallet_util::grin_util::secp::{ContextFlag, Message, Secp256k1, Signature};
 
 use super::base58;
-use crate::error::{Error, ErrorKind};
+use crate::error::Error;
 use crate::grin_util as util;
 use sha2::{Digest, Sha256};
 
 /// Build a public key for the given private key
-pub fn public_key_from_secret_key(secret_key: &SecretKey) -> Result<PublicKey, Error> {
-	let secp = Secp256k1::new();
+pub fn public_key_from_secret_key(
+	secp: &Secp256k1,
+	secret_key: &SecretKey,
+) -> Result<PublicKey, Error> {
 	PublicKey::from_secret_key(&secp, secret_key).map_err(|e| Error::from(e))
 }
 
@@ -32,35 +34,38 @@ pub fn verify_signature(
 	challenge: &str,
 	signature: &Signature,
 	public_key: &PublicKey,
+	secp: &Secp256k1,
 ) -> Result<(), Error> {
 	let mut hasher = Sha256::new();
 	hasher.update(challenge.as_bytes());
 	let message = Message::from_slice(hasher.finalize().as_slice())?;
-	let secp = Secp256k1::new();
 	secp.verify(&message, signature, public_key)
 		.map_err(|e| Error::from(e))?;
 	Ok(())
 }
 
 /// Sing the challenge with a private key.
-pub fn sign_challenge(challenge: &str, secret_key: &SecretKey) -> Result<Signature, Error> {
+pub fn sign_challenge(
+	challenge: &str,
+	secret_key: &SecretKey,
+	secp: &Secp256k1,
+) -> Result<Signature, Error> {
 	let mut hasher = Sha256::new();
 	hasher.update(challenge.as_bytes());
 	let message = Message::from_slice(hasher.finalize().as_slice())?;
-	let secp = Secp256k1::new();
 	secp.sign(&message, secret_key).map_err(|e| Error::from(e))
 }
 
 /// convert to a signature from string
-pub fn signature_from_string(sig_str: &str) -> Result<Signature, Error> {
+pub fn signature_from_string(sig_str: &str, secp: &Secp256k1) -> Result<Signature, Error> {
 	let signature_ser = util::from_hex(sig_str).map_err(|e| {
-		ErrorKind::TxProofGenericError(format!(
+		Error::TxProofGenericError(format!(
 			"Unable to build signature from HEX {}, {}",
 			sig_str, e
 		))
 	})?;
-	let signature = Signature::from_der(&signature_ser)
-		.map_err(|e| ErrorKind::TxProofGenericError(format!("Unable to build signature, {}", e)))?;
+	let signature = Signature::from_der(secp, &signature_ser)
+		.map_err(|e| Error::TxProofGenericError(format!("Unable to build signature, {}", e)))?;
 	Ok(signature)
 }
 
@@ -76,35 +81,36 @@ pub trait Hex<T> {
 
 impl Hex<PublicKey> for PublicKey {
 	fn from_hex(str: &str) -> Result<PublicKey, Error> {
-		let hex = util::from_hex(str).map_err(|e| {
-			ErrorKind::HexError(format!("Unable convert Publi Key HEX {}, {}", str, e))
-		})?;
-		PublicKey::from_slice(&hex).map_err(|e| {
-			ErrorKind::HexError(format!(
+		let hex = util::from_hex(str)
+			.map_err(|e| Error::HexError(format!("Unable convert Publi Key HEX {}, {}", str, e)))?;
+		let secp = Secp256k1::with_caps(ContextFlag::None);
+		PublicKey::from_slice(&secp, &hex).map_err(|e| {
+			Error::HexError(format!(
 				"Unable to build public key from HEX {}, {}",
 				str, e
 			))
-			.into()
 		})
 	}
 
 	fn to_hex(&self) -> String {
-		util::to_hex(&base58::serialize_public_key(self))
+		let secp = Secp256k1::with_caps(ContextFlag::None);
+		util::to_hex(&base58::serialize_public_key(&secp, self))
 	}
 }
 
 impl Hex<Signature> for Signature {
 	fn from_hex(str: &str) -> Result<Signature, Error> {
-		let hex = util::from_hex(str).map_err(|e| {
-			ErrorKind::HexError(format!("Unable convert Signature HEX {}, {}", str, e))
-		})?;
-		Signature::from_der(&hex).map_err(|e| {
-			ErrorKind::HexError(format!("Unable to build Signature from HEX {}, {}", str, e)).into()
+		let hex = util::from_hex(str)
+			.map_err(|e| Error::HexError(format!("Unable convert Signature HEX {}, {}", str, e)))?;
+		let secp = Secp256k1::with_caps(ContextFlag::None);
+		Signature::from_der(&secp, &hex).map_err(|e| {
+			Error::HexError(format!("Unable to build Signature from HEX {}, {}", str, e))
 		})
 	}
 
 	fn to_hex(&self) -> String {
-		let signature = self.serialize_der();
+		let secp = Secp256k1::with_caps(ContextFlag::None);
+		let signature = self.serialize_der(&secp);
 		util::to_hex(&signature)
 	}
 }
@@ -112,9 +118,10 @@ impl Hex<Signature> for Signature {
 impl Hex<SecretKey> for SecretKey {
 	fn from_hex(str: &str) -> Result<SecretKey, Error> {
 		let data = util::from_hex(str)
-			.map_err(|e| ErrorKind::HexError(format!("Unable convert key HEX, {}", e)))?;
-		SecretKey::from_slice(&data)
-			.map_err(|e| ErrorKind::HexError(format!("Unable to build Key from HEX, {}", e)).into())
+			.map_err(|e| Error::HexError(format!("Unable convert key HEX, {}", e)))?;
+		let secp = Secp256k1::with_caps(ContextFlag::None);
+		SecretKey::from_slice(&secp, &data)
+			.map_err(|e| Error::HexError(format!("Unable to build Key from HEX, {}", e)))
 	}
 
 	fn to_hex(&self) -> String {
@@ -125,7 +132,7 @@ impl Hex<SecretKey> for SecretKey {
 impl Hex<Commitment> for Commitment {
 	fn from_hex(str: &str) -> Result<Commitment, Error> {
 		let data = util::from_hex(str).map_err(|e| {
-			ErrorKind::HexError(format!("Unable convert Commitment HEX {}, {}", str, e))
+			Error::HexError(format!("Unable convert Commitment HEX {}, {}", str, e))
 		})?;
 		Ok(Commitment::from_vec(data))
 	}

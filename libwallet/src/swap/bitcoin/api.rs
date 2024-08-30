@@ -30,13 +30,14 @@ use crate::swap::types::{
 	BuyerContext, Context, Currency, RoleContext, SecondaryBuyerContext, SecondarySellerContext,
 	SellerContext, SwapTransactionsConfirmations,
 };
-use crate::swap::{ErrorKind, SellApi, Swap, SwapApi};
+use crate::swap::{Error, SellApi, Swap, SwapApi};
 use crate::{NodeClient, Slate};
 use bitcoin::{Script, Txid};
-use failure::_core::marker::PhantomData;
+use grin_wallet_util::grin_util::secp::Secp256k1;
+use std::marker::PhantomData;
 use std::sync::Arc;
 
-/// SwapApi trait implementaiton for BTC
+/// SwapApi trait implementation for BTC
 #[derive(Clone)]
 pub struct BtcSwapApi<'a, C, B>
 where
@@ -99,16 +100,14 @@ where
 	}
 
 	/// Update swap.secondary_data with a roll back script.
-	pub(crate) fn script(&self, swap: &Swap) -> Result<Script, ErrorKind> {
+	pub(crate) fn script(&self, swap: &Swap, secp: &Secp256k1) -> Result<Script, Error> {
 		let btc_data = swap.secondary_data.unwrap_btc()?;
 		Ok(btc_data.script(
-			swap.redeem_public
-				.as_ref()
-				.ok_or(ErrorKind::UnexpectedAction(
-					"swap.redeem_public value is not defined. Method BtcSwapApi::script"
-						.to_string(),
-				))?,
+			swap.redeem_public.as_ref().ok_or(Error::UnexpectedAction(
+				"swap.redeem_public value is not defined. Method BtcSwapApi::script".to_string(),
+			))?,
 			swap.get_time_secondary_lock_script() as u64,
+			secp,
 		)?)
 	}
 
@@ -119,7 +118,7 @@ where
 		swap: &Swap,
 		input_script: &Script,
 		confirmations_needed: u64,
-	) -> Result<(u64, u64, u64, Vec<Output>), ErrorKind> {
+	) -> Result<(u64, u64, u64, Vec<Output>), Error> {
 		let btc_data = swap.secondary_data.unwrap_btc()?;
 		let address = btc_data.address(self.secondary_currency, input_script, swap.network)?;
 		debug_assert!(address.len() > 0);
@@ -184,7 +183,7 @@ where
 		swap: &Swap,
 		context: &Context,
 		input_script: &Script,
-	) -> Result<BtcTtansaction, ErrorKind> {
+	) -> Result<BtcTtansaction, Error> {
 		let cosign_id = &context.unwrap_seller()?.unwrap_btc()?.cosign;
 
 		let redeem_address_str = swap.unwrap_seller()?.0.clone();
@@ -198,7 +197,7 @@ where
 		let (pending_amount, confirmed_amount, _, mut conf_outputs) =
 			self.btc_balance(swap, input_script, 0)?;
 		if pending_amount + confirmed_amount == 0 {
-			return Err(ErrorKind::Generic(
+			return Err(Error::Generic(
 				"Not found outputs to redeem. Probably Buyer already refund it".to_string(),
 			));
 		}
@@ -214,6 +213,7 @@ where
 				input_script,
 				&mut secp.sign(msg, &cosign_secret)?,
 				&mut secp.sign(msg, &redeem_secret)?,
+				secp,
 			)
 		};
 
@@ -238,12 +238,12 @@ where
 		refund_address: &String,
 		input_script: &Script,
 		post_tx: bool,
-	) -> Result<(), ErrorKind> {
+	) -> Result<(), Error> {
 		let (pending_amount, confirmed_amount, _, conf_outputs) =
 			self.btc_balance(swap, input_script, 0)?;
 
 		if pending_amount + confirmed_amount == 0 {
-			return Err(ErrorKind::Generic(
+			return Err(Error::Generic(
 				"Not found outputs to refund. Probably Seller already redeem it".to_string(),
 			));
 		}
@@ -263,6 +263,7 @@ where
 				&secondary_currency,
 				&mut secp.sign(msg, &refund_key)?,
 				input_script,
+				secp,
 			)
 		};
 
@@ -294,13 +295,13 @@ where
 		mwc_tip: &u64,
 		slate: &Slate,
 		outputs_ok: bool,
-	) -> Result<Option<u64>, ErrorKind> {
-		let result: Option<u64> = if slate.tx.kernels().is_empty() {
+	) -> Result<Option<u64>, Error> {
+		let result: Option<u64> = if slate.tx_or_err()?.kernels().is_empty() {
 			None
 		} else {
-			debug_assert!(slate.tx.kernels().len() == 1);
+			debug_assert!(slate.tx_or_err()?.kernels().len() == 1);
 
-			let kernel = &slate.tx.kernels()[0].excess;
+			let kernel = &slate.tx_or_err()?.kernels()[0].excess;
 			if kernel.0.to_vec().iter().any(|v| *v != 0) {
 				// kernel is non zero - we can check transaction by kernel
 				match self
@@ -315,7 +316,8 @@ where
 			} else {
 				if outputs_ok {
 					// kernel is not valid, still can use outputs.
-					let wallet_outputs: Vec<pedersen::Commitment> = slate.tx.outputs_committed();
+					let wallet_outputs: Vec<pedersen::Commitment> =
+						slate.tx_or_err()?.outputs_committed();
 					let res = self.node_client.get_outputs_from_node(&wallet_outputs)?;
 					let height = res.values().map(|v| v.1).max();
 					match height {
@@ -335,7 +337,7 @@ where
 		&self,
 		btc_tip: &u64,
 		tx_hash: Option<Txid>,
-	) -> Result<Option<u64>, ErrorKind> {
+	) -> Result<Option<u64>, Error> {
 		let result: Option<u64> = match tx_hash {
 			None => None,
 			Some(tx_hash) => {
@@ -365,10 +367,10 @@ where
 		_keychain: &K,
 		secondary_currency: Currency,
 		_is_seller: bool,
-	) -> Result<usize, ErrorKind> {
+	) -> Result<usize, Error> {
 		match secondary_currency.is_btc_family() {
 			true => Ok(4),
-			_ => return Err(ErrorKind::UnexpectedCoinType),
+			_ => return Err(Error::UnexpectedCoinType),
 		}
 	}
 
@@ -382,10 +384,10 @@ where
 		change_amount: u64,
 		keys: Vec<Identifier>,
 		parent_key_id: Identifier,
-	) -> Result<Context, ErrorKind> {
+	) -> Result<Context, Error> {
 		match secondary_currency.is_btc_family() {
 			true => (),
-			_ => return Err(ErrorKind::UnexpectedCoinType),
+			_ => return Err(Error::UnexpectedCoinType),
 		}
 
 		let secp = keychain.secp();
@@ -394,7 +396,7 @@ where
 		let role_context = if is_seller {
 			RoleContext::Seller(SellerContext {
 				parent_key_id: parent_key_id,
-				inputs: inputs.ok_or(ErrorKind::UnexpectedRole(
+				inputs: inputs.ok_or(Error::UnexpectedRole(
 					"Fn create_context() for seller not found inputs".to_string(),
 				))?,
 				change_output: keys.next().unwrap(),
@@ -449,13 +451,13 @@ where
 		_eth_redirect_out_wallet: Option<bool>,
 		dry_run: bool,
 		tag: Option<String>,
-	) -> Result<Swap, ErrorKind> {
+	) -> Result<Swap, Error> {
 		// Checking if address is valid
 
 		secondary_currency
 			.validate_address(&secondary_redeem_address)
 			.map_err(|e| {
-				ErrorKind::Generic(format!(
+				Error::Generic(format!(
 					"Unable to parse secondary currency redeem address {}, {}",
 					secondary_redeem_address, e
 				))
@@ -463,7 +465,7 @@ where
 
 		match secondary_currency.is_btc_family() {
 			true => (),
-			_ => return Err(ErrorKind::UnexpectedCoinType),
+			_ => return Err(Error::UnexpectedCoinType),
 		}
 
 		let height = self.node_client.get_chain_tip()?.0;
@@ -530,10 +532,10 @@ where
 		swap: &mut Swap,
 		context: &Context,
 		post_tx: bool,
-	) -> Result<(), ErrorKind> {
+	) -> Result<(), Error> {
 		assert!(swap.is_seller());
 
-		let input_script = self.script(swap)?;
+		let input_script = self.script(swap, keychain.secp())?;
 
 		let btc_tx = self.seller_build_redeem_tx(keychain, swap, context, &input_script)?;
 
@@ -552,9 +554,9 @@ where
 	/// Request confirmation numberss for all transactions that are known and in the in the swap
 	fn request_tx_confirmations(
 		&self,
-		_keychain: &K, // keychain is kept for Type. Compiler need to understand all types
+		keychain: &K, // keychain is kept for Type. Compiler need to understand all types
 		swap: &Swap,
-	) -> Result<SwapTransactionsConfirmations, ErrorKind> {
+	) -> Result<SwapTransactionsConfirmations, Error> {
 		let mwc_tip = self.node_client.get_chain_tip()?.0;
 
 		let is_seller = swap.is_seller();
@@ -585,7 +587,7 @@ where
 		let mut secondary_lock_amount = 0;
 		let mut least_confirmations = None;
 
-		if let Ok(input_script) = self.script(swap) {
+		if let Ok(input_script) = self.script(swap, keychain.secp()) {
 			if let Ok(address) =
 				btc_data.address(swap.secondary_currency, &input_script, swap.network)
 			{
@@ -636,8 +638,9 @@ where
 		&self,
 		swap: &Swap,
 		confirmations_needed: u64,
-	) -> Result<(u64, u64, u64), ErrorKind> {
-		let input_script = self.script(swap)?;
+		secp: &Secp256k1,
+	) -> Result<(u64, u64, u64), Error> {
+		let input_script = self.script(swap, secp)?;
 
 		let (pending_amount, confirmed_amount, least_confirmations, _outputs) =
 			self.btc_balance(swap, &input_script, confirmations_needed)?;
@@ -731,8 +734,12 @@ where
 
 	/// Get a secondary addresses for the lock account
 	/// We can have several addresses because of different formats
-	fn get_secondary_lock_address(&self, swap: &Swap) -> Result<Vec<String>, ErrorKind> {
-		let input_script = self.script(swap)?;
+	fn get_secondary_lock_address(
+		&self,
+		swap: &Swap,
+		secp: &Secp256k1,
+	) -> Result<Vec<String>, Error> {
+		let input_script = self.script(swap, secp)?;
 		let address = swap.secondary_data.unwrap_btc()?.address(
 			swap.secondary_currency,
 			&input_script,
@@ -742,7 +749,7 @@ where
 	}
 
 	/// Check if tx fee for the secondary is different from the posted
-	fn is_secondary_tx_fee_changed(&self, swap: &Swap) -> Result<bool, ErrorKind> {
+	fn is_secondary_tx_fee_changed(&self, swap: &Swap) -> Result<bool, Error> {
 		Ok(swap.secondary_data.unwrap_btc()?.tx_fee != Some(swap.secondary_fee))
 	}
 
@@ -754,17 +761,16 @@ where
 		swap: &mut Swap,
 		refund_address: Option<String>,
 		post_tx: bool,
-	) -> Result<(), ErrorKind> {
+	) -> Result<(), Error> {
 		assert!(!swap.is_seller());
 
-		let refund_address_str = refund_address.ok_or(ErrorKind::Generic(
-			"Please define refund address".to_string(),
-		))?;
+		let refund_address_str =
+			refund_address.ok_or(Error::Generic("Please define refund address".to_string()))?;
 
 		swap.secondary_currency
 			.validate_address(&refund_address_str)?;
 
-		let input_script = self.script(swap)?;
+		let input_script = self.script(swap, keychain.secp())?;
 		self.buyer_refund(
 			keychain,
 			context,
@@ -777,22 +783,22 @@ where
 	}
 
 	/// deposit secondary currecny to lock account.
-	fn post_secondary_lock_tx(&self, _swap: &mut Swap) -> Result<(), ErrorKind> {
+	fn post_secondary_lock_tx(&self, _swap: &mut Swap) -> Result<(), Error> {
 		Ok(())
 	}
 
 	/// transfer amount to dedicated address.
-	fn transfer_scondary(&self, _swap: &mut Swap) -> Result<(), ErrorKind> {
+	fn transfer_scondary(&self, _swap: &mut Swap) -> Result<(), Error> {
 		Ok(())
 	}
 
 	/// Validate clients. We want to be sure that the clients able to acceess the servers
-	fn test_client_connections(&self) -> Result<(), ErrorKind> {
+	fn test_client_connections(&self) -> Result<(), Error> {
 		{
 			let mut c = self.btc_node_client1.lock();
 			let name = c.name();
 			let _ = c.height().map_err(|e| {
-				ErrorKind::ElectrumNodeClient(format!(
+				Error::ElectrumNodeClient(format!(
 					"Unable to contact the primary ElectrumX client {}, {}",
 					name, e
 				))
@@ -802,7 +808,7 @@ where
 			let mut c = self.btc_node_client2.lock();
 			let name = c.name();
 			let _ = c.height().map_err(|e| {
-				ErrorKind::ElectrumNodeClient(format!(
+				Error::ElectrumNodeClient(format!(
 					"Unable to contact the secondary ElectrumX client {}, {}",
 					name, e
 				))

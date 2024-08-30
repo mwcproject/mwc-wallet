@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::error::ErrorKind;
+use super::error::Error;
 use crate::blake2::blake2b::blake2b;
 use crate::grin_core::core::{
 	Input as TxInput, Output as TxOutput, OutputFeatures, OutputIdentifier,
@@ -81,10 +81,10 @@ impl Builder {
 		&mut self,
 		secp: &Secp256k1,
 		secret_key: &SecretKey,
-	) -> Result<(), ErrorKind> {
+	) -> Result<(), Error> {
 		let id = self.participants.len();
 		if id != self.participant_id {
-			return Err(ErrorKind::ParticipantOrdering);
+			return Err(Error::ParticipantOrdering);
 		}
 		let partial_commitment = secp.commit(0, secret_key.clone())?;
 		self.participants.push(if self.commit_reveal {
@@ -100,13 +100,13 @@ impl Builder {
 		&mut self,
 		id: usize,
 		participant: &ParticipantData,
-	) -> Result<(), ErrorKind> {
+	) -> Result<(), Error> {
 		if self.participants.len() > id {
-			return Err(ErrorKind::ParticipantExists);
+			return Err(Error::ParticipantExists);
 		}
 
 		if self.participants.len() != id || self.participants.len() >= self.num_participants {
-			return Err(ErrorKind::ParticipantOrdering);
+			return Err(Error::ParticipantOrdering);
 		}
 
 		self.participants.push(if self.commit_reveal {
@@ -123,18 +123,18 @@ impl Builder {
 		&mut self,
 		id: usize,
 		participant: &ParticipantData,
-	) -> Result<(), ErrorKind> {
+	) -> Result<(), Error> {
 		if self.participants.len() <= id {
-			return Err(ErrorKind::ParticipantDoesntExist);
+			return Err(Error::ParticipantDoesntExist);
 		}
 
 		if self.commit_reveal && self.participants.len() != self.num_participants {
-			return Err(ErrorKind::MultiSigIncomplete);
+			return Err(Error::MultiSigIncomplete);
 		}
 
 		match participant.partial_commitment.as_ref() {
 			Some(p) => self.participants[id].reveal(p),
-			None => Err(ErrorKind::Reveal),
+			None => Err(Error::Reveal),
 		}
 	}
 
@@ -143,17 +143,17 @@ impl Builder {
 		&mut self,
 		id: usize,
 		participant: &ParticipantData,
-	) -> Result<(), ErrorKind> {
+	) -> Result<(), Error> {
 		if self.participants.len() <= id {
-			return Err(ErrorKind::ParticipantDoesntExist);
+			return Err(Error::ParticipantDoesntExist);
 		}
 
 		if self.participants.len() != self.num_participants {
-			return Err(ErrorKind::MultiSigIncomplete);
+			return Err(Error::MultiSigIncomplete);
 		}
 
 		if participant.t_1.is_none() || participant.t_2.is_none() {
-			return Err(ErrorKind::Round1Missing);
+			return Err(Error::Round1Missing);
 		}
 
 		self.participants[id].t_1 = participant.t_1.clone();
@@ -166,17 +166,17 @@ impl Builder {
 		&mut self,
 		id: usize,
 		participant: &ParticipantData,
-	) -> Result<(), ErrorKind> {
+	) -> Result<(), Error> {
 		if self.participants.len() <= id {
-			return Err(ErrorKind::ParticipantDoesntExist.into());
+			return Err(Error::ParticipantDoesntExist);
 		}
 
 		if self.participants.len() != self.num_participants {
-			return Err(ErrorKind::MultiSigIncomplete.into());
+			return Err(Error::MultiSigIncomplete);
 		}
 
 		if participant.tau_x.is_none() {
-			return Err(ErrorKind::Round2Missing.into());
+			return Err(Error::Round2Missing);
 		}
 
 		self.participants[id].tau_x = participant.tau_x.clone();
@@ -184,18 +184,18 @@ impl Builder {
 	}
 
 	/// Export this party participant data
-	pub fn export(&self) -> Result<ParticipantData, ErrorKind> {
+	pub fn export(&self) -> Result<ParticipantData, Error> {
 		if self.participants.len() <= self.participant_id {
-			return Err(ErrorKind::ParticipantDoesntExist);
+			return Err(Error::ParticipantDoesntExist);
 		}
 
 		Ok(self.participants[self.participant_id].clone())
 	}
 
 	/// Checking revealed data
-	pub fn reveal(&mut self, secp: &Secp256k1, secret_key: &SecretKey) -> Result<(), ErrorKind> {
+	pub fn reveal(&mut self, secp: &Secp256k1, secret_key: &SecretKey) -> Result<(), Error> {
 		if self.participants.len() != self.num_participants {
-			return Err(ErrorKind::MultiSigIncomplete);
+			return Err(Error::MultiSigIncomplete);
 		}
 
 		let partial_commitment = secp.commit(0, secret_key.clone())?;
@@ -204,15 +204,15 @@ impl Builder {
 	}
 
 	/// Mulisig buiding round 1
-	pub fn round_1(&mut self, secp: &Secp256k1, blind: &SecretKey) -> Result<(), ErrorKind> {
+	pub fn round_1(&mut self, secp: &Secp256k1, blind: &SecretKey) -> Result<(), Error> {
 		let mut t_1 = PublicKey::new();
 		let mut t_2 = PublicKey::new();
 		// Round 1 doesnt require knowledge of total commit or common nonce, we should allow NULL argument in libsecp
-		let commit = secp.commit(0, SecretKey::new(&mut thread_rng()))?;
+		let commit = secp.commit(0, SecretKey::new(secp, &mut thread_rng()))?;
 		let common_nonce = self
 			.common_nonce
 			.clone()
-			.unwrap_or(SecretKey::new(&mut thread_rng()));
+			.unwrap_or(SecretKey::new(secp, &mut thread_rng()));
 		secp.bullet_proof_multisig(
 			self.amount,
 			blind.clone(),
@@ -232,9 +232,9 @@ impl Builder {
 	}
 
 	/// Mulisig buiding round 2
-	pub fn round_2(&mut self, secp: &Secp256k1, blind: &SecretKey) -> Result<(), ErrorKind> {
-		let mut t_1 = self.sum_t_1()?;
-		let mut t_2 = self.sum_t_2()?;
+	pub fn round_2(&mut self, secp: &Secp256k1, blind: &SecretKey) -> Result<(), Error> {
+		let mut t_1 = self.sum_t_1(secp)?;
+		let mut t_2 = self.sum_t_2(secp)?;
 		let mut tau_x = SecretKey([0; SECRET_KEY_SIZE]);
 		let commit = self.commit(secp)?;
 		secp.bullet_proof_multisig(
@@ -255,10 +255,10 @@ impl Builder {
 	}
 
 	/// Finalize building multisig
-	pub fn finalize(&self, secp: &Secp256k1, blind: &SecretKey) -> Result<RangeProof, ErrorKind> {
-		let mut t_1 = self.sum_t_1()?;
-		let mut t_2 = self.sum_t_2()?;
-		let mut tau_x = self.sum_tau_x()?;
+	pub fn finalize(&self, secp: &Secp256k1, blind: &SecretKey) -> Result<RangeProof, Error> {
+		let mut t_1 = self.sum_t_1(secp)?;
+		let mut t_2 = self.sum_t_2(secp)?;
+		let mut tau_x = self.sum_tau_x(secp)?;
 		let commit = self.commit(secp)?;
 		let proof = secp
 			.bullet_proof_multisig(
@@ -274,13 +274,13 @@ impl Builder {
 				Some(&self.nonce),
 				0,
 			)
-			.ok_or(ErrorKind::MultiSigIncomplete)?;
+			.ok_or(Error::MultiSigIncomplete)?;
 		secp.verify_bullet_proof(commit, proof, None)?;
 		Ok(proof)
 	}
 
 	/// Multisig as commit
-	pub fn as_input(&self, secp: &Secp256k1) -> Result<TxInput, ErrorKind> {
+	pub fn as_input(&self, secp: &Secp256k1) -> Result<TxInput, Error> {
 		Ok(TxInput {
 			features: OutputFeatures::Plain,
 			commit: self.commit(secp)?,
@@ -288,7 +288,7 @@ impl Builder {
 	}
 
 	/// Multisig as output
-	pub fn as_output(&self, secp: &Secp256k1, blind: &SecretKey) -> Result<TxOutput, ErrorKind> {
+	pub fn as_output(&self, secp: &Secp256k1, blind: &SecretKey) -> Result<TxOutput, Error> {
 		Ok(TxOutput {
 			identifier: OutputIdentifier {
 				features: OutputFeatures::Plain,
@@ -299,7 +299,7 @@ impl Builder {
 	}
 
 	/// Build a commitment with initialized multisig
-	pub fn commit(&self, secp: &Secp256k1) -> Result<Commitment, ErrorKind> {
+	pub fn commit(&self, secp: &Secp256k1) -> Result<Commitment, Error> {
 		let mut partial_commitments: Vec<Commitment> = self
 			.participants
 			.iter()
@@ -307,22 +307,20 @@ impl Builder {
 			.collect();
 
 		if partial_commitments.len() != self.num_participants {
-			return Err(ErrorKind::MultiSigIncomplete);
+			return Err(Error::MultiSigIncomplete);
 		}
 
 		let commitment_value = secp.commit_value(self.amount)?;
 		partial_commitments.push(commitment_value);
-		let commitment = Secp256k1::commit_sum(partial_commitments, vec![])?;
+		let commitment = secp.commit_sum(partial_commitments, vec![])?;
 		Ok(commitment)
 	}
 
-	fn common_nonce(&self) -> Result<SecretKey, ErrorKind> {
-		self.common_nonce
-			.clone()
-			.ok_or(ErrorKind::CommonNonceMissing)
+	fn common_nonce(&self) -> Result<SecretKey, Error> {
+		self.common_nonce.clone().ok_or(Error::CommonNonceMissing)
 	}
 
-	fn sum_t_1(&self) -> Result<PublicKey, ErrorKind> {
+	fn sum_t_1(&self, secp: &Secp256k1) -> Result<PublicKey, Error> {
 		let t_1s: Vec<&PublicKey> = self
 			.participants
 			.iter()
@@ -330,14 +328,14 @@ impl Builder {
 			.collect();
 
 		if t_1s.len() != self.num_participants {
-			return Err(ErrorKind::MultiSigIncomplete);
+			return Err(Error::MultiSigIncomplete);
 		}
 
-		let t_1 = PublicKey::from_combination(t_1s)?;
+		let t_1 = PublicKey::from_combination(secp, t_1s)?;
 		Ok(t_1)
 	}
 
-	fn sum_t_2(&self) -> Result<PublicKey, ErrorKind> {
+	fn sum_t_2(&self, secp: &Secp256k1) -> Result<PublicKey, Error> {
 		let t_2s: Vec<&PublicKey> = self
 			.participants
 			.iter()
@@ -345,14 +343,14 @@ impl Builder {
 			.collect();
 
 		if t_2s.len() != self.num_participants {
-			return Err(ErrorKind::MultiSigIncomplete);
+			return Err(Error::MultiSigIncomplete);
 		}
 
-		let t_2 = PublicKey::from_combination(t_2s)?;
+		let t_2 = PublicKey::from_combination(secp, t_2s)?;
 		Ok(t_2)
 	}
 
-	fn sum_tau_x(&self) -> Result<SecretKey, ErrorKind> {
+	fn sum_tau_x(&self, secp: &Secp256k1) -> Result<SecretKey, Error> {
 		let mut sum_tau_x = SecretKey([0; SECRET_KEY_SIZE]);
 		let tau_xs: Vec<&SecretKey> = self
 			.participants
@@ -361,12 +359,12 @@ impl Builder {
 			.collect();
 
 		if tau_xs.len() != self.num_participants {
-			return Err(ErrorKind::MultiSigIncomplete);
+			return Err(Error::MultiSigIncomplete);
 		}
 
 		tau_xs
 			.iter()
-			.for_each(|x| sum_tau_x.add_assign(*x).unwrap());
+			.for_each(|x| sum_tau_x.add_assign(secp, *x).unwrap());
 		Ok(sum_tau_x)
 	}
 }
@@ -435,11 +433,11 @@ impl ParticipantData {
 	}
 
 	/// Convert this to not revealed
-	pub fn new_foreign_commit(&self) -> Result<Self, ErrorKind> {
+	pub fn new_foreign_commit(&self) -> Result<Self, Error> {
 		let hash = self
 			.partial_commitment_hash
 			.clone()
-			.ok_or(ErrorKind::ParticipantInvalid)?;
+			.ok_or(Error::ParticipantInvalid)?;
 		Ok(ParticipantData {
 			partial_commitment_hash: Some(hash),
 			partial_commitment: None,
@@ -450,11 +448,11 @@ impl ParticipantData {
 	}
 
 	/// Convert this to revealed
-	pub fn new_foreign_reveal(&self) -> Result<Self, ErrorKind> {
+	pub fn new_foreign_reveal(&self) -> Result<Self, Error> {
 		let commit = self
 			.partial_commitment
 			.clone()
-			.ok_or(ErrorKind::ParticipantInvalid)?;
+			.ok_or(Error::ParticipantInvalid)?;
 		Ok(ParticipantData {
 			partial_commitment_hash: None,
 			partial_commitment: Some(commit),
@@ -465,15 +463,12 @@ impl ParticipantData {
 	}
 
 	/// Check if partial_commitment match the hash
-	fn reveal(&mut self, partial_commitment: &Commitment) -> Result<(), ErrorKind> {
-		let hash = self
-			.partial_commitment_hash
-			.as_ref()
-			.ok_or(ErrorKind::Reveal)?;
+	fn reveal(&mut self, partial_commitment: &Commitment) -> Result<(), Error> {
+		let hash = self.partial_commitment_hash.as_ref().ok_or(Error::Reveal)?;
 		if &partial_commitment.hash()? == hash {
 			Ok(())
 		} else {
-			Err(ErrorKind::Reveal)
+			Err(Error::Reveal)
 		}
 	}
 }
@@ -486,17 +481,17 @@ pub struct Hash {
 
 impl Hash {
 	/// Create a new hash instance
-	pub fn new(inner: Vec<u8>) -> Result<Self, ErrorKind> {
+	pub fn new(inner: Vec<u8>) -> Result<Self, Error> {
 		if inner.len() != 32 {
-			return Err(ErrorKind::HashLength);
+			return Err(Error::HashLength);
 		}
 
 		Ok(Self { inner })
 	}
 
 	/// Init secret from the hash
-	pub fn to_secret_key(&self) -> Result<SecretKey, ErrorKind> {
-		let key = SecretKey::from_slice(&self.inner)?;
+	pub fn to_secret_key(&self, secp: &Secp256k1) -> Result<SecretKey, Error> {
+		let key = SecretKey::from_slice(secp, &self.inner)?;
 		Ok(key)
 	}
 }
@@ -527,18 +522,18 @@ impl<'de> Deserialize<'de> for Hash {
 /// Trait that make Hashable
 pub trait Hashed {
 	/// Calculate hash value
-	fn hash(&self) -> Result<Hash, ErrorKind>;
+	fn hash(&self) -> Result<Hash, Error>;
 }
 /// Define Hash for Pedersen Commitment
 impl Hashed for Commitment {
-	fn hash(&self) -> Result<Hash, ErrorKind> {
+	fn hash(&self) -> Result<Hash, Error> {
 		Hash::new(blake2b(32, &[], &self.0).as_bytes().to_vec())
 	}
 }
 
 /// Define hash for vector
 impl Hashed for Vec<u8> {
-	fn hash(&self) -> Result<Hash, ErrorKind> {
+	fn hash(&self) -> Result<Hash, Error> {
 		Hash::new(blake2b(32, &[], &self).as_bytes().to_vec())
 	}
 }
@@ -662,12 +657,12 @@ mod tests {
 		//// Set up phase: parties agree on the participants (and an ordering), amount and a common nonce
 		let num_participants: usize = 2;
 		let amount: u64 = 42_000_000;
-		let common_nonce = SecretKey::new(&mut thread_rng());
+		let common_nonce = SecretKey::new(&secp, &mut thread_rng());
 
 		// A: round 1
 		let id_a = 0;
-		let secret_a = SecretKey::new(&mut thread_rng());
-		let nonce_a = SecretKey::new(&mut thread_rng());
+		let secret_a = SecretKey::new(&secp, &mut thread_rng());
+		let nonce_a = SecretKey::new(&secp, &mut thread_rng());
 		let mut builder_a = Builder::new(
 			num_participants,
 			amount,
@@ -682,8 +677,8 @@ mod tests {
 
 		// B: round 1 + round 2
 		let id_b = 1;
-		let secret_b = SecretKey::new(&mut thread_rng());
-		let nonce_b = SecretKey::new(&mut thread_rng());
+		let secret_b = SecretKey::new(&secp, &mut thread_rng());
+		let nonce_b = SecretKey::new(&secp, &mut thread_rng());
 		let mut builder_b = Builder::new(
 			num_participants,
 			amount,

@@ -1,4 +1,4 @@
-// Copyright 2019 The Grin Developers
+// Copyright 2021 The Grin Developers
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -23,6 +23,7 @@ use grin_wallet_util::grin_core::global;
 use grin_wallet_libwallet as libwallet;
 use impls::test_framework::{self, LocalWalletClient};
 use libwallet::InitTxArgs;
+use std::sync::atomic::Ordering;
 use std::thread;
 use std::time::Duration;
 
@@ -36,6 +37,7 @@ fn self_send_test_impl(test_dir: &'static str) -> Result<(), wallet::Error> {
 	global::set_local_chain_type(global::ChainTypes::AutomatedTesting);
 	let mut wallet_proxy = create_wallet_proxy(test_dir);
 	let chain = wallet_proxy.chain.clone();
+	let stopper = wallet_proxy.running.clone();
 
 	// Create a new wallet test client, and set its queues to communicate with the
 	// proxy
@@ -98,11 +100,11 @@ fn self_send_test_impl(test_dir: &'static str) -> Result<(), wallet::Error> {
 		api.tx_lock_outputs(m, &slate, None, 0)?;
 		// Send directly to self
 		wallet::controller::foreign_single_use(wallet1.clone(), mask1_i.clone(), |api| {
-			slate = api.receive_tx(&slate, None, Some("listener"), None)?;
+			slate = api.receive_tx(&slate, None, &Some("listener".to_string()), None)?;
 			Ok(())
 		})?;
 		slate = api.finalize_tx(m, &slate)?;
-		api.post_tx(m, &slate.tx, false)?; // mines a block
+		api.post_tx(m, slate.tx_or_err()?, false)?; // mines a block
 		bh += 1;
 		Ok(())
 	})?;
@@ -133,7 +135,8 @@ fn self_send_test_impl(test_dir: &'static str) -> Result<(), wallet::Error> {
 	})?;
 
 	// let logging finish
-	thread::sleep(Duration::from_millis(200));
+	stopper.store(false, Ordering::Relaxed);
+	thread::sleep(Duration::from_millis(1000));
 	Ok(())
 }
 
@@ -142,7 +145,7 @@ fn wallet_self_send() {
 	let test_dir = "test_output/self_send";
 	setup(test_dir);
 	if let Err(e) = self_send_test_impl(test_dir) {
-		panic!("Libwallet Error: {} - {}", e, e.backtrace().unwrap());
+		panic!("Libwallet Error: {}", e);
 	}
 	clean_output_dir(test_dir);
 }

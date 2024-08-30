@@ -1,4 +1,4 @@
-// Copyright 2019 The Grin Developers
+// Copyright 2021 The Grin Developers
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -27,15 +27,11 @@ use grin_wallet_util::grin_api;
 use grin_wallet_util::grin_core;
 use grin_wallet_util::grin_keychain;
 use grin_wallet_util::grin_p2p;
-use grin_wallet_util::grin_store;
 use grin_wallet_util::grin_util;
 
 use grin_wallet_util as util;
 
 use blake2_rfc as blake2;
-
-use failure;
-extern crate failure_derive;
 
 #[macro_use]
 extern crate serde_derive;
@@ -64,7 +60,7 @@ pub mod slate_versions;
 pub mod slatepack;
 /// Atomic Swap library
 pub mod swap;
-mod types;
+pub mod types;
 extern crate bitcoin as bitcoin_lib;
 extern crate bitcoin_hashes;
 extern crate zcash_primitives as zcash;
@@ -73,7 +69,7 @@ pub use crate::slatepack::{SlatePurpose, Slatepack, SlatepackArmor, Slatepacker}
 
 pub use bitcoin::Address as BitcoinAddress;
 
-pub use crate::error::{Error, ErrorKind};
+pub use crate::error::Error;
 pub use crate::slate::{ParticipantData, ParticipantMessageData, ParticipantMessages, Slate};
 pub use crate::slate_versions::{
 	SlateVersion, VersionedCoinbase, VersionedSlate, CURRENT_SLATE_VERSION,
@@ -86,9 +82,10 @@ pub use api_impl::owner_libp2p;
 pub use api_impl::owner_swap;
 pub use api_impl::owner_updater::StatusMessage;
 pub use api_impl::types::{
-	BlockFees, InitTxArgs, InitTxSendArgs, IssueInvoiceTxArgs, NodeHeightResult,
-	OutputCommitMapping, PaymentProof, ReplayMitigationConfig, SendTXArgs, SwapStartArgs,
-	VersionInfo,
+	Amount, BlockFees, BuiltOutput, InitTxArgs, InitTxSendArgs, IssueInvoiceTxArgs,
+	NodeHeightResult, OutputCommitMapping, PaymentProof, ReplayMitigationConfig,
+	RetrieveTxQueryArgs, RetrieveTxQuerySortField, RetrieveTxQuerySortOrder, SendTXArgs,
+	SwapStartArgs, VersionInfo,
 };
 pub use internal::scan::{scan, set_replay_config};
 pub use proof::tx_proof::TxProof;
@@ -97,7 +94,7 @@ pub use slate_versions::ser as dalek_ser;
 pub use types::{
 	AcctPathMapping, BlockIdentifier, CbData, Context, HeaderInfo, NodeClient, NodeVersionInfo,
 	OutputData, OutputStatus, ScannedBlockInfo, StoredProofInfo, TxLogEntry, TxLogEntryType,
-	WalletBackend, WalletInfo, WalletInst, WalletLCProvider, WalletOutputBatch,
+	ViewWallet, WalletBackend, WalletInfo, WalletInst, WalletLCProvider, WalletOutputBatch,
 };
 
 pub use api_impl::foreign::{get_receive_account, set_receive_account};

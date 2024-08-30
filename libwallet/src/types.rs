@@ -1,4 +1,4 @@
-// Copyright 2019 The Grin Developers
+// Copyright 2021 The Grin Developers
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,7 +17,7 @@
 
 use super::swap::ethereum::EthereumWallet;
 use crate::config::{MQSConfig, TorConfig, WalletConfig};
-use crate::error::{Error, ErrorKind};
+use crate::error::Error;
 use crate::grin_api::{Libp2pMessages, Libp2pPeers};
 use crate::grin_core::core::hash::Hash;
 use crate::grin_core::core::Committed;
@@ -29,8 +29,7 @@ use crate::grin_util::logger::LoggingConfig;
 use crate::grin_util::secp::key::{PublicKey, SecretKey, ZERO_KEY};
 use crate::grin_util::secp::pedersen::Commitment;
 use crate::grin_util::secp::{self, pedersen, Secp256k1};
-use crate::grin_util::ToHex;
-use crate::grin_util::ZeroingString;
+use crate::grin_util::{ToHex, ZeroingString};
 use crate::proof::proofaddress::ProvableAddress;
 use crate::slate::ParticipantMessages;
 use crate::Slate;
@@ -42,6 +41,7 @@ use serde;
 use serde_json;
 use std::collections::HashMap;
 use std::fmt;
+use std::time::Duration;
 use uuid::Uuid;
 
 /// Combined trait to allow dynamic wallet dispatch
@@ -267,6 +267,9 @@ where
 	fn get_ethereum_wallet(&self) -> Result<EthereumWallet, Error>;
 }
 
+/// New wallet with empty seed mark. Needed to skip first long scan
+pub const FLAG_NEW_WALLET: u64 = 1;
+
 /// Batch trait to update the output data backend atomically. Trying to use a
 /// batch after commit MAY result in a panic. Due to this being a trait, the
 /// commit method can't take ownership.
@@ -307,6 +310,12 @@ where
 		first_scanned_block_height: u64,
 		block: &Vec<ScannedBlockInfo>,
 	) -> Result<(), Error>;
+
+	/// Save safe flag into DB
+	fn save_flag(&mut self, flag: u64) -> Result<(), Error>;
+
+	/// Load and optionally delete the flag from DB
+	fn load_flag(&mut self, flag: u64, delete: bool) -> Result<bool, Error>;
 
 	/// Save the last used good node index
 	fn save_last_working_node_index(&mut self, node_index: u8) -> Result<(), Error>;
@@ -388,7 +397,7 @@ pub trait NodeClient: Send + Sync + Clone {
 	fn get_node_index(&self) -> u8;
 
 	/// Return the node api secret
-	fn node_api_secret(&self) -> Option<String>;
+	fn node_api_secret(&self) -> &Option<String>;
 
 	/// Change the API secret
 	fn set_node_api_secret(&mut self, node_api_secret: Option<String>);
@@ -562,7 +571,7 @@ impl OutputData {
 		if self.height > current_height {
 			return 0;
 		}
-		if self.status == OutputStatus::Unconfirmed {
+		if self.status == OutputStatus::Unconfirmed || self.status == OutputStatus::Reverted {
 			0
 		} else {
 			// if an output has height n and we are at block n
@@ -588,16 +597,26 @@ impl OutputData {
 
 	/// Marks this output as unspent if it was previously unconfirmed
 	pub fn mark_unspent(&mut self) {
-		if let OutputStatus::Unconfirmed = self.status {
-			self.status = OutputStatus::Unspent
-		};
+		match self.status {
+			OutputStatus::Unconfirmed | OutputStatus::Reverted => {
+				self.status = OutputStatus::Unspent
+			}
+			_ => {}
+		}
 	}
 
 	/// Mark an output as spent
 	pub fn mark_spent(&mut self) {
 		match self.status {
-			OutputStatus::Unspent => self.status = OutputStatus::Spent,
-			OutputStatus::Locked => self.status = OutputStatus::Spent,
+			OutputStatus::Unspent | OutputStatus::Locked => self.status = OutputStatus::Spent,
+			_ => (),
+		}
+	}
+
+	/// Mark an output as reverted
+	pub fn mark_reverted(&mut self) {
+		match self.status {
+			OutputStatus::Unspent => self.status = OutputStatus::Reverted,
 			_ => (),
 		}
 	}
@@ -625,6 +644,8 @@ pub enum OutputStatus {
 	Locked,
 	/// Spent
 	Spent,
+	/// Reverted
+	Reverted,
 }
 
 impl fmt::Display for OutputStatus {
@@ -634,6 +655,7 @@ impl fmt::Display for OutputStatus {
 			OutputStatus::Unspent => write!(f, "Unspent"),
 			OutputStatus::Locked => write!(f, "Locked"),
 			OutputStatus::Spent => write!(f, "Spent"),
+			OutputStatus::Reverted => write!(f, "Reverted"),
 		}
 	}
 }
@@ -697,7 +719,7 @@ impl Context {
 		message: Option<String>,
 	) -> Context {
 		let sec_key = match use_test_rng {
-			false => SecretKey::new(&mut thread_rng()),
+			false => SecretKey::new(secp, &mut thread_rng()),
 			true => {
 				// allow for consistent test results
 				let mut test_rng = if is_initiator {
@@ -705,7 +727,7 @@ impl Context {
 				} else {
 					StepRng::new(1_234_567_891_u64, 1)
 				};
-				SecretKey::new(&mut test_rng)
+				SecretKey::new(secp, &mut test_rng)
 			}
 		};
 		Self::with_excess(
@@ -733,7 +755,7 @@ impl Context {
 	) -> Context {
 		let sec_nonce = match use_test_rng {
 			false => aggsig::create_secnonce(secp).unwrap(),
-			true => SecretKey::from_slice(&[1; 32]).unwrap(),
+			true => SecretKey::from_slice(secp, &[1; 32]).unwrap(),
 		};
 		Context {
 			parent_key_id: parent_key_id.clone(),
@@ -778,8 +800,8 @@ impl Context {
 			fee: slate.fee,
 			participant_id,
 			payment_proof_derivation_index: None,
-			output_commits: slate.tx.body.outputs_committed(),
-			input_commits: slate.tx.body.inputs_committed(),
+			output_commits: slate.tx_or_err()?.body.outputs_committed(),
+			input_commits: slate.tx_or_err()?.body.inputs_committed(),
 			calculated_excess: None,
 			late_lock_args: None,
 			message: None,
@@ -863,7 +885,7 @@ impl BlockIdentifier {
 	/// convert to hex string
 	pub fn from_hex(hex: &str) -> Result<BlockIdentifier, Error> {
 		let hash = Hash::from_hex(hex).map_err(|e| {
-			ErrorKind::GenericError(format!("BlockIdentifier Invalid hex {}, {}", hex, e))
+			Error::GenericError(format!("BlockIdentifier Invalid hex {}, {}", hex, e))
 		})?;
 		Ok(BlockIdentifier(hash))
 	}
@@ -934,6 +956,9 @@ pub struct WalletInfo {
 	/// amount locked via previous transactions
 	#[serde(with = "secp_ser::string_or_u64")]
 	pub amount_locked: u64,
+	/// amount previously confirmed, now reverted
+	#[serde(with = "secp_ser::string_or_u64")]
+	pub amount_reverted: u64,
 }
 
 /// Types of transactions that can be contained within a TXLog entry
@@ -949,6 +974,8 @@ pub enum TxLogEntryType {
 	TxReceivedCancelled,
 	/// Sent transaction that was rolled back by user
 	TxSentCancelled,
+	/// Received transaction that was reverted on-chain
+	TxReverted,
 }
 
 impl fmt::Display for TxLogEntryType {
@@ -959,6 +986,7 @@ impl fmt::Display for TxLogEntryType {
 			TxLogEntryType::TxSent => write!(f, "Sent Tx"),
 			TxLogEntryType::TxReceivedCancelled => write!(f, "Received Tx\n- Cancelled"),
 			TxLogEntryType::TxSentCancelled => write!(f, "Sent Tx\n- Cancelled"),
+			TxLogEntryType::TxReverted => write!(f, "Received Tx\n- Reverted"),
 		}
 	}
 }
@@ -1035,6 +1063,9 @@ pub struct TxLogEntry {
 	/// Output commits as Strings, defined for send & recieve
 	#[serde(default = "TxLogEntry::default_commits")]
 	pub output_commits: Vec<pedersen::Commitment>,
+	/// Track the time it took for a transaction to get reverted
+	#[serde(with = "option_duration_as_secs", default)]
+	pub reverted_after: Option<Duration>,
 }
 
 impl ser::Writeable for TxLogEntry {
@@ -1088,6 +1119,7 @@ impl TxLogEntry {
 			payment_proof: None,
 			input_commits: vec![],
 			output_commits: vec![],
+			reverted_after: None,
 		}
 	}
 
@@ -1141,6 +1173,7 @@ impl TxLogEntry {
 			payment_proof,
 			input_commits,
 			output_commits,
+			reverted_after: None,
 		}
 	}
 
@@ -1161,8 +1194,7 @@ impl TxLogEntry {
 			//sample time string: 2020-10-07T23:57:00+00:00
 			let time_converted = DateTime::parse_from_rfc3339(&time);
 			let time_stamp = time_converted.unwrap().timestamp();
-			let confirmed_t =
-				DateTime::<Utc>::from_utc(NaiveDateTime::from_timestamp(time_stamp, 0), Utc);
+			let confirmed_t = Utc.timestamp_opt(time_stamp, 0).unwrap();
 			self.confirmation_ts = Some(confirmed_t);
 		}
 		//query the node to get the confirmation time
@@ -1184,19 +1216,20 @@ impl TxLogEntry {
 			|| self.tx_type == TxLogEntryType::TxSentCancelled;
 	}
 
-	/// Cancel transaction
-	pub fn cancel(&mut self) {
-		self.tx_type = match &self.tx_type {
-			TxLogEntryType::TxReceived => TxLogEntryType::TxReceivedCancelled,
-			TxLogEntryType::TxSent => TxLogEntryType::TxSentCancelled,
-			any => any.clone(),
-		};
+	/// Return true if transaction cancelled or reverted ()
+	pub fn is_cancelled_reverted(&self) -> bool {
+		return self.tx_type == TxLogEntryType::TxReceivedCancelled
+			|| self.tx_type == TxLogEntryType::TxSentCancelled
+			|| self.tx_type == TxLogEntryType::TxReverted;
 	}
 
 	/// Un Cancel transaction
-	pub fn uncancel(&mut self) {
+	pub fn uncancel_unrevert(&mut self) {
 		self.tx_type = match &self.tx_type {
-			TxLogEntryType::TxReceivedCancelled => TxLogEntryType::TxReceived,
+			TxLogEntryType::TxReverted | TxLogEntryType::TxReceivedCancelled => {
+				self.reverted_after = None;
+				TxLogEntryType::TxReceived
+			}
 			TxLogEntryType::TxSentCancelled => TxLogEntryType::TxSent,
 			any => any.clone(),
 		};
@@ -1353,4 +1386,124 @@ pub struct HeaderInfo {
 	pub nonce: u64,
 	/// total chain difficulty for this header
 	pub total_difficulty: u64,
+}
+
+/// Utility struct for return values from below
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ViewWallet {
+	/// Rewind Hash used to retrieve the outputs
+	pub rewind_hash: String,
+	/// All outputs information that belongs to the rewind hash
+	pub output_result: Vec<ViewWalletOutputResult>,
+	/// total balance
+	pub total_balance: u64,
+	/// last pmmr index
+	pub last_pmmr_index: u64,
+}
+/// Utility struct for return values from below
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ViewWalletOutputResult {
+	///
+	pub commit: String,
+	///
+	pub value: u64,
+	///
+	pub height: u64,
+	///
+	pub mmr_index: u64,
+	///
+	pub is_coinbase: bool,
+	///
+	pub lock_height: u64,
+}
+
+impl ViewWalletOutputResult {
+	/// Return number of confirmations.
+	pub fn num_confirmations(&self, tip_height: u64) -> u64 {
+		if self.height > tip_height {
+			return 0;
+		} else {
+			1 + (tip_height - self.height)
+		}
+	}
+}
+
+/// Serializes an Option<Duration> to and from a string
+pub mod option_duration_as_secs {
+	use serde::de::Error;
+	use serde::{Deserialize, Deserializer, Serializer};
+	use std::time::Duration;
+
+	///
+	pub fn serialize<S>(dur: &Option<Duration>, serializer: S) -> Result<S::Ok, S::Error>
+	where
+		S: Serializer,
+	{
+		match dur {
+			Some(dur) => serializer.serialize_str(&format!("{}", dur.as_secs())),
+			None => serializer.serialize_none(),
+		}
+	}
+
+	///
+	pub fn deserialize<'de, D>(deserializer: D) -> Result<Option<Duration>, D::Error>
+	where
+		D: Deserializer<'de>,
+	{
+		match Option::<String>::deserialize(deserializer)? {
+			Some(s) => {
+				let secs = s
+					.parse::<u64>()
+					.map_err(|err| Error::custom(err.to_string()))?;
+				Ok(Some(Duration::from_secs(secs)))
+			}
+			None => Ok(None),
+		}
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use serde_json::Value;
+
+	#[derive(Serialize, Deserialize, PartialEq, Clone, Debug)]
+	struct TestSer {
+		#[serde(with = "option_duration_as_secs", default)]
+		dur: Option<Duration>,
+	}
+
+	#[test]
+	fn duration_serde() {
+		let some = TestSer {
+			dur: Some(Duration::from_secs(100)),
+		};
+		let val = serde_json::to_value(some.clone()).unwrap();
+		if let Value::Object(o) = &val {
+			if let Value::String(s) = o.get("dur").unwrap() {
+				assert_eq!(s, "100");
+			} else {
+				panic!("Invalid type");
+			}
+		} else {
+			panic!("Invalid type")
+		}
+		assert_eq!(some, serde_json::from_value(val).unwrap());
+
+		let none = TestSer { dur: None };
+		let val = serde_json::to_value(none.clone()).unwrap();
+		if let Value::Object(o) = &val {
+			if let Value::Null = o.get("dur").unwrap() {
+				// ok
+			} else {
+				panic!("Invalid type");
+			}
+		} else {
+			panic!("Invalid type")
+		}
+		assert_eq!(none, serde_json::from_value(val).unwrap());
+
+		let none2 = serde_json::from_str::<TestSer>("{}").unwrap();
+		assert_eq!(none, none2);
+	}
 }

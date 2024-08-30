@@ -15,7 +15,8 @@
 use crate::swap::message::Message;
 use crate::swap::swap::SwapJournalRecord;
 use crate::swap::types::{Action, SwapTransactionsConfirmations};
-use crate::swap::{Context, ErrorKind, Swap};
+use crate::swap::{Context, Error, Swap};
+use grin_wallet_util::grin_util::secp::Secp256k1;
 use std::fmt;
 
 /// We need to reprty post transaction we we don't see it on the blockchain
@@ -257,7 +258,7 @@ impl StateId {
 	}
 
 	/// Convert string name to State instance
-	pub fn from_cmd_str(str: &str) -> Result<Self, ErrorKind> {
+	pub fn from_cmd_str(str: &str) -> Result<Self, Error> {
 		match str {
 			"SellerOfferCreated" => Ok(StateId::SellerOfferCreated),
 			"SellerSendingOffer" => Ok(StateId::SellerSendingOffer),
@@ -299,7 +300,7 @@ impl StateId {
 			"BuyerWaitingForRefundConfirmations" => Ok(StateId::BuyerWaitingForRefundConfirmations),
 			"BuyerCancelledRefunded" => Ok(StateId::BuyerCancelledRefunded),
 			"BuyerCancelled" => Ok(StateId::BuyerCancelled),
-			_ => Err(ErrorKind::Generic(format!("Unknown state value {}", str))),
+			_ => Err(Error::Generic(format!("Unknown state value {}", str))),
 		}
 	}
 }
@@ -428,7 +429,7 @@ pub trait State {
 	fn get_state_id(&self) -> StateId;
 
 	/// Get a state eta. Return None for states that are never executed
-	fn get_eta(&self, swap: &Swap) -> Option<StateEtaInfo>;
+	fn get_eta(&self, swap: &Swap, secp: &Secp256k1) -> Option<StateEtaInfo>;
 
 	/// Check if it is cancellable
 	fn is_cancellable(&self) -> bool;
@@ -439,8 +440,10 @@ pub trait State {
 		input: Input,
 		swap: &mut Swap,
 		context: &Context,
+		height: u64,
 		tx_conf: &SwapTransactionsConfirmations,
-	) -> Result<StateProcessRespond, ErrorKind>;
+		secp: &Secp256k1,
+	) -> Result<StateProcessRespond, Error>;
 
 	/// Get the prev happy path State.
 	fn get_prev_swap_state(&self) -> Option<StateId>;

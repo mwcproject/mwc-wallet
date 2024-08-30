@@ -1,4 +1,4 @@
-// Copyright 2019 The Grin Developers
+// Copyright 2021 The Grin Developers
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,7 +21,6 @@ use crate::api::{Libp2pMessages, Libp2pPeers};
 use crate::chain::types::NoopAdapter;
 use crate::chain::Chain;
 use crate::core::core::hash::Hashed;
-use crate::core::core::verifier_cache::LruVerifierCache;
 use crate::core::core::BlockHeader;
 use crate::core::core::{Transaction, TxKernel};
 use crate::core::global::{set_local_chain_type, ChainTypes};
@@ -37,8 +36,7 @@ use crate::util;
 use crate::util::secp::key::SecretKey;
 use crate::util::secp::pedersen;
 use crate::util::secp::pedersen::Commitment;
-use crate::util::ToHex;
-use crate::util::{Mutex, RwLock};
+use crate::util::{Mutex, ToHex};
 use serde_json;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -100,14 +98,12 @@ where
 	pub fn new(chain_dir: &str) -> Self {
 		set_local_chain_type(ChainTypes::AutomatedTesting);
 		let genesis_block = pow::mine_genesis_block().unwrap();
-		let verifier_cache = Arc::new(RwLock::new(LruVerifierCache::new()));
 		let dir_name = format!("{}/.grin", chain_dir);
 		let c = Chain::init(
 			dir_name,
 			Arc::new(NoopAdapter {}),
 			genesis_block,
 			pow::verify_size,
-			verifier_cache,
 			false,
 		)
 		.unwrap();
@@ -141,11 +137,23 @@ where
 	/// Run the incoming message queue and respond more or less
 	/// synchronously
 	pub fn run(&mut self) -> Result<(), libwallet::Error> {
+		// We run the wallet_proxy within a spawned thread in tests.
+		// We set the local chain_type here within the thread.
+		set_local_chain_type(ChainTypes::AutomatedTesting);
+
 		self.running.store(true, Ordering::Relaxed);
 		loop {
 			thread::sleep(Duration::from_millis(10));
+			if !self.running.load(Ordering::Relaxed) {
+				info!("Proxy stopped");
+				return Ok(());
+			}
+
 			// read queue
-			let m = self.rx.recv().unwrap();
+			let m = match self.rx.recv_timeout(Duration::from_millis(10)) {
+				Ok(m) => m,
+				Err(_) => continue,
+			};
 			trace!("Wallet Client Proxy Received: {:?}", m);
 			let resp = match m.method.as_ref() {
 				"get_chain_tip" => self.get_chain_tip(m)?,
@@ -161,9 +169,6 @@ where
 			};
 
 			self.respond(resp);
-			if !self.running.load(Ordering::Relaxed) {
-				return Ok(());
-			}
 		}
 	}
 
@@ -183,12 +188,12 @@ where
 		let dest_wallet = self.wallets.get_mut(&m.sender_id).unwrap().1.clone();
 		let dest_wallet_mask = self.wallets.get_mut(&m.sender_id).unwrap().2.clone();
 		let tx: Transaction = serde_json::from_str(&m.body).map_err(|e| {
-			libwallet::ErrorKind::ClientCallback(format!("Error parsing Transaction, {}", e))
+			libwallet::Error::ClientCallback(format!("Error parsing Transaction, {}", e))
 		})?;
 
 		super::award_block_to_wallet(
 			&self.chain,
-			vec![&tx],
+			&[tx],
 			dest_wallet,
 			(&dest_wallet_mask).as_ref(),
 		)?;
@@ -213,7 +218,7 @@ where
 		};
 
 		let slate: SlateV3 = serde_json::from_str(&m.body).map_err(|e| {
-			libwallet::ErrorKind::ClientCallback(format!("Error parsing Transaction, {}", e))
+			libwallet::Error::ClientCallback(format!("Error parsing Transaction, {}", e))
 		})?;
 
 		let slate: Slate = {
@@ -224,11 +229,11 @@ where
 			match foreign::receive_tx(
 				&mut **w,
 				(&mask).as_ref(),
-				&slate.to_slate()?,
+				&slate.to_slate(false)?,
 				Some(String::from(m.dest.clone())),
 				None,
 				None,
-				None,
+				&None,
 				None,
 				false,
 				false,
@@ -259,7 +264,7 @@ where
 		m: WalletProxyMessage,
 	) -> Result<WalletProxyMessage, libwallet::Error> {
 		let height = self.chain.head().unwrap().height;
-		let hash = util::to_hex(&self.chain.head().unwrap().last_block_h.to_vec());
+		let hash = self.chain.head().unwrap().last_block_h.to_hex();
 
 		Ok(WalletProxyMessage {
 			sender_id: "node".to_owned(),
@@ -308,7 +313,7 @@ where
 			}
 			let c = util::from_hex(o).unwrap();
 			let commit = Commitment::from_vec(c);
-			let out = super::get_output_local(&self.chain.clone(), &commit);
+			let out = super::get_output_local(&self.chain.clone(), commit);
 			if let Some(o) = out {
 				outputs.push(o);
 			}
@@ -327,7 +332,7 @@ where
 		m: WalletProxyMessage,
 	) -> Result<WalletProxyMessage, libwallet::Error> {
 		let split = m.body.split(',').collect::<Vec<&str>>();
-		let start_index = split[0].parse::<u64>().unwrap();
+		let start_index = std::cmp::max(split[0].parse::<u64>().unwrap(), 1);
 		let max = split[1].parse::<u64>().unwrap();
 		let end_index = split[2].parse::<u64>().unwrap();
 		let end_index = match end_index {
@@ -454,17 +459,16 @@ impl LocalWalletClient {
 		};
 		{
 			let p = self.proxy_tx.lock();
-			p.send(m).map_err(|e| {
-				libwallet::ErrorKind::ClientCallback(format!("Send TX Slate, {}", e))
-			})?;
+			p.send(m)
+				.map_err(|e| libwallet::Error::ClientCallback(format!("Send TX Slate, {}", e)))?;
 		}
 		let r = self.rx.lock();
 		let m = r.recv().unwrap();
 		trace!("Received send_tx_slate response: {:?}", m.clone());
 		let slate: SlateV3 = serde_json::from_str(&m.body).map_err(|e| {
-			libwallet::ErrorKind::ClientCallback(format!("Parsing send_tx_slate response, {}", e))
+			libwallet::Error::ClientCallback(format!("Parsing send_tx_slate response, {}", e))
 		})?;
-		Ok(slate.to_slate()?)
+		Ok(slate.to_slate(false)?)
 	}
 }
 
@@ -473,8 +477,8 @@ impl NodeClient for LocalWalletClient {
 	fn node_url(&self) -> &str {
 		"node"
 	}
-	fn node_api_secret(&self) -> Option<String> {
-		None
+	fn node_api_secret(&self) -> &Option<String> {
+		&None
 	}
 	fn set_node_url(&mut self, _node_url: Vec<String>) {}
 	fn set_node_index(&mut self, _node_index: u8) {}
@@ -497,9 +501,8 @@ impl NodeClient for LocalWalletClient {
 		};
 		{
 			let p = self.proxy_tx.lock();
-			p.send(m).map_err(|e| {
-				libwallet::ErrorKind::ClientCallback(format!("post_tx send, {}", e))
-			})?;
+			p.send(m)
+				.map_err(|e| libwallet::Error::ClientCallback(format!("post_tx send, {}", e)))?;
 		}
 		let r = self.rx.lock();
 		let m = r.recv().unwrap();
@@ -518,14 +521,14 @@ impl NodeClient for LocalWalletClient {
 		{
 			let p = self.proxy_tx.lock();
 			p.send(m).map_err(|e| {
-				libwallet::ErrorKind::ClientCallback(format!("Get chain height send, {}", e))
+				libwallet::Error::ClientCallback(format!("Get chain height send, {}", e))
 			})?;
 		}
 		let r = self.rx.lock();
 		let m = r.recv().unwrap();
 		trace!("Received get_chain_tip response: {:?}", m.clone());
 		let res = m.body.parse::<String>().map_err(|e| {
-			libwallet::ErrorKind::ClientCallback(format!("Parsing get_height response, {}", e))
+			libwallet::Error::ClientCallback(format!("Parsing get_height response, {}", e))
 		})?;
 		let split: Vec<&str> = res.split(",").collect();
 		Ok((split[0].parse::<u64>().unwrap(), split[1].to_owned(), 1))
@@ -542,14 +545,14 @@ impl NodeClient for LocalWalletClient {
 		{
 			let p = self.proxy_tx.lock();
 			p.send(m).map_err(|e| {
-				libwallet::ErrorKind::ClientCallback(format!("Get chain header info send, {}", e))
+				libwallet::Error::ClientCallback(format!("Get chain header info send, {}", e))
 			})?;
 		}
 		let r = self.rx.lock();
 		let m = r.recv().unwrap();
 		trace!("Received get_header_info response: {:?}", m.clone());
 		let res = m.body.parse::<String>().map_err(|e| {
-			libwallet::ErrorKind::ClientCallback(format!("Parsing get_header_info response, {}", e))
+			libwallet::Error::ClientCallback(format!("Parsing get_header_info response, {}", e))
 		})?;
 		let split: Vec<&str> = res.split(",").collect();
 
@@ -587,7 +590,7 @@ impl NodeClient for LocalWalletClient {
 	) -> Result<HashMap<pedersen::Commitment, (String, u64, u64)>, libwallet::Error> {
 		let query_params: Vec<String> = wallet_outputs
 			.iter()
-			.map(|commit| util::to_hex(&commit.0))
+			.map(|commit| commit.as_ref().to_hex())
 			.collect();
 		let query_str = query_params.join(",");
 		let m = WalletProxyMessage {
@@ -599,7 +602,7 @@ impl NodeClient for LocalWalletClient {
 		{
 			let p = self.proxy_tx.lock();
 			p.send(m).map_err(|e| {
-				libwallet::ErrorKind::ClientCallback(format!("Get outputs from node send, {}", e))
+				libwallet::Error::ClientCallback(format!("Get outputs from node send, {}", e))
 			})?;
 		}
 		let r = self.rx.lock();
@@ -609,11 +612,7 @@ impl NodeClient for LocalWalletClient {
 		for out in outputs {
 			api_outputs.insert(
 				out.commit.commit(),
-				(
-					util::to_hex(&out.commit.to_vec()),
-					out.height,
-					out.mmr_index,
-				),
+				(out.commit.to_hex(), out.height, out.mmr_index),
 			);
 		}
 		Ok(api_outputs)
@@ -625,7 +624,7 @@ impl NodeClient for LocalWalletClient {
 		min_height: Option<u64>,
 		max_height: Option<u64>,
 	) -> Result<Option<(TxKernel, u64, u64)>, libwallet::Error> {
-		let mut query = format!("{},", util::to_hex(&excess.0));
+		let mut query = format!("{},", excess.0.as_ref().to_hex());
 		if let Some(h) = min_height {
 			query += &format!("{},", h);
 		} else {
@@ -646,7 +645,7 @@ impl NodeClient for LocalWalletClient {
 		{
 			let p = self.proxy_tx.lock();
 			p.send(m).map_err(|e| {
-				libwallet::ErrorKind::ClientCallback(format!(
+				libwallet::Error::ClientCallback(format!(
 					"Get outputs from node by PMMR index send, {}",
 					e
 				))
@@ -655,7 +654,7 @@ impl NodeClient for LocalWalletClient {
 		let r = self.rx.lock();
 		let m = r.recv().unwrap();
 		let res: Option<LocatedTxKernel> = serde_json::from_str(&m.body).map_err(|e| {
-			libwallet::ErrorKind::ClientCallback(format!("Get transaction kernels send, {}", e))
+			libwallet::Error::ClientCallback(format!("Get transaction kernels send, {}", e))
 		})?;
 		match res {
 			Some(k) => Ok(Some((k.tx_kernel, k.height, k.mmr_index))),
@@ -691,7 +690,7 @@ impl NodeClient for LocalWalletClient {
 		{
 			let p = self.proxy_tx.lock();
 			p.send(m).map_err(|e| {
-				libwallet::ErrorKind::ClientCallback(format!(
+				libwallet::Error::ClientCallback(format!(
 					"Get outputs from node by PMMR index send, {}",
 					e
 				))
@@ -741,7 +740,7 @@ impl NodeClient for LocalWalletClient {
 		{
 			let p = self.proxy_tx.lock();
 			p.send(m).map_err(|e| {
-				libwallet::ErrorKind::ClientCallback(format!(
+				libwallet::Error::ClientCallback(format!(
 					"Get outputs within height range send, {}",
 					e
 				))
@@ -769,10 +768,7 @@ impl NodeClient for LocalWalletClient {
 		{
 			let p = self.proxy_tx.lock();
 			p.send(m).map_err(|e| {
-				libwallet::ErrorKind::ClientCallback(format!(
-					"Get blocks by height range send, {}",
-					e
-				))
+				libwallet::Error::ClientCallback(format!("Get blocks by height range send, {}", e))
 			})?;
 		}
 

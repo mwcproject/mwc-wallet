@@ -1,4 +1,4 @@
-// Copyright 2019 The Grin Developers
+// Copyright 2021 The Grin Developers
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,7 +18,6 @@ use crate::api::{self, LocatedTxKernel, OutputListing, OutputPrintable};
 use crate::core::core::{Transaction, TxKernel};
 use crate::libwallet::HeaderInfo;
 use crate::libwallet::{NodeClient, NodeVersionInfo};
-use crossbeam_utils::thread::scope;
 use futures::stream::FuturesUnordered;
 use futures::TryStreamExt;
 use std::collections::HashMap;
@@ -28,12 +27,13 @@ use tokio::runtime::Builder;
 use crate::client_utils::Client;
 use crate::libwallet;
 use crate::util::secp::pedersen;
-use crate::util::{self, to_hex};
+use crate::util::ToHex;
 
 use super::resp_types::*;
 use crate::client_utils::json_rpc::*;
-use failure::_core::sync::atomic::{AtomicU8, Ordering};
 use grin_wallet_util::grin_api::{Libp2pMessages, Libp2pPeers};
+use grin_wallet_util::RUNTIME;
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
 
@@ -105,8 +105,15 @@ impl HTTPNodeClient {
 		node_url_list: Vec<String>,
 		node_api_secret: Option<String>,
 	) -> Result<HTTPNodeClient, Error> {
-		let client = Client::new(false, None)
-			.map_err(|e| Error::GenericError(format!("Unable to create a client, {}", e)))?;
+		let client = match Client::new() {
+			Ok(client) => client,
+			Err(e) => {
+				return Err(Error::GenericError(format!(
+					"Unable to create a client, {}",
+					e
+				)))
+			}
+		};
 
 		Ok(HTTPNodeClient {
 			node_url_list: node_url_list,
@@ -147,7 +154,7 @@ impl HTTPNodeClient {
 				}
 				let report = format!("Error calling {}: {}", method, e);
 				error!("{}", report);
-				Err(libwallet::ErrorKind::ClientCallback(report).into())
+				Err(libwallet::Error::ClientCallback(report))
 			}
 			Ok(inner) => match inner.clone().into_result() {
 				Ok(r) => Ok(r),
@@ -162,7 +169,7 @@ impl HTTPNodeClient {
 					// error message is likely what user want to see...
 					let report = format!("{}", e);
 					error!("{}", report);
-					Err(libwallet::ErrorKind::ClientCallback(report).into())
+					Err(libwallet::Error::ClientCallback(report))
 				}
 			},
 		}
@@ -193,7 +200,7 @@ impl HTTPNodeClient {
 				}
 				let report = format!("Get connected peers error {}, {}", url, e);
 				error!("{}", report);
-				Err(libwallet::ErrorKind::ClientCallback(report).into())
+				Err(libwallet::Error::ClientCallback(report))
 			}
 			Ok(peer) => Ok(peer),
 		}
@@ -208,7 +215,7 @@ impl HTTPNodeClient {
 		counter: i32,
 	) -> Result<Option<(TxKernel, u64, u64)>, libwallet::Error> {
 		let method = "get_kernel";
-		let params = json!([to_hex(&excess.0), min_height, max_height]);
+		let params = json!([excess.0.as_ref().to_hex(), min_height, max_height]);
 		// have to handle this manually since the error needs to be parsed
 		let url = format!("{}{}", self.node_url(), ENDPOINT);
 		let req = build_request(method, &params);
@@ -225,7 +232,7 @@ impl HTTPNodeClient {
 				}
 				let report = format!("Error calling {}: {}", method, e);
 				error!("{}", report);
-				Err(libwallet::ErrorKind::ClientCallback(report).into())
+				Err(libwallet::Error::ClientCallback(report))
 			}
 			Ok(inner) => match inner.clone().into_result::<LocatedTxKernel>() {
 				Ok(r) => Ok(Some((r.tx_kernel, r.height, r.mmr_index))),
@@ -236,7 +243,7 @@ impl HTTPNodeClient {
 					} else {
 						let report = format!("Unable to parse response for {}: {}", method, e);
 						error!("{}", report);
-						Err(libwallet::ErrorKind::ClientCallback(report).into())
+						Err(libwallet::Error::ClientCallback(report))
 					}
 				}
 			},
@@ -260,7 +267,7 @@ impl HTTPNodeClient {
 		// build vec of commits for inclusion in query
 		let query_params: Vec<String> = wallet_outputs
 			.iter()
-			.map(|commit| format!("{}", util::to_hex(&commit.0)))
+			.map(|commit| format!("{}", commit.as_ref().to_hex()))
 			.collect();
 
 		// going to leave this here even though we're moving
@@ -285,7 +292,8 @@ impl HTTPNodeClient {
 		trace!("Output query chunk size is: {}", chunk_size);
 
 		let url = format!("{}{}", self.node_url(), ENDPOINT);
-
+		let api_secret = self.node_api_secret();
+		let cl = self.client.clone();
 		let task = async move {
 			let params: Vec<_> = query_params
 				.chunks(chunk_size)
@@ -299,76 +307,46 @@ impl HTTPNodeClient {
 
 			let mut tasks = Vec::with_capacity(params.len());
 			for req in &reqs {
-				tasks.push(self.client.post_async::<Request, Response>(
-					url.as_str(),
-					self.node_api_secret(),
-					req,
-				));
+				tasks.push(cl.post_async::<Request, Response>(url.as_str(), api_secret, req));
 			}
 
 			let task: FuturesUnordered<_> = tasks.into_iter().collect();
 			task.try_collect().await
 		};
 
-		let res = scope(|s| {
-			let handle = s.spawn(|_| {
-				let mut rt = Builder::new()
-					.basic_scheduler()
-					.enable_all()
-					.build()
-					.unwrap();
-				let res: Result<Vec<Response>, _> = rt.block_on(task);
-				res
-			});
-			handle.join()
-		});
+		let res: Result<Vec<_>, _> = RUNTIME.lock().unwrap().block_on(task);
 
 		let results: Vec<OutputPrintable> = match res {
-			Ok(res) => match res {
-				Ok(res) => match res {
-					Ok(resps) => {
-						let mut results = vec![];
-						for r in resps {
-							match r.into_result::<Vec<OutputPrintable>>() {
-								Ok(mut r) => results.append(&mut r),
-								Err(e) => {
-									if counter > 0 {
-										debug!("Retry to call API get_outputs, {}", e);
-										self.increase_index();
-										return self.get_outputs_from_node_impl(
-											wallet_outputs,
-											counter - 1,
-										);
-									}
+			Ok(resps) => {
+				let mut results = vec![];
+				for r in resps {
+					match r.into_result::<Vec<OutputPrintable>>() {
+						Ok(mut r) => results.append(&mut r),
+						Err(e) => {
+							if counter > 0 {
+								debug!("Retry to call API get_outputs, {}", e);
+								self.increase_index();
+								return self
+									.get_outputs_from_node_impl(wallet_outputs, counter - 1);
+							}
 
-									let report =
-										format!("Unable to parse response for get_outputs: {}", e);
-									error!("{}", report);
-									return Err(libwallet::ErrorKind::ClientCallback(report).into());
-								}
-							};
+							let report = format!("Unable to parse response for get_outputs: {}", e);
+							error!("{}", report);
+							return Err(libwallet::Error::ClientCallback(report));
 						}
-						results
-					}
-					Err(e) => {
-						if counter > 0 {
-							debug!("Retry to call API get_outputs, {}", e);
-							self.increase_index();
-							return self.get_outputs_from_node_impl(wallet_outputs, counter - 1);
-						}
-						let report = format!("Outputs by id failed: {}", e);
-						error!("{}", report);
-						return Err(libwallet::ErrorKind::ClientCallback(report).into());
-					}
-				},
-				_ => {
-					let report = format!("Get Outputs Failed!");
-					return Err(libwallet::ErrorKind::ClientCallback(report).into());
+					};
 				}
-			},
-			_ => {
-				let report = format!("Get Outputs Failed!");
-				return Err(libwallet::ErrorKind::ClientCallback(report).into());
+				results
+			}
+			Err(e) => {
+				if counter > 0 {
+					debug!("Retry to call API get_outputs, {}", e);
+					self.increase_index();
+					return self.get_outputs_from_node_impl(wallet_outputs, counter - 1);
+				}
+				let report = format!("Outputs by id failed: {}", e);
+				error!("{}", report);
+				return Err(libwallet::Error::ClientCallback(report));
 			}
 		};
 
@@ -380,12 +358,12 @@ impl HTTPNodeClient {
 				Some(h) => h,
 				None => {
 					let msg = format!("Missing block height for output {:?}", out.commit);
-					return Err(libwallet::ErrorKind::ClientCallback(msg).into());
+					return Err(libwallet::Error::ClientCallback(msg));
 				}
 			};
 			api_outputs.insert(
 				out.commit,
-				(util::to_hex(&out.commit.0), height, out.mmr_index),
+				(out.commit.as_ref().to_hex(), height, out.mmr_index),
 			);
 		}
 		Ok(api_outputs)
@@ -405,8 +383,8 @@ impl NodeClient for HTTPNodeClient {
 		let index = self.current_node_index.load(Ordering::Relaxed);
 		&self.node_url_list.get(index as usize).unwrap()
 	}
-	fn node_api_secret(&self) -> Option<String> {
-		self.node_api_secret.clone()
+	fn node_api_secret(&self) -> &Option<String> {
+		&self.node_api_secret
 	}
 
 	fn set_node_url(&mut self, node_url_list: Vec<String>) {
@@ -564,11 +542,8 @@ impl NodeClient for HTTPNodeClient {
 			&params,
 			NODE_CALL_RETRY,
 		)?;
-		for out in res.outputs {
-			if out.spent {
-				continue;
-			}
-
+		// We asked for unspent outputs via the api but defensively filter out spent outputs just in case.
+		for out in res.outputs.into_iter().filter(|out| out.spent == false) {
 			let is_coinbase = match out.output_type {
 				api::OutputType::Coinbase => true,
 				api::OutputType::Transaction => false,
@@ -581,7 +556,7 @@ impl NodeClient for HTTPNodeClient {
 						out.commit, out, e
 					);
 					error!("{}", msg);
-					return Err(libwallet::ErrorKind::ClientCallback(msg).into());
+					return Err(libwallet::Error::ClientCallback(msg));
 				}
 			};
 			let block_height = match out.block_height {
@@ -592,7 +567,7 @@ impl NodeClient for HTTPNodeClient {
 						out.commit, out
 					);
 					error!("{}", msg);
-					return Err(libwallet::ErrorKind::ClientCallback(msg).into());
+					return Err(libwallet::Error::ClientCallback(msg));
 				}
 			};
 			api_outputs.push((
@@ -682,7 +657,7 @@ impl NodeClient for HTTPNodeClient {
 							e
 						);
 						error!("{}", report);
-						return Err(libwallet::ErrorKind::ClientCallback(report).into());
+						return Err(libwallet::Error::ClientCallback(report));
 					}
 				}
 			}
@@ -716,7 +691,12 @@ impl NodeClient for HTTPNodeClient {
 
 #[cfg(test)]
 mod tests {
+	use super::*;
+	use crate::core::core::{KernelFeatures, OutputFeatures, OutputIdentifier};
 	use crate::core::global;
+	use crate::core::libtx::build;
+	use crate::core::libtx::ProofBuilder;
+	use crate::keychain::{ExtKeychain, Keychain};
 	use crate::libwallet;
 	use crate::util;
 	use crate::util::secp::pedersen::Commitment;
@@ -727,7 +707,7 @@ mod tests {
 	use std::time::Instant;
 
 	// Let's do a stress test for the Node.
-	// Normally test is ignoting because the point of that test to run it manually and review the results.
+	// Normally test is ignoring because the point of that test to run it manually and review the results.
 	#[test]
 	#[ignore]
 	fn run_node_stress_test() -> Result<(), libwallet::Error> {
@@ -798,7 +778,7 @@ mod tests {
 			let node_list_clone = node_list.clone();
 			joins.push(thread::spawn(move || {
 				let client = HTTPNodeClient::new(node_list_clone, Some(api_secret.to_string()))
-					.map_err(|e| libwallet::ErrorKind::ClientCallback(format!("{}", e)))?;
+					.map_err(|e| libwallet::Error::ClientCallback(format!("{}", e)))?;
 
 				let total_time = Instant::now();
 
@@ -903,5 +883,65 @@ mod tests {
 		}
 
 		Ok(())
+	}
+
+	// JSON api for "push_transaction" between wallet->node currently only supports "feature and commit" inputs.
+	// We will need to revisit this if we decide to support "commit only" inputs (no features) at wallet level.
+	fn tx1i1o_v2_compatible() -> Transaction {
+		let keychain = ExtKeychain::from_random_seed(false).unwrap();
+		let builder = ProofBuilder::new(&keychain);
+		let key_id1 = ExtKeychain::derive_key_id(1, 1, 0, 0, 0);
+		let key_id2 = ExtKeychain::derive_key_id(1, 2, 0, 0, 0);
+		let tx = build::transaction(
+			KernelFeatures::Plain { fee: 2.into() },
+			&[build::input(5, key_id1), build::output(3, key_id2)],
+			&keychain,
+			&builder,
+		)
+		.unwrap();
+
+		let inputs: Vec<_> = tx.inputs().into();
+		let inputs: Vec<_> = inputs
+			.iter()
+			.map(|input| OutputIdentifier {
+				features: OutputFeatures::Plain,
+				commit: input.commitment(),
+			})
+			.collect();
+		Transaction {
+			body: tx.body.replace_inputs(inputs.as_slice().into()),
+			..tx
+		}
+	}
+
+	// Wallet will "push" a transaction to node, serializing the transaction as json.
+	// We are testing the json structure is what we expect here.
+	#[test]
+	fn test_transaction_json_ser_deser() {
+		let tx1 = tx1i1o_v2_compatible();
+		let value = serde_json::to_value(&tx1).unwrap();
+
+		let str = value.to_string();
+		println!("{}", str);
+
+		assert!(value["offset"].is_string());
+		assert_eq!(value["body"]["inputs"][0]["features"], "Plain");
+		assert!(value["body"]["inputs"][0]["commit"].is_string());
+		assert_eq!(value["body"]["outputs"][0]["features"], "Plain");
+		assert!(value["body"]["outputs"][0]["commit"].is_string());
+		assert!(value["body"]["outputs"][0]["proof"].is_string());
+
+		// Note: Tx kernel "features" serialize in a slightly unexpected way.
+		assert_eq!(value["body"]["kernels"][0]["features"]["Plain"]["fee"], 2);
+		assert!(value["body"]["kernels"][0]["excess"].is_string());
+		assert!(value["body"]["kernels"][0]["excess_sig"].is_string());
+
+		let tx2: Transaction = serde_json::from_value(value).unwrap();
+		assert_eq!(tx1, tx2);
+
+		let str = serde_json::to_string(&tx1).unwrap();
+		println!("{}", str);
+		let tx2: Transaction = serde_json::from_str(&str).unwrap();
+		assert_eq!(tx1, tx2);
 	}
 }

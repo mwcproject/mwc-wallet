@@ -1,4 +1,4 @@
-// Copyright 2019 The Grin Developers
+// Copyright 2021 The Grin Developers
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,13 +14,16 @@
 
 //! Types specific to the wallet api, mostly argument serialization
 
+use crate::grin_core::core::Output;
 use crate::grin_core::libtx::secp_ser;
-use crate::grin_keychain::Identifier;
+use crate::grin_keychain::{BlindingFactor, Identifier};
 use crate::grin_util::secp::pedersen;
 use crate::proof::proofaddress;
 use crate::proof::proofaddress::ProvableAddress;
 use crate::slate_versions::SlateVersion;
 use crate::types::OutputData;
+
+use chrono::prelude::*;
 
 /// Send TX API Args
 // TODO: This is here to ensure the legacy V1 API remains intact
@@ -47,6 +50,11 @@ pub struct SendTXArgs {
 	pub target_slate_version: Option<u16>,
 }
 
+/// Type for storing amounts (in nanogrins).
+/// Serializes as a string but can deserialize from a string or u64.
+#[derive(Serialize, Deserialize)]
+pub struct Amount(#[serde(with = "secp_ser::string_or_u64")] pub u64);
+
 /// V2 Init / Send TX API Args
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct InitTxArgs {
@@ -59,6 +67,8 @@ pub struct InitTxArgs {
 	#[serde(with = "secp_ser::string_or_u64")]
 	/// The amount to send, in nano MWC. (`1 MWC = 1_000_000_000 nMWC`)
 	pub amount: u64,
+	/// Does the amount include the fee, or will fees be spent in addition to the amount?
+	pub amount_includes_fee: Option<bool>,
 	#[serde(with = "secp_ser::string_or_u64")]
 	/// The minimum number of confirmations an output
 	/// should have in order to be included in the transaction.
@@ -172,6 +182,7 @@ impl Default for InitTxArgs {
 		InitTxArgs {
 			src_acct_name: None,
 			amount: 0,
+			amount_includes_fee: None,
 			minimum_confirmations: 10,
 			max_outputs: 500,
 			num_change_outputs: 1,
@@ -277,6 +288,107 @@ impl Default for ReplayMitigationConfig {
 		ReplayMitigationConfig {
 			replay_mitigation_flag: false,
 			replay_mitigation_min_amount: 50000000000,
+		}
+	}
+}
+
+/// Sort tx retrieval order
+#[derive(Clone, Serialize, Deserialize)]
+pub enum RetrieveTxQuerySortOrder {
+	/// Ascending
+	Asc,
+	/// Descending
+	Desc,
+}
+
+/// Valid sort fields for a transaction list retrieval query
+#[derive(Clone, Serialize, Deserialize)]
+pub enum RetrieveTxQuerySortField {
+	/// Transaction Id
+	Id,
+	/// Creation Timestamp
+	CreationTimestamp,
+	/// Confirmation Timestamp
+	ConfirmationTimestamp,
+	/// TotalAmount (AmountCredited-AmountDebited)
+	TotalAmount,
+	/// Amount Credited
+	AmountCredited,
+	/// Amount Debited
+	AmountDebited,
+}
+
+/// Retrieve Transaction List Pagination Arguments
+#[derive(Clone, Serialize, Deserialize)]
+pub struct RetrieveTxQueryArgs {
+	/// Retrieve transactions with an id higher than or equal to the given
+	/// If None, consider items from the first transaction and later
+	pub min_id: Option<u32>,
+	/// Retrieve tranactions with an id less than or equal to the given
+	/// If None, consider items from the last transaction and earlier
+	pub max_id: Option<u32>,
+	/// The maximum number of transactions to return
+	/// if both `before_id_inc` and `after_id_inc` are supplied, this will apply
+	/// to the before and earlier set
+	pub limit: Option<u32>,
+	/// whether to exclude cancelled transactions in the returned set
+	pub exclude_cancelled: Option<bool>,
+	/// whether to only consider outstanding transactions
+	pub include_outstanding_only: Option<bool>,
+	/// whether to only consider confirmed-only transactions
+	pub include_confirmed_only: Option<bool>,
+	/// whether to only consider sent transactions
+	pub include_sent_only: Option<bool>,
+	/// whether to only consider received transactions
+	pub include_received_only: Option<bool>,
+	/// whether to only consider coinbase transactions
+	pub include_coinbase_only: Option<bool>,
+	/// whether to only consider reverted transactions
+	pub include_reverted_only: Option<bool>,
+	/// lower bound on the total amount (amount_credited - amount_debited), inclusive
+	#[serde(with = "secp_ser::opt_string_or_u64")]
+	#[serde(default)]
+	pub min_amount: Option<u64>,
+	/// higher bound on the total amount (amount_credited - amount_debited), inclusive
+	#[serde(with = "secp_ser::opt_string_or_u64")]
+	#[serde(default)]
+	pub max_amount: Option<u64>,
+	/// lower bound on the creation timestamp, inclusive
+	pub min_creation_timestamp: Option<DateTime<Utc>>,
+	/// higher bound on on the creation timestamp, inclusive
+	pub max_creation_timestamp: Option<DateTime<Utc>>,
+	/// lower bound on the confirmation timestamp, inclusive
+	pub min_confirmed_timestamp: Option<DateTime<Utc>>,
+	/// higher bound on the confirmation timestamp, inclusive
+	pub max_confirmed_timestamp: Option<DateTime<Utc>>,
+	/// Field within the tranasction list on which to sort
+	/// defaults to ID if not present
+	pub sort_field: Option<RetrieveTxQuerySortField>,
+	/// Sort order, defaults to ASC if not present (earliest is first)
+	pub sort_order: Option<RetrieveTxQuerySortOrder>,
+}
+
+impl Default for RetrieveTxQueryArgs {
+	fn default() -> Self {
+		Self {
+			min_id: None,
+			max_id: None,
+			limit: None,
+			exclude_cancelled: Some(false),
+			include_outstanding_only: Some(false),
+			include_confirmed_only: Some(false),
+			include_sent_only: Some(false),
+			include_received_only: Some(false),
+			include_coinbase_only: Some(false),
+			include_reverted_only: Some(false),
+			min_amount: None,
+			max_amount: None,
+			min_creation_timestamp: None,
+			max_creation_timestamp: None,
+			min_confirmed_timestamp: None,
+			max_confirmed_timestamp: None,
+			sort_field: Some(RetrieveTxQuerySortField::Id),
+			sort_order: Some(RetrieveTxQuerySortOrder::Asc),
 		}
 	}
 }
@@ -404,4 +516,19 @@ pub struct SwapStartArgs {
 	pub dry_run: bool,
 	/// Tag for this offer. Needed for swap marketplace related offers management
 	pub tag: Option<String>,
+}
+
+/// Build output result
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct BuiltOutput {
+	/// Blinding Factor
+	#[serde(
+		serialize_with = "secp_ser::as_hex",
+		deserialize_with = "secp_ser::blind_from_hex"
+	)]
+	pub blind: BlindingFactor,
+	/// Key Identifier
+	pub key_id: Identifier,
+	/// Output
+	pub output: Output,
 }

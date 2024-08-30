@@ -1,4 +1,4 @@
-// Copyright 2019 The Grin Developers
+// Copyright 2021 The Grin Developers
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -21,13 +21,12 @@ use grin_wallet_util::grin_core as core;
 
 use impls::test_framework::{self, LocalWalletClient};
 use impls::{PathToSlateGetter, PathToSlatePutter, SlateGetter, SlatePutter};
+use std::sync::atomic::Ordering;
 use std::thread;
 use std::time::Duration;
 
-use grin_wallet_libwallet::InitTxArgs;
+use grin_wallet_libwallet::{InitTxArgs, NodeClient};
 
-use ed25519_dalek::SecretKey as DalekSecretKey;
-use grin_wallet_libwallet::proof::proofaddress;
 use grin_wallet_util::grin_core::global;
 
 use serde_json;
@@ -35,6 +34,7 @@ use serde_json;
 #[macro_use]
 mod common;
 use common::{clean_output_dir, create_wallet_proxy, setup};
+use grin_wallet_util::grin_util::secp::Secp256k1;
 
 /// self send impl
 fn file_exchange_test_impl(test_dir: &'static str) -> Result<(), wallet::Error> {
@@ -42,6 +42,8 @@ fn file_exchange_test_impl(test_dir: &'static str) -> Result<(), wallet::Error> 
 	// Create a new proxy to simulate server and wallet responses
 	let mut wallet_proxy = create_wallet_proxy(test_dir);
 	let chain = wallet_proxy.chain.clone();
+	let stopper = wallet_proxy.running.clone();
+	let secp = Secp256k1::new();
 
 	// Create a new wallet test client, and set its queues to communicate with the
 	// proxy
@@ -108,8 +110,6 @@ fn file_exchange_test_impl(test_dir: &'static str) -> Result<(), wallet::Error> 
 	// test optional message
 	let message = "sender test message, sender test message";
 
-	let mut wallet1_slatepack_secret = DalekSecretKey::from_bytes(&[0; 32]).unwrap();
-
 	// Should have 5 in account1 (5 spendable), 5 in account (2 spendable)
 	wallet::controller::owner_single_use(Some(wallet1.clone()), mask1, None, |api, m| {
 		let (wallet1_refreshed, wallet1_info) = api.retrieve_summary_info(m, true, 1)?;
@@ -127,21 +127,11 @@ fn file_exchange_test_impl(test_dir: &'static str) -> Result<(), wallet::Error> 
 			message: Some(message.to_owned()),
 			..Default::default()
 		};
-		let mut slate = api.init_send_tx(m, &args, 1)?;
-
-		{
-			let mut w_lock = api.wallet_inst.lock();
-			let w = w_lock.lc_provider()?.wallet_inst()?;
-			let k = w.keychain(m)?;
-			wallet1_slatepack_secret = proofaddress::payment_proof_address_dalek_secret(&k, None)?;
-		}
+		let slate = api.init_send_tx(m, &args, 1)?;
 
 		// output tx file
-		PathToSlatePutter::build_plain(Some((&send_file).into())).put_tx(
-			&mut slate,
-			&wallet1_slatepack_secret,
-			true,
-		)?;
+		PathToSlatePutter::build_plain(Some((&send_file).into()))
+			.put_tx(&slate, None, true, &secp)?;
 		api.tx_lock_outputs(m, &slate, None, 0)?;
 		Ok(())
 	})?;
@@ -152,8 +142,14 @@ fn file_exchange_test_impl(test_dir: &'static str) -> Result<(), wallet::Error> 
 		w.set_parent_key_id_by_name("account1")?;
 	}
 
+	let height = {
+		wallet_inst!(wallet2, w);
+		let (height, _, _) = w.w2n_client().get_chain_tip().unwrap();
+		height
+	};
+
 	let mut slate = PathToSlateGetter::build_form_path((&send_file).into())
-		.get_tx(&wallet1_slatepack_secret)?
+		.get_tx(None, height, &secp)?
 		.to_slate()?
 		.0;
 	let mut naughty_slate = slate.clone();
@@ -170,24 +166,21 @@ fn file_exchange_test_impl(test_dir: &'static str) -> Result<(), wallet::Error> 
 
 	// wallet 2 receives file, completes, sends file back
 	wallet::controller::foreign_single_use(wallet2.clone(), mask2_i.clone(), |api| {
-		slate = api.receive_tx(&slate, None, None, Some(sender2_message.clone()))?;
-		PathToSlatePutter::build_plain(Some((&receive_file).into())).put_tx(
-			&slate,
-			&wallet1_slatepack_secret,
-			true,
-		)?;
+		slate = api.receive_tx(&slate, None, &None, Some(sender2_message.clone()))?;
+		PathToSlatePutter::build_plain(Some((&receive_file).into()))
+			.put_tx(&slate, None, true, &secp)?;
 		Ok(())
 	})?;
 
 	// wallet 1 finalises and posts
 	wallet::controller::owner_single_use(Some(wallet1.clone()), mask1, None, |api, m| {
 		let mut slate = PathToSlateGetter::build_form_path(receive_file.into())
-			.get_tx(&wallet1_slatepack_secret)?
+			.get_tx(None, height, &secp)?
 			.to_slate()?
 			.0;
 		api.verify_slate_messages(m, &slate)?;
 		slate = api.finalize_tx(m, &slate)?;
-		api.post_tx(m, &slate.tx, false)?;
+		api.post_tx(m, slate.tx_or_err()?, false)?;
 		bh += 1;
 		Ok(())
 	})?;
@@ -215,7 +208,7 @@ fn file_exchange_test_impl(test_dir: &'static str) -> Result<(), wallet::Error> 
 
 	// Check messages, all participants should have both
 	wallet::controller::owner_single_use(Some(wallet1.clone()), mask1, None, |api, m| {
-		let (_, tx) = api.retrieve_txs(m, true, None, Some(slate.id))?;
+		let (_, tx) = api.retrieve_txs(m, true, None, Some(slate.id), None)?;
 		assert_eq!(
 			tx[0].clone().messages.unwrap().messages[0].message,
 			Some(message.to_owned())
@@ -231,7 +224,7 @@ fn file_exchange_test_impl(test_dir: &'static str) -> Result<(), wallet::Error> 
 	})?;
 
 	wallet::controller::owner_single_use(Some(wallet2.clone()), mask2, None, |api, m| {
-		let (_, tx) = api.retrieve_txs(m, true, None, Some(slate.id))?;
+		let (_, tx) = api.retrieve_txs(m, true, None, Some(slate.id), None)?;
 		assert_eq!(
 			tx[0].clone().messages.unwrap().messages[0].message,
 			Some(message.to_owned())
@@ -244,6 +237,7 @@ fn file_exchange_test_impl(test_dir: &'static str) -> Result<(), wallet::Error> 
 	})?;
 
 	// let logging finish
+	stopper.store(false, Ordering::Relaxed);
 	thread::sleep(Duration::from_millis(200));
 	Ok(())
 }
@@ -253,7 +247,7 @@ fn wallet_file_exchange() {
 	let test_dir = "test_output/file_exchange";
 	setup(test_dir);
 	if let Err(e) = file_exchange_test_impl(test_dir) {
-		panic!("Libwallet Error: {} - {}", e, e.backtrace().unwrap());
+		panic!("Libwallet Error: {}", e);
 	}
 	clean_output_dir(test_dir);
 }

@@ -1,4 +1,4 @@
-// Copyright 2019 The Grin Developers
+// Copyright 2021 The Grin Developers
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -24,13 +24,15 @@ use grin_wallet_util::grin_core::global;
 use self::libwallet::{InitTxArgs, Slate};
 use impls::test_framework::{self, LocalWalletClient};
 use impls::{PathToSlateGetter, PathToSlatePutter, SlateGetter, SlatePutter};
-use libwallet::proof::proofaddress;
+use std::sync::atomic::Ordering;
 use std::thread;
 use std::time::Duration;
 
 #[macro_use]
 mod common;
 use common::{clean_output_dir, create_wallet_proxy, setup};
+use grin_wallet_util::grin_util::secp::Secp256k1;
+use libwallet::NodeClient;
 
 /// self send impl
 fn file_repost_test_impl(test_dir: &'static str) -> Result<(), wallet::Error> {
@@ -38,6 +40,8 @@ fn file_repost_test_impl(test_dir: &'static str) -> Result<(), wallet::Error> {
 	global::set_local_chain_type(global::ChainTypes::AutomatedTesting);
 	let mut wallet_proxy = create_wallet_proxy(test_dir);
 	let chain = wallet_proxy.chain.clone();
+	let stopper = wallet_proxy.running.clone();
+	let secp = Secp256k1::new();
 
 	// Create a new wallet test client, and set its queues to communicate with the
 	// proxy
@@ -120,16 +124,9 @@ fn file_repost_test_impl(test_dir: &'static str) -> Result<(), wallet::Error> {
 			..Default::default()
 		};
 
-		let sec_key = {
-			let mut w_lock = api.wallet_inst.lock();
-			let w = w_lock.lc_provider()?.wallet_inst()?;
-			let k = w.keychain(m)?;
-			let sec_key = proofaddress::payment_proof_address_dalek_secret(&k, None)?;
-			sec_key
-		};
-
 		let slate = api.init_send_tx(m, &args, 1)?;
-		PathToSlatePutter::build_plain(Some((&send_file).into())).put_tx(&slate, &sec_key, true)?;
+		PathToSlatePutter::build_plain(Some((&send_file).into()))
+			.put_tx(&slate, None, true, &secp)?;
 		api.tx_lock_outputs(m, &slate, None, 0)?;
 		Ok(())
 	})?;
@@ -143,22 +140,20 @@ fn file_repost_test_impl(test_dir: &'static str) -> Result<(), wallet::Error> {
 		w.set_parent_key_id_by_name("listener")?;
 	}
 
-	wallet::controller::foreign_single_use(wallet1.clone(), mask1_i.clone(), |api| {
-		let sec_key = {
-			let mut w_lock = api.wallet_inst.lock();
-			let w = w_lock.lc_provider()?.wallet_inst()?;
-			let k = w.keychain(None)?; // mask is none, so it is fine...
-			let sec_key = proofaddress::payment_proof_address_dalek_secret(&k, None)?;
-			sec_key
-		};
+	let height = {
+		wallet_inst!(wallet1, w);
+		let (height, _, _) = w.w2n_client().get_chain_tip()?;
+		height
+	};
 
+	wallet::controller::foreign_single_use(wallet1.clone(), mask1_i.clone(), |api| {
 		slate = PathToSlateGetter::build_form_path((&send_file).into())
-			.get_tx(&sec_key)?
+			.get_tx(None, height, &secp)?
 			.to_slate()?
 			.0;
-		slate = api.receive_tx(&slate, None, None, None)?;
+		slate = api.receive_tx(&slate, None, &None, None)?;
 		PathToSlatePutter::build_plain(Some((&receive_file).into()))
-			.put_tx(&slate, &sec_key, true)?;
+			.put_tx(&slate, None, true, &secp)?;
 		Ok(())
 	})?;
 
@@ -170,16 +165,8 @@ fn file_repost_test_impl(test_dir: &'static str) -> Result<(), wallet::Error> {
 
 	// wallet 1 finalize
 	wallet::controller::owner_single_use(Some(wallet1.clone()), mask1, None, |api, m| {
-		let sec_key = {
-			let mut w_lock = api.wallet_inst.lock();
-			let w = w_lock.lc_provider()?.wallet_inst()?;
-			let k = w.keychain(m)?;
-			let sec_key = proofaddress::payment_proof_address_dalek_secret(&k, None)?;
-			sec_key
-		};
-
 		slate = PathToSlateGetter::build_form_path((&receive_file).into())
-			.get_tx(&sec_key)?
+			.get_tx(None, height, &secp)?
 			.to_slate()?
 			.0;
 		slate = api.finalize_tx(m, &slate)?;
@@ -188,7 +175,7 @@ fn file_repost_test_impl(test_dir: &'static str) -> Result<(), wallet::Error> {
 
 	// Now repost from cached
 	wallet::controller::owner_single_use(Some(wallet1.clone()), mask1, None, |api, m| {
-		let (_, txs) = api.retrieve_txs(m, true, None, Some(slate.id))?;
+		let (_, txs) = api.retrieve_txs(m, true, None, Some(slate.id), None)?;
 		let stored_tx = api.get_stored_tx(m, &txs[0])?;
 		api.post_tx(m, &stored_tx.unwrap(), false)?;
 		bh += 1;
@@ -247,7 +234,7 @@ fn file_repost_test_impl(test_dir: &'static str) -> Result<(), wallet::Error> {
 		let slate_i = sender_api.init_send_tx(m, &args, 1)?;
 		slate = client1.send_tx_slate_direct("wallet2", &slate_i)?;
 		sender_api.tx_lock_outputs(m, &slate, None, 0)?;
-		slate = sender_api.finalize_tx(m, &mut slate)?;
+		slate = sender_api.finalize_tx(m, &slate)?;
 		Ok(())
 	})?;
 
@@ -256,7 +243,7 @@ fn file_repost_test_impl(test_dir: &'static str) -> Result<(), wallet::Error> {
 
 	// Now repost from cached
 	wallet::controller::owner_single_use(Some(wallet1.clone()), mask1, None, |api, m| {
-		let (_, txs) = api.retrieve_txs(m, true, None, Some(slate.id))?;
+		let (_, txs) = api.retrieve_txs(m, true, None, Some(slate.id), None)?;
 		let stored_tx = api.get_stored_tx(m, &txs[0])?;
 		api.post_tx(m, &stored_tx.unwrap(), false)?;
 		bh += 1;
@@ -284,6 +271,7 @@ fn file_repost_test_impl(test_dir: &'static str) -> Result<(), wallet::Error> {
 	})?;
 
 	// let logging finish
+	stopper.store(false, Ordering::Relaxed);
 	thread::sleep(Duration::from_millis(200));
 	Ok(())
 }
@@ -293,7 +281,7 @@ fn wallet_file_repost() {
 	let test_dir = "test_output/file_repost";
 	setup(test_dir);
 	if let Err(e) = file_repost_test_impl(test_dir) {
-		panic!("Libwallet Error: {} - {}", e, e.backtrace().unwrap());
+		panic!("Libwallet Error: {}", e);
 	}
 	clean_output_dir(test_dir);
 }

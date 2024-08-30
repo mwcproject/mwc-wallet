@@ -1,4 +1,4 @@
-// Copyright 2019 The Grin Developers
+// Copyright 2021 The Grin Developers
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,32 +20,32 @@ use crate::util::file::get_first_line;
 use crate::util::secp::key::SecretKey;
 use crate::util::{Mutex, ZeroingString};
 
+use crate::cmd::wallet::MIN_COMPAT_NODE_VERSION;
 /// Argument parsing and error handling for wallet commands
 use clap::ArgMatches;
 use ed25519_dalek::SecretKey as DalekSecretKey;
-use failure::Fail;
 use grin_wallet_api::Owner;
 use grin_wallet_config::parse_node_address_string;
 use grin_wallet_config::{MQSConfig, TorConfig, WalletConfig};
-use grin_wallet_controller::command;
-use grin_wallet_controller::{Error, ErrorKind};
+use grin_wallet_controller::{command, Error};
 use grin_wallet_impls::tor::config::is_tor_address;
 use grin_wallet_impls::{DefaultLCProvider, DefaultWalletImpl};
 use grin_wallet_impls::{PathToSlateGetter, SlateGetter};
 use grin_wallet_libwallet::proof::proofaddress;
 use grin_wallet_libwallet::proof::proofaddress::ProvableAddress;
-use grin_wallet_libwallet::Slate;
 use grin_wallet_libwallet::{
 	swap::types::Currency, IssueInvoiceTxArgs, NodeClient, SwapStartArgs, WalletInst,
 	WalletLCProvider,
 };
-use grin_wallet_util::grin_core as core;
+use grin_wallet_libwallet::{Slate, SlatePurpose};
 use grin_wallet_util::grin_core::core::amount_to_hr_string;
-use grin_wallet_util::grin_core::global;
 use grin_wallet_util::grin_keychain as keychain;
+use grin_wallet_util::grin_util::secp::Secp256k1;
+use grin_wallet_util::{grin_core as core, OnionV3Address};
 use linefeed::terminal::Signal;
 use linefeed::{Interface, ReadResult};
 use rpassword;
+use semver::Version;
 use std::sync::Arc;
 use std::{
 	convert::TryFrom,
@@ -59,23 +59,23 @@ macro_rules! arg_parse {
 		match $r {
 			Ok(res) => res,
 			Err(e) => {
-				return Err(ErrorKind::ArgumentError(format!("{}", e)).into());
+				return Err(Error::ArgumentError(format!("{}", e)));
 			}
 		}
 	};
 }
 /// Simple error definition, just so we can return errors from all commands
 /// and let the caller figure out what to do
-#[derive(Clone, Eq, PartialEq, Debug, Fail)]
+#[derive(Clone, Eq, PartialEq, Debug, thiserror::Error)]
 
 pub enum ParseError {
-	#[fail(display = "Invalid Arguments: {}", _0)]
+	#[error("Invalid Arguments: {0}")]
 	ArgumentError(String),
-	#[fail(display = "Parsing IO error: {}", _0)]
+	#[error("Parsing IO error: {0}")]
 	IOError(String),
-	#[fail(display = "Wallet configuration already exists: {}", _0)]
+	#[error("Wallet configuration already exists: {0}")]
 	WalletExists(String),
-	#[fail(display = "User Cancelled")]
+	#[error("User Cancelled")]
 	CancelledError,
 }
 
@@ -237,6 +237,21 @@ fn parse_required<'a>(args: &'a ArgMatches, name: &str) -> Result<&'a str, Parse
 	}
 }
 
+// parses an optional value, throws error if value isn't provided
+fn parse_optional(args: &ArgMatches, name: &str) -> Result<Option<String>, ParseError> {
+	if !args.is_present(name) {
+		return Ok(None);
+	}
+	let arg = args.value_of(name);
+	match arg {
+		Some(ar) => Ok(Some(ar.into())),
+		None => {
+			let msg = format!("Value for argument '{}' is required in this context", name,);
+			Err(ParseError::ArgumentError(msg))
+		}
+	}
+}
+
 // parses a number, or throws error with message otherwise
 fn parse_u64(arg: &str, name: &str) -> Result<u64, ParseError> {
 	let val = arg.parse::<u64>();
@@ -277,7 +292,7 @@ pub fn parse_global_args(
 	config: &WalletConfig,
 	args: &ArgMatches,
 ) -> Result<command::GlobalArgs, ParseError> {
-	let account = parse_required(args, "account")?;
+	let account = args.value_of("account").map(|s| s.to_string());
 	let mut show_spent = false;
 	if args.is_present("show_spent") {
 		show_spent = true;
@@ -303,15 +318,9 @@ pub fn parse_global_args(
 		}
 	};
 
-	let chain_type = match config.chain_type.clone() {
-		None => global::get_chain_type(),
-		Some(c) => c,
-	};
-
 	Ok(command::GlobalArgs {
-		account: account.to_owned(),
+		account: account,
 		show_spent: show_spent,
-		chain_type: chain_type,
 		api_secret: api_secret,
 		node_api_secret: node_api_secret,
 		password: password,
@@ -397,6 +406,9 @@ pub fn parse_listen_args(
 	if let Some(port) = args.value_of("libp2p_port") {
 		config.libp2p_listen_port = Some(port.parse().unwrap());
 	}
+	if let Some(bridge) = args.value_of("bridge") {
+		tor_config.bridge.bridge_line = Some(bridge.into());
+	}
 
 	let method = parse_required(args, "method")?;
 	if args.is_present("no_tor") {
@@ -420,6 +432,23 @@ pub fn parse_owner_api_args(
 	Ok(())
 }
 
+pub fn parse_scan_rewind_hash_args(
+	args: &ArgMatches,
+) -> Result<command::ViewWalletScanArgs, ParseError> {
+	let rewind_hash = parse_required(args, "rewind_hash")?;
+	let start_height = parse_u64_or_none(args.value_of("start_height"));
+	let backwards_from_tip = parse_u64_or_none(args.value_of("backwards_from_tip"));
+	if backwards_from_tip.is_some() && start_height.is_some() {
+		let msg = format!("backwards_from tip and start_height cannot both be present");
+		return Err(ParseError::ArgumentError(msg));
+	}
+	Ok(command::ViewWalletScanArgs {
+		rewind_hash: rewind_hash.into(),
+		start_height,
+		backwards_from_tip,
+	})
+}
+
 pub fn parse_account_args(account_args: &ArgMatches) -> Result<command::AccountArgs, ParseError> {
 	let create = match account_args.value_of("create") {
 		None => None,
@@ -431,7 +460,11 @@ pub fn parse_account_args(account_args: &ArgMatches) -> Result<command::AccountA
 pub fn parse_send_args(args: &ArgMatches) -> Result<command::SendArgs, ParseError> {
 	// amount
 	let amount = parse_required(args, "amount")?;
-	let amount = core::core::amount_from_hr_string(amount);
+	let (amount, spend_max) = if amount.eq_ignore_ascii_case("max") {
+		(Ok(0), true)
+	} else {
+		(core::core::amount_from_hr_string(amount), false)
+	};
 	let amount = match amount {
 		Ok(a) => a,
 		Err(e) => {
@@ -442,6 +475,7 @@ pub fn parse_send_args(args: &ArgMatches) -> Result<command::SendArgs, ParseErro
 			return Err(ParseError::ArgumentError(msg));
 		}
 	};
+	let amount_includes_fee = args.is_present("amount_includes_fee") || spend_max;
 
 	// message
 	let message = match args.is_present("message") {
@@ -484,7 +518,10 @@ pub fn parse_send_args(args: &ArgMatches) -> Result<command::SendArgs, ParseErro
 			if !estimate_selection_strategies && method != "slatepack" {
 				parse_required(args, "dest")?
 			} else {
-				""
+				match args.value_of("dest") {
+					Some(d) => d,
+					None => "",
+				}
 			}
 		}
 	};
@@ -524,18 +561,21 @@ pub fn parse_send_args(args: &ArgMatches) -> Result<command::SendArgs, ParseErro
 				let v = parse_required(args, "slate_version")?;
 				Some(parse_u64(v, "slate_version")? as u16)
 			}
-			false => None,
+			false => {
+				if method == "slatepack" {
+					Some(4 as u16)
+				} else {
+					None
+				}
+			}
 		}
 	};
 
 	let payment_proof_address = {
-		match args.is_present("request_payment_proof")
-			|| (args.is_present("proof") && method != "file")
-		{
+		match args.is_present("proof") {
 			true => {
 				// if the destination address is a TOR address, we don't need the address
 				// separately
-
 				let proof_dest = proofaddress::address_to_pubkey(dest.to_string());
 				match ProvableAddress::from_str(&proof_dest) {
 					Ok(a) => Some(a),
@@ -546,6 +586,9 @@ pub fn parse_send_args(args: &ArgMatches) -> Result<command::SendArgs, ParseErro
 						)) {
 							Ok(a) => Some(a),
 							Err(e) => {
+								if !estimate_selection_strategies {
+									println!("No recipient Slatepack address or provided address invalid. No payment proof will be requested.");
+								}
 								let msg = format!("Invalid proof address: {:?}", e);
 								return Err(ParseError::ArgumentError(msg));
 							}
@@ -587,8 +630,7 @@ pub fn parse_send_args(args: &ArgMatches) -> Result<command::SendArgs, ParseErro
 			if addr.tor_public_key().is_err() {
 				return Err(ParseError::ArgumentError(
 					"Expecting tor PK address as a slatepack recipient value".to_string(),
-				)
-				.into());
+				));
 			}
 			Some(addr)
 		}
@@ -608,11 +650,20 @@ pub fn parse_send_args(args: &ArgMatches) -> Result<command::SendArgs, ParseErro
 		None => None,
 	};
 
+	let bridge = match args.value_of("bridge") {
+		Some(b) => Some(b.to_string()),
+		None => None,
+	};
+
+	let slatepack_qr = args.is_present("slatepack_qr");
+
 	if minimum_confirmations_change_outputs_is_present && !exclude_change_outputs {
 		Err(ArgumentError("minimum_confirmations_change_outputs may only be specified if exclude_change_outputs is set".to_string()))
 	} else {
 		Ok(command::SendArgs {
 			amount: amount,
+			amount_includes_fee: amount_includes_fee,
+			use_max_amount: spend_max,
 			message: message,
 			minimum_confirmations: min_c,
 			selection_strategy: selection_strategy.to_owned(),
@@ -633,6 +684,8 @@ pub fn parse_send_args(args: &ArgMatches) -> Result<command::SendArgs, ParseErro
 			slatepack_recipient,
 			late_lock,
 			min_fee,
+			bridge: bridge,
+			slatepack_qr: slatepack_qr,
 		})
 	}
 }
@@ -652,11 +705,17 @@ pub fn parse_receive_unpack_args(args: &ArgMatches) -> Result<command::ReceiveAr
 		false => None,
 	};
 
+	let bridge = parse_optional(args, "bridge")?;
+
+	let slatepack_qr = args.is_present("slatepack_qr");
+
 	Ok(command::ReceiveArgs {
 		input_file,
 		input_slatepack_message: args.value_of("content").map(|s| s.to_string()),
 		message: args.value_of("message").map(|s| s.to_string()),
 		outfile: args.value_of("outfile").map(|s| s.to_string()),
+		bridge,
+		slatepack_qr: slatepack_qr,
 	})
 }
 
@@ -724,13 +783,14 @@ pub fn parse_issue_invoice_args(
 			if addr.tor_public_key().is_err() {
 				return Err(ParseError::ArgumentError(
 					"Expecting tor PK address as a slatepack recipient value".to_string(),
-				)
-				.into());
+				));
 			}
 			Some(addr)
 		}
 		None => None,
 	};
+
+	let slatepack_qr = args.is_present("slatepack_qr");
 
 	// dest (output file)
 	let dest = parse_required(args, "dest")?;
@@ -744,6 +804,7 @@ pub fn parse_issue_invoice_args(
 			target_slate_version,
 			slatepack_recipient,
 		},
+		slatepack_qr: slatepack_qr,
 	})
 }
 
@@ -751,6 +812,8 @@ pub fn parse_process_invoice_args(
 	args: &ArgMatches,
 	prompt: bool,
 	slatepack_secret: &DalekSecretKey,
+	height: u64,
+	secp: &Secp256k1,
 ) -> Result<command::ProcessInvoiceArgs, ParseError> {
 	// TODO: display and prompt for confirmation of what we're doing
 	// message
@@ -773,31 +836,20 @@ pub fn parse_process_invoice_args(
 	let method = parse_required(args, "method")?;
 
 	// dest
-	let dest = {
+	let mut dest = {
 		if method == "self" {
 			match args.value_of("dest") {
-				Some(d) => d,
-				None => "default",
+				Some(d) => Some(d.to_string()),
+				None => Some("default".to_string()),
 			}
 		} else {
 			if !estimate_selection_strategies {
-				parse_required(args, "dest")?
+				parse_optional(args, "dest")?
 			} else {
-				""
+				None
 			}
 		}
 	};
-	if !estimate_selection_strategies
-		&& method == "http"
-		&& !dest.starts_with("http://")
-		&& !dest.starts_with("https://")
-	{
-		let msg = format!(
-			"HTTP Destination should start with http://: or https://: {}",
-			dest,
-		);
-		return Err(ParseError::ArgumentError(msg));
-	}
 
 	// ttl_blocks
 	let ttl_blocks = parse_u64_or_none(args.value_of("ttl_blocks"));
@@ -806,23 +858,82 @@ pub fn parse_process_invoice_args(
 	let max_outputs = 500;
 
 	// file input only
-	let tx_file = parse_required(args, "input")?;
+	let tx_file = parse_optional(args, "file")?;
+	let input_slatepack_message = args.value_of("content").map(|s| s.to_string());
+
+	let slate = match &tx_file {
+		Some(file_name) => PathToSlateGetter::build_form_path(file_name.into())
+			.get_tx(Some(&slatepack_secret), height, &secp)
+			.map_err(|e| {
+				ParseError::IOError(format!(
+					"Unable to read slate data from file {}, {}",
+					file_name, e
+				))
+			})?,
+		None => match &input_slatepack_message {
+			Some(message) => PathToSlateGetter::build_form_str(message.clone())
+				.get_tx(Some(&slatepack_secret), height, &secp)
+				.map_err(|e| {
+					ParseError::IOError(format!(
+						"Unable to read slate data from the content, {}",
+						e
+					))
+				})?,
+			None => {
+				return Err(ParseError::ArgumentError(
+					"Please specify 'file' or 'content' argument".to_string(),
+				))
+			}
+		},
+	};
+
+	let (slate, sender, _, content, _) = slate
+		.to_slate()
+		.map_err(|e| ParseError::ArgumentError(format!("Unable to read the slate, {}", e)))?;
+
+	if slate.compact_slate && content != SlatePurpose::InvoiceInitial {
+		return Err(ParseError::ArgumentError(
+			"Slate has a wrong type, it is not initial invoice slate".to_string(),
+		));
+	}
+
+	if dest.is_none() {
+		dest = match &sender {
+			Some(sender) => Some(format!(
+				"http://{}",
+				OnionV3Address::from_bytes(*sender.as_bytes()).to_ov3_str()
+			)),
+			None => {
+				if !estimate_selection_strategies {
+					return Err(ParseError::ArgumentError(
+						"Please specify 'dest' argument".to_string(),
+					));
+				}
+				None
+			}
+		};
+	}
+
+	if !estimate_selection_strategies && method == "http" {
+		if let Some(dest) = &dest {
+			if !dest.starts_with("http://") && !dest.starts_with("https://") {
+				return Err(ParseError::ArgumentError(format!(
+					"HTTP Destination should start with http://: or https://: {}",
+					dest
+				)));
+			}
+		}
+	}
 
 	if prompt {
 		// Now we need to prompt the user whether they want to do this,
 		// which requires reading the slate
-		let slate =
-			match PathToSlateGetter::build_form_path((&tx_file).into()).get_tx(slatepack_secret) {
-				Ok(s) => s,
-				Err(e) => return Err(ParseError::ArgumentError(format!("{}", e))),
-			};
-		let slate = slate
-			.to_slate()
-			.map_err(|e| ParseError::ArgumentError(format!("Unable to read the slate, {}", e)))?
-			.0;
-
-		prompt_pay_invoice(&slate, method, dest)?;
+		prompt_pay_invoice(&slate, method, dest.as_ref().unwrap())?;
 	}
+
+	let bridge = parse_optional(args, "bridge")?;
+
+	let slatepack_qr = args.is_present("slatepack_qr");
 
 	Ok(command::ProcessInvoiceArgs {
 		message: message,
@@ -830,10 +941,13 @@ pub fn parse_process_invoice_args(
 		selection_strategy: selection_strategy.to_owned(),
 		estimate_selection_strategies,
 		method: method.to_owned(),
-		dest: dest.to_owned(),
+		dest: dest.unwrap_or(String::new()),
 		max_outputs: max_outputs,
-		input: tx_file.to_owned(),
+		input_slatepack_message,
+		input_file: tx_file,
 		ttl_blocks,
+		bridge,
+		slatepack_qr: slatepack_qr,
 	})
 }
 
@@ -881,9 +995,14 @@ pub fn parse_txs_args(args: &ArgMatches) -> Result<command::TxsArgs, ParseError>
 		let msg = format!("At most one of 'id' (-i) or 'txid' (-t) may be provided.");
 		return Err(ParseError::ArgumentError(msg));
 	}
+	let count = match args.value_of("count") {
+		None => None,
+		Some(c) => Some(parse_u64(c, "count")? as u32),
+	};
 	Ok(command::TxsArgs {
 		id: tx_id,
 		tx_slate_id: tx_slate_id,
+		count: count,
 	})
 }
 
@@ -1357,10 +1476,6 @@ where
 		>,
 	),
 {
-	if let Some(t) = wallet_config.chain_type.clone() {
-		core::global::set_local_chain_type(t);
-	}
-
 	if wallet_args.is_present("external") {
 		wallet_config.api_listen_interface = "0.0.0.0".to_string();
 	}
@@ -1373,7 +1488,7 @@ where
 		wallet_config.check_node_api_http_addr = sa.to_string().clone();
 	}
 
-	let global_wallet_args = arg_parse!(parse_global_args(&wallet_config, &wallet_args));
+	let mut global_wallet_args = arg_parse!(parse_global_args(&wallet_config, &wallet_args));
 
 	//parse the nodes address and put them in a vec
 	let node_list = parse_node_address_string(wallet_config.check_node_api_http_addr.clone());
@@ -1410,6 +1525,19 @@ where
 		}
 	};
 
+	// This will also cache the node version info for calls to foreign API check middleware
+	if let Some(v) = node_client.clone().get_version_info() {
+		if Version::parse(&v.node_version) < Version::parse(MIN_COMPAT_NODE_VERSION) {
+			println!("The MWC Node in use (version {}) is outdated and incompatible with this wallet version.", v.node_version);
+			println!(
+				"Please update the node to version {} or later and try again.",
+				MIN_COMPAT_NODE_VERSION
+			);
+			return Err(Error::GenericError(format!("The MWC Node in use (version {}) is outdated and incompatible with this wallet version. Please update the node to version {} or later and try again.", v.node_version, MIN_COMPAT_NODE_VERSION)));
+		}
+	}
+	// ... if node isn't available, allow offline functions
+
 	// Instantiate wallet (doesn't open the wallet)
 	let wallet =
 		inst_wallet::<DefaultLCProvider<C, keychain::ExtKeychain>, C, keychain::ExtKeychain>(
@@ -1438,10 +1566,15 @@ where
 		("recover", _) => open_wallet = false,
 		("cli", _) => open_wallet = false,
 		("owner_api", _) => {
-			// If wallet exists, open it. Otherwise, that's fine too.
+			// If wallet exists and password is present then open it. Otherwise, that's fine too.
 			let mut wallet_lock = wallet.lock();
 			let lc = wallet_lock.lc_provider().unwrap();
-			open_wallet = lc.wallet_exists(None, wallet_config.wallet_data_dir.as_deref())?;
+			open_wallet = (wallet_args.is_present("pass")
+				&& lc.wallet_exists(None, wallet_config.wallet_data_dir.as_deref())?)
+				|| wallet_config.owner_api_include_foreign.unwrap_or(false)
+				|| wallet_config
+					.owner_api_include_mqs_listener
+					.unwrap_or(false);
 		}
 		_ => {}
 	}
@@ -1495,7 +1628,7 @@ where
 			&wallet_config,
 			&tor_config,
 			&mqs_config,
-			&global_wallet_args,
+			&mut global_wallet_args,
 			test_mode,
 		),
 		_ => {
@@ -1539,6 +1672,12 @@ where
 	K: keychain::Keychain + 'static,
 {
 	let km = (&keychain_mask).as_ref();
+
+	if test_mode {
+		owner_api.doctest_mode = true;
+		owner_api.doctest_retain_tld = true;
+	}
+
 	match wallet_args.subcommand() {
 		("init", Some(args)) => {
 			let a = arg_parse!(parse_init_args(
@@ -1590,6 +1729,15 @@ where
 			mqs_config,
 			global_wallet_args,
 		),
+		("rewind_hash", Some(_)) => command::rewind_hash(owner_api, km),
+		("scan_rewind_hash", Some(args)) => {
+			let a = arg_parse!(parse_scan_rewind_hash_args(&args));
+			command::scan_rewind_hash(
+				owner_api,
+				a,
+				wallet_config.dark_background_color_scheme.unwrap_or(true),
+			)
+		}
 		("account", Some(args)) => {
 			let a = arg_parse!(parse_account_args(&args));
 			command::account(owner_api, km, a)
@@ -1629,19 +1777,22 @@ where
 			command::issue_invoice_tx(owner_api, km, a)
 		}
 		("pay", Some(args)) => {
-			let slatepack_secret = {
+			let (slatepack_secret, height, secp) = {
 				let mut w_lock = owner_api.wallet_inst.lock();
 				let w = w_lock.lc_provider()?.wallet_inst()?;
 				let keychain = w.keychain(km)?;
 				let slatepack_secret =
 					proofaddress::payment_proof_address_dalek_secret(&keychain, None)?;
-				slatepack_secret
+				let (height, _, _) = w.w2n_client().get_chain_tip()?;
+				(slatepack_secret, height, keychain.secp().clone())
 			};
 
 			let a = arg_parse!(parse_process_invoice_args(
 				&args,
 				!test_mode,
-				&slatepack_secret
+				&slatepack_secret,
+				height,
+				&secp,
 			));
 			command::process_invoice(
 				owner_api,
@@ -1761,11 +1912,10 @@ where
 			command::eth(owner_api.wallet_inst.clone(), a)
 		}
 		(cmd, _) => {
-			return Err(ErrorKind::ArgumentError(format!(
+			return Err(Error::ArgumentError(format!(
 				"Unknown wallet command '{}', use 'mwc help wallet' for details",
 				cmd
-			))
-			.into());
+			)));
 		}
 	}
 }

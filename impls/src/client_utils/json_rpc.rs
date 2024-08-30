@@ -1,4 +1,4 @@
-// Copyright 2020 The Grin Developers
+// Copyright 2021 The Grin Developers
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,8 +14,6 @@
 // Derived from https://github.com/apoelstra/rust-jsonrpc
 
 //! JSON RPC Client functionality
-use failure::Fail;
-use hyper;
 use serde_json;
 
 /// Builds a request
@@ -99,31 +97,22 @@ impl Response {
 }
 
 /// A library error
-#[derive(Debug, Fail, Clone)]
+#[derive(Debug, thiserror::Error, Clone)]
 pub enum Error {
 	/// Json error
-	#[fail(display = "Unable to parse json, {}", _0)]
+	#[error("Unable to parse json, {0}")]
 	Json(String),
-	/// Client error
-	#[fail(display = "Connection error, {}", _0)]
-	Hyper(String),
 	/// Error response
-	#[fail(display = "RPC error: {:?}", _0)]
+	#[error("RPC error: {0:?}")]
 	Rpc(RpcError),
 	/// Internal generic Error
-	#[fail(display = "Client error: {}", _0)]
+	#[error("Client error: {0}")]
 	GenericError(String),
 }
 
 impl From<serde_json::Error> for Error {
 	fn from(e: serde_json::Error) -> Error {
 		Error::Json(format!("{}", e))
-	}
-}
-
-impl From<hyper::error::Error> for Error {
-	fn from(e: hyper::error::Error) -> Error {
-		Error::Hyper(format!("{}", e))
 	}
 }
 

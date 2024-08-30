@@ -1,4 +1,4 @@
-// Copyright 2019 The Grin Developers
+// Copyright 2021 The Grin Developers
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -28,8 +28,8 @@ use crate::proof::proofaddress::ProvableAddress;
 use crate::slate_versions::SlateVersion;
 use crate::Context;
 use crate::{
-	BlockFees, CbData, Error, ErrorKind, NodeClient, Slate, SlatePurpose, TxLogEntryType,
-	VersionInfo, VersionedSlate, WalletBackend, WalletInst, WalletLCProvider,
+	BlockFees, CbData, Error, NodeClient, Slate, SlatePurpose, TxLogEntryType, VersionInfo,
+	VersionedSlate, WalletBackend, WalletInst, WalletLCProvider,
 };
 use ed25519_dalek::PublicKey as DalekPublicKey;
 use grin_wallet_util::OnionV3Address;
@@ -63,7 +63,7 @@ where
 	let keychain = w.keychain(keychain_mask)?;
 	let provable_address = proofaddress::payment_proof_address(&keychain, ProofAddressType::Onion)
 		.map_err(|e| {
-			ErrorKind::PaymentProofAddress(format!(
+			Error::PaymentProofAddress(format!(
 				"Error occurred in getting payment proof address, {}",
 				e
 			))
@@ -114,7 +114,7 @@ pub fn receive_tx<'a, T: ?Sized, C, K>(
 	address: Option<String>,
 	key_id_opt: Option<&str>,
 	output_amounts: Option<Vec<u64>>,
-	dest_acct_name: Option<&str>,
+	dest_acct_name: &Option<String>,
 	message: Option<String>,
 	use_test_rng: bool,
 	refresh_from_node: bool,
@@ -131,26 +131,18 @@ where
 	// that means it's not mqs so need to print it
 	if slate_message.is_some() {
 		println!(
-			"{}",
-			format!(
-				"slate [{}] received from [{}] for [{}] MWCs. Message: [\"{}\"]",
-				slate.id.to_string(),
-				display_from,
-				amount_to_hr_string(slate.amount, false),
-				slate_message.clone().unwrap()
-			)
-			.to_string()
+			"slate [{}] received from [{}] for [{}] MWCs. Message: [\"{}\"]",
+			slate.id.to_string(),
+			display_from,
+			amount_to_hr_string(slate.amount, false),
+			slate_message.clone().unwrap()
 		);
 	} else {
 		println!(
-			"{}",
-			format!(
-				"slate [{}] received from [{}] for [{}] MWCs.",
-				slate.id.to_string(),
-				display_from,
-				amount_to_hr_string(slate.amount, false)
-			)
-			.to_string()
+			"slate [{}] received from [{}] for [{}] MWCs.",
+			slate.id.to_string(),
+			display_from,
+			amount_to_hr_string(slate.amount, false)
 		);
 	}
 
@@ -158,7 +150,7 @@ where
 	let mut ret_slate = slate.clone();
 	check_ttl(w, &ret_slate, refresh_from_node)?;
 
-	let mut dest_acct_name = dest_acct_name.map(|s| s.to_string());
+	let mut dest_acct_name = dest_acct_name.clone();
 	if dest_acct_name.is_none() {
 		dest_acct_name = get_receive_account();
 	}
@@ -180,6 +172,7 @@ where
 		keychain_mask,
 		None,
 		Some(ret_slate.id),
+		None,
 		Some(&parent_key_id),
 		use_test_rng,
 		None,
@@ -187,17 +180,16 @@ where
 	)?;
 	for t in &tx {
 		if t.tx_type == TxLogEntryType::TxReceived {
-			return Err(ErrorKind::TransactionAlreadyReceived(ret_slate.id.to_string()).into());
+			return Err(Error::TransactionAlreadyReceived(ret_slate.id.to_string()));
 		}
 		if let Some(offset) = t.kernel_offset {
-			let offset_skey = slate.tx.offset.secret_key()?;
 			let keychain = w.keychain(keychain_mask)?;
+			let offset_skey = slate.tx_or_err()?.offset.secret_key(keychain.secp())?;
 			let offset_commit = keychain.secp().commit(0, offset_skey)?;
 			if offset == offset_commit {
-				return Err(ErrorKind::TransactionWithSameOffsetAlreadyReceived(
+				return Err(Error::TransactionWithSameOffsetAlreadyReceived(
 					offset_commit.to_hex(),
-				)
-				.into());
+				));
 			}
 		}
 	}
@@ -243,7 +235,7 @@ where
 
 	tx::update_message(&mut *w, keychain_mask, &ret_slate)?;
 
-	let excess = ret_slate.calc_excess(Some(&keychain))?;
+	let excess = ret_slate.calc_excess(keychain.secp(), Some(&keychain), height)?;
 
 	if let Some(ref mut p) = ret_slate.payment_proof {
 		if p.sender_address
@@ -262,6 +254,7 @@ where
 			p.sender_address.clone(),
 			p.receiver_address.clone(),
 			proofaddress::payment_proof_address_secret(&keychain, None)?,
+			keychain.secp(),
 		)?;
 
 		p.receiver_signature = Some(sig);
@@ -287,6 +280,36 @@ where
 	check_ttl(w, &sl, refresh_from_node)?;
 	// Participant id 0 for mwc713 compatibility
 	let context = w.get_private_context(keychain_mask, sl.id.as_bytes(), 0)?;
+	let mut slate_message = String::new();
+	for participant_data in &slate.participant_data {
+		if let Some(msg2) = &participant_data.message {
+			if !slate_message.is_empty() {
+				slate_message.push_str(", ");
+			}
+			slate_message.push_str(msg2);
+		}
+	}
+
+	// that means it's not mqs so need to print it
+	if !slate_message.is_empty() {
+		println!(
+			"Get invoice slate [{}] to finalize for [{}] MWCs. Message: [\"{}\"], processing...",
+			slate.id.to_string(),
+			amount_to_hr_string(slate.amount, false),
+			slate_message
+		);
+	} else {
+		println!(
+			"Get invoice finalize slate [{}] for [{}] MWCs, processing...",
+			slate.id.to_string(),
+			amount_to_hr_string(slate.amount, false)
+		);
+	}
+
+	debug!(
+		"foreign just finalize_invoice_tx just got slate = {:?}",
+		slate
+	);
 
 	if slate.compact_slate {
 		// Add our contribution to the offset
@@ -308,7 +331,7 @@ where
 
 	// Participant id 0 for mwc713 compatibility
 	tx::complete_tx(&mut *w, keychain_mask, &mut sl, 0, &context)?;
-	tx::update_stored_tx(&mut *w, keychain_mask, &context, &sl, true)?;
+	tx::update_stored_tx(&mut *w, keychain_mask, &context, &mut sl, true)?;
 	tx::update_message(&mut *w, keychain_mask, &sl)?;
 	{
 		let mut batch = w.batch(keychain_mask)?;
@@ -316,6 +339,13 @@ where
 		batch.delete_private_context(sl.id.as_bytes(), 0)?;
 		batch.commit()?;
 	}
+
+	println!(
+		"Invoice slate [{}] for [{}] MWCs was processed and sent back for posting.",
+		slate.id.to_string(),
+		amount_to_hr_string(slate.amount, false)
+	);
+
 	Ok(sl)
 }
 
@@ -330,12 +360,7 @@ where
 	C: NodeClient + 'a,
 	K: Keychain + 'a,
 {
-	owner_swap::swap_income_message(wallet_inst, keychain_mask, &message, None).map_err(|e| {
-		ErrorKind::SwapError(format!(
-			"Error occurred in receiving the swap message by TOR, {}",
-			e
-		))
-	})?;
+	owner_swap::swap_income_message(wallet_inst, keychain_mask, &message, None)?;
 	Ok(())
 }
 
@@ -351,13 +376,7 @@ where
 	C: NodeClient + 'a,
 	K: Keychain + 'a,
 {
-	let response =
-		owner_swap::marketplace_message(wallet_inst, keychain_mask, &message).map_err(|e| {
-			ErrorKind::SwapError(format!(
-				"Error occurred in receiving the swap message by TOR, {}",
-				e
-			))
-		})?;
+	let response = owner_swap::marketplace_message(wallet_inst, keychain_mask, &message)?;
 	Ok(response)
 }
 
@@ -386,9 +405,10 @@ where
 
 	let sec_key = proofaddress::payment_proof_address_dalek_secret(&keychain, address_index)
 		.map_err(|e| {
-			ErrorKind::SlatepackDecodeError(format!("Unable to build key to decrypt, {}", e))
+			Error::SlatepackDecodeError(format!("Unable to build key to decrypt, {}", e))
 		})?;
-	let sp = encrypted_slate.into_slatepack(&sec_key)?;
+	let (current_height, _, _) = w.w2n_client().get_chain_tip()?;
+	let sp = encrypted_slate.into_slatepack(&sec_key, current_height, keychain.secp())?;
 	let sender = sp.get_sender();
 	let recipient = sp.get_recipient();
 	let content = sp.get_content();
@@ -424,6 +444,8 @@ where
 			(slatepack_secret, slatepack_pk)
 		};
 
+		let keychain = w.keychain(keychain_mask)?;
+
 		Ok(VersionedSlate::into_version(
 			slate.clone(),
 			version.unwrap_or(SlateVersion::SP),
@@ -432,14 +454,12 @@ where
 			slatepack_recipient,
 			&slatepack_secret,
 			use_test_rng,
+			keychain.secp(),
 		)?)
 	} else {
 		// Plain slate format
 		let version = version.unwrap_or(slate.lowest_version());
-		Ok(
-			VersionedSlate::into_version_plain(slate.clone(), version).map_err(|e| {
-				ErrorKind::SlatepackEncodeError(format!("Unable to build a slate, {}", e))
-			})?,
-		)
+		Ok(VersionedSlate::into_version_plain(slate.clone(), version)
+			.map_err(|e| Error::SlatepackEncodeError(format!("Unable to build a slate, {}", e)))?)
 	}
 }

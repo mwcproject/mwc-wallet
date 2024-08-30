@@ -29,12 +29,12 @@ use crate::grin_util::secp::pedersen::Commitment;
 use crate::grin_util::secp::Signature;
 use crate::grin_util::secp::{Message, PublicKey};
 use crate::internal::{keys, updater};
-use crate::swap::error::ErrorKind;
 use crate::types::NodeClient;
-use crate::Context;
 use crate::{wallet_lock, WalletInst, WalletLCProvider};
-use crate::{AcctPathMapping, Error, InitTxArgs, OutputCommitMapping, OutputStatus};
+use crate::{AcctPathMapping, InitTxArgs, OutputCommitMapping, OutputStatus};
+use crate::{Context, Error};
 use ed25519_dalek::PublicKey as DalekPublicKey;
+use grin_wallet_util::grin_util::secp::Secp256k1;
 use std::collections::HashMap;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -72,9 +72,10 @@ impl IntegrityContext {
 		context0: &Context,
 		context1: &Context,
 		tip_height: u64,
+		secp: &Secp256k1,
 	) -> Result<Self, Error> {
 		let mut sec_key = context0.sec_key.clone();
-		sec_key.add_assign(&context1.sec_key)?;
+		sec_key.add_assign(secp, &context1.sec_key)?;
 
 		Ok(Self {
 			sender_parent_key_id: context0.parent_key_id.clone(),
@@ -119,7 +120,7 @@ impl IntegrityContext {
 			)?;
 		}
 
-		let kernel_excess = Commitment::from_pubkey(&pk)?;
+		let kernel_excess = Commitment::from_pubkey(secp, &pk)?;
 		Ok((kernel_excess, signature))
 	}
 }
@@ -197,13 +198,16 @@ where
 	)?;
 
 	outputs.retain(|o| {
-		o.output.status == OutputStatus::Unspent || o.output.status == OutputStatus::Unconfirmed
+		o.output.status == OutputStatus::Unspent
+			|| o.output.status == OutputStatus::Unconfirmed
+			|| o.output.status == OutputStatus::Reverted
 	});
 
 	// Let's check if fee already paid.
 	let log_entry = updater::retrieve_txs(
 		&mut **w,
 		keychain_mask,
+		None,
 		None,
 		None,
 		Some(&integrity_account.path),
@@ -226,7 +230,7 @@ where
 		};
 		if log_entry.tx_slate_id.is_none()
 			|| height < tip_height.saturating_sub(libp2p_connection::INTEGRITY_FEE_VALID_BLOCKS)
-			|| log_entry.is_cancelled()
+			|| log_entry.is_cancelled_reverted()
 		{
 			continue;
 		}
@@ -310,7 +314,10 @@ where
 	// Check if integrity outputs still in the waiting state
 	if outputs
 		.iter()
-		.find(|o| o.output.status == OutputStatus::Unconfirmed)
+		.find(|o| {
+			o.output.status == OutputStatus::Unconfirmed
+				|| o.output.status == OutputStatus::Reverted
+		})
 		.is_some()
 	{
 		return Ok(results);
@@ -328,6 +335,8 @@ where
 		// We can't keep wallet locked on post. Test environment doesn't work this way
 		let tx_to_post = {
 			wallet_lock!(wallet_inst.clone(), w);
+
+			let keychain = w.keychain(keychain_mask)?;
 
 			if account.is_none() {
 				// Creating integrity account
@@ -378,7 +387,7 @@ where
 				args.address.clone(),
 				None,
 				None,
-				Some(INTEGRITY_ACCOUNT_NAME),
+				&Some(INTEGRITY_ACCOUNT_NAME.into()),
 				None,
 				false,
 				false,
@@ -388,8 +397,14 @@ where
 				owner::finalize_tx(&mut **w, keychain_mask, &slate, false, false)?;
 
 			// Build and store integral fee data...
-			let integrity_context =
-				IntegrityContext::build(&slate.id, slate.fee, &context0, &context1, tip_height)?;
+			let integrity_context = IntegrityContext::build(
+				&slate.id,
+				slate.fee,
+				&context0,
+				&context1,
+				tip_height,
+				keychain.secp(),
+			)?;
 			{
 				let mut batch = w.batch(keychain_mask)?;
 				batch.save_integrity_context(slate.id.as_bytes(), &integrity_context)?;
@@ -398,7 +413,7 @@ where
 
 			results[i] = (Some(integrity_context), false);
 
-			slate.tx
+			slate.tx_or_err()?.clone()
 		};
 
 		// Posting transaction...
@@ -436,9 +451,9 @@ where
 	wallet_lock!(wallet_inst, w);
 
 	let total_amount: u64 = outputs.iter().map(|o| o.output.value).sum();
-	let fee = tx_fee(outputs.len(), 1, 1, None);
+	let fee = tx_fee(outputs.len(), 1, 1);
 	if total_amount <= fee {
-		return Err(ErrorKind::Generic("Reserved amount for Integrity fees is smaller then a transaction fee. It is impossible to move dust funds.".to_string()).into());
+		return Err(Error::GenericError("Reserved amount for Integrity fees is smaller then a transaction fee. It is impossible to move dust funds.".to_string()));
 	}
 
 	let mut args = InitTxArgs::default();
@@ -459,7 +474,7 @@ where
 		args.address.clone(),
 		None,
 		None,
-		Some(account_withdraw_to),
+		&Some(account_withdraw_to.clone()),
 		None,
 		false,
 		false,
@@ -470,7 +485,7 @@ where
 	let (slate, _context1) = owner::finalize_tx(&mut **w, keychain_mask, &slate, false, false)?;
 
 	// Posting transaction...
-	owner::post_tx(w.w2n_client(), &slate.tx, false)?;
+	owner::post_tx(w.w2n_client(), slate.tx_or_err()?, false)?;
 
 	Ok(args.amount)
 }

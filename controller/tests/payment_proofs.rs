@@ -1,4 +1,4 @@
-// Copyright 2019 The Grin Developers
+// Copyright 2021 The Grin Developers
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -21,6 +21,7 @@ extern crate grin_wallet_util;
 use grin_wallet_libwallet as libwallet;
 use impls::test_framework::{self, LocalWalletClient};
 use libwallet::{InitTxArgs, Slate};
+use std::sync::atomic::Ordering;
 use std::thread;
 use std::time::Duration;
 
@@ -36,6 +37,7 @@ fn payment_proofs_test_impl(test_dir: &'static str) -> Result<(), wallet::Error>
 	global::set_local_chain_type(global::ChainTypes::AutomatedTesting);
 	let mut wallet_proxy = create_wallet_proxy(test_dir);
 	let chain = wallet_proxy.chain.clone();
+	let stopper = wallet_proxy.running.clone();
 
 	create_wallet_and_add!(
 		client1,
@@ -116,15 +118,19 @@ fn payment_proofs_test_impl(test_dir: &'static str) -> Result<(), wallet::Error>
 			slate_i.payment_proof.as_ref().unwrap().sender_address
 		);
 
+		// Check we are creating a tx with kernel features 0
+		// We will check this produces a Plain kernel later.
+		assert_eq!(0, slate.get_kernel_features());
+
 		// Check we are creating a tx with the expected lock_height of 0.
 		// We will check this produces a Plain kernel later.
-		assert_eq!(0, slate_i.lock_height);
+		assert_eq!(0, slate_i.get_lock_height());
 
 		slate = client1.send_tx_slate_direct("wallet2", &slate_i)?;
 		sender_api.tx_lock_outputs(m, &slate, None, 0)?;
 
 		// Ensure what's stored in TX log for payment proof is correct
-		let (_, txs) = sender_api.retrieve_txs(m, true, None, Some(slate.id))?;
+		let (_, txs) = sender_api.retrieve_txs(m, true, None, Some(slate.id), None)?;
 		assert!(txs[0].payment_proof.is_some());
 		let pp = txs[0].clone().payment_proof.unwrap();
 		assert_eq!(
@@ -145,7 +151,7 @@ fn payment_proofs_test_impl(test_dir: &'static str) -> Result<(), wallet::Error>
 		assert!(pp.is_err());
 
 		slate = sender_api.finalize_tx(m, &slate)?;
-		sender_api.post_tx(m, &slate.tx, true)?;
+		sender_api.post_tx(m, slate.tx_or_err()?, true)?;
 		Ok(())
 	})?;
 
@@ -169,6 +175,7 @@ fn payment_proofs_test_impl(test_dir: &'static str) -> Result<(), wallet::Error>
 	})?;
 
 	// let logging finish
+	stopper.store(false, Ordering::Relaxed);
 	thread::sleep(Duration::from_millis(200));
 	Ok(())
 }
@@ -178,7 +185,7 @@ fn payment_proofs() {
 	let test_dir = "test_output/payment_proofs";
 	setup(test_dir);
 	if let Err(e) = payment_proofs_test_impl(test_dir) {
-		panic!("Libwallet Error: {} - {}", e, e.backtrace().unwrap());
+		panic!("Libwallet Error: {}", e);
 	}
 	clean_output_dir(test_dir);
 }

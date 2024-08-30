@@ -16,5 +16,5 @@ mod error;
 /// Types used for multisig operations
 pub mod types;
 
-pub use self::error::ErrorKind;
+pub use self::error::Error;
 pub use self::types::{Builder, Hashed, ParticipantData};

@@ -1,4 +1,4 @@
-// Copyright 2020 The Grin Developers
+// Copyright 2021 The Grin Developers
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,6 +18,6 @@ mod armor;
 mod packer;
 mod slatepack;
 
-pub use self::armor::{generate_check, SlatepackArmor};
+pub use self::armor::{generate_check, max_size, min_size, SlatepackArmor, HEADER_ENC};
 pub use self::packer::Slatepacker;
 pub use self::slatepack::{SlatePurpose, Slatepack};
