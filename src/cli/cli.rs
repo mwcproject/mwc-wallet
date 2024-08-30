@@ -142,7 +142,7 @@ where
 					continue;
 				}
 				// TODO tidy up a bit
-				if command.to_lowercase() == "exit" {
+				if command.to_lowercase().trim() == "exit" {
 					break;
 				}
 				/* use crate::common::{is_cli, COLORED_PROMPT}; */
