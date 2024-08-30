@@ -156,8 +156,11 @@ where
 				// Just add 'mwc-wallet' to each command behind the scenes
 				// so we don't need to maintain a separate definition file
 				let augmented_command = format!("mwc-wallet {}", command);
-				let args =
-					app.get_matches_from_safe_borrow(augmented_command.trim().split_whitespace());
+				let command_split = match shlex::split(&augmented_command) {
+					Some(command_split) => command_split,
+					None => vec!["mwc-wallet".to_string()],
+				};
+				let args = app.get_matches_from_safe_borrow(command_split);
 				let done = match args {
 					Ok(args) => {
 						// handle opening /closing separately
