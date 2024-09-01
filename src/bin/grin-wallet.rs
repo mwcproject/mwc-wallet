@@ -29,6 +29,7 @@ use grin_wallet_impls::HTTPNodeClient;
 use grin_wallet_util::grin_core as core;
 use grin_wallet_util::grin_util as util;
 use std::env;
+use std::net::IpAddr;
 use std::path::PathBuf;
 
 use grin_wallet_config::parse_node_address_string;
@@ -147,6 +148,28 @@ fn real_main() -> i32 {
 	);
 
 	log_build_info();
+
+	// Let's validate config for Windows, api_listen_interface & tor.tor_enabled
+	#[cfg(target_os = "windows")]
+	{
+		let config = config.members.as_ref().unwrap();
+		if let Some(tor_config) = &config.tor {
+			if tor_config.use_tor_listener {
+				match config.wallet.api_listen_interface.parse::<IpAddr>() {
+					Ok(ip_addr) => {
+						if !ip_addr.is_loopback() {
+							println!("Incorrect wallet configuration, please update mwc-wallet.toml. If Tor is enabled, api_listen_interface must be a loopback address: '127.0.0.1' or '::1'");
+							return 0;
+						}
+					}
+					Err(e) => {
+						println!("Unable to parse wallet configuration mwc-wallet.toml. api_listen_interface value {}. Expecting ip4 or ip6 value. {}", config.wallet.api_listen_interface, e);
+						return 0;
+					}
+				}
+			}
+		}
+	}
 
 	global::init_global_chain_type(
 		config
