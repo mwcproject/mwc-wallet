@@ -203,9 +203,9 @@ pub fn create_sender(
 						&tc.socks_proxy_addr,
 						Some(tc.send_config_dir),
 						tc.socks_running,
-						tc.tor_log_file,
-						tc.bridge,
-						tc.proxy,
+						&tc.tor_log_file,
+						&tc.bridge,
+						&tc.proxy,
 					)
 					.map_err(|e| invalid(e))?,
 				)
@@ -242,9 +242,9 @@ pub fn create_swap_message_sender(
 					&tor_config.socks_proxy_addr,
 					Some(tor_config.send_config_dir.clone()),
 					tor_config.socks_running,
-					tor_config.tor_log_file.clone(),
-					tor_config.bridge.clone(),
-					tor_config.proxy.clone(),
+					&tor_config.tor_log_file,
+					&tor_config.bridge,
+					&tor_config.proxy,
 				)
 				.map_err(|e| invalid(e))?,
 			)

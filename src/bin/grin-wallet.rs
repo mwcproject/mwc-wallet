@@ -29,7 +29,6 @@ use grin_wallet_impls::HTTPNodeClient;
 use grin_wallet_util::grin_core as core;
 use grin_wallet_util::grin_util as util;
 use std::env;
-use std::net::IpAddr;
 use std::path::PathBuf;
 
 use grin_wallet_config::parse_node_address_string;
@@ -152,6 +151,8 @@ fn real_main() -> i32 {
 	// Let's validate config for Windows, api_listen_interface & tor.tor_enabled
 	#[cfg(target_os = "windows")]
 	{
+		use std::net::IpAddr;
+
 		let config = config.members.as_ref().unwrap();
 		if let Some(tor_config) = &config.tor {
 			if tor_config.use_tor_listener {

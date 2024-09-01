@@ -33,8 +33,8 @@ use serde::{Deserialize, Serialize};
 use serde_json;
 
 use grin_wallet_impls::{
-	Address, CloseReason, MWCMQPublisher, MWCMQSAddress, MWCMQSubscriber, Publisher, Subscriber,
-	SubscriptionHandler,
+	Address, CloseReason, HttpDataSender, MWCMQPublisher, MWCMQSAddress, MWCMQSubscriber,
+	Publisher, SlateSender, Subscriber, SubscriptionHandler,
 };
 use grin_wallet_libwallet::swap::message::Message;
 use grin_wallet_libwallet::wallet_lock;
@@ -72,6 +72,7 @@ use std::sync::mpsc::Sender;
 use std::sync::{Arc, RwLock};
 use std::thread;
 use std::thread::JoinHandle;
+use std::time::{Duration, SystemTime};
 
 lazy_static! {
 	pub static ref MWC_OWNER_BASIC_REALM: HeaderValue =
@@ -198,8 +199,8 @@ pub fn init_tor_listener<L, C, K>(
 	libp2p_listener_port: &Option<u16>,
 	tor_base: Option<&str>,
 	tor_log_file: &Option<String>,
-	bridge: TorBridgeConfig,
-	tor_proxy: TorProxyConfig,
+	bridge: &TorBridgeConfig,
+	tor_proxy: &TorProxyConfig,
 ) -> Result<(tor_process::TorProcess, SecretKey), Error>
 where
 	L: WalletLCProvider<'static, C, K> + 'static,
@@ -228,7 +229,7 @@ where
 	let mut tor_timeout = 200;
 	if bridge.bridge_line.is_some() {
 		tor_timeout = 300;
-		let bridge_config = tor_bridge::TorBridge::try_from(bridge)
+		let bridge_config = tor_bridge::TorBridge::try_from(bridge.clone())
 			.map_err(|e| Error::TorConfig(format!("{}", e)))?;
 		hm_tor_bridge = bridge_config
 			.to_hashmap()
@@ -237,7 +238,7 @@ where
 
 	let mut hm_tor_poxy: HashMap<String, String> = HashMap::new();
 	if tor_proxy.transport.is_some() || tor_proxy.allowed_port.is_some() {
-		let proxy_config = tor_proxy::TorProxy::try_from(tor_proxy)
+		let proxy_config = tor_proxy::TorProxy::try_from(tor_proxy.clone())
 			.map_err(|e| Error::TorConfig(format!("{}", e)))?;
 		hm_tor_poxy = proxy_config
 			.to_hashmap()
@@ -1020,8 +1021,8 @@ pub fn foreign_listener<L, C, K>(
 	socks_proxy_addr: &str,
 	libp2p_listen_port: &Option<u16>,
 	tor_log_file: &Option<String>,
-	tor_bridge: TorBridgeConfig,
-	tor_proxy: TorProxyConfig,
+	tor_bridge: &TorBridgeConfig,
+	tor_proxy: &TorProxyConfig,
 ) -> Result<(), Error>
 where
 	L: WalletLCProvider<'static, C, K> + 'static,
@@ -1089,19 +1090,19 @@ where
 
 	warn!("HTTP Foreign listener started.");
 
-	{
-		let address = ProvableAddress::from_tor_pub_key(&slatepack_pk);
-		let qr_string = match QrCode::new(address.public_key.clone()) {
-			Ok(qr) => qr.to_string(false, 3),
-			Err(_) => "Failed to generate QR code!".to_string(),
-		};
-		warn!(
-			"Slatepack Address is: {}\n{}",
-			address.public_key, qr_string
-		);
-	}
+	let address = ProvableAddress::from_tor_pub_key(&slatepack_pk);
+	let qr_string = match QrCode::new(address.public_key.clone()) {
+		Ok(qr) => qr.to_string(false, 3),
+		Err(_) => "Failed to generate QR code!".to_string(),
+	};
+	warn!(
+		"Slatepack Address is: {}\n{}",
+		address.public_key, qr_string
+	);
 
 	set_foreign_api_server(Some(apis));
+
+	let check_tor_connection = tor_info.is_some();
 
 	// Starting libp2p listener
 	let tor_process = if tor_info.is_some() && libp2p_listen_port.is_some() {
@@ -1118,6 +1119,53 @@ where
 	} else {
 		None
 	};
+
+	// checking connection every minute until the thread is running
+	if check_tor_connection {
+		let this_tor_address = address.to_string();
+		let this_wallet_dest = format!("http://{}.onion", this_tor_address);
+
+		let sender = HttpDataSender::tor_through_socks_proxy(
+			&this_wallet_dest,
+			None,
+			socks_proxy_addr,
+			None,
+			true,
+			&None,
+			tor_bridge,
+			tor_proxy,
+		)?;
+
+		let mut finished = false;
+		while !finished {
+			// waiting for a minute
+			for _ in 1..(60 * 2) {
+				if api_thread.is_finished() {
+					finished = true;
+					break;
+				}
+				thread::sleep(Duration::from_millis(500));
+			}
+			// And check. That should trigger refresh on tor is something was changed
+			if !finished {
+				let ping_start = SystemTime::now();
+				match sender.check_other_wallet_version(&this_wallet_dest) {
+					Ok(_) => {
+						let ping_call_duration = SystemTime::now()
+							.duration_since(ping_start)
+							.unwrap_or(Duration::from_millis(0));
+						info!(
+							"Tor listener is healthy, ping time: {}",
+							ping_call_duration.as_millis()
+						);
+					}
+					Err(e) => {
+						warn!("Tor listener is NOT healthy, ping error: {}", e);
+					}
+				}
+			}
+		}
+	}
 
 	let res = api_thread
 		.join()
