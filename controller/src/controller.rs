@@ -63,6 +63,7 @@ use grin_wallet_util::grin_p2p::libp2p_connection;
 use grin_wallet_util::grin_util::secp::pedersen::Commitment;
 use grin_wallet_util::grin_util::secp::{ContextFlag, Secp256k1};
 use grin_wallet_util::grin_util::static_secp_instance;
+use log::Level;
 use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::net::{SocketAddr, SocketAddrV4};
@@ -1161,8 +1162,18 @@ where
 
 	async fn call_api(req: Request<Body>, api: Owner<L, C, K>) -> Result<serde_json::Value, Error> {
 		let val: serde_json::Value = parse_body(req).await?;
+
+		if log_enabled!(Level::Debug) {
+			debug!("OwnerAPI request: {}", val);
+		}
+
 		match <dyn OwnerRpcV2>::handle_request(&api, val) {
-			MaybeReply::Reply(r) => Ok(r),
+			MaybeReply::Reply(r) => {
+				if log_enabled!(Level::Debug) {
+					debug!("OwnerAPI repsonse: {}", r);
+				}
+				Ok(r)
+			}
 			MaybeReply::DontReply => {
 				// Since it's http, we need to return something. We return [] because jsonrpc
 				// clients will parse it as an empty batch response.
@@ -1614,8 +1625,18 @@ where
 		api: Foreign<'static, L, C, K>,
 	) -> Result<serde_json::Value, Error> {
 		let val: serde_json::Value = parse_body(req).await?;
+
+		if log_enabled!(Level::Debug) {
+			debug!("ForeignAPI request: {}", val);
+		}
+
 		match <dyn ForeignRpc>::handle_request(&api, val) {
-			MaybeReply::Reply(r) => Ok(r),
+			MaybeReply::Reply(r) => {
+				if log_enabled!(Level::Debug) {
+					debug!("ForeignAPI response: {}", r);
+				}
+				Ok(r)
+			}
 			MaybeReply::DontReply => {
 				// Since it's http, we need to return something. We return [] because jsonrpc
 				// clients will parse it as an empty batch response.
