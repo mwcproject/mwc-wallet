@@ -794,7 +794,6 @@ pub struct ReceiveArgs {
 	pub input_slatepack_message: Option<String>,
 	pub message: Option<String>,
 	pub outfile: Option<String>,
-	pub bridge: Option<String>,
 	pub slatepack_qr: bool,
 }
 

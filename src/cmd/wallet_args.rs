@@ -705,8 +705,6 @@ pub fn parse_receive_unpack_args(args: &ArgMatches) -> Result<command::ReceiveAr
 		false => None,
 	};
 
-	let bridge = parse_optional(args, "bridge")?;
-
 	let slatepack_qr = args.is_present("slatepack_qr");
 
 	Ok(command::ReceiveArgs {
@@ -714,7 +712,6 @@ pub fn parse_receive_unpack_args(args: &ArgMatches) -> Result<command::ReceiveAr
 		input_slatepack_message: args.value_of("content").map(|s| s.to_string()),
 		message: args.value_of("message").map(|s| s.to_string()),
 		outfile: args.value_of("outfile").map(|s| s.to_string()),
-		bridge,
 		slatepack_qr: slatepack_qr,
 	})
 }

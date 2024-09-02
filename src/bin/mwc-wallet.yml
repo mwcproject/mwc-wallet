@@ -274,10 +274,6 @@ subcommands:
             short: o
             long: outfile
             takes_value: true
-        - bridge:
-            help: Enable tor bridge relay when receiving via Slatepack workflow
-            long: bridge
-            takes_value: true
         - slatepack_qr:
             help: Show slatepack data as QR code
             short: q
