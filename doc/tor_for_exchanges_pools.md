@@ -7,8 +7,9 @@ allow for real production use of tor for withdrawals by both exchanges and minin
 # Configuration #
 
 The configuration of tor is the same as in previous versions with the exception of a new parameter in the mwc-wallet.toml
-[tor] section, called socks_running. By default it is set to false. If you wish to use an external tor socks proxy, you will
-need to set this parameter to true. The tor section of your mwc-wallet.toml may look like this:
+[tor] section, called socks_running. By default it is set to false. If you wish to use an external tor socks proxy for sending, you will
+need to set this parameter to true. Please note, for listening wallet will need to run it's own instance of tor. 
+The tor section of your mwc-wallet.toml may look like this:
 
 ```
 [tor]
@@ -23,10 +24,12 @@ send_config_dir = "/Users/test/.mwc/main"
 socks_running = false
 ```
 Note: use socks_running true if you already have a tor sock process setup. To get much better performance it is 
-recommended to have sock process allways running. Otherwise wallet will run it for every tor interaction.
+recommended to have sock process allways running. Otherwise wallet will run it for every send operation.
 
 This configuration tells the mwc-wallet not to instantiate a tor instance each time send is called and instead the mwc-wallet
 will expect that a tor instance is already running. You are expected to have a tor instance running.
+
+Also please note. If wallet is listening, it will need to run it's own instance of tor. This instance will be used for sending. 
 
 To install/configure tor, you can use the following command on linux:
 

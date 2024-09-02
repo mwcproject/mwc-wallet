@@ -300,6 +300,16 @@ fn comments() -> HashMap<String, String> {
 	);
 
 	retval.insert(
+		"socks_running".to_string(),
+		"
+# To use an external Tor SOCKS proxy for 'send', set this parameter to true. For 'listen', the
+# wallet will run its own Tor instance, which is shared for 'send' calls. If your wallet primarily
+# sends and doesn't listen, we recommend using your own Tor instance.
+"
+		.to_string(),
+	);
+
+	retval.insert(
 		"[tor.bridge]".to_string(),
 		"
 #########################################

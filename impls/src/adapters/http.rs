@@ -86,9 +86,9 @@ impl HttpDataSender {
 		proxy_addr: &str,
 		tor_config_dir: Option<String>,
 		socks_running: bool,
-		tor_log_file: Option<String>,
-		tor_bridge: TorBridgeConfig,
-		tor_proxy: TorProxyConfig,
+		tor_log_file: &Option<String>,
+		tor_bridge: &TorBridgeConfig,
+		tor_proxy: &TorProxyConfig,
 	) -> Result<HttpDataSender, Error> {
 		let addr = proxy_addr.parse().map_err(|e| {
 			Error::GenericError(format!("Unable to parse address {}, {}", proxy_addr, e))

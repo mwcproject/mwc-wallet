@@ -66,19 +66,19 @@ impl Client {
 		if socks_proxy_addr.is_none() {
 			#[cfg(not(target_os = "android"))]
 			{
-				connect_timeout = 10;
-				timeout = 20;
+				connect_timeout = 15;
+				timeout = 40;
 			}
 
 			#[cfg(target_os = "android")]
 			{
 				// For android timeouts need to be longer because we already experiencing some connection issues.
 				connect_timeout = 30;
-				timeout = 30;
+				timeout = 50;
 			}
 		} else {
 			connect_timeout = 60;
-			timeout = 120;
+			timeout = 180;
 		}
 
 		let mut builder = ClientBuilder::new()
