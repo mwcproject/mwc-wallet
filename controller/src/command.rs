@@ -1408,6 +1408,16 @@ where
 					}
 				}
 				"http" => {
+					let tor_config = match tor_config {
+						Some(mut c) => {
+							if let Some(b) = args.bridge {
+								c.bridge.bridge_line = Some(b);
+							}
+							Some(c)
+						}
+						None => None,
+					};
+
 					let sender =
 						create_sender(args.method.as_str(), &args.dest, &None, tor_config)?;
 					// We want to lock outputs for original slate. Sender can respond with anyhting. No reasons to check respond if lock works fine for original slate
