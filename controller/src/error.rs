@@ -119,19 +119,19 @@ pub enum Error {
 	MQSConfig(String),
 
 	///rejecting invoice as auto invoice acceptance is turned off
-	#[error("rejecting invoice as auto invoice acceptance is turned off!")]
+	#[error("Rejecting invoice as auto invoice acceptance is turned off!")]
 	DoesNotAcceptInvoices,
 
 	///when invoice amount is too big(added with mqs feature)
-	#[error("error: rejecting invoice as amount '{0}' is too big!")]
+	#[error("Rejecting invoice as amount '{0}' is too big!")]
 	InvoiceAmountTooBig(u64),
 
 	/// Verify slate messages call failure
-	#[error("failed verifying slate messages, {0}")]
+	#[error("Failed verifying slate messages, {0}")]
 	VerifySlateMessagesError(String),
 
 	/// Processing swap message failure
-	#[error("failed processing swap messages, {0}")]
+	#[error("Failed processing swap messages, {0}")]
 	ProcessSwapMessageError(String),
 }
 

@@ -155,7 +155,8 @@ where
 
 				// Just add 'mwc-wallet' to each command behind the scenes
 				// so we don't need to maintain a separate definition file
-				let augmented_command = format!("mwc-wallet {}", command);
+				// shlex::split is escaping back slash, need to double it
+				let augmented_command = format!("mwc-wallet {}", command).replace(r"\", r"\\");
 				let command_split = match shlex::split(&augmented_command) {
 					Some(command_split) => command_split,
 					None => vec!["mwc-wallet".to_string()],

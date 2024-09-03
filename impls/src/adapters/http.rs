@@ -421,7 +421,7 @@ impl HttpDataSender {
 				.completion_percent(100)
 				.launch()
 				.map_err(|e| {
-					Error::TorProcess(format!("Unable to start Tor process {}, {:?}", tor_cmd, e))
+					Error::TorProcess(format!("Unable to start Tor process. If error persist, please run from the console 'tor -f {}' to see the error details, {:?}", tor_cmd, e))
 				})?;
 			tor::status::set_tor_sender_running(true);
 		}
