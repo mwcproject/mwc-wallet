@@ -190,16 +190,18 @@ where
 				let w_provider = w_lock.lc_provider()?;
 				w_provider.wallet_inst().is_ok()
 			};
-			if wallet_opened {
+
+			let sec = if wallet_opened {
 				// Business goes here
 				owner::update_wallet_state(
 					self.wallet_inst.clone(),
 					(&keychain_mask).as_ref(),
 					status_send_channel,
 				)?;
-			}
-
-			let sec = frequency.as_secs();
+				frequency.as_secs()
+			} else {
+				1
+			};
 
 			for _ in 0..sec {
 				if !self.is_running.load(Ordering::Relaxed) {
