@@ -41,7 +41,8 @@ use grin_wallet_impls::{Address, MWCMQSAddress, Publisher};
 use grin_wallet_libwallet::api_impl::{owner, owner_eth, owner_libp2p, owner_swap};
 use grin_wallet_libwallet::proof::proofaddress::{self, ProvableAddress};
 use grin_wallet_libwallet::proof::tx_proof::TxProof;
-use grin_wallet_libwallet::slate_versions::v3::sig_is_blank;
+use grin_wallet_libwallet::slate_versions::v2::TransactionV2;
+use grin_wallet_libwallet::slate_versions::v3::{sig_is_blank, TransactionV3};
 use grin_wallet_libwallet::slatepack::SlatePurpose;
 use grin_wallet_libwallet::swap::fsm::state::StateId;
 use grin_wallet_libwallet::swap::trades;
@@ -60,6 +61,7 @@ use serde_json as json;
 use serde_json::json;
 use serde_json::{Map as JsonMap, Value as JsonValue};
 use std::collections::HashSet;
+use std::convert::TryFrom;
 use std::fs::File;
 use std::io;
 use std::io::{Read, Write};
@@ -1626,15 +1628,51 @@ where
 		return Err(Error::GenericError(format!("File {} is empty", args.input)));
 	}
 
-	let transaction: Transaction = serde_json::from_str(&content).map_err(|e| {
-		Error::IO(format!(
-			"Json to Transaction conversion failed for {}, {}",
-			content, e
-		))
-	})?;
-
 	controller::owner_single_use(None, keychain_mask, Some(owner_api), |api, m| {
-		api.post_tx(m, &transaction, args.fluff)?;
+		let (slatepack_secret, height, secp) = {
+			let mut w_lock = api.wallet_inst.lock();
+			let w = w_lock.lc_provider()?.wallet_inst()?;
+			let keychain = w.keychain(keychain_mask)?;
+			let slatepack_secret =
+				proofaddress::payment_proof_address_dalek_secret(&keychain, None)?;
+			let (height, _, _) = w.w2n_client().get_chain_tip()?;
+			(slatepack_secret, height, keychain.secp().clone())
+		};
+
+		let tx = match serde_json::from_str::<TransactionV3>(&content) {
+			Ok(tx) => Transaction::try_from(tx)?,
+			Err(_) => {
+				match serde_json::from_str::<TransactionV2>(&content) {
+					Ok(tx) => {
+						let tx: TransactionV3 = tx.into();
+						Transaction::try_from(tx)?
+					}
+					Err(_) => {
+						// Let's try decode as a slate
+						let slate_pkg = PathToSlateGetter::build_form_str(content).get_tx(
+							Some(&slatepack_secret),
+							height,
+							&secp,
+						)?;
+						let (slate, _, _, content, _slatepack_format) = slate_pkg.to_slate()?;
+						if content != SlatePurpose::FullSlate {
+							return Err(Error::LibWallet(format!(
+								"Posting can performed for a FullSlate, this slate is {:?}",
+								content
+							)));
+						}
+						if slate.tx.is_none() {
+							return Err(Error::LibWallet(format!(
+								"Slate is empty, no transaction is found"
+							)));
+						}
+						slate.tx.unwrap()
+					}
+				}
+			}
+		};
+
+		api.post_tx(m, &tx, args.fluff)?;
 		info!("Posted transaction");
 		return Ok(());
 	})?;
