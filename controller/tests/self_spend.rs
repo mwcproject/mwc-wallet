@@ -106,7 +106,7 @@ fn self_spend_impl(test_dir: &'static str) -> Result<(), wallet::Error> {
 	debug!("===========the outputs list are {:?}", output_list);
 	assert!(output_list.len() == 4);
 
-	libwallet::owner::self_spend_particular_putput(
+	libwallet::owner::self_spend_particular_output(
 		wallet1.clone(),
 		mask1,
 		output_list[0].clone(),
@@ -115,7 +115,7 @@ fn self_spend_impl(test_dir: &'static str) -> Result<(), wallet::Error> {
 		1,
 		true,
 	)?;
-	libwallet::owner::self_spend_particular_putput(
+	libwallet::owner::self_spend_particular_output(
 		wallet1.clone(),
 		mask1,
 		output_list[1].clone(),

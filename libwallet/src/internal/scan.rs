@@ -422,6 +422,10 @@ where
 	let mut batch = w.batch(keychain_mask)?;
 
 	let parent_key_id = output.key_id.parent_path();
+	let mut path = parent_key_id.to_path();
+	// Resetting reply attack prevention block number to 0, so we could calculate parent correctly
+	path.path[3] = ChildNumber::from(0);
+	let parent_key_id = path.to_identifier();
 
 	if !found_parents.contains_key(&parent_key_id) {
 		found_parents.insert(parent_key_id.clone(), 0);

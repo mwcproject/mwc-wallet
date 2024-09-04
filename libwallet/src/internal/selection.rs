@@ -332,7 +332,10 @@ where
 		let mut sum = 0;
 		for oaui in output_amounts_unwrapped {
 			sum = sum + oaui;
-			key_vec_amounts.push((keys::next_available_key(wallet, keychain_mask)?, oaui));
+			key_vec_amounts.push((
+				keys::next_available_key(wallet, keychain_mask, Some(&parent_key_id))?,
+				oaui,
+			));
 			i = i + 1;
 		}
 		if sum != slate.amount {
@@ -355,7 +358,7 @@ where
 				let key_str = key_id_opt.unwrap();
 				Identifier::from_hex(key_str)?
 			} else {
-				keys::next_available_key(wallet, keychain_mask)?
+				keys::next_available_key(wallet, keychain_mask, Some(&parent_key_id))?
 			};
 
 			let output_amount: u64 = if i == num_outputs - 1 {

@@ -249,7 +249,7 @@ where
 	fn next_child(
 		&mut self,
 		keychain_mask: Option<&SecretKey>,
-		parent_key_id: Option<Identifier>,
+		parent_key_id: Option<&Identifier>,
 		height: Option<u64>,
 	) -> Result<Identifier, Error>;
 

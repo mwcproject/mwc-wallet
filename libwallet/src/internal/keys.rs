@@ -23,13 +23,14 @@ use std::collections::HashSet;
 pub fn next_available_key<'a, T: ?Sized, C, K>(
 	wallet: &mut T,
 	keychain_mask: Option<&SecretKey>,
+	parent_key_id: Option<&Identifier>,
 ) -> Result<Identifier, Error>
 where
 	T: WalletBackend<'a, C, K>,
 	C: NodeClient + 'a,
 	K: Keychain + 'a,
 {
-	let child = wallet.next_child(keychain_mask, None, None)?;
+	let child = wallet.next_child(keychain_mask, parent_key_id, None)?;
 	Ok(child)
 }
 
