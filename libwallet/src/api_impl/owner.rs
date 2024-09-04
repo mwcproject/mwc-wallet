@@ -1543,7 +1543,7 @@ where
 }
 
 ///
-pub fn self_spend_particular_putput<'a, L, C, K>(
+pub fn self_spend_particular_output<'a, L, C, K>(
 	wallet_inst: Arc<Mutex<Box<dyn WalletInst<'a, L, C, K>>>>,
 	keychain_mask: Option<&SecretKey>,
 	output: OutputData,
@@ -1583,7 +1583,7 @@ where
 {
 	let k = w.keychain(keychain_mask)?;
 
-	let key_id = keys::next_available_key(&mut *w, keychain_mask)?;
+	let key_id = keys::next_available_key(&mut *w, keychain_mask, None)?;
 
 	let blind = k.derive_key(amount, &key_id, SwitchCommitmentType::Regular)?;
 	let commit = k.secp().commit(amount, blind.clone())?;

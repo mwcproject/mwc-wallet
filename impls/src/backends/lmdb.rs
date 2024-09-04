@@ -492,19 +492,19 @@ where
 	fn next_child<'a>(
 		&mut self,
 		keychain_mask: Option<&SecretKey>,
-		parent_key_id: Option<Identifier>,
+		parent_key_id: Option<&Identifier>,
 		height: Option<u64>,
 	) -> Result<Identifier, Error> {
-		let parent_key_id = parent_key_id.unwrap_or(self.parent_key_id.clone());
+		let parent_key_id = parent_key_id.unwrap_or(&self.parent_key_id).clone();
 		let mut deriv_idx = {
 			let batch = self.db.batch()?;
-			let deriv_key = to_key(DERIV_PREFIX, &mut self.parent_key_id.to_bytes().to_vec());
+			let deriv_key = to_key(DERIV_PREFIX, &mut parent_key_id.to_bytes().to_vec());
 			match batch.get_ser(&deriv_key, None)? {
 				Some(idx) => idx,
 				None => 0,
 			}
 		};
-		let mut return_path = self.parent_key_id.to_path();
+		let mut return_path = parent_key_id.to_path();
 		return_path.depth += 1;
 		return_path.path[return_path.depth as usize - 1] = ChildNumber::from(deriv_idx);
 		if let Some(hei) = height {

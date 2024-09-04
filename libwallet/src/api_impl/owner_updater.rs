@@ -59,44 +59,50 @@ pub fn start_updater_log_thread(
 ) -> Result<JoinHandle<()>, Error> {
 	let handle = thread::Builder::new()
 		.name("wallet-updater-status".to_string())
-		.spawn(move || loop {
-			let running = running_state.load(Ordering::Relaxed);
-			while let Ok(m) = rx.try_recv() {
-				// save to our message queue to be read by other consumers
-				{
-					let mut q = queue.lock();
-					q.insert(0, m.clone());
-					while q.len() > MESSAGE_QUEUE_MAX_LEN {
-						q.pop();
-					}
-				}
-				match m {
-					StatusMessage::UpdatingOutputs(_show_progress, s) => info!("{}", s),
-					StatusMessage::FullScanWarn(s) => warn!("{}", s),
-					StatusMessage::Scanning(show_progress, s, m) => {
-						info!("{}", s);
-						if show_progress {
-							warn!("Scanning - {}% complete", m);
-						} else {
-							info!("Scanning - {}% complete", m);
+		.spawn(move || {
+			let mut updated_percent: u8 = 250;
+			loop {
+				let running = running_state.load(Ordering::Relaxed);
+				while let Ok(m) = rx.try_recv() {
+					// save to our message queue to be read by other consumers
+					{
+						let mut q = queue.lock();
+						q.insert(0, m.clone());
+						while q.len() > MESSAGE_QUEUE_MAX_LEN {
+							q.pop();
 						}
 					}
-					StatusMessage::ScanningComplete(show_progress, s) => {
-						if show_progress {
-							warn!("{}", s);
-						} else {
+					match m {
+						StatusMessage::UpdatingOutputs(_show_progress, s) => info!("{}", s),
+						StatusMessage::FullScanWarn(s) => warn!("{}", s),
+						StatusMessage::Scanning(show_progress, s, m) => {
 							info!("{}", s);
+							if updated_percent != m {
+								if show_progress {
+									warn!("Scanning - {}% complete", m);
+								} else {
+									info!("Scanning - {}% complete", m);
+								}
+								updated_percent = m;
+							}
 						}
+						StatusMessage::ScanningComplete(show_progress, s) => {
+							if show_progress {
+								warn!("{}", s);
+							} else {
+								info!("{}", s);
+							}
+						}
+						StatusMessage::Warning(s) => warn!("{}", s),
+						StatusMessage::Info(s) => info!("{}", s),
 					}
-					StatusMessage::Warning(s) => warn!("{}", s),
-					StatusMessage::Info(s) => info!("{}", s),
 				}
+				if !running {
+					// Need to check first, then read, and exit
+					break;
+				}
+				thread::sleep(Duration::from_millis(100));
 			}
-			if !running {
-				// Need to check first, then read, and exit
-				break;
-			}
-			thread::sleep(Duration::from_millis(100));
 		})?;
 
 	Ok(handle)
