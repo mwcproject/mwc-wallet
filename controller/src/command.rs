@@ -540,7 +540,8 @@ where
 				"http" | "mwcmqs" => {
 					let sender =
 						create_sender(&args.method, &args.dest, &args.apisecret, tor_config)?;
-					let other_wallet_version = sender.check_other_wallet_version(&args.dest)?;
+					let other_wallet_version =
+						sender.check_other_wallet_version(&args.dest, true)?;
 					if let Some(other_wallet_version) = &other_wallet_version {
 						if init_args.target_slate_version.is_none() {
 							init_args.target_slate_version =
@@ -1428,7 +1429,7 @@ where
 						SlatePurpose::InvoiceResponse,
 						&slatepack_secret,
 						sender_pk,
-						sender.check_other_wallet_version(&args.dest)?,
+						sender.check_other_wallet_version(&args.dest, true)?,
 						height,
 						&secp,
 					)?;
@@ -4134,7 +4135,7 @@ where
 	let dest = format!("http://{}.onion", this_tor_address);
 
 	let sender = create_sender("tor", &dest, &None, Some(tor_config.clone()))?;
-	match sender.check_other_wallet_version(&dest) {
+	match sender.check_other_wallet_version(&dest, false) {
 		Ok(_) => println!("Tor connection online"),
 		Err(e) => println!("Tor is offline, {}", e),
 	}

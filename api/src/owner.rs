@@ -746,7 +746,7 @@ where
 							})?;
 
 					let other_wallet_version = comm_adapter
-						.check_other_wallet_version(&sa.dest)
+						.check_other_wallet_version(&sa.dest, true)
 						.map_err(|e| {
 							Error::GenericError(format!("Unable to get other wallet info, {}", e))
 						})?;

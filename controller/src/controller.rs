@@ -201,6 +201,7 @@ pub fn init_tor_listener<L, C, K>(
 	tor_log_file: &Option<String>,
 	bridge: &TorBridgeConfig,
 	tor_proxy: &TorProxyConfig,
+	show_messages: bool,
 ) -> Result<(tor_process::TorProcess, SecretKey), Error>
 where
 	L: WalletLCProvider<'static, C, K> + 'static,
@@ -245,10 +246,12 @@ where
 			.map_err(|e| Error::TorConfig(format!("{}", e)))?;
 	}
 
-	warn!(
-		"Starting TOR Hidden Service for API listener at address {}, binding to {}",
-		onion_address, addr
-	);
+	if show_messages {
+		warn!(
+			"Starting TOR Hidden Service for API listener at address {}, binding to {}",
+			onion_address, addr
+		);
+	}
 
 	tor_config::output_tor_listener_config(
 		&tor_dir,
@@ -891,7 +894,8 @@ pub fn start_libp2p_listener<L, C, K>(
 	socks_proxy_addr: &str,
 	libp2p_listen_port: u16,
 	stop_mutex: std::sync::Arc<std::sync::Mutex<u32>>,
-) -> Result<(), Error>
+	show_messages: bool,
+) -> Result<JoinHandle<()>, Error>
 where
 	L: WalletLCProvider<'static, C, K> + 'static,
 	C: NodeClient + 'static,
@@ -909,9 +913,13 @@ where
 		))
 	})?;
 
-	warn!("Starting libp2p listener with port {}", libp2p_listen_port);
+	if show_messages {
+		warn!("Starting libp2p listener with port {}", libp2p_listen_port);
+	} else {
+		debug!("Starting libp2p listener with port {}", libp2p_listen_port);
+	}
 
-	thread::Builder::new()
+	let handle = thread::Builder::new()
 		.name("libp2p_node".to_string())
 		.spawn(move || {
 			let requested_kernel_cache: RwLock<HashMap<Commitment, (TxKernel, u64)>> =
@@ -1007,7 +1015,7 @@ where
 		})
 		.map_err(|e| Error::GenericError(format!("Unable to start libp2p_node server, {}", e)))?;
 
-	Ok(())
+	Ok(handle)
 }
 
 /// Listener version, providing same API but listening for requests on a
@@ -1045,50 +1053,8 @@ where
 		slatepack_pk
 	};
 
-	// need to keep in scope while the main listener is running
-	let tor_info = match use_tor {
-		true => match init_tor_listener(
-			wallet.clone(),
-			keychain_mask.clone(),
-			addr,
-			socks_proxy_addr,
-			libp2p_listen_port,
-			None,
-			tor_log_file,
-			tor_bridge,
-			tor_proxy,
-		) {
-			Ok((tp, tor_secret)) => Some((tp, tor_secret)),
-			Err(e) => {
-				warn!("Unable to start TOR listener; Check that TOR executable is installed and on your path");
-				error!("Tor Error: {}", e);
-				warn!("Listener will be available via HTTP only");
-				None
-			}
-		},
-		false => None,
-	};
-
-	let api_handler_v2 = ForeignAPIHandlerV2::new(wallet.clone(), keychain_mask);
-	let mut router = Router::new();
-
-	router
-		.add_route("/v2/foreign", Arc::new(api_handler_v2))
-		.map_err(|e| {
-			Error::GenericError(format!("Router failed to add route /v2/foreign, {}", e))
-		})?;
-
-	let api_chan: &'static mut (oneshot::Sender<()>, oneshot::Receiver<()>) =
-		Box::leak(Box::new(oneshot::channel::<()>()));
-	let mut apis = ApiServer::new();
 	warn!("Starting HTTP Foreign listener API server at {}.", addr);
 	let socket_addr: SocketAddr = addr.parse().expect("unable to parse socket address");
-	let api_thread = apis
-		// Assuming you have a variable `channel_pair` of the required type
-		.start(socket_addr, router, tls_config, api_chan)
-		.map_err(|e| Error::GenericError(format!("API thread failed to start, {}", e)))?;
-
-	warn!("HTTP Foreign listener started.");
 
 	let address = ProvableAddress::from_tor_pub_key(&slatepack_pk);
 	let qr_string = match QrCode::new(address.public_key.clone()) {
@@ -1100,86 +1066,182 @@ where
 		address.public_key, qr_string
 	);
 
-	set_foreign_api_server(Some(apis));
+	let mut running = false;
+	let mut restarting = true;
+	let mut retries = 0;
 
-	let check_tor_connection = tor_info.is_some();
+	while restarting {
+		restarting = false;
 
-	// Starting libp2p listener
-	let tor_process = if tor_info.is_some() && libp2p_listen_port.is_some() {
-		let tor_info = tor_info.unwrap();
-		let libp2p_listen_port = libp2p_listen_port.unwrap();
-		start_libp2p_listener(
-			wallet.clone(),
-			tor_info.1 .0,
-			socks_proxy_addr,
-			libp2p_listen_port,
-			std::sync::Arc::new(std::sync::Mutex::new(1)), // passing new obj, because we never will stop the libp2p process
-		)?;
-		Some(tor_info.0)
-	} else {
-		None
-	};
-
-	// checking connection every minute until the thread is running
-	if check_tor_connection {
-		let this_tor_address = address.to_string();
-		let this_wallet_dest = format!("http://{}.onion", this_tor_address);
-
-		let sender = HttpDataSender::tor_through_socks_proxy(
-			&this_wallet_dest,
-			None,
-			socks_proxy_addr,
-			None,
-			true,
-			&None,
-			tor_bridge,
-			tor_proxy,
-		)?;
-
-		let mut finished = false;
-		while !finished {
-			// waiting for a minute
-			for _ in 1..(60 * 2) {
-				if api_thread.is_finished() {
-					finished = true;
-					break;
+		// need to keep in scope while the main listener is running
+		let tor_info = match use_tor {
+			true => match init_tor_listener(
+				wallet.clone(),
+				keychain_mask.clone(),
+				addr,
+				socks_proxy_addr,
+				libp2p_listen_port,
+				None,
+				tor_log_file,
+				tor_bridge,
+				tor_proxy,
+				retries == 0,
+			) {
+				Ok((tp, tor_secret)) => Some((tp, tor_secret)),
+				Err(e) => {
+					if retries == 0 {
+						warn!("Unable to start TOR listener; Check that TOR executable is installed and on your path");
+						error!("Tor Error: {}", e);
+						warn!("Listener will be available via HTTP only");
+					} else {
+						error!("Tor Error: {}", e);
+						restarting = true;
+						continue;
+					}
+					None
 				}
-				thread::sleep(Duration::from_millis(500));
+			},
+			false => None,
+		};
+
+		let mut apis = ApiServer::new();
+
+		let api_chan: &'static mut (oneshot::Sender<()>, oneshot::Receiver<()>) =
+			Box::leak(Box::new(oneshot::channel::<()>()));
+
+		let mut router = Router::new();
+
+		let api_handler_v2 = ForeignAPIHandlerV2::new(wallet.clone(), keychain_mask.clone());
+		router
+			.add_route("/v2/foreign", Arc::new(api_handler_v2))
+			.map_err(|e| {
+				Error::GenericError(format!("Router failed to add route /v2/foreign, {}", e))
+			})?;
+
+		let api_thread = apis
+			// Assuming you have a variable `channel_pair` of the required type
+			.start(socket_addr, router, tls_config.clone(), api_chan)
+			.map_err(|e| Error::GenericError(format!("API thread failed to start, {}", e)))?;
+
+		set_foreign_api_server(Some(apis));
+
+		let check_tor_connection = tor_info.is_some();
+
+		let libp2p_stop = Arc::new(std::sync::Mutex::new(1));
+
+		// Starting libp2p listener
+		let tor_process = if tor_info.is_some() && libp2p_listen_port.is_some() {
+			let tor_info = tor_info.unwrap();
+			let libp2p_listen_port = libp2p_listen_port.unwrap();
+			let libp2p_handle = start_libp2p_listener(
+				wallet.clone(),
+				tor_info.1 .0,
+				socks_proxy_addr,
+				libp2p_listen_port,
+				libp2p_stop.clone(), // passing new obj, because we never will stop the libp2p process
+				retries == 0,
+			)?;
+			Some((tor_info.0, Some(libp2p_handle)))
+		} else if tor_info.is_some() {
+			let tor_info = tor_info.unwrap();
+			Some((tor_info.0, None))
+		} else {
+			None
+		};
+
+		// checking connection every minute until the thread is running
+		if check_tor_connection {
+			if retries > 0 {
+				// let's wait for some time.
+				for _ in 1..(60 * 2) {
+					if api_thread.is_finished() {
+						break;
+					}
+					thread::sleep(Duration::from_millis(500));
+				}
 			}
-			// And check. That should trigger refresh on tor is something was changed
-			if !finished {
+
+			let this_tor_address = address.to_string();
+			let this_wallet_dest = format!("http://{}.onion", this_tor_address);
+
+			let sender = HttpDataSender::tor_through_socks_proxy(
+				&this_wallet_dest,
+				None,
+				socks_proxy_addr,
+				None,
+				true,
+				&None,
+				tor_bridge,
+				tor_proxy,
+			)?;
+
+			while !restarting && !api_thread.is_finished() {
+				// waiting for a minute
+				// And check. That should trigger refresh on tor is something was changed
 				let ping_start = SystemTime::now();
-				match sender.check_other_wallet_version(&this_wallet_dest) {
+				match sender.check_other_wallet_version(&this_wallet_dest, false) {
 					Ok(_) => {
 						let ping_call_duration = SystemTime::now()
 							.duration_since(ping_start)
 							.unwrap_or(Duration::from_millis(0));
-						info!(
+						debug!(
 							"Tor listener is healthy, ping time: {}",
 							ping_call_duration.as_millis()
 						);
+						if !running {
+							warn!("Foreign Listener is running...");
+							running = true;
+						}
+						retries = 0;
 					}
 					Err(e) => {
-						warn!("Tor listener is NOT healthy, ping error: {}", e);
+						debug!("Tor listener is NOT healthy, ping error: {}", e);
+						restarting = true;
+						if running {
+							warn!("Foreign Listener TOR proxy is not healthy, restarting it...");
+							running = false;
+						}
+						set_foreign_api_server(None);
+						retries += 1;
+					}
+				}
+				// waiting for a minute
+				if !restarting {
+					for _ in 1..(60 * 2) {
+						if api_thread.is_finished() {
+							break;
+						}
+						thread::sleep(Duration::from_millis(500));
 					}
 				}
 			}
+		} else {
+			warn!("Foreign Listener is running...");
+		}
+
+		let res = api_thread
+			.join()
+			.map_err(|e| Error::GenericError(format!("API thread panicked :{:?}", e)));
+
+		set_foreign_api_server(None);
+		tor::status::set_tor_address(None);
+
+		// Stopping tor, we failed to start in any case
+		if let Some((mut tor_process, libp2p_handle)) = tor_process {
+			let _ = tor_process.kill();
+			// stopping libp2p listener first
+			if let Some(libp2p_handle) = libp2p_handle {
+				*libp2p_stop.lock().unwrap() = 0;
+				let _ = libp2p_handle.join();
+			}
+		}
+
+		if res.is_err() {
+			return res;
 		}
 	}
 
-	let res = api_thread
-		.join()
-		.map_err(|e| Error::GenericError(format!("API thread panicked :{:?}", e)));
-
-	set_foreign_api_server(None);
-	tor::status::set_tor_address(None);
-
-	// Stopping tor, we failed to start in any case
-	if let Some(mut tor_process) = tor_process {
-		let _ = tor_process.kill();
-	}
-
-	res
+	Ok(())
 }
 
 /// V2 API Handler/Wrapper for owner functions
