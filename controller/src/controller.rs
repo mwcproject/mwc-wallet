@@ -1151,7 +1151,8 @@ where
 
 		// checking connection every minute until the thread is running
 		if check_tor_connection {
-			if retries > 0 {
+			// After first restart no waiting, in most case it is a fix, so let's validata and report asap.
+			if retries > 1 {
 				// let's wait for some time.
 				for _ in 1..(60 * 2) {
 					if api_thread.is_finished() {
