@@ -120,6 +120,7 @@ impl HttpDataSender {
 		&self,
 		timeout: Option<u128>,
 		destination_address: &String,
+		show_error: bool,
 	) -> Result<(SlateVersion, Option<String>), Error> {
 		let res_str: String;
 		let start_time = std::time::Instant::now();
@@ -174,7 +175,11 @@ impl HttpDataSender {
 				          	Please urge the other wallet owner to upgrade and try the transaction again."
 						.to_string();
 				}
-				error!("{}", report);
+				if show_error {
+					error!("{}", report);
+				} else {
+					debug!("{}", report);
+				}
 				Error::ClientCallback(report)
 			})?;
 		}
@@ -433,9 +438,14 @@ impl SlateSender for HttpDataSender {
 	fn check_other_wallet_version(
 		&self,
 		destination_address: &String,
+		show_error: bool,
 	) -> Result<Option<(SlateVersion, Option<String>)>, Error> {
 		// we need to keep _tor in scope so that the process is not killed by drop.
-		Ok(Some(self.check_other_version(None, destination_address)?))
+		Ok(Some(self.check_other_version(
+			None,
+			destination_address,
+			show_error,
+		)?))
 	}
 
 	fn send_tx(

@@ -46,6 +46,7 @@ pub trait SlateSender {
 	fn check_other_wallet_version(
 		&self,
 		destination_address: &String,
+		show_error: bool,
 	) -> Result<Option<(SlateVersion, Option<String>)>, Error>;
 
 	/// Send a transaction slate to another listening wallet and return result
