@@ -33,7 +33,7 @@ use super::resp_types::*;
 use crate::client_utils::json_rpc::*;
 use grin_wallet_util::grin_api::{Libp2pMessages, Libp2pPeers};
 use grin_wallet_util::RUNTIME;
-use std::sync::atomic::{AtomicU8, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
 
