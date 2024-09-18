@@ -73,7 +73,7 @@ impl WalletSeed {
 		match result {
 			Ok(r) => Ok(r),
 			Err(e) => Err(Error::Mnemonic(format!(
-				"Unable convert seed to menmonic, {}",
+				"Unable convert seed to mnemonic, {}",
 				e
 			))),
 		}

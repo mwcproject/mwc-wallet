@@ -33,7 +33,7 @@ use super::resp_types::*;
 use crate::client_utils::json_rpc::*;
 use grin_wallet_util::grin_api::{Libp2pMessages, Libp2pPeers};
 use grin_wallet_util::RUNTIME;
-use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
 
@@ -89,7 +89,7 @@ where
 pub struct HTTPNodeClient {
 	node_url_list: Vec<String>,
 	node_api_secret: Option<String>, //share the same secret for all the nodes.
-	current_node_index: Arc<AtomicU8>, //default is 0. start from the first one.
+	current_node_index: Arc<AtomicUsize>, //default is 0. start from the first one.
 	node_version_info: Option<NodeVersionInfo>,
 	client: Client,
 
@@ -118,7 +118,7 @@ impl HTTPNodeClient {
 		Ok(HTTPNodeClient {
 			node_url_list: node_url_list,
 			node_api_secret: node_api_secret,
-			current_node_index: Arc::new(AtomicU8::new(0)),
+			current_node_index: Arc::new(AtomicUsize::new(0)),
 			node_version_info: None,
 			client,
 			chain_tip: CachedValue::new(),
@@ -372,16 +372,13 @@ impl HTTPNodeClient {
 
 impl NodeClient for HTTPNodeClient {
 	fn increase_index(&self) {
-		let index = self.current_node_index.load(Ordering::Relaxed);
-		if index < (self.node_url_list.len() - 1) as u8 {
-			self.current_node_index.store(index + 1, Ordering::Relaxed);
-		} else {
-			self.current_node_index.store(0, Ordering::Relaxed); //start over again.
-		}
+		let index =
+			(self.current_node_index.load(Ordering::Relaxed) + 1) % self.node_url_list.len();
+		self.current_node_index.store(index, Ordering::Relaxed);
 	}
 	fn node_url(&self) -> &str {
-		let index = self.current_node_index.load(Ordering::Relaxed);
-		&self.node_url_list.get(index as usize).unwrap()
+		let index = self.current_node_index.load(Ordering::Relaxed) % self.node_url_list.len();
+		&self.node_url_list.get(index).unwrap()
 	}
 	fn node_api_secret(&self) -> &Option<String> {
 		&self.node_api_secret
@@ -395,11 +392,14 @@ impl NodeClient for HTTPNodeClient {
 		self.node_api_secret = node_api_secret;
 	}
 	fn set_node_index(&mut self, node_index: u8) {
-		self.current_node_index.store(node_index, Ordering::Relaxed);
+		self.current_node_index.store(
+			node_index as usize % self.node_url_list.len(),
+			Ordering::Relaxed,
+		);
 	}
 	fn get_node_index(&self) -> u8 {
 		let index = self.current_node_index.load(Ordering::Relaxed);
-		index
+		(index % self.node_url_list.len()) as u8
 	}
 
 	fn reset_cache(&self) {
