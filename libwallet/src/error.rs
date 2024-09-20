@@ -101,6 +101,10 @@ pub enum Error {
 	#[error("Node not ready or not available")]
 	NodeNotReady,
 
+	/// Node api url is not set.
+	#[error("node_url is empty. Please update your config.")]
+	NodeUrlIsEmpty,
+
 	/// Error originating from hyper.
 	#[error("Hyper error, {0}")]
 	Hyper(String),

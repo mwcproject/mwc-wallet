@@ -474,8 +474,8 @@ impl LocalWalletClient {
 
 impl NodeClient for LocalWalletClient {
 	fn increase_index(&self) {}
-	fn node_url(&self) -> &str {
-		"node"
+	fn node_url(&self) -> Result<String, libwallet::Error> {
+		Err(libwallet::Error::NodeUrlIsEmpty)
 	}
 	fn node_api_secret(&self) -> &Option<String> {
 		&None
@@ -495,7 +495,7 @@ impl NodeClient for LocalWalletClient {
 	fn post_tx(&self, tx: &Transaction, _fluff: bool) -> Result<(), libwallet::Error> {
 		let m = WalletProxyMessage {
 			sender_id: self.id.clone(),
-			dest: self.node_url().to_owned(),
+			dest: self.node_url()?,
 			method: "post_tx".to_owned(),
 			body: serde_json::to_string(tx).unwrap(),
 		};
@@ -514,7 +514,7 @@ impl NodeClient for LocalWalletClient {
 	fn get_chain_tip(&self) -> Result<(u64, String, u64), libwallet::Error> {
 		let m = WalletProxyMessage {
 			sender_id: self.id.clone(),
-			dest: self.node_url().to_owned(),
+			dest: self.node_url()?,
 			method: "get_chain_tip".to_owned(),
 			body: "".to_owned(),
 		};
@@ -538,7 +538,7 @@ impl NodeClient for LocalWalletClient {
 	fn get_header_info(&self, height: u64) -> Result<HeaderInfo, libwallet::Error> {
 		let m = WalletProxyMessage {
 			sender_id: self.id.clone(),
-			dest: self.node_url().to_owned(),
+			dest: self.node_url()?,
 			method: "get_header_info".to_owned(),
 			body: format!("{}", height),
 		};
@@ -595,7 +595,7 @@ impl NodeClient for LocalWalletClient {
 		let query_str = query_params.join(",");
 		let m = WalletProxyMessage {
 			sender_id: self.id.clone(),
-			dest: self.node_url().to_owned(),
+			dest: self.node_url()?,
 			method: "get_outputs_from_node".to_owned(),
 			body: query_str,
 		};
@@ -638,7 +638,7 @@ impl NodeClient for LocalWalletClient {
 
 		let m = WalletProxyMessage {
 			sender_id: self.id.clone(),
-			dest: self.node_url().to_owned(),
+			dest: self.node_url()?,
 			method: "get_kernel".to_owned(),
 			body: query,
 		};
@@ -683,7 +683,7 @@ impl NodeClient for LocalWalletClient {
 		};
 		let m = WalletProxyMessage {
 			sender_id: self.id.clone(),
-			dest: self.node_url().to_owned(),
+			dest: self.node_url()?,
 			method: "get_outputs_by_pmmr_index".to_owned(),
 			body: query_str,
 		};
@@ -733,7 +733,7 @@ impl NodeClient for LocalWalletClient {
 		};
 		let m = WalletProxyMessage {
 			sender_id: self.id.clone(),
-			dest: self.node_url().to_owned(),
+			dest: self.node_url()?,
 			method: "height_range_to_pmmr_indices".to_owned(),
 			body: query_str,
 		};
@@ -761,7 +761,7 @@ impl NodeClient for LocalWalletClient {
 	) -> Result<Vec<api::BlockPrintable>, libwallet::Error> {
 		let m = WalletProxyMessage {
 			sender_id: self.id.clone(),
-			dest: self.node_url().to_owned(),
+			dest: self.node_url()?,
 			method: "get_blocks_by_height".to_owned(),
 			body: format!("{},{}", start_height, end_height),
 		};
