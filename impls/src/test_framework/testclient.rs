@@ -475,7 +475,7 @@ impl LocalWalletClient {
 impl NodeClient for LocalWalletClient {
 	fn increase_index(&self) {}
 	fn node_url(&self) -> Result<String, libwallet::Error> {
-		Err(libwallet::Error::NodeUrlIsEmpty)
+		Ok("node".to_string())
 	}
 	fn node_api_secret(&self) -> &Option<String> {
 		&None

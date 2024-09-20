@@ -352,8 +352,8 @@ mod tests {
 		fn increase_index(&self) {
 			unimplemented!()
 		}
-		fn node_url(&self) -> &str {
-			"test_node_url"
+		fn node_url(&self) -> Result<String, crate::Error> {
+			Ok("node".to_string())
 		}
 		fn set_node_url(&mut self, _node_url: Vec<String>) {
 			unimplemented!()
