@@ -138,7 +138,7 @@ impl HTTPNodeClient {
 		params: &serde_json::Value,
 		counter: i32,
 	) -> Result<D, libwallet::Error> {
-		let url = format!("{}{}", self.node_url(), ENDPOINT);
+		let url = format!("{}{}", self.node_url()?, ENDPOINT);
 		let req = build_request(method, params);
 		let res = self
 			.client
@@ -181,7 +181,7 @@ impl HTTPNodeClient {
 		counter: i32,
 	) -> Result<Vec<crate::grin_p2p::types::PeerInfoDisplayLegacy>, libwallet::Error> {
 		// There is no v2 API with connected peers. Keep using v1 for that
-		let addr = self.node_url();
+		let addr = self.node_url()?;
 		let url = format!("{}/v1/peers/connected", addr);
 
 		let res = self
@@ -217,7 +217,7 @@ impl HTTPNodeClient {
 		let method = "get_kernel";
 		let params = json!([excess.0.as_ref().to_hex(), min_height, max_height]);
 		// have to handle this manually since the error needs to be parsed
-		let url = format!("{}{}", self.node_url(), ENDPOINT);
+		let url = format!("{}{}", self.node_url()?, ENDPOINT);
 		let req = build_request(method, &params);
 		let res = self
 			.client
@@ -291,7 +291,7 @@ impl HTTPNodeClient {
 
 		trace!("Output query chunk size is: {}", chunk_size);
 
-		let url = format!("{}{}", self.node_url(), ENDPOINT);
+		let url = format!("{}{}", self.node_url()?, ENDPOINT);
 		let api_secret = self.node_api_secret();
 		let cl = self.client.clone();
 		let task = async move {
@@ -372,14 +372,20 @@ impl HTTPNodeClient {
 
 impl NodeClient for HTTPNodeClient {
 	fn increase_index(&self) {
-		let index =
-			(self.current_node_index.load(Ordering::Relaxed) + 1) % self.node_url_list.len();
-		self.current_node_index.store(index, Ordering::Relaxed);
+		if !self.node_url_list.is_empty() {
+			let index =
+				(self.current_node_index.load(Ordering::Relaxed) + 1) % self.node_url_list.len();
+			self.current_node_index.store(index, Ordering::Relaxed);
+		}
 	}
-	fn node_url(&self) -> &str {
+	fn node_url(&self) -> Result<String, libwallet::Error> {
+		if self.node_url_list.is_empty() {
+			return Err(libwallet::Error::NodeUrlIsEmpty);
+		}
 		let index = self.current_node_index.load(Ordering::Relaxed) % self.node_url_list.len();
-		&self.node_url_list.get(index).unwrap()
+		Ok(self.node_url_list[index].clone())
 	}
+
 	fn node_api_secret(&self) -> &Option<String> {
 		&self.node_api_secret
 	}
@@ -392,14 +398,12 @@ impl NodeClient for HTTPNodeClient {
 		self.node_api_secret = node_api_secret;
 	}
 	fn set_node_index(&mut self, node_index: u8) {
-		self.current_node_index.store(
-			node_index as usize % self.node_url_list.len(),
-			Ordering::Relaxed,
-		);
+		self.current_node_index
+			.store(node_index as usize, Ordering::Relaxed);
 	}
 	fn get_node_index(&self) -> u8 {
 		let index = self.current_node_index.load(Ordering::Relaxed);
-		(index % self.node_url_list.len()) as u8
+		index as u8
 	}
 
 	fn reset_cache(&self) {
@@ -432,7 +436,7 @@ impl NodeClient for HTTPNodeClient {
 					});
 				} else {
 					error!(
-						"Unable to contact Node to get version info: {}, {}",
+						"Unable to contact Node to get version info: {:?}, {}",
 						self.node_url(), e
 					);
 					return None;
@@ -652,7 +656,7 @@ impl NodeClient for HTTPNodeClient {
 					}
 					Err(e) => {
 						let report = format!(
-							"get_blocks_by_height: error calling api 'get_block' at {}. Error: {}",
+							"get_blocks_by_height: error calling api 'get_block' at {:?}. Error: {}",
 							self.node_url(),
 							e
 						);

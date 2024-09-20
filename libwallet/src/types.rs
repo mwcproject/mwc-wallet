@@ -385,7 +385,7 @@ pub trait NodeClient: Send + Sync + Clone {
 	fn increase_index(&self);
 
 	/// Return the URL of the check node
-	fn node_url(&self) -> &str;
+	fn node_url(&self) -> Result<String, Error>;
 
 	/// Set the node URL
 	fn set_node_url(&mut self, node_url: Vec<String>);
