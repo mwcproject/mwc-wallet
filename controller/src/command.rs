@@ -48,7 +48,7 @@ use grin_wallet_libwallet::swap::fsm::state::StateId;
 use grin_wallet_libwallet::swap::trades;
 use grin_wallet_libwallet::swap::types::Action;
 use grin_wallet_libwallet::swap::{message, Swap};
-use grin_wallet_libwallet::{Slate, TxLogEntry, WalletInst};
+use grin_wallet_libwallet::{Slate, StatusMessage, TxLogEntry, WalletInst};
 use grin_wallet_util::grin_core::consensus::MWC_BASE;
 use grin_wallet_util::grin_core::core::{amount_to_hr_string, Transaction};
 use grin_wallet_util::grin_core::global::{FLOONET_DNS_SEEDS, MAINNET_DNS_SEEDS};
@@ -67,8 +67,11 @@ use std::io;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc;
+use std::sync::mpsc::Sender;
 use std::sync::Arc;
 use std::thread;
+use std::thread::JoinHandle;
 use std::time::Duration;
 use uuid::Uuid;
 
@@ -152,6 +155,7 @@ where
 pub fn rewind_hash<'a, L, C, K>(
 	owner_api: &mut Owner<L, C, K>,
 	keychain_mask: Option<&SecretKey>,
+	mwc713print: bool,
 ) -> Result<(), Error>
 where
 	L: WalletLCProvider<'static, C, K>,
@@ -160,11 +164,15 @@ where
 {
 	controller::owner_single_use(None, keychain_mask, Some(owner_api), |api, m| {
 		let rewind_hash = api.get_rewind_hash(m)?;
-		println!();
-		println!("Wallet Rewind Hash");
-		println!("-------------------------------------");
-		println!("{}", rewind_hash);
-		println!();
+		if mwc713print {
+			println!("Wallet Rewind Hash: {}", rewind_hash);
+		} else {
+			println!();
+			println!("Wallet Rewind Hash");
+			println!("-------------------------------------");
+			println!("{}", rewind_hash);
+			println!();
+		}
 		Ok(())
 	})?;
 	Ok(())
@@ -181,6 +189,7 @@ pub fn scan_rewind_hash<L, C, K>(
 	owner_api: &mut Owner<L, C, K>,
 	args: ViewWalletScanArgs,
 	dark_scheme: bool,
+	show_progress: bool,
 ) -> Result<(), Error>
 where
 	L: WalletLCProvider<'static, C, K> + 'static,
@@ -201,21 +210,73 @@ where
 			"Starting view wallet output scan from height {} ...",
 			start_height
 		);
-		let result = api.scan_rewind_hash(rewind_hash, Some(start_height));
+
+		let mut status_send_channel: Option<Sender<StatusMessage>> = None;
+		let running = Arc::new(AtomicBool::new(true));
+		let mut updater: Option<JoinHandle<()>> = None;
+		if show_progress {
+			let (tx, rx) = mpsc::channel();
+			// Starting printing to console thread.
+			updater = Some(
+				grin_wallet_libwallet::api_impl::owner_updater::start_updater_console_thread(
+					rx,
+					running.clone(),
+				)?,
+			);
+			status_send_channel = Some(tx);
+		}
+
+		let result = owner::scan_rewind_hash(
+			api.wallet_inst.clone(),
+			rewind_hash,
+			Some(start_height),
+			&status_send_channel,
+		);
+
 		let deci_sec = time::Duration::from_millis(100);
-		thread::sleep(deci_sec);
-		match result {
-			Ok(res) => {
-				warn!("View wallet check complete");
-				if res.total_balance != 0 {
-					display::view_wallet_output(res.clone(), tip_height, dark_scheme)?;
+		if show_progress {
+			running.store(false, Ordering::Relaxed);
+			let _ = updater.unwrap().join();
+			// Printing for parser
+			match result {
+				Ok(res) => {
+					println!("View wallet check complete");
+					for m in res.output_result {
+						println!(
+							"ViewOutput: {},{},{},{},{},{},{}",
+							m.commit,
+							m.mmr_index,
+							m.height,
+							m.lock_height,
+							m.is_coinbase,
+							m.num_confirmations(tip_height),
+							m.value
+						);
+					}
+					println!("ViewTotal: {}", res.total_balance);
+					Ok(())
 				}
-				display::view_wallet_balance(res.clone(), tip_height, dark_scheme);
-				Ok(())
+				Err(e) => {
+					println!("View wallet check failed: {}", e);
+					Err(e.into())
+				}
 			}
-			Err(e) => {
-				error!("View wallet check failed: {}", e);
-				Err(e.into())
+		} else {
+			// nice printing
+			thread::sleep(deci_sec);
+			match result {
+				Ok(res) => {
+					warn!("View wallet check complete");
+					if res.total_balance != 0 {
+						display::view_wallet_output(res.clone(), tip_height, dark_scheme)?;
+					}
+					display::view_wallet_balance(res.clone(), tip_height, dark_scheme);
+					Ok(())
+				}
+				Err(e) => {
+					error!("View wallet check failed: {}", e);
+					Err(e.into())
+				}
 			}
 		}
 	})?;

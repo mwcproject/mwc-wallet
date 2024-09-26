@@ -1726,13 +1726,14 @@ where
 			mqs_config,
 			global_wallet_args,
 		),
-		("rewind_hash", Some(_)) => command::rewind_hash(owner_api, km),
+		("rewind_hash", Some(_)) => command::rewind_hash(owner_api, km, false),
 		("scan_rewind_hash", Some(args)) => {
 			let a = arg_parse!(parse_scan_rewind_hash_args(&args));
 			command::scan_rewind_hash(
 				owner_api,
 				a,
 				wallet_config.dark_background_color_scheme.unwrap_or(true),
+				false,
 			)
 		}
 		("account", Some(args)) => {
