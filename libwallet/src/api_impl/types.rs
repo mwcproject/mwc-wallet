@@ -469,6 +469,60 @@ pub struct PaymentProof {
 	pub sender_sig: String,
 }
 
+/// Ownership proof for addresses & root public keys
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct PubKeySignature {
+	/// Public key
+	pub public_key: String,
+	/// Signature
+	pub signature: String,
+}
+
+/// Ownership proof for addresses & root public keys
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct OwnershipProof {
+	/// Name of the network
+	pub network: String,
+	/// Message to sign
+	pub message: String,
+
+	/// Proof for the root public key (viewing key)
+	pub wallet_root: Option<PubKeySignature>,
+	/// Proof for the tor address
+	pub tor_address: Option<PubKeySignature>,
+	/// Proof for MQS address
+	pub mqs_address: Option<PubKeySignature>,
+}
+
+/// Ownership validation results
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct OwnershipProofValidation {
+	/// Network name
+	pub network: String,
+	/// Message that was signed
+	pub message: String,
+
+	/// Viewing key
+	pub viewing_key: Option<String>,
+	/// Tor address
+	pub tor_address: Option<String>,
+	/// MQS address
+	pub mqs_address: Option<String>,
+}
+
+impl OwnershipProofValidation {
+	/// Build empty instance
+	pub fn empty(message: String) -> Self {
+		OwnershipProofValidation {
+			network: String::new(),
+			message,
+			viewing_key: None,
+			tor_address: None,
+			mqs_address: None,
+		}
+	}
+}
+
 /// Init swap operation
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct SwapStartArgs {

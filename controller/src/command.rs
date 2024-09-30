@@ -48,7 +48,7 @@ use grin_wallet_libwallet::swap::fsm::state::StateId;
 use grin_wallet_libwallet::swap::trades;
 use grin_wallet_libwallet::swap::types::Action;
 use grin_wallet_libwallet::swap::{message, Swap};
-use grin_wallet_libwallet::{Slate, StatusMessage, TxLogEntry, WalletInst};
+use grin_wallet_libwallet::{OwnershipProof, Slate, StatusMessage, TxLogEntry, WalletInst};
 use grin_wallet_util::grin_core::consensus::MWC_BASE;
 use grin_wallet_util::grin_core::core::{amount_to_hr_string, Transaction};
 use grin_wallet_util::grin_core::global::{FLOONET_DNS_SEEDS, MAINNET_DNS_SEEDS};
@@ -173,6 +173,82 @@ where
 			println!("{}", rewind_hash);
 			println!();
 		}
+		Ok(())
+	})?;
+	Ok(())
+}
+
+/// Arguments for generate_ownership_proof command
+pub struct GenerateOwnershipProofArgs {
+	/// Message to sign
+	pub message: String,
+	/// does need to include public root key
+	pub include_public_root_key: bool,
+	/// does need to include tor address
+	pub include_tor_address: bool,
+	/// does need to include MQS address
+	pub include_mqs_address: bool,
+}
+
+pub fn generate_ownership_proof<'a, L, C, K>(
+	owner_api: &mut Owner<L, C, K>,
+	keychain_mask: Option<&SecretKey>,
+	args: GenerateOwnershipProofArgs,
+) -> Result<(), Error>
+where
+	L: WalletLCProvider<'static, C, K>,
+	C: NodeClient + 'static,
+	K: keychain::Keychain + 'static,
+{
+	controller::owner_single_use(None, keychain_mask, Some(owner_api), |api, m| {
+		let proof = api.retrieve_ownership_proof(
+			m,
+			args.message,
+			args.include_public_root_key,
+			args.include_tor_address,
+			args.include_mqs_address,
+		)?;
+
+		let proof_json = serde_json::to_string(&proof).map_err(|e| {
+			Error::GenericError(format!("Failed convert proof result into json, {}", e))
+		})?;
+
+		println!("Ownership Proof: {}", proof_json);
+		Ok(())
+	})?;
+	Ok(())
+}
+
+pub fn validate_ownership_proof<'a, L, C, K>(
+	owner_api: &mut Owner<L, C, K>,
+	keychain_mask: Option<&SecretKey>,
+	proof: &str,
+) -> Result<(), Error>
+where
+	L: WalletLCProvider<'static, C, K>,
+	C: NodeClient + 'static,
+	K: keychain::Keychain + 'static,
+{
+	controller::owner_single_use(None, keychain_mask, Some(owner_api), |api, _m| {
+		let proof = serde_json::from_str::<OwnershipProof>(proof).map_err(|e| {
+			Error::ArgumentError(format!("Unable to decode proof from json, {}", e))
+		})?;
+
+		let validation = api.validate_ownership_proof(proof)?;
+		println!("Network: {}", validation.network);
+		println!("Message: {}", validation.message);
+		println!(
+			"Viewing Key: {}",
+			validation.viewing_key.unwrap_or("Not provided".to_string())
+		);
+		println!(
+			"Tor Address: {}",
+			validation.tor_address.unwrap_or("Not provided".to_string())
+		);
+		println!(
+			"MWCMQS Address: {}",
+			validation.mqs_address.unwrap_or("Not provided".to_string())
+		);
 		Ok(())
 	})?;
 	Ok(())

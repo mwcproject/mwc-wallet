@@ -357,6 +357,10 @@ pub enum Error {
 	/// Nonce creation error
 	#[error("Nonce error: {0}")]
 	Nonce(String),
+
+	/// Invalid ownership proof
+	#[error("Invalid ownership proof: {0}")]
+	InvalidOwnershipProof(String),
 }
 
 impl From<io::Error> for Error {

@@ -43,7 +43,7 @@ use crate::util::secp::key::SecretKey;
 use crate::util::{from_hex, Mutex, ZeroingString};
 use grin_wallet_util::grin_util::secp::key::PublicKey;
 use grin_wallet_util::grin_util::static_secp_instance;
-use libwallet::RetrieveTxQueryArgs;
+use libwallet::{OwnershipProof, OwnershipProofValidation, RetrieveTxQueryArgs};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, Sender};
 use std::sync::Arc;
@@ -2435,6 +2435,31 @@ where
 		owner::verify_payment_proof(self.wallet_inst.clone(), keychain_mask, proof)
 	}
 
+	pub fn retrieve_ownership_proof(
+		&self,
+		keychain_mask: Option<&SecretKey>,
+		message: String,
+		include_public_root_key: bool,
+		include_tor_address: bool,
+		include_mqs_address: bool,
+	) -> Result<OwnershipProof, Error> {
+		owner::generate_ownership_proof(
+			self.wallet_inst.clone(),
+			keychain_mask,
+			message,
+			include_public_root_key,
+			include_tor_address,
+			include_mqs_address,
+		)
+	}
+
+	pub fn validate_ownership_proof(
+		&self,
+		proof: OwnershipProof,
+	) -> Result<OwnershipProofValidation, Error> {
+		owner::validate_ownership_proof(proof)
+	}
+
 	/// Start swap trade process. Return SwapID that can be used to check the status or perform further action.
 	pub fn swap_start(
 		&self,
@@ -2796,3 +2821,26 @@ macro_rules! doctest_helper_setup_doc_env {
 		let mut $wallet = Arc::new(Mutex::new(wallet));
 	};
 }
+
+/*#[test]
+#[allow(unused_mut)]
+fn test_api() {
+	use crate as grin_wallet_api;
+	global::set_local_chain_type(global::ChainTypes::AutomatedTesting);
+	grin_wallet_api::doctest_helper_setup_doc_env!(wallet, wallet_config);
+	let mut api_owner = Owner::new(wallet.clone(), None, None);
+
+	let proof = api_owner.retrieve_ownership_proof(None,
+														 "my message to sign".to_string(),
+														 true,
+														 true,
+														 true).unwrap();
+
+	let valiation = api_owner.validate_ownership_proof(proof).unwrap();
+
+	assert_eq!(valiation.network, "floonet");
+	assert_eq!(valiation.message, "my message to sign".to_string());
+	assert!(valiation.viewing_key.is_some());
+	assert!(valiation.tor_address.is_some());
+	assert!(valiation.mqs_address.is_some());
+}*/

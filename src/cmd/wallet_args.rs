@@ -1447,6 +1447,17 @@ pub fn parse_eth_args(args: &ArgMatches) -> Result<command::EthArgs, ParseError>
 	})
 }
 
+pub fn parse_retrieve_ownership_proof(
+	args: &ArgMatches,
+) -> Result<command::GenerateOwnershipProofArgs, ParseError> {
+	Ok(command::GenerateOwnershipProofArgs {
+		message: parse_required(args, "message")?.to_string(),
+		include_public_root_key: args.is_present("include_public_root_key"),
+		include_tor_address: args.is_present("include_tor_address"),
+		include_mqs_address: args.is_present("include_mqs_address"),
+	})
+}
+
 pub fn wallet_command<C, F>(
 	wallet_args: &ArgMatches,
 	mut wallet_config: WalletConfig,
@@ -1908,6 +1919,14 @@ where
 		("eth", Some(args)) => {
 			let a = arg_parse!(parse_eth_args(&args));
 			command::eth(owner_api.wallet_inst.clone(), a)
+		}
+		("generate_ownership_proof", Some(args)) => {
+			let a = arg_parse!(parse_retrieve_ownership_proof(&args));
+			command::generate_ownership_proof(owner_api, km, a)
+		}
+		("validate_ownership_proof", Some(args)) => {
+			let proof = arg_parse!(parse_required(args, "proof"));
+			command::validate_ownership_proof(owner_api, km, proof)
 		}
 		(cmd, _) => {
 			return Err(Error::ArgumentError(format!(
