@@ -273,8 +273,15 @@ impl PluginClient {
 
 	/// Try to find the plugin client path
 	pub fn get_client_path(plugin: &str) -> Result<String, Error> {
+		use std::path::PathBuf;
+
 		let plugin_path = env::var_os("PATH").and_then(|path| {
-			env::split_paths(&path)
+			let mut paths: Vec<PathBuf> = env::split_paths(&path).collect();
+			paths.push(PathBuf::from("/Library/Apple/usr/bin"));
+			paths.push(PathBuf::from("/usr/local/bin"));
+
+			paths
+				.iter()
 				.filter_map(|dir| {
 					let full_path = dir.join(plugin);
 					if full_path.is_file() {
