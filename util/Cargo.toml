@@ -21,22 +21,22 @@ tokio = { version = "0.2", features = ["full"] }
 thiserror = "1"
 
 # For Release
-#grin_core = { git = "https://github.com/mwcproject/mwc-node", tag = "5.3.2" }
-#grin_keychain = { git = "https://github.com/mwcproject/mwc-node", tag = "5.3.2" }
-#grin_chain = { git = "https://github.com/mwcproject/mwc-node", tag = "5.3.2" }
-#grin_util = { git = "https://github.com/mwcproject/mwc-node", tag = "5.3.2" }
-#grin_api = { git = "https://github.com/mwcproject/mwc-node", tag = "5.3.2" }
-#grin_store = { git = "https://github.com/mwcproject/mwc-node", tag = "5.3.2" }
-#grin_p2p = { git = "https://github.com/mwcproject/mwc-node", tag = "5.3.2" }
+grin_core = { git = "https://github.com/mwcproject/mwc-node", tag = "5.3.2.2" }
+grin_keychain = { git = "https://github.com/mwcproject/mwc-node", tag = "5.3.2.2" }
+grin_chain = { git = "https://github.com/mwcproject/mwc-node", tag = "5.3.2.2" }
+grin_util = { git = "https://github.com/mwcproject/mwc-node", tag = "5.3.2.2" }
+grin_api = { git = "https://github.com/mwcproject/mwc-node", tag = "5.3.2.2" }
+grin_store = { git = "https://github.com/mwcproject/mwc-node", tag = "5.3.2.2" }
+grin_p2p = { git = "https://github.com/mwcproject/mwc-node", tag = "5.3.2.2" }
 
 # For bleeding edge
-grin_core = { git = "https://github.com/mwcproject/mwc-node", branch = "5.3.100" }
-grin_keychain = { git = "https://github.com/mwcproject/mwc-node", branch = "5.3.100" }
-grin_chain = { git = "https://github.com/mwcproject/mwc-node", branch = "5.3.100" }
-grin_util = { git = "https://github.com/mwcproject/mwc-node", branch = "5.3.100" }
-grin_api = { git = "https://github.com/mwcproject/mwc-node", branch = "5.3.100" }
-grin_store = { git = "https://github.com/mwcproject/mwc-node", branch = "5.3.100" }
-grin_p2p = { git = "https://github.com/mwcproject/mwc-node", branch = "5.3.100" }
+#grin_core = { git = "https://github.com/mwcproject/mwc-node", branch = "5.3.100" }
+#grin_keychain = { git = "https://github.com/mwcproject/mwc-node", branch = "5.3.100" }
+#grin_chain = { git = "https://github.com/mwcproject/mwc-node", branch = "5.3.100" }
+#grin_util = { git = "https://github.com/mwcproject/mwc-node", branch = "5.3.100" }
+#grin_api = { git = "https://github.com/mwcproject/mwc-node", branch = "5.3.100" }
+#grin_store = { git = "https://github.com/mwcproject/mwc-node", branch = "5.3.100" }
+#grin_p2p = { git = "https://github.com/mwcproject/mwc-node", branch = "5.3.100" }
 
 # For local testing
 #grin_core = { path = "../../mwc-node/core"}
