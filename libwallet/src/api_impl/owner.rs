@@ -22,11 +22,14 @@ use crate::grin_core::libtx::proof;
 use crate::grin_keychain::ViewKey;
 use crate::grin_util::secp::key::SecretKey;
 use crate::grin_util::Mutex;
-use crate::grin_util::ToHex;
+use crate::proof::crypto::Hex;
 
 use crate::api_impl::owner_updater::StatusMessage;
 use crate::grin_keychain::{BlindingFactor, Identifier, Keychain, SwitchCommitmentType};
 use crate::grin_util::secp::key::PublicKey;
+use crate::grin_util::secp::Message;
+use crate::grin_util::secp::Secp256k1;
+use crate::grin_util::secp::Signature;
 
 use crate::internal::{keys, scan, selection, tx, updater};
 use crate::slate::{PaymentInfo, Slate};
@@ -37,12 +40,20 @@ use crate::types::{
 use crate::Error;
 use crate::{
 	wallet_lock, BuiltOutput, InitTxArgs, IssueInvoiceTxArgs, NodeHeightResult,
-	OutputCommitMapping, PaymentProof, RetrieveTxQueryArgs, ScannedBlockInfo, TxLogEntryType,
-	ViewWallet, WalletInst, WalletLCProvider,
+	OutputCommitMapping, OwnershipProof, OwnershipProofValidation, PaymentProof, PubKeySignature,
+	RetrieveTxQueryArgs, ScannedBlockInfo, TxLogEntryType, ViewWallet, WalletInst,
+	WalletLCProvider,
 };
 
 use crate::proof::tx_proof::{pop_proof_for_slate, TxProof};
+use digest::Digest;
+use ed25519_dalek::Keypair as DalekKeypair;
 use ed25519_dalek::PublicKey as DalekPublicKey;
+use ed25519_dalek::SecretKey as DalekSecretKey;
+use ed25519_dalek::Signature as DalekSignature;
+use ed25519_dalek::Signer;
+use sha2::Sha256;
+use signature::Verifier;
 use std::cmp;
 use std::fs::File;
 use std::io::Write;
@@ -52,7 +63,10 @@ use std::sync::Arc;
 const USER_MESSAGE_MAX_LEN: usize = 1000; // We can keep messages as long as we need unless the slate will be too large to operate. 1000 symbols should be enough to keep everybody happy
 use crate::proof::crypto;
 use crate::proof::proofaddress;
+use crate::proof::proofaddress::ProvableAddress;
 use grin_wallet_util::grin_core::core::Committed;
+use grin_wallet_util::grin_core::global;
+use grin_wallet_util::grin_util::from_hex;
 
 /// List of accounts
 pub fn accounts<'a, T: ?Sized, C, K>(w: &mut T) -> Result<Vec<AcctPathMapping>, Error>
@@ -98,6 +112,8 @@ where
 	C: NodeClient + 'a,
 	K: Keychain + 'a,
 {
+	use grin_wallet_util::grin_util::ToHex;
+
 	wallet_lock!(wallet_inst, w);
 	let keychain = w.keychain(keychain_mask)?;
 	let root_public_key = keychain.public_root_key();
@@ -1540,6 +1556,263 @@ where
 	let recipient_mine = my_address_pubkey == recipient_pubkey;
 
 	Ok((sender_mine, recipient_mine))
+}
+
+/// Generate signatures for root public keym tor address PK and MQS PK.
+pub fn generate_ownership_proof<'a, L, C, K>(
+	wallet_inst: Arc<Mutex<Box<dyn WalletInst<'a, L, C, K>>>>,
+	keychain_mask: Option<&SecretKey>,
+	message: String,
+	include_public_root_key: bool,
+	include_tor_address: bool,
+	include_mqs_address: bool,
+) -> Result<OwnershipProof, Error>
+where
+	L: WalletLCProvider<'a, C, K>,
+	C: NodeClient + 'a,
+	K: Keychain + 'a,
+{
+	if message.is_empty() {
+		return Err(Error::GenericError(
+			"Not defines message to sign".to_string(),
+		));
+	}
+
+	if !include_public_root_key && !include_tor_address && !include_mqs_address {
+		return Err(Error::GenericError(
+			"No keys are selected to include into the ownership proof".to_string(),
+		));
+	}
+
+	let network = if global::is_mainnet() {
+		"mainnet"
+	} else {
+		"floonet"
+	};
+	let mut message2sign = String::new();
+	message2sign.push_str(network);
+	message2sign.push('|');
+	message2sign.push_str(message.as_str());
+
+	wallet_lock!(wallet_inst, w);
+	let keychain = w.keychain(keychain_mask)?;
+	let secp = keychain.secp();
+
+	if include_public_root_key {
+		let root_public_key = keychain.public_root_key();
+		let root_public_key = root_public_key.to_hex();
+		message2sign.push('|');
+		message2sign.push_str(root_public_key.as_str());
+	}
+
+	if include_tor_address {
+		let secret = proofaddress::payment_proof_address_secret(&keychain, None)?;
+		let tor_pk = proofaddress::secret_2_tor_pub(&secret)?;
+		let tor_pk = tor_pk.to_hex();
+		message2sign.push('|');
+		message2sign.push_str(tor_pk.as_str());
+	}
+
+	if include_mqs_address {
+		let mqs_pub_key: PublicKey = proofaddress::payment_proof_address_pubkey(&keychain)?;
+		let mqs_pub_key = mqs_pub_key.to_hex();
+		message2sign.push('|');
+		message2sign.push_str(mqs_pub_key.as_str());
+	}
+
+	// message to sign is ready. Now we can go forward and generate signatures for all public keys
+	let mut hasher = Sha256::new();
+	hasher.update(message2sign.as_bytes());
+	let message_hash = hasher.finalize();
+
+	// generating the signatures for message
+	let wallet_root = if include_public_root_key {
+		let secret = keychain.private_root_key();
+		let signature = secp
+			.sign(
+				&Message::from_slice(message_hash.as_slice()).map_err(|e| {
+					Error::GenericError(format!("Unable to build a message, {}", e))
+				})?,
+				&secret,
+			)
+			.map_err(|e| Error::from(e))?;
+		Some(PubKeySignature {
+			public_key: keychain.public_root_key().to_hex(),
+			signature: signature.to_hex(),
+		})
+	} else {
+		None
+	};
+
+	let tor_address = if include_tor_address {
+		let secret = proofaddress::payment_proof_address_secret(&keychain, None)?;
+		let secret = DalekSecretKey::from_bytes(&secret.0)
+			.map_err(|e| Error::GenericError(format!("Unable build dalek public key, {}", e)))?;
+		let public = DalekPublicKey::from(&secret);
+		let keypair = DalekKeypair { secret, public };
+		let signature = keypair
+			.try_sign(message_hash.as_slice())
+			.map_err(|e| Error::GenericError(format!("Unable build dalek signature, {}", e)))?;
+		Some(PubKeySignature {
+			public_key: public.to_hex(),
+			signature: signature.to_hex(),
+		})
+	} else {
+		None
+	};
+
+	let mqs_address = if include_mqs_address {
+		let secret = proofaddress::payment_proof_address_secret(&keychain, None)?;
+		let signature = secp
+			.sign(
+				&Message::from_slice(message_hash.as_slice()).map_err(|e| {
+					Error::GenericError(format!("Unable to build a message, {}", e))
+				})?,
+				&secret,
+			)
+			.map_err(|e| Error::from(e))?;
+		let mqs_pub_key = PublicKey::from_secret_key(&secp, &secret)?;
+		Some(PubKeySignature {
+			public_key: mqs_pub_key.to_hex(),
+			signature: signature.to_hex(),
+		})
+	} else {
+		None
+	};
+
+	Ok(OwnershipProof {
+		network: network.to_string(),
+		message,
+		wallet_root,
+		tor_address,
+		mqs_address,
+	})
+}
+
+/// Generate signatures for root public keym tor address PK and MQS PK.
+pub fn validate_ownership_proof(proof: OwnershipProof) -> Result<OwnershipProofValidation, Error>
+where
+{
+	if proof.message.is_empty() {
+		return Err(Error::InvalidOwnershipProof(
+			"message value is empty".to_string(),
+		));
+	}
+
+	let mut result = OwnershipProofValidation::empty(proof.message.clone());
+
+	let network = if global::is_mainnet() {
+		"mainnet"
+	} else {
+		"floonet"
+	};
+
+	if proof.network != network {
+		return Err(Error::InvalidOwnershipProof(format!(
+			"This proof is generated for wrong network: {}",
+			proof.network
+		)));
+	}
+
+	result.network = network.to_string();
+
+	let mut message2sign = String::new();
+	message2sign.push_str(network);
+	message2sign.push('|');
+	message2sign.push_str(proof.message.as_str());
+
+	let secp = Secp256k1::new();
+
+	if let Some(wallet_root) = &proof.wallet_root {
+		message2sign.push('|');
+		message2sign.push_str(wallet_root.public_key.as_str());
+	}
+	if let Some(tor_address) = &proof.tor_address {
+		message2sign.push('|');
+		message2sign.push_str(tor_address.public_key.as_str());
+	}
+	if let Some(mqs_address) = &proof.mqs_address {
+		message2sign.push('|');
+		message2sign.push_str(mqs_address.public_key.as_str());
+	}
+
+	// message to sign is ready. Now we can go forward and generate signatures for all public keys
+	let mut hasher = Sha256::new();
+	hasher.update(message2sign.as_bytes());
+	let message_hash = hasher.finalize();
+
+	if let Some(wallet_root) = &proof.wallet_root {
+		let public_key = PublicKey::from_hex(&wallet_root.public_key).map_err(|e| {
+			Error::InvalidOwnershipProof(format!("Unable to decode wallet root public key, {}", e))
+		})?;
+		let signature = Signature::from_hex(&wallet_root.signature).map_err(|e| {
+			Error::InvalidOwnershipProof(format!("Unable to decode wallet root signature, {}", e))
+		})?;
+		secp.verify(
+			&Message::from_slice(message_hash.as_slice())
+				.map_err(|e| Error::GenericError(format!("Unable to build a message, {}", e)))?,
+			&signature,
+			&public_key,
+		)
+		.map_err(|e| {
+			Error::InvalidOwnershipProof(format!("wallet root signature is invalid, {}", e))
+		})?;
+
+		use grin_wallet_util::grin_util::ToHex;
+		// we are good so far, reporting viewing key
+		result.viewing_key = Some(ViewKey::rewind_hash(&secp, public_key).to_hex());
+	}
+
+	if let Some(mqs_address) = &proof.mqs_address {
+		let public_key = PublicKey::from_hex(&mqs_address.public_key).map_err(|e| {
+			Error::InvalidOwnershipProof(format!("Unable to decode mqs address public key, {}", e))
+		})?;
+		let signature = Signature::from_hex(&mqs_address.signature).map_err(|e| {
+			Error::InvalidOwnershipProof(format!("Unable to decode mqs address signature, {}", e))
+		})?;
+		secp.verify(
+			&Message::from_slice(message_hash.as_slice())
+				.map_err(|e| Error::GenericError(format!("Unable to build a message, {}", e)))?,
+			&signature,
+			&public_key,
+		)
+		.map_err(|e| {
+			Error::InvalidOwnershipProof(format!("mqs address signature is invalid, {}", e))
+		})?;
+
+		// we are good so far, reporting mwqs address
+		let mqs_address = ProvableAddress::from_pub_key(&public_key);
+		result.mqs_address = Some(mqs_address.public_key);
+	}
+
+	if let Some(tor_address) = &proof.tor_address {
+		let public_key = from_hex(&tor_address.public_key).map_err(|e| {
+			Error::InvalidOwnershipProof(format!("Unable to decode tor address public key, {}", e))
+		})?;
+
+		let public_key = DalekPublicKey::from_bytes(&public_key).map_err(|e| {
+			Error::InvalidOwnershipProof(format!("Unable to decode tor address public key, {}", e))
+		})?;
+
+		let signature = from_hex(&tor_address.signature).map_err(|e| {
+			Error::InvalidOwnershipProof(format!("Unable to decode tor address signature, {}", e))
+		})?;
+		let signature = DalekSignature::from_bytes(&signature).map_err(|e| {
+			Error::InvalidOwnershipProof(format!("Unable to decode tor address signature, {}", e))
+		})?;
+
+		public_key
+			.verify(message_hash.as_slice(), &signature)
+			.map_err(|e| {
+				Error::InvalidOwnershipProof(format!("tor address signature is invalid, {}", e))
+			})?;
+
+		// we are good so far, reporting tor address
+		let tor_address = ProvableAddress::from_tor_pub_key(&public_key);
+		result.tor_address = Some(tor_address.public_key);
+	}
+
+	return Ok(result);
 }
 
 ///

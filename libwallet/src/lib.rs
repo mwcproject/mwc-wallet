@@ -83,9 +83,9 @@ pub use api_impl::owner_swap;
 pub use api_impl::owner_updater::StatusMessage;
 pub use api_impl::types::{
 	Amount, BlockFees, BuiltOutput, InitTxArgs, InitTxSendArgs, IssueInvoiceTxArgs,
-	NodeHeightResult, OutputCommitMapping, PaymentProof, ReplayMitigationConfig,
-	RetrieveTxQueryArgs, RetrieveTxQuerySortField, RetrieveTxQuerySortOrder, SendTXArgs,
-	SwapStartArgs, VersionInfo,
+	NodeHeightResult, OutputCommitMapping, OwnershipProof, OwnershipProofValidation, PaymentProof,
+	PubKeySignature, ReplayMitigationConfig, RetrieveTxQueryArgs, RetrieveTxQuerySortField,
+	RetrieveTxQuerySortOrder, SendTXArgs, SwapStartArgs, VersionInfo,
 };
 pub use internal::scan::{scan, set_replay_config};
 pub use proof::tx_proof::TxProof;

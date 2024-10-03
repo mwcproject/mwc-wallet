@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use ed25519_dalek::PublicKey as DalekPublicKey;
+use ed25519_dalek::Signature as DalekSignature;
 use grin_wallet_util::grin_util::secp::key::{PublicKey, SecretKey};
 use grin_wallet_util::grin_util::secp::pedersen::Commitment;
 use grin_wallet_util::grin_util::secp::{ContextFlag, Message, Secp256k1, Signature};
@@ -112,6 +114,38 @@ impl Hex<Signature> for Signature {
 		let secp = Secp256k1::with_caps(ContextFlag::None);
 		let signature = self.serialize_der(&secp);
 		util::to_hex(&signature)
+	}
+}
+
+impl Hex<DalekPublicKey> for DalekPublicKey {
+	fn from_hex(str: &str) -> Result<DalekPublicKey, Error> {
+		let hex = util::from_hex(str).map_err(|e| {
+			Error::HexError(format!("Unable convert Public Key HEX {}, {}", str, e))
+		})?;
+		DalekPublicKey::from_bytes(&hex).map_err(|e| {
+			Error::HexError(format!(
+				"Unable to build public key from HEX {}, {}",
+				str, e
+			))
+		})
+	}
+
+	fn to_hex(&self) -> String {
+		util::to_hex(self.as_bytes())
+	}
+}
+
+impl Hex<DalekSignature> for DalekSignature {
+	fn from_hex(str: &str) -> Result<DalekSignature, Error> {
+		let hex = util::from_hex(str)
+			.map_err(|e| Error::HexError(format!("Unable convert Signature HEX {}, {}", str, e)))?;
+		DalekSignature::from_bytes(&hex).map_err(|e| {
+			Error::HexError(format!("Unable to build Signature from HEX {}, {}", str, e))
+		})
+	}
+
+	fn to_hex(&self) -> String {
+		util::to_hex(&self.clone().to_bytes())
 	}
 }
 

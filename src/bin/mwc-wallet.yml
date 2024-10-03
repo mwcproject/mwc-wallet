@@ -1021,3 +1021,31 @@ subcommands:
             takes_value: true
   - check_tor_connection:
       about: check this wallet tor connection (for CLI mode)
+  - generate_ownership_proof:
+      about: Gerenerate ownershup proof for the root public key, tor address and mqs addresses.
+      args:
+        - message:
+            help: Message to sign
+            short: s
+            long: message
+            takes_value: true
+        - include_public_root_key:
+            help: Include root public key and signature. Note, root public key can be user to generate rewind_hash to view the all outputs for your wallet.
+            short: p
+            long: include_public_root_key
+        - include_tor_address:
+            help: Include tor address and singature.
+            short: t
+            long: include_tor_address
+        - include_mqs_address:
+            help: Include MWCMQS address and singature.
+            short: m
+            long: include_mqs_address
+  - validate_ownership_proof:
+      about: Validate ownership proof record
+      args:
+        - proof:
+            help: Proof record
+            short: p
+            long: proof
+            takes_value: true
