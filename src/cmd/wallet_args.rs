@@ -24,6 +24,8 @@ use crate::cmd::wallet::MIN_COMPAT_NODE_VERSION;
 /// Argument parsing and error handling for wallet commands
 use clap::ArgMatches;
 use ed25519_dalek::SecretKey as DalekSecretKey;
+use linefeed::terminal::Signal;
+use linefeed::{Interface, ReadResult};
 use mwc_wallet_api::Owner;
 use mwc_wallet_config::parse_node_address_string;
 use mwc_wallet_config::{MQSConfig, TorConfig, WalletConfig};
@@ -42,8 +44,6 @@ use mwc_wallet_util::mwc_core::core::amount_to_hr_string;
 use mwc_wallet_util::mwc_keychain as keychain;
 use mwc_wallet_util::mwc_util::secp::Secp256k1;
 use mwc_wallet_util::{mwc_core as core, OnionV3Address};
-use linefeed::terminal::Signal;
-use linefeed::{Interface, ReadResult};
 use rpassword;
 use semver::Version;
 use std::sync::Arc;

@@ -379,7 +379,7 @@ impl Slatepack {
 			// Receiver address, so this wallet open the message if it is in the archive
 			debug_assert!(recipient.as_bytes().len() == 32);
 			w_pack.write_bytes(recipient.as_bytes())?; // 32 bytes unencrypted - recipient. Primary reason - we want to be able to read what we write.
-										   // expected to be aligned
+											  // expected to be aligned
 
 			// Do CRC and encryption. CRC we want to be encrypted
 			{

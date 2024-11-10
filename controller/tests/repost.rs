@@ -31,8 +31,8 @@ use std::time::Duration;
 #[macro_use]
 mod common;
 use common::{clean_output_dir, create_wallet_proxy, setup};
-use mwc_wallet_util::mwc_util::secp::Secp256k1;
 use libwallet::NodeClient;
+use mwc_wallet_util::mwc_util::secp::Secp256k1;
 
 /// self send impl
 fn file_repost_test_impl(test_dir: &'static str) -> Result<(), wallet::Error> {

@@ -31,10 +31,10 @@ use mwc_wallet_util::mwc_util as util;
 use std::env;
 use std::path::PathBuf;
 
+use mwc_wallet::cmd;
 use mwc_wallet_config::parse_node_address_string;
 use mwc_wallet_controller::controller::{set_foreign_api_server, set_owner_api_server};
 use mwc_wallet_libwallet::proof::proofaddress;
-use mwc_wallet::cmd;
 
 // include build information
 pub mod built_info {

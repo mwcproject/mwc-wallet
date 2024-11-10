@@ -33,8 +33,8 @@ use mwc_wallet_util::mwc_keychain::ExtKeychain;
 use mwc_wallet_util::mwc_util::from_hex;
 use util::secp::key::{PublicKey, SecretKey};
 
-use mwc_wallet_util::mwc_api as api;
 use mwc_wallet::cmd::wallet_args;
+use mwc_wallet_util::mwc_api as api;
 
 use mwc_wallet_util::mwc_util::secp::Secp256k1;
 use serde::de::DeserializeOwned;

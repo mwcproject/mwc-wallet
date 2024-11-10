@@ -5067,7 +5067,7 @@ mod tests {
 						.is_err(),
 					true
 				); // For test node, repost doesn't work by some reasons
-   // We should be good now
+	   // We should be good now
 				nc.mine_block();
 				let res = buyer
 					.process(Input::Check, nc.get_chain_tip().unwrap().0, kc_sell.secp())

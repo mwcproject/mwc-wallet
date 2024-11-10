@@ -17,9 +17,9 @@ use crate::mwc_util::secp::pedersen::Commitment;
 use crate::mwc_util::secp::Signature;
 use crate::swap::Error;
 use crate::{Slate, VersionedSlate};
+use hex::{self, FromHex};
 use mwc_wallet_util::mwc_util::secp::{ContextFlag, Secp256k1};
 use mwc_wallet_util::mwc_util::ToHex;
-use hex::{self, FromHex};
 use serde::{Deserialize, Deserializer, Serializer};
 
 /// Slate deserialization

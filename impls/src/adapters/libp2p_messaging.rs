@@ -16,9 +16,9 @@ use crate::mwc_p2p::libp2p_connection;
 use crate::util::RwLock;
 use crate::Error;
 use chrono::Utc;
+use mwc_libp2p::gossipsub::IdentTopic as Topic;
 use mwc_wallet_libwallet::IntegrityContext;
 use mwc_wallet_util::mwc_util::secp::Secp256k1;
-use mwc_libp2p::gossipsub::IdentTopic as Topic;
 use std::thread;
 use uuid::Uuid;
 

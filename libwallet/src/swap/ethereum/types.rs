@@ -17,8 +17,8 @@ use crate::swap::message::SecondaryUpdate;
 use crate::swap::ser::*;
 use crate::swap::types::SecondaryData;
 use crate::swap::Error;
-use regex::Regex;
 use mwc_web3::types::{Address, H256};
+use regex::Regex;
 
 /// ETH transaction ready to post (any type). Here it is a redeem tx
 #[derive(Serialize, Deserialize, Debug, Clone)]

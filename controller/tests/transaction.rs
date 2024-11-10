@@ -443,7 +443,7 @@ fn tx_rollback(test_dir: &'static str) -> Result<(), wallet::Error> {
 	// few values to keep things shorter
 	let reward = core::consensus::MWC_FIRST_GROUP_REWARD;
 	let cm = global::coinbase_maturity(); // assume all testing precedes soft fork height
-									  // mine a few blocks
+									   // mine a few blocks
 	let _ = test_framework::award_blocks_to_wallet(&chain, wallet1.clone(), mask1, 5, false);
 
 	let amount = core::consensus::MWC_FIRST_GROUP_REWARD / 2;

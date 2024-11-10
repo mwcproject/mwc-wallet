@@ -22,17 +22,18 @@ extern crate mwc_wallet_impls as impls;
 use mwc_wallet_util::mwc_core as core;
 use mwc_wallet_util::mwc_core::global;
 
-use mwc_wallet_libwallet as libwallet;
 use impls::test_framework::{self, LocalWalletClient};
+use mwc_wallet_libwallet as libwallet;
 use std::thread;
 use std::time::Duration;
 
-use mwc_wallet_util::mwc_util as util;
 use mwc_libp2p::PeerId;
+use mwc_wallet_util::mwc_util as util;
 
 #[macro_use]
 mod common;
 use common::{clean_output_dir, create_wallet_proxy, setup};
+use mwc_libp2p::identity::Keypair;
 use mwc_wallet_libwallet::internal::updater;
 use mwc_wallet_libwallet::{owner, TxLogEntryType};
 use mwc_wallet_util::mwc_core::core::hash::Hash;
@@ -42,7 +43,6 @@ use mwc_wallet_util::mwc_p2p::libp2p_connection;
 use mwc_wallet_util::mwc_util::secp;
 use mwc_wallet_util::mwc_util::secp::pedersen::Commitment;
 use mwc_wallet_util::mwc_util::secp::Message;
-use mwc_libp2p::identity::Keypair;
 use std::collections::HashMap;
 use std::convert::TryInto;
 

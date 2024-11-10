@@ -22,12 +22,6 @@ use crate::swap::set_test_mode;
 use crate::swap::types::Currency;
 use crate::swap::Error;
 use crossbeam_utils::thread::scope;
-use rand::thread_rng;
-use secp256k1::SecretKey;
-#[cfg(test)]
-use std::sync::RwLock;
-use std::u64;
-use tokio::runtime::Builder;
 use mwc_web3::{
 	api::{Accounts, Namespace},
 	contract::{Contract, Options},
@@ -35,6 +29,12 @@ use mwc_web3::{
 	signing::SecretKeyRef,
 	types::{Address, Bytes, SignedData, TransactionParameters, TransactionReceipt, H256, U256},
 };
+use rand::thread_rng;
+use secp256k1::SecretKey;
+#[cfg(test)]
+use std::sync::RwLock;
+use std::u64;
+use tokio::runtime::Builder;
 
 const TRANSACTION_DEFAULT_GAS_LIMIT: u64 = 5_500_000u64;
 
@@ -244,7 +244,8 @@ impl InfuraNodeClient {
 						chain_id: None,
 					};
 					let signed = accounts_sign.sign_transaction(tx, &key).await.unwrap();
-					mwc_web3.eth()
+					mwc_web3
+						.eth()
 						.send_raw_transaction(signed.raw_transaction)
 						.await
 				}

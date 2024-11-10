@@ -18,9 +18,9 @@ extern crate mwc_wallet_controller as wallet;
 extern crate mwc_wallet_impls as impls;
 extern crate mwc_wallet_util;
 
-use mwc_wallet_libwallet as libwallet;
 use impls::test_framework::{self, LocalWalletClient};
 use libwallet::{InitTxArgs, Slate};
+use mwc_wallet_libwallet as libwallet;
 use std::sync::atomic::Ordering;
 use std::thread;
 use std::time::Duration;

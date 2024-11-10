@@ -15,6 +15,7 @@
 //! Selection of inputs for building transactions
 
 use crate::error::Error;
+use crate::internal::keys;
 use crate::mwc_core::core::amount_to_hr_string;
 use crate::mwc_core::libtx::{
 	build,
@@ -24,7 +25,6 @@ use crate::mwc_core::libtx::{
 use crate::mwc_keychain::{Identifier, Keychain};
 use crate::mwc_util::secp::key::SecretKey;
 use crate::mwc_util::secp::pedersen::Commitment;
-use crate::internal::keys;
 use crate::proof::proofaddress;
 use crate::slate::Slate;
 use crate::types::*;

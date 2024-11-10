@@ -17,13 +17,13 @@ extern crate mwc_wallet_controller as wallet;
 extern crate mwc_wallet_impls as impls;
 extern crate mwc_wallet_util;
 
+use impls::test_framework::LocalWalletClient;
 use mwc_wallet_libwallet as libwallet;
 use mwc_wallet_util::mwc_core::core::OutputFeatures;
 use mwc_wallet_util::mwc_keychain::{
 	mnemonic, BlindingFactor, ExtKeychain, ExtKeychainPath, Keychain, SwitchCommitmentType,
 };
 use mwc_wallet_util::mwc_util::{secp, ZeroingString};
-use impls::test_framework::LocalWalletClient;
 use rand::{thread_rng, Rng};
 use std::sync::atomic::Ordering;
 use std::thread;

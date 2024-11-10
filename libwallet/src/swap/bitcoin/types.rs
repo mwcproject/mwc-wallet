@@ -33,9 +33,9 @@ use byteorder::{ByteOrder, LittleEndian};
 use std::io::Cursor;
 use std::ops::Deref;
 
-use mwc_bch::messages::{Tx as BchTx, TxIn as BchTxIn, TxOut as BchTxOut};
 use bitcoin_hashes::hex::ToHex;
 use bitcoin_hashes::{hash160, Hash};
+use mwc_bch::messages::{Tx as BchTx, TxIn as BchTxIn, TxOut as BchTxOut};
 
 use mwc_wallet_util::mwc_util::secp::Secp256k1;
 use mwc_zcash_primitives::transaction as zcash_tx;

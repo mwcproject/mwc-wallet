@@ -1315,7 +1315,7 @@ where
 
 				if !swap.redeem_kernel_updated {
 					debug_assert!(false); // That shouldn't happen
-					  // let's go back to the waiting since the data is not ready
+						   // let's go back to the waiting since the data is not ready
 					return Ok(StateProcessRespond::new(
 						StateId::SellerWaitingForBuyerToRedeemMwc,
 					));
@@ -1474,8 +1474,8 @@ where
 							if h < tx_conf.secondary_tip - state::SECONDARY_HEIGHT_TO_INCREASE_FEE {
 								// we can bump the fees if there is enough amount. Tx redeem size is about 660 bytes. And we don't want to spend more then half of the BTC funds.
 								if swap.secondary_fee
-									* state::SECONDARY_INCREASE_FEE_K * 660.0
-									* 2.0 < swap.secondary_amount as f32
+									* state::SECONDARY_INCREASE_FEE_K
+									* 660.0 * 2.0 < swap.secondary_amount as f32
 								{
 									swap.secondary_fee *= state::SECONDARY_INCREASE_FEE_K;
 									swap.posted_secondary_height = None;

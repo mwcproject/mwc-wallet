@@ -17,12 +17,12 @@
 use crate::mwc_util::Mutex;
 use crate::{mwc_util::secp::key::SecretKey, swap::ethereum::EthereumWallet};
 
+use crate::internal::selection;
 use crate::mwc_core::core::Committed;
 use crate::mwc_core::{core, global};
 use crate::mwc_keychain::ExtKeychainPath;
 use crate::mwc_keychain::{Identifier, Keychain, SwitchCommitmentType};
 use crate::mwc_util::to_hex;
-use crate::internal::selection;
 use crate::swap::error::Error;
 use crate::swap::fsm::state::{Input, StateEtaInfo, StateId, StateProcessRespond};
 use crate::swap::message::{Message, SecondaryUpdate, Update};

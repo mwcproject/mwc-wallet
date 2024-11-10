@@ -15,10 +15,10 @@
 use crate::mwc_util::Mutex;
 use crate::swap::types::Currency;
 use crate::swap::Error;
+use mwc_web3::types::{Address, TransactionReceipt, H256};
 use secp256k1::SecretKey;
 use std::sync::Arc;
 use std::{collections::HashMap, u64};
-use mwc_web3::types::{Address, TransactionReceipt, H256};
 
 use super::to_eth_address;
 

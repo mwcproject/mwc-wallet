@@ -41,9 +41,9 @@ use crate::libwallet::{
 use crate::util::logger::LoggingConfig;
 use crate::util::secp::key::SecretKey;
 use crate::util::{from_hex, Mutex, ZeroingString};
+use libwallet::{OwnershipProof, OwnershipProofValidation, RetrieveTxQueryArgs};
 use mwc_wallet_util::mwc_util::secp::key::PublicKey;
 use mwc_wallet_util::mwc_util::static_secp_instance;
-use libwallet::{OwnershipProof, OwnershipProofValidation, RetrieveTxQueryArgs};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, Sender};
 use std::sync::Arc;

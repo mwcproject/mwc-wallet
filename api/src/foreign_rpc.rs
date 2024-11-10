@@ -22,9 +22,9 @@ use crate::libwallet::{
 use crate::{Foreign, ForeignCheckMiddlewareFn};
 use easy_jsonrpc_mw;
 use ed25519_dalek::PublicKey as DalekPublicKey;
+use libwallet::slatepack::SlatePurpose;
 use mwc_wallet_libwallet::proof::proofaddress::{self, ProvableAddress};
 use mwc_wallet_util::mwc_util::secp::Secp256k1;
-use libwallet::slatepack::SlatePurpose;
 
 /// Public definition used to generate Foreign jsonrpc api.
 /// * When running `mwc-wallet listen` with defaults, the V2 api is available at

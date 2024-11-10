@@ -35,9 +35,9 @@ use libwallet::proof::proofaddress;
 mod common;
 use self::core::global;
 use common::{clean_output_dir, create_wallet_proxy, setup};
+use impls::adapters::SlateGetData;
 use mwc_wallet_libwallet::slatepack::SlatePurpose;
 use mwc_wallet_util::mwc_util::secp::Secp256k1;
-use impls::adapters::SlateGetData;
 
 fn output_slatepack(
 	slate: &Slate,

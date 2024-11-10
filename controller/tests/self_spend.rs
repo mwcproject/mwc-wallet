@@ -22,8 +22,8 @@ use mwc_wallet_util::mwc_core as core;
 use mwc_wallet_util::mwc_core::global;
 
 use self::libwallet::OutputStatus;
-use mwc_wallet_libwallet as libwallet;
 use impls::test_framework::{self, LocalWalletClient};
+use mwc_wallet_libwallet as libwallet;
 use std::thread;
 use std::time::Duration;
 

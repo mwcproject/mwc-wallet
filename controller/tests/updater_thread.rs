@@ -22,8 +22,8 @@ extern crate mwc_wallet_libwallet as libwallet;
 // use crate::libwallet::api_impl::owner_updater::{start_updater_log_thread, StatusMessage};
 // use mwc_wallet_util::mwc_core as core;
 
-use mwc_wallet_util::mwc_core::global;
 use impls::test_framework::{self, LocalWalletClient};
+use mwc_wallet_util::mwc_core::global;
 use std::sync::atomic::Ordering;
 use std::thread;
 use std::time::Duration;

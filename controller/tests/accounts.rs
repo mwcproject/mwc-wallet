@@ -22,9 +22,9 @@ use mwc_wallet_util::mwc_keychain as keychain;
 
 use self::core::global;
 use self::keychain::{ExtKeychain, Keychain};
-use mwc_wallet_libwallet as libwallet;
 use impls::test_framework::{self, LocalWalletClient};
 use libwallet::InitTxArgs;
+use mwc_wallet_libwallet as libwallet;
 use std::sync::atomic::Ordering;
 use std::thread;
 use std::time::Duration;

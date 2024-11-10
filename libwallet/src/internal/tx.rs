@@ -16,6 +16,7 @@
 
 use uuid::Uuid;
 
+use crate::internal::{selection, updater};
 use crate::mwc_core::consensus::valid_header_version;
 use crate::mwc_core::core::HeaderVersion;
 use crate::mwc_keychain::{Identifier, Keychain};
@@ -23,7 +24,6 @@ use crate::mwc_util as util;
 use crate::mwc_util::secp::key::SecretKey;
 use crate::mwc_util::secp::{pedersen, Signature};
 use crate::mwc_util::Mutex;
-use crate::internal::{selection, updater};
 use crate::proof::crypto;
 use crate::proof::crypto::Hex;
 use crate::proof::proofaddress;

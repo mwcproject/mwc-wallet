@@ -568,8 +568,8 @@ macro_rules! doctest_helper_setup_doc_env_foreign {
 		use mwc_wallet_util::mwc_keychain as keychain;
 		use mwc_wallet_util::mwc_util as util;
 
-		use mwc_core::global;
 		use keychain::ExtKeychain;
+		use mwc_core::global;
 		use tempfile::tempdir;
 
 		use std::sync::Arc;

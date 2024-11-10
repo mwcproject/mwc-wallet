@@ -16,6 +16,7 @@
 mod common;
 
 use common::{clean_output_dir, create_wallet_proxy, setup};
+use log::error;
 use mwc_wallet_controller::controller::owner_single_use as owner;
 use mwc_wallet_controller::Error;
 use mwc_wallet_impls::test_framework::*;
@@ -32,7 +33,6 @@ use mwc_wallet_util::mwc_keychain::ExtKeychain;
 use mwc_wallet_util::mwc_util::secp::key::SecretKey;
 use mwc_wallet_util::mwc_util::secp::Secp256k1;
 use mwc_wallet_util::mwc_util::Mutex;
-use log::error;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;

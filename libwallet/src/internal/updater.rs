@@ -19,6 +19,7 @@ use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
 
 use crate::error::Error;
+use crate::internal::keys;
 use crate::mwc_core::consensus::reward;
 use crate::mwc_core::core::{Output, TxKernel};
 use crate::mwc_core::global;
@@ -28,7 +29,6 @@ use crate::mwc_keychain::{Identifier, Keychain, SwitchCommitmentType};
 use crate::mwc_util as util;
 use crate::mwc_util::secp::key::SecretKey;
 use crate::mwc_util::secp::pedersen;
-use crate::internal::keys;
 use crate::types::{
 	NodeClient, OutputData, OutputStatus, TxLogEntry, TxLogEntryType, WalletBackend, WalletInfo,
 };

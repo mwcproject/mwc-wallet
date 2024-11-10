@@ -17,6 +17,8 @@ use crate::api_impl::foreign;
 use crate::api_impl::owner;
 use crate::api_impl::owner_updater::StatusMessage;
 use crate::api_impl::types::InitTxArgs;
+use crate::internal::tx;
+use crate::internal::{keys, updater};
 use crate::mwc_core::consensus::{valid_header_version, WEEK_HEIGHT};
 use crate::mwc_core::core::Committed;
 use crate::mwc_core::core::HeaderVersion;
@@ -30,8 +32,6 @@ use crate::mwc_util::secp::pedersen;
 use crate::mwc_util::secp::{ContextFlag, Secp256k1};
 use crate::mwc_util::Mutex;
 use crate::mwc_util::{from_hex, ToHex};
-use crate::internal::tx;
-use crate::internal::{keys, updater};
 use crate::types::*;
 use crate::ReplayMitigationConfig;
 use crate::{wallet_lock, Error};
@@ -224,7 +224,8 @@ where
 			if let Some(e_height) = end_height {
 				if e_height > built_height_64
 					&& e_height - built_height_64 > 1440 * 7
-					&& should_self_spend && amount > self_spend_amount
+					&& should_self_spend
+					&& amount > self_spend_amount
 				{
 					self_spend_outputs.push(OutputResult {
 						commit: *commit,
@@ -2281,7 +2282,7 @@ where
 {
 	//spend this output to the account itself.
 	let fee = tx_fee(1, 1, 1); //there is only one input and one output and one kernel
-						   //let amount = output.eligible_to_spend(current_height, minimum_confirmations);
+							//let amount = output.eligible_to_spend(current_height, minimum_confirmations);
 
 	let mut output_vec = Vec::new();
 	output_vec.push(commit_string);

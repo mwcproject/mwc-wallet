@@ -18,6 +18,7 @@ use crate::mwc_util::secp::key::SecretKey;
 use crate::mwc_util::Mutex;
 
 use crate::api_impl::{foreign, owner};
+use crate::internal::{keys, updater};
 use crate::mwc_core::core::hash::Hash;
 use crate::mwc_core::libtx::tx_fee;
 use crate::mwc_core::ser;
@@ -28,7 +29,6 @@ use crate::mwc_util::secp;
 use crate::mwc_util::secp::pedersen::Commitment;
 use crate::mwc_util::secp::Signature;
 use crate::mwc_util::secp::{Message, PublicKey};
-use crate::internal::{keys, updater};
 use crate::types::NodeClient;
 use crate::{wallet_lock, WalletInst, WalletLCProvider};
 use crate::{AcctPathMapping, InitTxArgs, OutputCommitMapping, OutputStatus};

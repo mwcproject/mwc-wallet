@@ -15,12 +15,12 @@
 //! Generic implementation of owner API functions
 use crate::api_impl::owner::check_ttl;
 use crate::api_impl::owner_swap;
+use crate::internal::selection;
+use crate::internal::{tx, updater};
 use crate::mwc_core::core::amount_to_hr_string;
 use crate::mwc_keychain::Keychain;
 use crate::mwc_util::secp::key::SecretKey;
 use crate::mwc_util::Mutex;
-use crate::internal::selection;
-use crate::internal::{tx, updater};
 use crate::proof::crypto::Hex;
 use crate::proof::proofaddress;
 use crate::proof::proofaddress::ProofAddressType;

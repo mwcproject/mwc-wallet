@@ -22,10 +22,10 @@ use crate::mwc_keychain::Identifier;
 use crate::mwc_util::secp::key::SecretKey;
 use crate::swap::message::Message;
 use bitcoin::Address;
+use mwc_web3::types::H160;
 use std::convert::TryInto;
 use std::fmt;
 use std::{convert::TryFrom, str::FromStr};
-use mwc_web3::types::H160;
 
 /// MWC Network where SWAP happens.
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
@@ -266,11 +266,11 @@ impl Currency {
 						// Intentionally return error from first call. Legacy address error is not interesting much
 						let (hash, addr_type) = mwc_bch::address::legacyaddr_decode(&address, nw)
 							.map_err(|_| {
-								Error::Generic(format!(
-									"Unable to parse BCH address {}, {}",
-									address, e
-								))
-							})?;
+							Error::Generic(format!(
+								"Unable to parse BCH address {}, {}",
+								address, e
+							))
+						})?;
 						(hash.0.to_vec(), addr_type)
 					}
 					Ok((v, addr_type)) => (v, addr_type),
@@ -396,7 +396,11 @@ impl Currency {
 
 						let hash160 = mwc_bch::util::Hash160(hash_dt);
 						// Converting into legacy address that is equal to BTC.
-						mwc_bch::address::legacyaddr_encode(&hash160.0, addr_type, Self::bch_network())
+						mwc_bch::address::legacyaddr_encode(
+							&hash160.0,
+							addr_type,
+							Self::bch_network(),
+						)
 					}
 				}
 			}

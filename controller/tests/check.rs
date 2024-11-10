@@ -22,10 +22,10 @@ use mwc_wallet_util::mwc_util as util;
 
 use self::core::consensus;
 use self::core::global;
-use mwc_wallet_libwallet as libwallet;
 use impls::test_framework::{self, LocalWalletClient};
 use impls::{PathToSlatePutter, SlatePutter};
 use libwallet::{InitTxArgs, NodeClient};
+use mwc_wallet_libwallet as libwallet;
 use std::sync::atomic::Ordering;
 use std::thread;
 use std::time::Duration;
