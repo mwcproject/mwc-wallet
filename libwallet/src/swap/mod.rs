@@ -57,7 +57,7 @@ pub(crate) use self::api::SwapApi;
 pub(crate) use self::buyer::BuyApi;
 pub(crate) use self::seller::SellApi;
 
-pub use crate::grin_keychain::Keychain;
+pub use crate::mwc_keychain::Keychain;
 
 #[cfg(test)]
 use serial_test::serial;
@@ -105,18 +105,18 @@ pub fn is_test_response() -> bool {
 
 #[cfg(test)]
 mod tests {
-	use crate::grin_core::core::transaction::Weighting;
-	use crate::grin_core::core::{Inputs, KernelFeatures, Transaction, TxKernel};
-	use crate::grin_keychain::{ExtKeychain, Identifier, Keychain, SwitchCommitmentType};
-	use crate::grin_util::secp::key::{PublicKey, SecretKey};
-	use crate::grin_util::secp::pedersen::{Commitment, RangeProof};
-	use crate::grin_util::to_hex;
-	use crate::grin_util::Mutex;
+	use crate::mwc_core::core::transaction::Weighting;
+	use crate::mwc_core::core::{Inputs, KernelFeatures, Transaction, TxKernel};
+	use crate::mwc_keychain::{ExtKeychain, Identifier, Keychain, SwitchCommitmentType};
+	use crate::mwc_util::secp::key::{PublicKey, SecretKey};
+	use crate::mwc_util::secp::pedersen::{Commitment, RangeProof};
+	use crate::mwc_util::to_hex;
+	use crate::mwc_util::Mutex;
 	use crate::{NodeClient, Slate, SlateVersion, VersionedSlate};
 	use bitcoin_lib::network::constants::Network as BtcNetwork;
 	use bitcoin_lib::util::key::PublicKey as BtcPublicKey;
 	use bitcoin_lib::{Address, AddressType, Transaction as BtcTransaction, TxOut};
-	use grin_wallet_util::grin_util::secp::Secp256k1;
+	use mwc_wallet_util::mwc_util::secp::Secp256k1;
 	use std::collections::HashMap;
 	use std::convert::TryInto;
 	#[cfg(not(target_os = "windows"))]
@@ -129,17 +129,17 @@ mod tests {
 	use super::message::Message;
 	use super::types::*;
 	use super::*;
-	use crate::grin_api::{Libp2pMessages, Libp2pPeers};
-	use crate::grin_core::core::Committed;
-	use crate::grin_core::global;
-	use crate::grin_core::global::ChainTypes;
+	use crate::mwc_api::{Libp2pMessages, Libp2pPeers};
+	use crate::mwc_core::core::Committed;
+	use crate::mwc_core::global;
+	use crate::mwc_core::global::ChainTypes;
 	use crate::swap::fsm::machine::StateMachine;
 	use crate::swap::fsm::state;
 	use crate::swap::fsm::state::{Input, StateId, StateProcessRespond};
 	use crate::swap::message::{SecondaryUpdate, Update};
-	extern crate web3;
+	extern crate mwc_web3;
 
-	const GRIN_UNIT: u64 = 1_000_000_000;
+	const MWC_UNIT: u64 = 1_000_000_000;
 
 	fn keychain(idx: u8) -> ExtKeychain {
 		let seed_sell: String = format!("fixed0rng0for0testing0purposes0{}", idx % 10);
@@ -157,11 +157,11 @@ mod tests {
 			role_context: RoleContext::Seller(SellerContext {
 				parent_key_id: key_id(0, 0),
 				inputs: vec![
-					(key_id(0, 1), None, 60 * GRIN_UNIT),
-					(key_id(0, 2), None, 60 * GRIN_UNIT),
+					(key_id(0, 1), None, 60 * MWC_UNIT),
+					(key_id(0, 2), None, 60 * MWC_UNIT),
 				],
 				change_output: key_id(0, 3),
-				change_amount: 20 * GRIN_UNIT, // selling 100 coins, so 20 will be left
+				change_amount: 20 * MWC_UNIT, // selling 100 coins, so 20 will be left
 				refund_output: key_id(0, 4),
 				secondary_context: SecondarySellerContext::Btc(BtcSellerContext {
 					cosign: key_id(0, 5),
@@ -228,11 +228,11 @@ mod tests {
 			role_context: RoleContext::Seller(SellerContext {
 				parent_key_id: key_id(0, 0),
 				inputs: vec![
-					(key_id(0, 1), None, 60 * GRIN_UNIT),
-					(key_id(0, 2), None, 60 * GRIN_UNIT),
+					(key_id(0, 1), None, 60 * MWC_UNIT),
+					(key_id(0, 2), None, 60 * MWC_UNIT),
 				],
 				change_output: key_id(0, 3),
-				change_amount: 20 * GRIN_UNIT, // selling 100 coins, so 20 will be left
+				change_amount: 20 * MWC_UNIT, // selling 100 coins, so 20 will be left
 				refund_output: key_id(0, 4),
 				secondary_context: SecondarySellerContext::Eth(EthSellerContext {
 					redeem_address: Some(redeem_address.unwrap()),
@@ -379,7 +379,7 @@ mod tests {
 		}
 		fn get_connected_peer_info(
 			&self,
-		) -> Result<Vec<crate::grin_p2p::types::PeerInfoDisplayLegacy>, crate::Error> {
+		) -> Result<Vec<crate::mwc_p2p::types::PeerInfoDisplayLegacy>, crate::Error> {
 			unimplemented!()
 		}
 		fn height_range_to_pmmr_indices(
@@ -394,7 +394,7 @@ mod tests {
 			_start_height: u64,
 			_end_height: u64,
 			_threads_number: usize,
-		) -> Result<Vec<crate::grin_api::BlockPrintable>, crate::Error> {
+		) -> Result<Vec<crate::mwc_api::BlockPrintable>, crate::Error> {
 			unimplemented!()
 		}
 		fn reset_cache(&self) {
@@ -528,7 +528,7 @@ mod tests {
 			.create_swap_offer(
 				&kc_sell,
 				&ctx_sell,
-				100 * GRIN_UNIT,
+				100 * MWC_UNIT,
 				3_000_000,
 				Currency::Btc,
 				secondary_redeem_address,
@@ -605,7 +605,7 @@ mod tests {
 		let nc = TestNodeClient::new(300_000);
 		let btc_nc = TestBtcNodeClient::new(500_000);
 
-		let amount = 100 * GRIN_UNIT;
+		let amount = 100 * MWC_UNIT;
 		let btc_amount_1 = 2_000_000;
 		let btc_amount_2 = 1_000_000;
 		let btc_amount = btc_amount_1 + btc_amount_2;
@@ -895,7 +895,7 @@ mod tests {
 		};
 		btc_nc.mine_blocks(5);
 
-		// Buyer: wait for Grin confirmations
+		// Buyer: wait for Mwc confirmations
 		let tx_conf = api_buy
 			.request_tx_confirmations(&kc_buy, &swap_buy)
 			.unwrap();
@@ -1041,7 +1041,7 @@ mod tests {
 			);
 		}
 
-		// Seller: wait for Grin confirmations
+		// Seller: wait for Mwc confirmations
 		nc.mine_blocks(10);
 		let tx_conf = api_sell
 			.request_tx_confirmations(&kc_sell, &swap_sell)
@@ -1397,7 +1397,7 @@ mod tests {
 			_ => panic!("Invalid action"),
 		}
 
-		// At this point, buyer would add Grin to their outputs
+		// At this point, buyer would add Mwc to their outputs
 		// Now seller can redeem BTC
 		if write_json {
 			write(
@@ -1863,7 +1863,7 @@ mod tests {
 		let nc = TestNodeClient::new(300_000);
 		let btc_nc = TestBtcNodeClient::new(500_000);
 
-		let amount = 100 * GRIN_UNIT;
+		let amount = 100 * MWC_UNIT;
 		let btc_amount_1 = 2_000_000;
 		let btc_amount_2 = 1_000_000;
 		let btc_amount_plus = 10_000;
@@ -6504,7 +6504,7 @@ mod tests {
 		let secondary_redeem_address = "tb1qp6a3fc7fryx6s9tvhnsy96x57gmmu3j90a9hwe".to_string();
 		// BTC amount in satoshi
 		let btc_amount = 10_000;
-		let mwc_amount = GRIN_UNIT; // 1 mwc is fine
+		let mwc_amount = MWC_UNIT; // 1 mwc is fine
 
 		let nc = TestNodeClient::new(300_000);
 
@@ -6735,7 +6735,7 @@ mod tests {
 			.create_swap_offer(
 				&kc_sell,
 				&ctx_sell,
-				100 * GRIN_UNIT,
+				100 * MWC_UNIT,
 				3_000_000,
 				Currency::Ether,
 				secondary_redeem_address,

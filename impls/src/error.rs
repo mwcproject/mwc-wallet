@@ -1,4 +1,4 @@
-// Copyright 2021 The Grin Developers
+// Copyright 2021 The Mwc Developers
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,7 +15,7 @@
 //! Implementation specific error types
 use crate::core::libtx;
 use crate::keychain;
-use grin_wallet_util::OnionV3AddressError;
+use mwc_wallet_util::OnionV3AddressError;
 
 /// Wallet errors, mostly wrappers around underlying crypto or I/O errors.
 #[derive(Clone, thiserror::Error, Eq, PartialEq, Debug)]

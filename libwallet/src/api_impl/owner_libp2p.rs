@@ -14,27 +14,27 @@
 
 //! Generic implementation libp2p related communication functionality
 
-use crate::grin_util::secp::key::SecretKey;
-use crate::grin_util::Mutex;
+use crate::mwc_util::secp::key::SecretKey;
+use crate::mwc_util::Mutex;
 
 use crate::api_impl::{foreign, owner};
-use crate::grin_core::core::hash::Hash;
-use crate::grin_core::libtx::tx_fee;
-use crate::grin_core::ser;
-use crate::grin_keychain::Keychain;
-use crate::grin_keychain::{ExtKeychainPath, Identifier};
-use crate::grin_p2p::libp2p_connection;
-use crate::grin_util::secp;
-use crate::grin_util::secp::pedersen::Commitment;
-use crate::grin_util::secp::Signature;
-use crate::grin_util::secp::{Message, PublicKey};
+use crate::mwc_core::core::hash::Hash;
+use crate::mwc_core::libtx::tx_fee;
+use crate::mwc_core::ser;
+use crate::mwc_keychain::Keychain;
+use crate::mwc_keychain::{ExtKeychainPath, Identifier};
+use crate::mwc_p2p::libp2p_connection;
+use crate::mwc_util::secp;
+use crate::mwc_util::secp::pedersen::Commitment;
+use crate::mwc_util::secp::Signature;
+use crate::mwc_util::secp::{Message, PublicKey};
 use crate::internal::{keys, updater};
 use crate::types::NodeClient;
 use crate::{wallet_lock, WalletInst, WalletLCProvider};
 use crate::{AcctPathMapping, InitTxArgs, OutputCommitMapping, OutputStatus};
 use crate::{Context, Error};
 use ed25519_dalek::PublicKey as DalekPublicKey;
-use grin_wallet_util::grin_util::secp::Secp256k1;
+use mwc_wallet_util::mwc_util::secp::Secp256k1;
 use std::collections::HashMap;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -111,7 +111,7 @@ impl IntegrityContext {
 		#[cfg(debug_assertions)]
 		{
 			// Sanity check
-			crate::grin_core::libtx::aggsig::verify_completed_sig(
+			crate::mwc_core::libtx::aggsig::verify_completed_sig(
 				secp,
 				&signature,
 				&pk,

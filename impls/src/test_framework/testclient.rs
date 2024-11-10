@@ -1,4 +1,4 @@
-// Copyright 2021 The Grin Developers
+// Copyright 2021 The Mwc Developers
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -94,11 +94,11 @@ where
 	C: NodeClient + 'a,
 	K: Keychain + 'a,
 {
-	/// Create a new client that will communicate with the given grin node
+	/// Create a new client that will communicate with the given mwc node
 	pub fn new(chain_dir: &str) -> Self {
 		set_local_chain_type(ChainTypes::AutomatedTesting);
 		let genesis_block = pow::mine_genesis_block().unwrap();
-		let dir_name = format!("{}/.grin", chain_dir);
+		let dir_name = format!("{}/.mwc", chain_dir);
 		let c = Chain::init(
 			dir_name,
 			Arc::new(NoopAdapter {}),
@@ -490,7 +490,7 @@ impl NodeClient for LocalWalletClient {
 	fn get_version_info(&mut self) -> Option<NodeVersionInfo> {
 		None
 	}
-	/// Posts a transaction to a grin node
+	/// Posts a transaction to a mwc node
 	/// In this case it will create a new block with award rewarded to
 	fn post_tx(&self, tx: &Transaction, _fluff: bool) -> Result<(), libwallet::Error> {
 		let m = WalletProxyMessage {
@@ -577,7 +577,7 @@ impl NodeClient for LocalWalletClient {
 	/// Return Connected peers
 	fn get_connected_peer_info(
 		&self,
-	) -> Result<Vec<crate::grin_p2p::types::PeerInfoDisplayLegacy>, libwallet::Error> {
+	) -> Result<Vec<crate::mwc_p2p::types::PeerInfoDisplayLegacy>, libwallet::Error> {
 		trace!("get_connected_peer_info called at the test client. Skipped.");
 		return Ok(Vec::new());
 	}

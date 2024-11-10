@@ -1,4 +1,4 @@
-// Copyright 2021 The Grin Developers
+// Copyright 2021 The Mwc Developers
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,8 +22,8 @@ use crate::libwallet::{
 use crate::{Foreign, ForeignCheckMiddlewareFn};
 use easy_jsonrpc_mw;
 use ed25519_dalek::PublicKey as DalekPublicKey;
-use grin_wallet_libwallet::proof::proofaddress::{self, ProvableAddress};
-use grin_wallet_util::grin_util::secp::Secp256k1;
+use mwc_wallet_libwallet::proof::proofaddress::{self, ProvableAddress};
+use mwc_wallet_util::mwc_util::secp::Secp256k1;
 use libwallet::slatepack::SlatePurpose;
 
 /// Public definition used to generate Foreign jsonrpc api.
@@ -38,7 +38,7 @@ pub trait ForeignRpc {
 	# Json rpc example
 
 	```
-	# grin_wallet_api::doctest_helper_json_rpc_foreign_assert_response!(
+	# mwc_wallet_api::doctest_helper_json_rpc_foreign_assert_response!(
 	# r#"
 	{
 		"jsonrpc": "2.0",
@@ -76,7 +76,7 @@ pub trait ForeignRpc {
 	# Json rpc example
 
 	```
-	# grin_wallet_api::doctest_helper_json_rpc_foreign_assert_response!(
+	# mwc_wallet_api::doctest_helper_json_rpc_foreign_assert_response!(
 	# r#"
 	{
 		"jsonrpc": "2.0",
@@ -106,7 +106,7 @@ pub trait ForeignRpc {
 	# Json rpc example
 
 	```
-	# grin_wallet_api::doctest_helper_json_rpc_foreign_assert_response!(
+	# mwc_wallet_api::doctest_helper_json_rpc_foreign_assert_response!(
 	# r#"
 	{
 		"jsonrpc": "2.0",
@@ -157,7 +157,7 @@ pub trait ForeignRpc {
 	# Json rpc example
 
 	```
-	# grin_wallet_api::doctest_helper_json_rpc_foreign_assert_response!(
+	# mwc_wallet_api::doctest_helper_json_rpc_foreign_assert_response!(
 	# r#"
 	{
 		"jsonrpc": "2.0",
@@ -239,7 +239,7 @@ pub trait ForeignRpc {
 	# Json rpc example
 
 	```
-	# grin_wallet_api::doctest_helper_json_rpc_foreign_assert_response!(
+	# mwc_wallet_api::doctest_helper_json_rpc_foreign_assert_response!(
 	# r#"
 	{
 		"jsonrpc": "2.0",
@@ -389,7 +389,7 @@ pub trait ForeignRpc {
 	```
 	```
 	# // Compact slate processing case
-	# grin_wallet_api::doctest_helper_json_rpc_foreign_assert_response!(
+	# mwc_wallet_api::doctest_helper_json_rpc_foreign_assert_response!(
 	# r#"
 	{
 		"jsonrpc": "2.0",
@@ -516,7 +516,7 @@ pub trait ForeignRpc {
 	```
 	```
 	# // Using Slatepacks for interaction
-	# grin_wallet_api::doctest_helper_json_rpc_foreign_assert_response!(
+	# mwc_wallet_api::doctest_helper_json_rpc_foreign_assert_response!(
 	# r#"
 	{
 		"jsonrpc": "2.0",
@@ -556,7 +556,7 @@ pub trait ForeignRpc {
 	# Json rpc example
 
 	```
-	# grin_wallet_api::doctest_helper_json_rpc_foreign_assert_response!(
+	# mwc_wallet_api::doctest_helper_json_rpc_foreign_assert_response!(
 	# r#"
 	{
 		"jsonrpc": "2.0",
@@ -715,7 +715,7 @@ pub trait ForeignRpc {
 	```
 	```
 	# // Compact slate test case
-	# grin_wallet_api::doctest_helper_json_rpc_foreign_assert_response!(
+	# mwc_wallet_api::doctest_helper_json_rpc_foreign_assert_response!(
 	# r#"
 	{
 		"jsonrpc": "2.0",
@@ -881,7 +881,7 @@ pub trait ForeignRpc {
 	```
 	```
 	# // Slatepack input/outputs test
-	# grin_wallet_api::doctest_helper_json_rpc_foreign_assert_response!(
+	# mwc_wallet_api::doctest_helper_json_rpc_foreign_assert_response!(
 	# r#"
 	{
 		"jsonrpc": "2.0",
@@ -1051,14 +1051,14 @@ pub fn run_doctest_foreign(
 	compact_slate: bool,
 ) -> Result<Option<serde_json::Value>, String> {
 	use easy_jsonrpc_mw::Handler;
-	use grin_wallet_impls::test_framework::{self, LocalWalletClient, WalletProxy};
-	use grin_wallet_impls::{DefaultLCProvider, DefaultWalletImpl};
-	use grin_wallet_libwallet::{api_impl, WalletInst};
-	use grin_wallet_util::grin_keychain::ExtKeychain;
+	use mwc_wallet_impls::test_framework::{self, LocalWalletClient, WalletProxy};
+	use mwc_wallet_impls::{DefaultLCProvider, DefaultWalletImpl};
+	use mwc_wallet_libwallet::{api_impl, WalletInst};
+	use mwc_wallet_util::mwc_keychain::ExtKeychain;
 
 	use crate::core::global;
 	use crate::core::global::ChainTypes;
-	use grin_wallet_util::grin_util as util;
+	use mwc_wallet_util::mwc_util as util;
 
 	use std::sync::Arc;
 	use util::Mutex;
@@ -1335,7 +1335,7 @@ macro_rules! doctest_helper_json_rpc_foreign_assert_response {
 		// create temporary wallet, run jsonrpc request on owner api of wallet, delete wallet, return
 		// json response.
 		// In order to prevent leaking tempdirs, This function should not panic.
-		use grin_wallet_api::run_doctest_foreign;
+		use mwc_wallet_api::run_doctest_foreign;
 		use serde_json;
 		use serde_json::Value;
 		use tempfile::tempdir;
@@ -1375,5 +1375,5 @@ macro_rules! doctest_helper_json_rpc_foreign_assert_response {
 // placeholder for doc tests.
 #[test]
 fn foreign_api_v3_test() {
-	// use crate as grin_wallet_api;
+	// use crate as mwc_wallet_api;
 }

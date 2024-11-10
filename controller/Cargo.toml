@@ -1,12 +1,12 @@
 [package]
-name = "grin_wallet_controller"
+name = "mwc_wallet_controller"
 version = "5.3.3"
-authors = ["Grin Developers <mimblewimble@lists.launchpad.net>"]
-description = "Controllers for grin wallet instantiation"
+authors = ["Mwc Developers <mimblewimble@lists.launchpad.net>"]
+description = "Controllers for mwc wallet instantiation"
 license = "Apache-2.0"
-repository = "https://github.com/mimblewimble/grin-wallet"
-keywords = [ "crypto", "grin", "mimblewimble" ]
-exclude = ["**/*.grin", "**/*.grin2"]
+repository = "https://github.com/mimblewimble/mwc-wallet"
+keywords = [ "crypto", "mwc", "mimblewimble" ]
+exclude = ["**/*.mwc", "**/*.mwc2"]
 #build = "src/build/build.rs"
 edition = "2018"
 
@@ -32,15 +32,15 @@ qr_code = "1.1.0"
 colored = "1.6"
 x25519-dalek = "0.6"
 ed25519-dalek = "1.0.0-pre.4"
-wagyu-ethereum = { git = "https://github.com/mwcproject/wagyu-ethereum", branch = "master" }
-libp2p = { git = "https://github.com/mwcproject/rust-libp2p", branch = "master", default-features = false, features = [ "noise", "yamux", "mplex", "dns", "tcp-tokio", "ping", "gossipsub"] }
+mwc-wagyu-ethereum = { git = "https://github.com/mwcproject/wagyu-ethereum", branch = "master" }
+mwc-libp2p = { git = "https://github.com/mwcproject/rust-libp2p", branch = "master", default-features = false, features = [ "noise", "yamux", "mplex", "dns", "tcp-tokio", "ping", "gossipsub"] }
 #libp2p = { path = "../../rust-libp2p", default-features = false, features = [ "noise", "yamux", "mplex", "dns", "tcp-tokio", "ping", "gossipsub"] }
 
-grin_wallet_util = { path = "../util", version = "5.3.3" }
-grin_wallet_api = { path = "../api", version = "5.3.3" }
-grin_wallet_impls = { path = "../impls", version = "5.3.3" }
-grin_wallet_libwallet = { path = "../libwallet", version = "5.3.3" }
-grin_wallet_config = { path = "../config", version = "5.3.3" }
+mwc_wallet_util = { path = "../util", version = "5.3.3" }
+mwc_wallet_api = { path = "../api", version = "5.3.3" }
+mwc_wallet_impls = { path = "../impls", version = "5.3.3" }
+mwc_wallet_libwallet = { path = "../libwallet", version = "5.3.3" }
+mwc_wallet_config = { path = "../config", version = "5.3.3" }
 
 [dev-dependencies]
 remove_dir_all = "0.7"

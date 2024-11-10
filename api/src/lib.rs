@@ -1,4 +1,4 @@
-// Copyright 2021 The Grin Developers
+// Copyright 2021 The Mwc Developers
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,12 +21,12 @@
 #![deny(non_snake_case)]
 #![deny(unused_mut)]
 
-use grin_wallet_config as config;
-use grin_wallet_util::grin_core as core;
-use grin_wallet_util::grin_keychain as keychain;
-use grin_wallet_util::grin_util as util;
-extern crate grin_wallet_impls as impls;
-extern crate grin_wallet_libwallet as libwallet;
+use mwc_wallet_config as config;
+use mwc_wallet_util::mwc_core as core;
+use mwc_wallet_util::mwc_keychain as keychain;
+use mwc_wallet_util::mwc_util as util;
+extern crate mwc_wallet_impls as impls;
+extern crate mwc_wallet_libwallet as libwallet;
 
 #[macro_use]
 extern crate serde_derive;

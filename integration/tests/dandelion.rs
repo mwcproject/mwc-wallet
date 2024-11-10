@@ -1,4 +1,4 @@
-// Copyright 2021 The Grin Developers
+// Copyright 2021 The Mwc Developers
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,8 +19,8 @@ mod framework;
 
 use self::util::Mutex;
 use crate::framework::{LocalServerContainer, LocalServerContainerConfig};
-use grin_core as core;
-use grin_util as util;
+use mwc_core as core;
+use mwc_util as util;
 use std::sync::Arc;
 use std::{thread, time};
 
@@ -127,7 +127,7 @@ fn test_dandelion_timeout() {
 			LocalServerContainer::get_wallet_info(&coinbase_wallet_config, &coinbase_seed);
 	}
 
-	warn!("Sending 50 Grins to recipient wallet");
+	warn!("Sending 50 Mwcs to recipient wallet");
 
 	// Sending stem transaction
 	LocalServerContainer::send_amount_to(

@@ -1,4 +1,4 @@
-// Copyright 2021 The Grin Developers
+// Copyright 2021 The Mwc Developers
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -14,12 +14,12 @@
 //! tests ttl_cutoff blocks
 #[macro_use]
 extern crate log;
-extern crate grin_wallet_controller as wallet;
-extern crate grin_wallet_impls as impls;
-extern crate grin_wallet_util;
+extern crate mwc_wallet_controller as wallet;
+extern crate mwc_wallet_impls as impls;
+extern crate mwc_wallet_util;
 
-use grin_wallet_libwallet as libwallet;
-use grin_wallet_util::grin_core::global;
+use mwc_wallet_libwallet as libwallet;
+use mwc_wallet_util::mwc_core::global;
 use impls::test_framework::{self, LocalWalletClient};
 use libwallet::{InitTxArgs, Slate, TxLogEntryType};
 use std::sync::atomic::Ordering;
@@ -79,7 +79,7 @@ fn ttl_cutoff_test_impl(test_dir: &'static str) -> Result<(), wallet::Error> {
 	let _ =
 		test_framework::award_blocks_to_wallet(&chain, wallet1.clone(), mask1, bh as usize, false);
 
-	let amount = 2_000_000_000; // grin had 60_000_000_000
+	let amount = 2_000_000_000; // mwc had 60_000_000_000
 	let mut slate = Slate::blank(1, false);
 	wallet::controller::owner_single_use(Some(wallet1.clone()), mask1, None, |sender_api, m| {
 		// note this will increment the block count as part of the transaction "Posting"

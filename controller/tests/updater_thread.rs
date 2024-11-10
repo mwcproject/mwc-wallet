@@ -1,4 +1,4 @@
-// Copyright 2021 The Grin Developers
+// Copyright 2021 The Mwc Developers
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -14,15 +14,15 @@
 //! Test a wallet repost command
 #[macro_use]
 extern crate log;
-extern crate grin_wallet_api as api;
-extern crate grin_wallet_controller as wallet;
-extern crate grin_wallet_impls as impls;
-extern crate grin_wallet_libwallet as libwallet;
+extern crate mwc_wallet_api as api;
+extern crate mwc_wallet_controller as wallet;
+extern crate mwc_wallet_impls as impls;
+extern crate mwc_wallet_libwallet as libwallet;
 
 // use crate::libwallet::api_impl::owner_updater::{start_updater_log_thread, StatusMessage};
-// use grin_wallet_util::grin_core as core;
+// use mwc_wallet_util::mwc_core as core;
 
-use grin_wallet_util::grin_core::global;
+use mwc_wallet_util::mwc_core::global;
 use impls::test_framework::{self, LocalWalletClient};
 use std::sync::atomic::Ordering;
 use std::thread;
@@ -103,7 +103,7 @@ fn updater_thread_test_impl(test_dir: &'static str) -> Result<(), wallet::Error>
 	thread::sleep(Duration::from_secs(10));
 
 	let messages = owner_api.get_updater_messages(1000)?;
-	assert!(messages.len() >= 15); // grin has 32 lines, mwc has 25 lines.  We don't want ot validate content, it will change. Just checking that it alive.
+	assert!(messages.len() >= 15); // mwc has 32 lines, mwc has 25 lines.  We don't want ot validate content, it will change. Just checking that it alive.
 
 	owner_api.stop_updater()?;
 	stopper.store(false, Ordering::Relaxed);

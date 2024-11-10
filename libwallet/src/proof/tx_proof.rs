@@ -1,4 +1,4 @@
-// Copyright 2020 The Grin Developers
+// Copyright 2020 The Mwc Developers
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,10 +13,10 @@
 // limitations under the License.
 
 extern crate colored;
-use crate::grin_util as util;
-use crate::grin_util::secp::key::{PublicKey, SecretKey};
-use crate::grin_util::secp::pedersen::Commitment;
-use crate::grin_util::secp::{pedersen, Secp256k1, Signature};
+use crate::mwc_util as util;
+use crate::mwc_util::secp::key::{PublicKey, SecretKey};
+use crate::mwc_util::secp::pedersen::Commitment;
+use crate::mwc_util::secp::{pedersen, Secp256k1, Signature};
 use crate::proof::crypto::Hex;
 
 use super::crypto;
@@ -33,9 +33,9 @@ use std::path::Path;
 use std::{fs, path};
 use util::Mutex;
 
-use crate::grin_core::core::amount_to_hr_string;
-use crate::grin_core::core::Committed;
-use crate::grin_core::global;
+use crate::mwc_core::core::amount_to_hr_string;
+use crate::mwc_core::core::Committed;
+use crate::mwc_core::global;
 use colored::*;
 use std::collections::HashSet;
 
@@ -696,7 +696,7 @@ pub fn verify_tx_proof_wrapper(
 
 	let outputs = outputs
 		.iter()
-		.map(|o| crate::grin_util::to_hex(&o.0))
+		.map(|o| crate::mwc_util::to_hex(&o.0))
 		.collect();
 
 	Ok((

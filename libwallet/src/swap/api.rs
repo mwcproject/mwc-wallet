@@ -16,16 +16,16 @@ use super::error::Error;
 use super::swap::Swap;
 use super::types::{Context, Currency};
 use super::Keychain;
-use crate::grin_core::global;
-use crate::grin_keychain::Identifier;
-use crate::grin_util::Mutex;
+use crate::mwc_core::global;
+use crate::mwc_keychain::Identifier;
+use crate::mwc_util::Mutex;
 use crate::swap::bitcoin::{BtcSwapApi, ElectrumNodeClient};
 use crate::swap::ethereum::{EthSwapApi, EthereumWallet, InfuraNodeClient};
 use crate::swap::fsm::machine::StateMachine;
 use crate::swap::message::SecondaryUpdate;
 use crate::swap::types::SwapTransactionsConfirmations;
 use crate::NodeClient;
-use grin_wallet_util::grin_util::secp::Secp256k1;
+use mwc_wallet_util::mwc_util::secp::Secp256k1;
 use std::sync::Arc;
 
 /// Swap API trait that is used by both Buyer and Seller.

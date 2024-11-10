@@ -1,4 +1,4 @@
-// Copyright 2021 The Grin Developers
+// Copyright 2021 The Mwc Developers
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,21 +17,21 @@
 
 use crate::blake2::blake2b::blake2b;
 use crate::error::Error;
-use crate::grin_core::core::amount_to_hr_string;
-use crate::grin_core::core::committed::Committed;
-use crate::grin_core::core::transaction::{
+use crate::mwc_core::core::amount_to_hr_string;
+use crate::mwc_core::core::committed::Committed;
+use crate::mwc_core::core::transaction::{
 	Input, KernelFeatures, Output, OutputFeatures, Transaction, TransactionBody, TxKernel,
 	Weighting,
 };
-use crate::grin_core::global;
-use crate::grin_core::libtx::{aggsig, build, proof::ProofBuild, secp_ser, tx_fee};
-use crate::grin_core::map_vec;
-use crate::grin_keychain::{BlindSum, BlindingFactor, Keychain, SwitchCommitmentType};
-use crate::grin_util::secp;
-use crate::grin_util::secp::key::{PublicKey, SecretKey};
-use crate::grin_util::secp::pedersen::Commitment;
-use crate::grin_util::secp::Signature;
-use crate::grin_util::ToHex;
+use crate::mwc_core::global;
+use crate::mwc_core::libtx::{aggsig, build, proof::ProofBuild, secp_ser, tx_fee};
+use crate::mwc_core::map_vec;
+use crate::mwc_keychain::{BlindSum, BlindingFactor, Keychain, SwitchCommitmentType};
+use crate::mwc_util::secp;
+use crate::mwc_util::secp::key::{PublicKey, SecretKey};
+use crate::mwc_util::secp::pedersen::Commitment;
+use crate::mwc_util::secp::Signature;
+use crate::mwc_util::ToHex;
 use crate::Context;
 use serde::ser::{Serialize, Serializer};
 use serde_json;
@@ -42,22 +42,22 @@ use uuid::Uuid;
 use crate::slate_versions::v2::SlateV2;
 use crate::slate_versions::v2::SlateV2ParseTTL;
 
-use crate::grin_core::consensus::WEEK_HEIGHT;
+use crate::mwc_core::consensus::WEEK_HEIGHT;
 use crate::slate_versions::v3::{
 	CoinbaseV3, InputV3, OutputV3, ParticipantDataV3, PaymentInfoV3, SlateV3, TransactionBodyV3,
 	TransactionV3, TxKernelV3, VersionCompatInfoV3,
 };
 
-// use crate::slate_versions::{CURRENT_SLATE_VERSION, GRIN_BLOCK_HEADER_VERSION};
-use crate::grin_core::core::{Inputs, NRDRelativeHeight, OutputIdentifier};
+// use crate::slate_versions::{CURRENT_SLATE_VERSION, MWC_BLOCK_HEADER_VERSION};
+use crate::mwc_core::core::{Inputs, NRDRelativeHeight, OutputIdentifier};
 use crate::proof::proofaddress;
 use crate::proof::proofaddress::ProvableAddress;
 use crate::types::CbData;
 use crate::{SlateVersion, Slatepacker, CURRENT_SLATE_VERSION};
 use ed25519_dalek::SecretKey as DalekSecretKey;
-use grin_wallet_util::grin_core::core::FeeFields;
-use grin_wallet_util::grin_util::secp::ContextFlag;
-use grin_wallet_util::grin_util::secp::Secp256k1;
+use mwc_wallet_util::mwc_core::core::FeeFields;
+use mwc_wallet_util::mwc_util::secp::ContextFlag;
+use mwc_wallet_util::mwc_util::secp::Secp256k1;
 use rand::rngs::mock::StepRng;
 use rand::thread_rng;
 
@@ -225,7 +225,7 @@ pub struct Slate {
 pub struct VersionCompatInfo {
 	/// The current version of the slate format
 	pub version: u16,
-	/// The grin block header version this slate is intended for
+	/// The mwc block header version this slate is intended for
 	pub block_header_version: u16,
 }
 
@@ -459,7 +459,7 @@ impl Slate {
 			participant_data: vec![],
 			version_info: VersionCompatInfo {
 				version: CURRENT_SLATE_VERSION,
-				block_header_version: 1, // GRIN_BLOCK_HEADER_VERSION,
+				block_header_version: 1, // MWC_BLOCK_HEADER_VERSION,
 			},
 			payment_proof: None,
 			offset: BlindingFactor::zero(),

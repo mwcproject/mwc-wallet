@@ -1,4 +1,4 @@
-// Copyright 2021 The Grin Developers
+// Copyright 2021 The Mwc Developers
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,11 +14,11 @@
 
 //! Error types for libwallet
 
-use crate::grin_core::core::{committed, transaction};
-use crate::grin_core::libtx;
-use crate::grin_keychain;
-use crate::grin_util::secp;
-use crate::util::{self, grin_store};
+use crate::mwc_core::core::{committed, transaction};
+use crate::mwc_core::libtx;
+use crate::mwc_keychain;
+use crate::mwc_util::secp;
+use crate::util::{self, mwc_store};
 use std::io;
 
 /// Wallet errors, mostly wrappers around underlying crypto or I/O errors.
@@ -51,7 +51,7 @@ pub enum Error {
 
 	/// Keychain error
 	#[error("Keychain error, {0}")]
-	Keychain(#[from] grin_keychain::Error),
+	Keychain(#[from] mwc_keychain::Error),
 
 	/// Transaction Error
 	#[error("Transaction error, {0}")]
@@ -87,7 +87,7 @@ pub enum Error {
 
 	/// Other serialization errors
 	#[error("Ser/Deserialization error, {0}")]
-	Deser(#[from] crate::grin_core::ser::Error),
+	Deser(#[from] crate::mwc_core::ser::Error),
 
 	/// IO Error
 	#[error("I/O error, {0}")]
@@ -375,8 +375,8 @@ impl From<secp::Error> for Error {
 	}
 }
 
-impl From<grin_store::Error> for Error {
-	fn from(error: grin_store::Error) -> Error {
+impl From<mwc_store::Error> for Error {
+	fn from(error: mwc_store::Error) -> Error {
 		Error::Backend(format!("{}", error))
 	}
 }

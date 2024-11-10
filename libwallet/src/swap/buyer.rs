@@ -20,13 +20,13 @@ use super::swap::{tx_add_input, tx_add_output, Swap};
 use super::types::*;
 use super::{Error, Keychain, CURRENT_VERSION};
 use crate::api_impl::owner_eth::get_eth_balance;
-use crate::grin_core::core::Committed;
-use crate::grin_core::core::KernelFeatures;
-use crate::grin_core::libtx::{build, proof, tx_fee};
-use crate::grin_keychain::{BlindSum, BlindingFactor, SwitchCommitmentType};
-use crate::grin_util::secp::aggsig;
-use crate::grin_util::secp::key::{PublicKey, SecretKey};
-use crate::grin_util::secp::pedersen::RangeProof;
+use crate::mwc_core::core::Committed;
+use crate::mwc_core::core::KernelFeatures;
+use crate::mwc_core::libtx::{build, proof, tx_fee};
+use crate::mwc_keychain::{BlindSum, BlindingFactor, SwitchCommitmentType};
+use crate::mwc_util::secp::aggsig;
+use crate::mwc_util::secp::key::{PublicKey, SecretKey};
+use crate::mwc_util::secp::pedersen::RangeProof;
 use crate::swap::bitcoin::BtcData;
 use crate::swap::ethereum::{EthData, EthereumWallet};
 use crate::swap::fsm::state::StateId;
@@ -496,7 +496,7 @@ impl BuyApi {
 
 		// Add multisig output to slate (with invalid proof)
 		let mut proof = RangeProof::zero();
-		proof.plen = crate::grin_util::secp::constants::MAX_PROOF_SIZE;
+		proof.plen = crate::mwc_util::secp::constants::MAX_PROOF_SIZE;
 
 		tx_add_output(slate, swap.multisig.commit(keychain.secp())?, proof)?;
 

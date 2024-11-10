@@ -17,14 +17,14 @@ use super::multisig::{Builder as MultisigBuilder, Hashed};
 use super::ser::*;
 use super::types::*;
 use super::{Error, Keychain};
-use crate::grin_core::core::{
+use crate::mwc_core::core::{
 	transaction as tx, CommitWrapper, Inputs, KernelFeatures, OutputIdentifier, TxKernel, Weighting,
 };
-use crate::grin_core::libtx::secp_ser;
-use crate::grin_keychain::{Identifier, SwitchCommitmentType};
-use crate::grin_util::secp::key::{PublicKey, SecretKey};
-use crate::grin_util::secp::pedersen::{Commitment, RangeProof};
-use crate::grin_util::secp::{Message as SecpMessage, Secp256k1, Signature};
+use crate::mwc_core::libtx::secp_ser;
+use crate::mwc_keychain::{Identifier, SwitchCommitmentType};
+use crate::mwc_util::secp::key::{PublicKey, SecretKey};
+use crate::mwc_util::secp::pedersen::{Commitment, RangeProof};
+use crate::mwc_util::secp::{Message as SecpMessage, Secp256k1, Signature};
 use crate::swap::fsm::state::StateId;
 use crate::{NodeClient, Slate};
 use chrono::{DateTime, Utc};
@@ -32,7 +32,7 @@ use std::convert::TryInto;
 use uuid::Uuid;
 
 #[cfg(test)]
-use crate::grin_util::RwLock;
+use crate::mwc_util::RwLock;
 
 /// Dummy wrapper for the hex-encoded serialized transaction.
 #[derive(Serialize, Deserialize)]

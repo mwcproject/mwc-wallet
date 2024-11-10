@@ -1,11 +1,11 @@
 [package]
-name = "grin_integration"
+name = "mwc_integration"
 version = "1.1.0"
-authors = ["Grin Developers <mimblewimble@lists.launchpad.net>"]
+authors = ["Mwc Developers <mimblewimble@lists.launchpad.net>"]
 description = "Simple, private and scalable cryptocurrency implementation based on the MimbleWimble chain format."
 license = "Apache-2.0"
-repository = "https://github.com/mimblewimble/grin"
-keywords = [ "crypto", "grin", "mimblewimble" ]
+repository = "https://github.com/mimblewimble/mwc"
+keywords = [ "crypto", "mwc", "mimblewimble" ]
 workspace = ".."
 edition = "2018"
 
@@ -23,16 +23,16 @@ tokio =  "0.1.22"
 blake2-rfc = "0.2"
 bufstream = "0.1"
 
-#grin_apiwallet = { path = "../apiwallet", version = "1.1.0" }
-#grin_libwallet = { path = "../libwallet", version = "1.1.0" }
-#grin_refwallet = { path = "../refwallet", version = "1.1.0" }
-#grin_wallet_config = { path = "../config", version = "1.1.0" }
+#mwc_apiwallet = { path = "../apiwallet", version = "1.1.0" }
+#mwc_libwallet = { path = "../libwallet", version = "1.1.0" }
+#mwc_refwallet = { path = "../refwallet", version = "1.1.0" }
+#mwc_wallet_config = { path = "../config", version = "1.1.0" }
 
-#grin_core = { git = "https://github.com/mimblewimble/grin", branch = "milestone/1.1.0" }
-#grin_keychain = { git = "https://github.com/mimblewimble/grin", branch = "milestone/1.1.0" }
-#grin_chain = { git = "https://github.com/mimblewimble/grin", branch = "milestone/1.1.0" }
-#grin_util = { git = "https://github.com/mimblewimble/grin", branch = "milestone/1.1.0" }
-#grin_api = { git = "https://github.com/mimblewimble/grin", branch = "milestone/1.1.0" }
-#grin_store = { git = "https://github.com/mimblewimble/grin", branch = "milestone/1.1.0" }
-#grin_p2p = { git = "https://github.com/mimblewimble/grin", branch = "milestone/1.1.0" }
-#grin_servers = { git = "https://github.com/mimblewimble/grin", branch = "milestone/1.1.0" }
+#mwc_core = { git = "https://github.com/mimblewimble/mwc", branch = "milestone/1.1.0" }
+#mwc_keychain = { git = "https://github.com/mimblewimble/mwc", branch = "milestone/1.1.0" }
+#mwc_chain = { git = "https://github.com/mimblewimble/mwc", branch = "milestone/1.1.0" }
+#mwc_util = { git = "https://github.com/mimblewimble/mwc", branch = "milestone/1.1.0" }
+#mwc_api = { git = "https://github.com/mimblewimble/mwc", branch = "milestone/1.1.0" }
+#mwc_store = { git = "https://github.com/mimblewimble/mwc", branch = "milestone/1.1.0" }
+#mwc_p2p = { git = "https://github.com/mimblewimble/mwc", branch = "milestone/1.1.0" }
+#mwc_servers = { git = "https://github.com/mimblewimble/mwc", branch = "milestone/1.1.0" }

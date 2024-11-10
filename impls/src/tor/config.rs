@@ -1,4 +1,4 @@
-// Copyright 2021 The Grin Developers
+// Copyright 2021 The Mwc Developers
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,7 +15,7 @@
 //! Tor Configuration + Onion (Hidden) Service operations
 use crate::util::secp::key::SecretKey;
 use crate::Error;
-use grin_wallet_util::OnionV3Address;
+use mwc_wallet_util::OnionV3Address;
 
 use crate::tor;
 use ed25519_dalek::ExpandedSecretKey;
@@ -355,7 +355,7 @@ pub fn complete_tor_address(input: &str) -> Result<String, Error> {
 mod tests {
 	use super::*;
 
-	use grin_wallet_util::grin_util::static_secp_instance;
+	use mwc_wallet_util::mwc_util::static_secp_instance;
 	use rand::rngs::mock::StepRng;
 
 	use crate::util::{self, secp};

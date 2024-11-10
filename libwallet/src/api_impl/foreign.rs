@@ -1,4 +1,4 @@
-// Copyright 2021 The Grin Developers
+// Copyright 2021 The Mwc Developers
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,10 +15,10 @@
 //! Generic implementation of owner API functions
 use crate::api_impl::owner::check_ttl;
 use crate::api_impl::owner_swap;
-use crate::grin_core::core::amount_to_hr_string;
-use crate::grin_keychain::Keychain;
-use crate::grin_util::secp::key::SecretKey;
-use crate::grin_util::Mutex;
+use crate::mwc_core::core::amount_to_hr_string;
+use crate::mwc_keychain::Keychain;
+use crate::mwc_util::secp::key::SecretKey;
+use crate::mwc_util::Mutex;
 use crate::internal::selection;
 use crate::internal::{tx, updater};
 use crate::proof::crypto::Hex;
@@ -32,7 +32,7 @@ use crate::{
 	VersionedSlate, WalletBackend, WalletInst, WalletLCProvider,
 };
 use ed25519_dalek::PublicKey as DalekPublicKey;
-use grin_wallet_util::OnionV3Address;
+use mwc_wallet_util::OnionV3Address;
 use std::sync::Arc;
 use std::sync::RwLock;
 use strum::IntoEnumIterator;

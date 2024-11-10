@@ -5,7 +5,7 @@ Mode of Interactions
 There's a variety of ways wallet software can be integrated with, from hardware
 to automated bots to the more classic desktop wallets. No single implementation
 can hope to accommodate all possible interactions, especially if it wants to
-remain user friendly (who or whatever the user may be). With that in mind, Grin
+remain user friendly (who or whatever the user may be). With that in mind, Mwc
 needs to provide a healthy base for a more complete wallet ecosystem to
 develop.
 
@@ -15,7 +15,7 @@ We propose to achieve this by implementing, as part of the "standard" wallet:
 * One or two default main mode of interaction.
 
 While not being exhaustive, the different ways we can imagine wallet software
-working with Grin are the following:
+working with Mwc are the following:
 
 1. A receive-only online wallet server. This should have some well-known network
    address that can be reached by a client. There should be a spending key kept
@@ -23,7 +23,7 @@ working with Grin are the following:
 1. A fully offline interaction. The sender uses her wallet to dump a file that's
    sent to the receiver in any practical way. The receiver builds upon that file,
    sending it back to the sender. The sender finalizes the transaction and sends it
-   to a Grin node.
+   to a Mwc node.
 1. Fully online interaction through a non-trusted 3rd party. In this mode
    receiver and sender both connect to a web server that facilitates the
    interaction. Exchanges can be all be encrypted.
@@ -35,7 +35,7 @@ working with Grin are the following:
 1. Fully programmatic. Similar to the online server, but both for receiving and
    sending, most likely by an automated bot of some sorts.
 
-As part of the Grin project, we will only consider the first 2 modes of
+As part of the Mwc project, we will only consider the first 2 modes of
 interaction. We hope that other projects and businesses will tackle other modes
 and perhaps even create new ones we haven't considered.
 
@@ -73,7 +73,7 @@ public key that can be derived similarly to Hierarchical Deterministic wallets
 would provide the best security and privacy.
 
 TODO figure out what's needed for the bulletproof. Maybe pre-compute multiple
-of them for ranges of receiving amounts (i.e. 1-10 grins, 10-100 grins, etc).
+of them for ranges of receiving amounts (i.e. 1-10 mwcs, 10-100 mwcs, etc).
 
 Offline Wallet
 --------------

@@ -1,4 +1,4 @@
-// Copyright 2021 The Grin Developers
+// Copyright 2021 The Mwc Developers
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -14,9 +14,9 @@
 //! Tests and experimentations with late locking
 #[macro_use]
 extern crate log;
-extern crate grin_wallet_controller as wallet;
-extern crate grin_wallet_impls as impls;
-extern crate grin_wallet_libwallet as libwallet;
+extern crate mwc_wallet_controller as wallet;
+extern crate mwc_wallet_impls as impls;
+extern crate mwc_wallet_libwallet as libwallet;
 
 use self::libwallet::{InitTxArgs, Slate};
 use impls::test_framework::{self, LocalWalletClient};
@@ -27,7 +27,7 @@ use std::time::Duration;
 #[macro_use]
 mod common;
 use common::{clean_output_dir, create_wallet_proxy, setup};
-use grin_wallet_util::grin_core::consensus::calc_mwc_block_reward;
+use mwc_wallet_util::mwc_core::consensus::calc_mwc_block_reward;
 
 /// self send impl
 fn late_lock_test_impl(test_dir: &'static str) -> Result<(), libwallet::Error> {

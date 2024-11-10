@@ -16,16 +16,16 @@ use super::bitcoin::{BtcBuyerContext, BtcData, BtcSellerContext};
 use super::ethereum::{EthBuyerContext, EthData, EthSellerContext, EthereumAddress};
 use super::ser::*;
 use super::Error;
-use crate::grin_core::global::ChainTypes;
-use crate::grin_core::{global, ser};
-use crate::grin_keychain::Identifier;
-use crate::grin_util::secp::key::SecretKey;
+use crate::mwc_core::global::ChainTypes;
+use crate::mwc_core::{global, ser};
+use crate::mwc_keychain::Identifier;
+use crate::mwc_util::secp::key::SecretKey;
 use crate::swap::message::Message;
 use bitcoin::Address;
 use std::convert::TryInto;
 use std::fmt;
 use std::{convert::TryFrom, str::FromStr};
-use web3::types::H160;
+use mwc_web3::types::H160;
 
 /// MWC Network where SWAP happens.
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
@@ -213,11 +213,11 @@ impl Currency {
 		Ok(amount)
 	}
 
-	fn bch_network() -> bch::network::Network {
+	fn bch_network() -> mwc_bch::network::Network {
 		if global::is_mainnet() {
-			bch::network::Network::Mainnet
+			mwc_bch::network::Network::Mainnet
 		} else {
-			bch::network::Network::Testnet
+			mwc_bch::network::Network::Testnet
 		}
 	}
 
@@ -260,11 +260,11 @@ impl Currency {
 			}
 			Currency::Bch => {
 				let nw = Self::bch_network();
-				let (v, _addr_type) = match bch::address::cashaddr_decode(&address, nw) {
+				let (v, _addr_type) = match mwc_bch::address::cashaddr_decode(&address, nw) {
 					Err(e) => {
 						// Try legacy address
 						// Intentionally return error from first call. Legacy address error is not interesting much
-						let (hash, addr_type) = bch::address::legacyaddr_decode(&address, nw)
+						let (hash, addr_type) = mwc_bch::address::legacyaddr_decode(&address, nw)
 							.map_err(|_| {
 								Error::Generic(format!(
 									"Unable to parse BCH address {}, {}",
@@ -375,7 +375,7 @@ impl Currency {
 				// With BCH problem that it doesn't have functionality to build scripts for pay to pubkey
 				// That is why we will use BTC library to do that.
 				// In order to do that, we need to have legacy address.
-				match bch::address::cashaddr_decode(&address, Self::bch_network()) {
+				match mwc_bch::address::cashaddr_decode(&address, Self::bch_network()) {
 					Err(_) => {
 						// Legacy address - that is what we need
 						address.clone()
@@ -394,9 +394,9 @@ impl Currency {
 						})?;
 						let hash_dt: [u8; 20] = *ba;
 
-						let hash160 = bch::util::Hash160(hash_dt);
+						let hash160 = mwc_bch::util::Hash160(hash_dt);
 						// Converting into legacy address that is equal to BTC.
-						bch::address::legacyaddr_encode(&hash160.0, addr_type, Self::bch_network())
+						mwc_bch::address::legacyaddr_encode(&hash160.0, addr_type, Self::bch_network())
 					}
 				}
 			}

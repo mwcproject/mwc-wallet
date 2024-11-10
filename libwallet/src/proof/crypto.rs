@@ -14,13 +14,13 @@
 
 use ed25519_dalek::PublicKey as DalekPublicKey;
 use ed25519_dalek::Signature as DalekSignature;
-use grin_wallet_util::grin_util::secp::key::{PublicKey, SecretKey};
-use grin_wallet_util::grin_util::secp::pedersen::Commitment;
-use grin_wallet_util::grin_util::secp::{ContextFlag, Message, Secp256k1, Signature};
+use mwc_wallet_util::mwc_util::secp::key::{PublicKey, SecretKey};
+use mwc_wallet_util::mwc_util::secp::pedersen::Commitment;
+use mwc_wallet_util::mwc_util::secp::{ContextFlag, Message, Secp256k1, Signature};
 
 use super::base58;
 use crate::error::Error;
-use crate::grin_util as util;
+use crate::mwc_util as util;
 use sha2::{Digest, Sha256};
 
 /// Build a public key for the given private key

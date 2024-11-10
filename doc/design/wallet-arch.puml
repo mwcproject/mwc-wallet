@@ -1,9 +1,9 @@
-@startuml grin-wallet-overview 
+@startuml mwc-wallet-overview 
 skinparam componentStyle uml2
 
-[Grin Node] as grin_node
+[Mwc Node] as mwc_node
 
-folder "Provided by Grin" as services {
+folder "Provided by Mwc" as services {
 	component foreign_api [
 		**Foreign API**
 		External-Facing functions
@@ -45,7 +45,7 @@ package "Traits Implemented by Wallets" as traits {
 
 note left of wallet_client
     - Communication layer implementation
-    - Handles underlying communication with grin node
+    - Handles underlying communication with mwc node
        or other wallets
     - HTTP implementation provided currently, (Other,
        more secure protocols possible.)
@@ -83,7 +83,7 @@ end note
 [External Wallets] as external_wallets
 [External Wallets] as external_wallets_2
 
-wallet_client <--> grin_node
+wallet_client <--> mwc_node
 wallet_client <--> external_wallets_2
 
 web_server <--> owner_http
@@ -105,6 +105,6 @@ external_wallets <--> foreign_http
 foreign_http <--> foreign_api
 
 'layout fix
-'grin_node -[hidden]- wallet_backend
+'mwc_node -[hidden]- wallet_backend
 
 @enduml

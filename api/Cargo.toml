@@ -1,12 +1,12 @@
 [package]
-name = "grin_wallet_api"
+name = "mwc_wallet_api"
 version = "5.3.3"
-authors = ["Grin Developers <mimblewimble@lists.launchpad.net>"]
-description = "Grin Wallet API"
+authors = ["Mwc Developers <mimblewimble@lists.launchpad.net>"]
+description = "Mwc Wallet API"
 license = "Apache-2.0"
-repository = "https://github.com/mimblewimble/grin-wallet"
-keywords = [ "crypto", "grin", "mimblewimble" ]
-exclude = ["**/*.grin", "**/*.grin2"]
+repository = "https://github.com/mimblewimble/mwc-wallet"
+keywords = [ "crypto", "mwc", "mimblewimble" ]
+exclude = ["**/*.mwc", "**/*.mwc2"]
 edition = "2018"
 
 [dependencies]
@@ -24,10 +24,10 @@ ed25519-dalek = "1.0.0-pre.4"
 colored = "1.6"
 x25519-dalek = "0.6"
 
-grin_wallet_libwallet = { path = "../libwallet", version = "5.3.3" }
-grin_wallet_config = { path = "../config", version = "5.3.3" }
-grin_wallet_impls = { path = "../impls", version = "5.3.3" }
-grin_wallet_util = { path = "../util", version = "5.3.3" }
+mwc_wallet_libwallet = { path = "../libwallet", version = "5.3.3" }
+mwc_wallet_config = { path = "../config", version = "5.3.3" }
+mwc_wallet_impls = { path = "../impls", version = "5.3.3" }
+mwc_wallet_util = { path = "../util", version = "5.3.3" }
 
 [dev-dependencies]
 serde_json = "1"

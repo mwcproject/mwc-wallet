@@ -1,4 +1,4 @@
-// Copyright 2021 The Grin Developers
+// Copyright 2021 The Mwc Developers
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -14,15 +14,15 @@
 //! tests differing accounts in the same wallet
 #[macro_use]
 extern crate log;
-extern crate grin_wallet_controller as wallet;
-extern crate grin_wallet_impls as impls;
+extern crate mwc_wallet_controller as wallet;
+extern crate mwc_wallet_impls as impls;
 
-use grin_wallet_util::grin_core as core;
-use grin_wallet_util::grin_util as util;
+use mwc_wallet_util::mwc_core as core;
+use mwc_wallet_util::mwc_util as util;
 
 use self::core::consensus;
 use self::core::global;
-use grin_wallet_libwallet as libwallet;
+use mwc_wallet_libwallet as libwallet;
 use impls::test_framework::{self, LocalWalletClient};
 use impls::{PathToSlatePutter, SlatePutter};
 use libwallet::{InitTxArgs, NodeClient};
@@ -34,7 +34,7 @@ use util::ZeroingString;
 #[macro_use]
 mod common;
 use common::{clean_output_dir, create_wallet_proxy, setup};
-use grin_wallet_util::grin_util::secp::Secp256k1;
+use mwc_wallet_util::mwc_util::secp::Secp256k1;
 
 macro_rules! send_to_dest {
 	($a:expr, $m: expr, $b:expr, $c:expr, $d:expr) => {

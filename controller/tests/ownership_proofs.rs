@@ -1,4 +1,4 @@
-// Copyright 2024 The Grin Developers
+// Copyright 2024 The Mwc Developers
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -14,10 +14,10 @@
 //! Test a wallet sending to self
 #[macro_use]
 extern crate log;
-extern crate grin_wallet_controller as wallet;
-extern crate grin_wallet_impls as impls;
+extern crate mwc_wallet_controller as wallet;
+extern crate mwc_wallet_impls as impls;
 
-use grin_wallet_util::grin_core::global;
+use mwc_wallet_util::mwc_core::global;
 
 use impls::test_framework::{self, LocalWalletClient};
 use std::sync::atomic::Ordering;
@@ -27,8 +27,8 @@ use std::time::Duration;
 #[macro_use]
 mod common;
 use common::{clean_output_dir, create_wallet_proxy, setup};
-use grin_wallet_libwallet::PubKeySignature;
-use grin_wallet_util::grin_util::ZeroingString;
+use mwc_wallet_libwallet::PubKeySignature;
+use mwc_wallet_util::mwc_util::ZeroingString;
 
 /// self send impl
 fn ownership_proof_impl(test_dir: &'static str) -> Result<(), wallet::Error> {

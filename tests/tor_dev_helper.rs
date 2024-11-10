@@ -1,4 +1,4 @@
-// Copyright 2021 The Grin Developers
+// Copyright 2021 The Mwc Developers
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -19,16 +19,16 @@ extern crate log;
 
 extern crate mwc_wallet;
 
-use grin_wallet_impls::test_framework::{self, LocalWalletClient, WalletProxy};
+use mwc_wallet_impls::test_framework::{self, LocalWalletClient, WalletProxy};
 
 use clap::App;
 use std::thread;
 use std::time::Duration;
 
-use grin_wallet_impls::DefaultLCProvider;
-use grin_wallet_util::grin_keychain::ExtKeychain;
+use mwc_wallet_impls::DefaultLCProvider;
+use mwc_wallet_util::mwc_keychain::ExtKeychain;
 
-use grin_wallet_util::grin_util as util;
+use mwc_wallet_util::mwc_util as util;
 
 #[macro_use]
 mod common;
@@ -44,7 +44,7 @@ fn setup_no_clean() {
 
 #[ignore]
 #[test]
-fn socks_tor() -> Result<(), grin_wallet_controller::Error> {
+fn socks_tor() -> Result<(), mwc_wallet_controller::Error> {
 	// For windows we can't run it because of the leaks. And we dont want to see bunch of warnings as well
 	#[cfg(target_os = "windows")]
 	if true {

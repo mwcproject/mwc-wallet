@@ -16,9 +16,9 @@ Slatepacks are intented to simplify the exchange process for Slates in a secure 
 * Files are susceptible to man in the middle attack because files are not addressed to specific wallet.
 * Users don't like files for exchanges. Sting with content is more friendly.
 
-To address those issues MWC adopts grin's Slatepacks:  https://docs.grin.mw/wiki/transactions/slatepack/ <br>
+To address those issues MWC adopts mwc's Slatepacks:  https://docs.mwc.mw/wiki/transactions/slatepack/ <br>
 Altho MWC slatepacks look very similar, the implementation is very different.
-This document desribes the Slatepack format and our deviation from grins Implementation.
+This document desribes the Slatepack format and our deviation from mwcs Implementation.
 
 # Community-level explanation
 Slatepacks Simplify the existing transaction process so that a transaction can be built using a copy and pastable SlatepackMessage string asynchronously.
@@ -46,8 +46,8 @@ Please note, ProvableAddress is applicable to encrypted slatepack only.
 
 ## Message Armor
 
-Grin Armor does binary to Base58 conversion and it works great for us. This part works as it is, the only change is the header and footer.
-https://docs.grin.mw/wiki/transactions/slatepack/#armor
+Mwc Armor does binary to Base58 conversion and it works great for us. This part works as it is, the only change is the header and footer.
+https://docs.mwc.mw/wiki/transactions/slatepack/#armor
 
 For normal encrypted slatepacks the header/footer are: BEGINSLATEPACK / ENDSLATEPACK
 
@@ -55,7 +55,7 @@ For non encrypted slatepacks in binary format the header/footer are: BEGINSLATE_
 
 ## Encryption/Decryption
 
-Grin's original design is using the 'age' rust library for encryption/decryption. The Age library had a huge data overhead on data size.
+Mwc's original design is using the 'age' rust library for encryption/decryption. The Age library had a huge data overhead on data size.
 The header is about 350 bytes. For example, initial send message size less then 150 bytes. Such overhead is not acceptable.
 Also it is not clear if age will allow to read the message that was archived. 
 

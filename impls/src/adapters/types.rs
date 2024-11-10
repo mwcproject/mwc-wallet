@@ -1,12 +1,12 @@
 //The following is support mqs usage in mwc713
 use crate::error::Error;
-use grin_wallet_libwallet::swap::message::Message;
-use grin_wallet_libwallet::Slate;
+use mwc_wallet_libwallet::swap::message::Message;
+use mwc_wallet_libwallet::Slate;
 use std::sync::mpsc::Sender;
 use url::Url; //only for the Address::parse
 
-use grin_wallet_libwallet::proof::proofaddress::ProvableAddress;
-use grin_wallet_util::grin_util::secp::Secp256k1;
+use mwc_wallet_libwallet::proof::proofaddress::ProvableAddress;
+use mwc_wallet_util::mwc_util::secp::Secp256k1;
 use regex::Regex;
 use std::fmt::{self, Debug, Display};
 

@@ -1,4 +1,4 @@
-// Copyright 2021 The Grin Developers
+// Copyright 2021 The Mwc Developers
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -28,9 +28,9 @@ use crate::libwallet::Slate;
 use crate::tor::config::complete_tor_address;
 use crate::util::ZeroingString;
 use ed25519_dalek::{PublicKey as DalekPublicKey, SecretKey as DalekSecretKey};
-use grin_wallet_libwallet::slatepack::SlatePurpose;
-use grin_wallet_libwallet::{SlateVersion, Slatepacker};
-use grin_wallet_util::grin_util::secp::Secp256k1;
+use mwc_wallet_libwallet::slatepack::SlatePurpose;
+use mwc_wallet_libwallet::{SlateVersion, Slatepacker};
+use mwc_wallet_util::mwc_util::secp::Secp256k1;
 pub use mwcmq::{
 	get_mwcmqs_brocker, init_mwcmqs_access_data, MWCMQPublisher, MWCMQSubscriber, MwcMqsChannel,
 };

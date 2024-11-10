@@ -14,14 +14,14 @@
 
 use super::error::Error;
 use crate::blake2::blake2b::blake2b;
-use crate::grin_core::core::{
+use crate::mwc_core::core::{
 	Input as TxInput, Output as TxOutput, OutputFeatures, OutputIdentifier,
 };
-use crate::grin_core::libtx::secp_ser;
-use crate::grin_util::secp::constants::SECRET_KEY_SIZE;
-use crate::grin_util::secp::key::{PublicKey, SecretKey};
-use crate::grin_util::secp::pedersen::{Commitment, RangeProof};
-use crate::grin_util::secp::Secp256k1;
+use crate::mwc_core::libtx::secp_ser;
+use crate::mwc_util::secp::constants::SECRET_KEY_SIZE;
+use crate::mwc_util::secp::key::{PublicKey, SecretKey};
+use crate::mwc_util::secp::pedersen::{Commitment, RangeProof};
+use crate::mwc_util::secp::Secp256k1;
 use crate::swap::ser::*;
 use hex::FromHex;
 use rand::thread_rng;
@@ -541,7 +541,7 @@ impl Hashed for Vec<u8> {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::grin_util::secp::ContextFlag;
+	use crate::mwc_util::secp::ContextFlag;
 	use rand::thread_rng;
 
 	/*

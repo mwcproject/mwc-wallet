@@ -1,4 +1,4 @@
-// Copyright 2021 The Grin Developers
+// Copyright 2021 The Mwc Developers
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,16 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! A threaded persistent Updater that can be controlled by a grin wallet
+//! A threaded persistent Updater that can be controlled by a mwc wallet
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
-use crate::grin_keychain::Keychain;
-use crate::grin_util::secp::key::SecretKey;
-use crate::grin_util::Mutex;
+use crate::mwc_keychain::Keychain;
+use crate::mwc_util::secp::key::SecretKey;
+use crate::mwc_util::Mutex;
 
 use crate::api_impl::owner;
 use crate::types::NodeClient;

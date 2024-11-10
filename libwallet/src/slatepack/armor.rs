@@ -1,4 +1,4 @@
-// Copyright 2021 The Grin Developers
+// Copyright 2021 The Mwc Developers
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,7 +21,7 @@
 // Finally add armor framing and space/newline formatting as desired
 
 use crate::Error;
-use grin_wallet_util::grin_core::global::max_tx_weight;
+use mwc_wallet_util::mwc_core::global::max_tx_weight;
 use regex::Regex;
 use sha2::{Digest, Sha256};
 use std::str;

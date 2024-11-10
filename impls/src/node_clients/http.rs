@@ -1,4 +1,4 @@
-// Copyright 2021 The Grin Developers
+// Copyright 2021 The Mwc Developers
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -31,8 +31,8 @@ use crate::util::ToHex;
 
 use super::resp_types::*;
 use crate::client_utils::json_rpc::*;
-use grin_wallet_util::grin_api::{Libp2pMessages, Libp2pPeers};
-use grin_wallet_util::RUNTIME;
+use mwc_wallet_util::mwc_api::{Libp2pMessages, Libp2pPeers};
+use mwc_wallet_util::RUNTIME;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
@@ -100,7 +100,7 @@ pub struct HTTPNodeClient {
 }
 
 impl HTTPNodeClient {
-	/// Create a new client that will communicate with the given grin node
+	/// Create a new client that will communicate with the given mwc node
 	pub fn new(
 		node_url_list: Vec<String>,
 		node_api_secret: Option<String>,
@@ -179,14 +179,14 @@ impl HTTPNodeClient {
 	fn get_connected_peer_info_impls(
 		&self,
 		counter: i32,
-	) -> Result<Vec<crate::grin_p2p::types::PeerInfoDisplayLegacy>, libwallet::Error> {
+	) -> Result<Vec<crate::mwc_p2p::types::PeerInfoDisplayLegacy>, libwallet::Error> {
 		// There is no v2 API with connected peers. Keep using v1 for that
 		let addr = self.node_url()?;
 		let url = format!("{}/v1/peers/connected", addr);
 
 		let res = self
 			.client
-			.get::<Vec<crate::grin_p2p::types::PeerInfoDisplayLegacy>>(
+			.get::<Vec<crate::mwc_p2p::types::PeerInfoDisplayLegacy>>(
 				url.as_str(),
 				self.node_api_secret(),
 			);
@@ -274,12 +274,12 @@ impl HTTPNodeClient {
 		// to the json RPC api to keep the functionality of
 		// parallelizing larger requests.
 		let chunk_default = 200;
-		let chunk_size = match env::var("GRIN_OUTPUT_QUERY_SIZE") {
+		let chunk_size = match env::var("MWC_OUTPUT_QUERY_SIZE") {
 			Ok(s) => match s.parse::<usize>() {
 				Ok(c) => c,
 				Err(e) => {
 					error!(
-						"Unable to parse GRIN_OUTPUT_QUERY_SIZE, defaulting to {}",
+						"Unable to parse MWC_OUTPUT_QUERY_SIZE, defaulting to {}",
 						chunk_default
 					);
 					error!("Reason: {}", e);
@@ -447,7 +447,7 @@ impl NodeClient for HTTPNodeClient {
 		Some(retval)
 	}
 
-	/// Posts a transaction to a grin node
+	/// Posts a transaction to a mwc node
 	fn post_tx(&self, tx: &Transaction, fluff: bool) -> Result<(), libwallet::Error> {
 		let params = json!([tx, fluff]);
 		self.send_json_request::<serde_json::Value>("push_transaction", &params, NODE_CALL_RETRY)?;
@@ -500,7 +500,7 @@ impl NodeClient for HTTPNodeClient {
 	/// Return Connected peers
 	fn get_connected_peer_info(
 		&self,
-	) -> Result<Vec<crate::grin_p2p::types::PeerInfoDisplayLegacy>, libwallet::Error> {
+	) -> Result<Vec<crate::mwc_p2p::types::PeerInfoDisplayLegacy>, libwallet::Error> {
 		self.get_connected_peer_info_impls(1)
 	}
 
@@ -705,7 +705,7 @@ mod tests {
 	use crate::util;
 	use crate::util::secp::pedersen::Commitment;
 	use crate::HTTPNodeClient;
-	use grin_wallet_libwallet::NodeClient;
+	use mwc_wallet_libwallet::NodeClient;
 	use std::thread;
 	use std::thread::JoinHandle;
 	use std::time::Instant;

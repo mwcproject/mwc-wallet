@@ -1,4 +1,4 @@
-// Copyright 2021 The Grin Developers
+// Copyright 2021 The Mwc Developers
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,7 +15,7 @@
 use crate::cmd::wallet_args;
 use crate::config::GlobalWalletConfig;
 use clap::ArgMatches;
-use grin_wallet_libwallet::NodeClient;
+use mwc_wallet_libwallet::NodeClient;
 use std::thread;
 use std::time::Duration;
 

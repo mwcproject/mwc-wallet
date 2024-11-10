@@ -1,4 +1,4 @@
-// Copyright 2021 The Grin Developers
+// Copyright 2021 The Mwc Developers
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,10 +14,10 @@
 
 //! Types specific to the wallet api, mostly argument serialization
 
-use crate::grin_core::core::Output;
-use crate::grin_core::libtx::secp_ser;
-use crate::grin_keychain::{BlindingFactor, Identifier};
-use crate::grin_util::secp::pedersen;
+use crate::mwc_core::core::Output;
+use crate::mwc_core::libtx::secp_ser;
+use crate::mwc_keychain::{BlindingFactor, Identifier};
+use crate::mwc_util::secp::pedersen;
 use crate::proof::proofaddress;
 use crate::proof::proofaddress::ProvableAddress;
 use crate::slate_versions::SlateVersion;
@@ -50,7 +50,7 @@ pub struct SendTXArgs {
 	pub target_slate_version: Option<u16>,
 }
 
-/// Type for storing amounts (in nanogrins).
+/// Type for storing amounts (in nanomwcs).
 /// Serializes as a string but can deserialize from a string or u64.
 #[derive(Serialize, Deserialize)]
 pub struct Amount(#[serde(with = "secp_ser::string_or_u64")] pub u64);
@@ -60,7 +60,7 @@ pub struct Amount(#[serde(with = "secp_ser::string_or_u64")] pub u64);
 pub struct InitTxArgs {
 	/// The human readable account name from which to draw outputs
 	/// for the transaction, overriding whatever the active account is as set via the
-	/// [`set_active_account`](../grin_wallet_api/owner/struct.Owner.html#method.set_active_account) method.
+	/// [`set_active_account`](../mwc_wallet_api/owner/struct.Owner.html#method.set_active_account) method.
 	///
 	#[serde(default)]
 	pub src_acct_name: Option<String>,
@@ -239,10 +239,10 @@ impl InitTxSendArgs {
 pub struct IssueInvoiceTxArgs {
 	/// The human readable account name to which the received funds should be added
 	/// overriding whatever the active account is as set via the
-	/// [`set_active_account`](../grin_wallet_api/owner/struct.Owner.html#method.set_active_account) method.
+	/// [`set_active_account`](../mwc_wallet_api/owner/struct.Owner.html#method.set_active_account) method.
 	#[serde(default)]
 	pub dest_acct_name: Option<String>,
-	/// The invoice amount in nanogrins. (`1 G = 1_000_000_000nG`)
+	/// The invoice amount in nanomwcs. (`1 G = 1_000_000_000nG`)
 	#[serde(with = "secp_ser::string_or_u64")]
 	pub amount: u64,
 	/// Optional message, that will be signed

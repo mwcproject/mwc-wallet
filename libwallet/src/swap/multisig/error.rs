@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::grin_util::secp;
+use crate::mwc_util::secp;
 
 /// Multisig error
 #[derive(Clone, Eq, PartialEq, Debug, thiserror::Error)]

@@ -1,4 +1,4 @@
-// Copyright 2021 The Grin Developers
+// Copyright 2021 The Mwc Developers
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,7 +17,7 @@ use crate::{Slate, SlateVersion, Slatepack, SlatepackArmor};
 
 use ed25519_dalek::PublicKey as DalekPublicKey;
 use ed25519_dalek::SecretKey as DalekSecretKey;
-use grin_wallet_util::grin_util::secp::Secp256k1;
+use mwc_wallet_util::mwc_util::secp::Secp256k1;
 
 use crate::slatepack::slatepack::SlatePurpose;
 
@@ -118,20 +118,20 @@ impl Slatepacker {
 
 #[test]
 fn slatepack_io_test() {
-	use crate::grin_core::core::KernelFeatures;
-	use crate::grin_core::core::{Input, Output, OutputFeatures, Transaction, TxKernel};
-	use crate::grin_core::global;
-	use crate::grin_keychain::BlindingFactor;
-	use crate::grin_keychain::ExtKeychain;
-	use crate::grin_util as util;
-	use crate::grin_util::secp::pedersen::{Commitment, RangeProof};
-	use crate::grin_util::secp::Signature;
-	use crate::grin_util::secp::{PublicKey, SecretKey};
+	use crate::mwc_core::core::KernelFeatures;
+	use crate::mwc_core::core::{Input, Output, OutputFeatures, Transaction, TxKernel};
+	use crate::mwc_core::global;
+	use crate::mwc_keychain::BlindingFactor;
+	use crate::mwc_keychain::ExtKeychain;
+	use crate::mwc_util as util;
+	use crate::mwc_util::secp::pedersen::{Commitment, RangeProof};
+	use crate::mwc_util::secp::Signature;
+	use crate::mwc_util::secp::{PublicKey, SecretKey};
 	use crate::proof::proofaddress;
 	use crate::proof::proofaddress::ProvableAddress;
 	use crate::slate::{PaymentInfo, VersionCompatInfo};
 	use crate::ParticipantData;
-	use grin_wallet_util::grin_util::secp::Secp256k1;
+	use mwc_wallet_util::mwc_util::secp::Secp256k1;
 	use uuid::Uuid;
 	use x25519_dalek::PublicKey as xDalekPublicKey;
 

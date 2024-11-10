@@ -1,12 +1,12 @@
 [package]
-name = "grin_wallet_impls"
+name = "mwc_wallet_impls"
 version = "5.3.3"
-authors = ["Grin Developers <mimblewimble@lists.launchpad.net>"]
+authors = ["Mwc Developers <mimblewimble@lists.launchpad.net>"]
 description = "Concrete types derived from libwallet traits"
 license = "Apache-2.0"
-repository = "https://github.com/mimblewimble/grin-wallet"
-keywords = [ "crypto", "grin", "mimblewimble" ]
-exclude = ["**/*.grin", "**/*.grin2"]
+repository = "https://github.com/mimblewimble/mwc-wallet"
+keywords = [ "crypto", "mwc", "mimblewimble" ]
+exclude = ["**/*.mwc", "**/*.mwc2"]
 edition = "2018"
 
 [dependencies]
@@ -38,12 +38,12 @@ sysinfo = "0.29"
 base64 = "0.12.0"
 url = "2.1"
 
-libp2p = { git = "https://github.com/mwcproject/rust-libp2p", branch = "master", default-features = false, features = [ "noise", "yamux", "mplex", "dns", "tcp-tokio", "ping", "gossipsub"] }
+mwc-libp2p = { git = "https://github.com/mwcproject/rust-libp2p", branch = "master", default-features = false, features = [ "noise", "yamux", "mplex", "dns", "tcp-tokio", "ping", "gossipsub"] }
 #libp2p = { path = "../../rust-libp2p", default-features = false, features = [ "noise", "yamux", "mplex", "dns", "tcp-tokio", "ping", "gossipsub"] }
 
-grin_wallet_util = { path = "../util", version = "5.3.3" }
-grin_wallet_config = { path = "../config", version = "5.3.3" }
-grin_wallet_libwallet = { path = "../libwallet", version = "5.3.3" }
+mwc_wallet_util = { path = "../util", version = "5.3.3" }
+mwc_wallet_config = { path = "../config", version = "5.3.3" }
+mwc_wallet_libwallet = { path = "../libwallet", version = "5.3.3" }
 
 [dev-dependencies]
 "remove_dir_all" = "0.7"

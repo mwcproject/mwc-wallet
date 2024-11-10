@@ -1,4 +1,4 @@
-// Copyright 2019 The Grin Developers
+// Copyright 2019 The Mwc Developers
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -32,8 +32,8 @@ use crate::util::Mutex;
 use crate::{Owner, OwnerRpcV3};
 use easy_jsonrpc_mw;
 use ed25519_dalek::PublicKey as DalekPublicKey;
-use grin_wallet_libwallet::proof::proofaddress::{self, ProvableAddress};
-use grin_wallet_util::grin_util::secp::Secp256k1;
+use mwc_wallet_libwallet::proof::proofaddress::{self, ProvableAddress};
+use mwc_wallet_util::mwc_util::secp::Secp256k1;
 use std::convert::TryFrom;
 use std::sync::Arc;
 use std::time::Duration;
@@ -50,7 +50,7 @@ pub trait OwnerRpcV2: Sync + Send {
 	# Json rpc example
 
 	```
-	# grin_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
+	# mwc_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
 	# r#"
 	{
 		"jsonrpc": "2.0",
@@ -85,7 +85,7 @@ pub trait OwnerRpcV2: Sync + Send {
 	# Json rpc example
 
 	```
-	# grin_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
+	# mwc_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
 	# r#"
 	{
 		"jsonrpc": "2.0",
@@ -118,7 +118,7 @@ pub trait OwnerRpcV2: Sync + Send {
 	# Json rpc example
 
 	```
-	# grin_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
+	# mwc_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
 	# r#"
 	{
 		"jsonrpc": "2.0",
@@ -150,7 +150,7 @@ pub trait OwnerRpcV2: Sync + Send {
 	# Json rpc example
 
 	```
-	# grin_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
+	# mwc_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
 	# r#"
 	{
 		"jsonrpc": "2.0",
@@ -225,7 +225,7 @@ pub trait OwnerRpcV2: Sync + Send {
 	# Json rpc example
 
 	```
-		# grin_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
+		# mwc_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
 		# r#"
 		{
 			"jsonrpc": "2.0",
@@ -323,7 +323,7 @@ pub trait OwnerRpcV2: Sync + Send {
 	Networked version of [Owner::retrieve_summary_info](struct.Owner.html#method.retrieve_summary_info).
 
 	```
-	# grin_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
+	# mwc_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
 	# r#"
 	{
 		"jsonrpc": "2.0",
@@ -376,7 +376,7 @@ pub trait OwnerRpcV2: Sync + Send {
 
 	```
 	# // Full data request
-	# grin_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
+	# mwc_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
 	# r#"
 	{
 		"jsonrpc": "2.0",
@@ -471,7 +471,7 @@ pub trait OwnerRpcV2: Sync + Send {
 	# ,false, 4, false, false, false, false, false);
 	#
 	# // Short request. minimum_confirmations is optional but we put it, otherwise there will be not enough funds for default value 10
-	# grin_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
+	# mwc_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
 	# r#"
 	{
 		"jsonrpc": "2.0",
@@ -549,7 +549,7 @@ pub trait OwnerRpcV2: Sync + Send {
 	# ,false, 4, false, false, false, false, false);
 	#
 	# // Compact slate request that will be ready for compacting to slatepack
-	# grin_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
+	# mwc_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
 	# r#"
 	{
 		"jsonrpc": "2.0",
@@ -632,7 +632,7 @@ pub trait OwnerRpcV2: Sync + Send {
 	# ,false, 4, false, false, false, false, true);
 	#
 	# // Producing compact slate that can be converted into the slatepack with target_slate_version = 4.
-	# grin_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
+	# mwc_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
 	# r#"
 	{
 		"jsonrpc": "2.0",
@@ -719,7 +719,7 @@ pub trait OwnerRpcV2: Sync + Send {
 	# ,false, 4, false, false, false, false, false);
 	#
 	# // Testing low 'max_outputs' value. Expecting to get error that slate is too large
-	# grin_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
+	# mwc_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
 	# r#"
 	{
 		"jsonrpc": "2.0",
@@ -757,7 +757,7 @@ pub trait OwnerRpcV2: Sync + Send {
 
 	```
 	# // Minimal list of arguments
-	# grin_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
+	# mwc_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
 	# r#"
 	{
 		"jsonrpc": "2.0",
@@ -829,7 +829,7 @@ pub trait OwnerRpcV2: Sync + Send {
 	# ,false , 4, false, false, false, false, false);
 	#
 	# // Full list of arguments
-	# grin_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
+	# mwc_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
 	# r#"
 	{
 		"jsonrpc": "2.0",
@@ -904,7 +904,7 @@ pub trait OwnerRpcV2: Sync + Send {
 	# , false, 4, false, false, false, false, false);
 	#
 	# // Compact Slate, can be converted into the slatepack
-	# grin_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
+	# mwc_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
 	# r#"
 	# {
 		"jsonrpc": "2.0",
@@ -945,7 +945,7 @@ pub trait OwnerRpcV2: Sync + Send {
 	Networked version of [Owner::process_invoice_tx](struct.Owner.html#method.process_invoice_tx).
 
 	```
-	# grin_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
+	# mwc_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
 	# r#"
 	{
 		"jsonrpc": "2.0",
@@ -1005,7 +1005,7 @@ pub trait OwnerRpcV2: Sync + Send {
 				"max_outputs": 500,
 				"num_change_outputs": 1,
 				"selection_strategy_is_use_all": true,
-				"message": "Ok, here are your grins",
+				"message": "Ok, here are your mwcs",
 				"target_slate_version": null,
 				"payment_proof_recipient_address": null,
 				"ttl_blocks": null,
@@ -1041,7 +1041,7 @@ pub trait OwnerRpcV2: Sync + Send {
 			},
 			{
 			  "id": "1",
-			  "message": "Ok, here are your grins",
+			  "message": "Ok, here are your mwcs",
 			  "message_sig": "8f07ddd5e9f5179cff19486034181ed76505baaad53e5d994064127b56c5841bba2daf9cbf88c79c31c140108e02ca5051252a90c5c36796b6a86a52315012bf",
 			  "part_sig": "8f07ddd5e9f5179cff19486034181ed76505baaad53e5d994064127b56c5841b9eff89ca02e15d91c7081062570b61dc60dd5727a35cc2fa329528eb30c86532",
 			  "public_blind_excess": "03b3041e0521339d1f47a5684a391b6185174e020274d02dffea0cc16ddb6b188b",
@@ -1092,7 +1092,7 @@ pub trait OwnerRpcV2: Sync + Send {
 	# , false, 4, false, false, false, false, false);
 	#
 	# // Compact slate processing, V3
-	# grin_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
+	# mwc_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
 	# r#"
 		{
 			"jsonrpc": "2.0",
@@ -1155,7 +1155,7 @@ pub trait OwnerRpcV2: Sync + Send {
 					"max_outputs": 500,
 					"num_change_outputs": 1,
 					"selection_strategy_is_use_all": true,
-					"message": "Ok, here are your grins",
+					"message": "Ok, here are your mwcs",
 					"target_slate_version": null,
 					"payment_proof_recipient_address": null,
 					"ttl_blocks": null,
@@ -1192,7 +1192,7 @@ pub trait OwnerRpcV2: Sync + Send {
 				},
 				{
 				  "id": "1",
-				  "message": "Ok, here are your grins",
+				  "message": "Ok, here are your mwcs",
 				  "message_sig": "8f07ddd5e9f5179cff19486034181ed76505baaad53e5d994064127b56c5841b14be6c976b3f69dd3eb2ec9bfe0134fc9162e668984f1d9592bca8bb46c37087",
 				  "part_sig": "8f07ddd5e9f5179cff19486034181ed76505baaad53e5d994064127b56c5841bb431617fb560348f12fb9a288fd758a3189958a50d5cea436417539314b235f9",
 				  "public_blind_excess": "02e3c128e436510500616fef3f9a22b15ca015f407c8c5cf96c9059163c873828f",
@@ -1245,7 +1245,7 @@ pub trait OwnerRpcV2: Sync + Send {
 	# , false, 4, false, false, false, false, true);
 	#
 	# // Slatepack payload
-	# grin_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
+	# mwc_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
 	# r#"
 		{
 			"jsonrpc": "2.0",
@@ -1259,7 +1259,7 @@ pub trait OwnerRpcV2: Sync + Send {
 					"max_outputs": 500,
 					"num_change_outputs": 1,
 					"selection_strategy_is_use_all": true,
-					"message": "Ok, here are your grins",
+					"message": "Ok, here are your mwcs",
 					"target_slate_version": null,
 					"payment_proof_recipient_address": null,
 					"ttl_blocks": null,
@@ -1293,7 +1293,7 @@ pub trait OwnerRpcV2: Sync + Send {
 	Networked version of [Owner::tx_lock_outputs](struct.Owner.html#method.tx_lock_outputs).
 
 	```
-	# grin_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
+	# mwc_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
 	# r#"
 	{
 		"jsonrpc": "2.0",
@@ -1373,7 +1373,7 @@ pub trait OwnerRpcV2: Sync + Send {
 	# , false, 5 ,true, false, false, false, false);
 	#
 	# // test for compact slate case
-	# grin_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
+	# mwc_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
 	# r#"
 	{
 		"jsonrpc": "2.0",
@@ -1432,7 +1432,7 @@ pub trait OwnerRpcV2: Sync + Send {
 	# , false, 5 ,true, false, false, false, true);
 	#
 	# // Slatepack processing
-	# grin_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
+	# mwc_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
 	# r#"
 	{
 		"jsonrpc": "2.0",
@@ -1463,7 +1463,7 @@ pub trait OwnerRpcV2: Sync + Send {
 	Networked version of [Owner::finalize_tx](struct.Owner.html#method.finalize_tx).
 
 	```
-	# grin_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
+	# mwc_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
 	# r#"
 	{
 		"jsonrpc": "2.0",
@@ -1623,7 +1623,7 @@ pub trait OwnerRpcV2: Sync + Send {
 	# , false, 5, true, true, false, false, false);
 	#
 	# // Compact slate case
-	# grin_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
+	# mwc_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
 	# r#"
 	{
 		"jsonrpc": "2.0",
@@ -1789,7 +1789,7 @@ pub trait OwnerRpcV2: Sync + Send {
 	# , false, 5, true, true, false, false, true);
 	#
 	# // Slatepack processing
-	# grin_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
+	# mwc_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
 	# r#"
 	{
 		"jsonrpc": "2.0",
@@ -1819,7 +1819,7 @@ pub trait OwnerRpcV2: Sync + Send {
 	Networked version of [Owner::post_tx](struct.Owner.html#method.post_tx).
 
 	```
-	# grin_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
+	# mwc_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
 	# r#"
 	{
 		"jsonrpc": "2.0",
@@ -1887,7 +1887,7 @@ pub trait OwnerRpcV2: Sync + Send {
 
 
 	```
-	# grin_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
+	# mwc_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
 	# r#"
 	{
 		"jsonrpc": "2.0",
@@ -1911,7 +1911,7 @@ pub trait OwnerRpcV2: Sync + Send {
 	# "#
 	# , false, 5, true, true, false, false, true);
 	#
-	# grin_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
+	# mwc_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
 	# r#"
 	{
 		"jsonrpc": "2.0",
@@ -1943,7 +1943,7 @@ pub trait OwnerRpcV2: Sync + Send {
 
 	```
 	# // Short form
-	# grin_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
+	# mwc_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
 	# r#"
 	{
 		"jsonrpc": "2.0",
@@ -2012,7 +2012,7 @@ pub trait OwnerRpcV2: Sync + Send {
 	Networked version of [Owner::verify_slate_messages](struct.Owner.html#method.verify_slate_messages).
 
 	```
-	# grin_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
+	# mwc_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
 	# r#"
 	{
 		"jsonrpc": "2.0",
@@ -2093,7 +2093,7 @@ pub trait OwnerRpcV2: Sync + Send {
 
 
 	```
-	# grin_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
+	# mwc_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
 	# r#"
 	{
 		"jsonrpc": "2.0",
@@ -2125,7 +2125,7 @@ pub trait OwnerRpcV2: Sync + Send {
 
 
 	```
-	# grin_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
+	# mwc_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
 	# r#"
 	{
 		"jsonrpc": "2.0",
@@ -2156,7 +2156,7 @@ pub trait OwnerRpcV2: Sync + Send {
 	/**
 	Networked version of [Owner::start_updated](struct.Owner.html#method.start_updater).
 	```
-	# grin_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
+	# mwc_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
 	# r#"
 	{
 		"jsonrpc": "2.0",
@@ -2186,7 +2186,7 @@ pub trait OwnerRpcV2: Sync + Send {
 	/**
 	Networked version of [Owner::stop_updater](struct.Owner.html#method.stop_updater).
 	```
-	# grin_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
+	# mwc_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
 	# r#"
 	{
 		"jsonrpc": "2.0",
@@ -2213,7 +2213,7 @@ pub trait OwnerRpcV2: Sync + Send {
 	/**
 	Networked version of [Owner::get_updater_messages](struct.Owner.html#method.get_updater_messages).
 	```
-	# grin_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
+	# mwc_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
 	# r#"
 	{
 		"jsonrpc": "2.0",
@@ -2243,7 +2243,7 @@ pub trait OwnerRpcV2: Sync + Send {
 	/**
 	Networked version of [Owner::get_mqs_address](struct.Owner.html#method.get_mqs_address).
 	```
-	# grin_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
+	# mwc_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
 	# r#"
 	{
 		"jsonrpc": "2.0",
@@ -2275,7 +2275,7 @@ pub trait OwnerRpcV2: Sync + Send {
 	/**
 	Networked version of [Owner::get_wallet_public_address](struct.Owner.html#method.get_wallet_public_address).
 	```
-	# grin_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
+	# mwc_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
 	# r#"
 	{
 		"jsonrpc": "2.0",
@@ -2308,7 +2308,7 @@ pub trait OwnerRpcV2: Sync + Send {
 	Networked version of [Owner::retrieve_payment_proof](struct.Owner.html#method.retrieve_payment_proof).
 	```
 	# // Legacy non compact case
-	# grin_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
+	# mwc_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
 	# r#"
 	{
 		"jsonrpc": "2.0",
@@ -2349,7 +2349,7 @@ pub trait OwnerRpcV2: Sync + Send {
 	# , false, 5, true, true, true, true, false);
 	#
 	# // Comapact slate case, kernel is different now.
-	# grin_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
+	# mwc_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
 	# r#"
 	{
 		"jsonrpc": "2.0",
@@ -2401,7 +2401,7 @@ pub trait OwnerRpcV2: Sync + Send {
 	/**
 	Networked version of [Owner::verify_payment_proof](struct.Owner.html#method.verify_payment_proof).
 	```
-	# grin_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
+	# mwc_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
 	# r#"
 	{
 		"jsonrpc": "2.0",
@@ -2443,7 +2443,7 @@ pub trait OwnerRpcV2: Sync + Send {
 	# , false, 5, true, true, true, true, false);
 	#
 	# // Compact slate case
-	# grin_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
+	# mwc_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
 	# r#"
 	{
 		"jsonrpc": "2.0",
@@ -2492,7 +2492,7 @@ pub trait OwnerRpcV2: Sync + Send {
 	Networked version of [Owner::encode_slatepack_message](struct.Owner.html#method.encode_slatepack_message).
 	```
 	# // Compact slate processing, V3
-	# grin_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
+	# mwc_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
 	# r#"
 	{
 		"jsonrpc": "2.0",
@@ -2573,7 +2573,7 @@ pub trait OwnerRpcV2: Sync + Send {
 
 	#
 	# // Converting slate into non encrypted binary, recipient is null
-	# grin_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
+	# mwc_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
 	# r#"
 	{
 		"jsonrpc": "2.0",
@@ -2661,7 +2661,7 @@ pub trait OwnerRpcV2: Sync + Send {
 	/**
 	Networked version of [Owner::decode_slatepack_message](struct.Owner.html#method.decode_slatepack_message).
 	```
-	# grin_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
+	# mwc_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
 	# r#"
 	{
 		"jsonrpc": "2.0",
@@ -2753,7 +2753,7 @@ pub trait OwnerRpcV2: Sync + Send {
 	# , false, 0, false, false, false, false, true);
 	#
 	# // Decode not encrypted slate pack
-	# grin_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
+	# mwc_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
 	# r#"
 	{
 		"jsonrpc": "2.0",
@@ -3177,10 +3177,10 @@ pub fn run_doctest_owner(
 	compact_slate: bool,
 ) -> Result<Option<serde_json::Value>, String> {
 	use easy_jsonrpc_mw::Handler;
-	use grin_wallet_impls::test_framework::{self, LocalWalletClient, WalletProxy};
-	use grin_wallet_impls::{DefaultLCProvider, DefaultWalletImpl};
-	use grin_wallet_libwallet::{api_impl, WalletInst};
-	use grin_wallet_util::grin_keychain::ExtKeychain;
+	use mwc_wallet_impls::test_framework::{self, LocalWalletClient, WalletProxy};
+	use mwc_wallet_impls::{DefaultLCProvider, DefaultWalletImpl};
+	use mwc_wallet_libwallet::{api_impl, WalletInst};
+	use mwc_wallet_util::mwc_keychain::ExtKeychain;
 
 	use crate::core::global;
 	use crate::core::global::ChainTypes;
@@ -3518,7 +3518,7 @@ macro_rules! doctest_helper_json_rpc_owner_assert_response {
 		// TODO: Fix properly
 		#[cfg(not(target_os = "windows"))]
 		{
-			use grin_wallet_api::run_doctest_owner;
+			use mwc_wallet_api::run_doctest_owner;
 			use serde_json;
 			use serde_json::Value;
 			use tempfile::tempdir;
@@ -3561,5 +3561,5 @@ macro_rules! doctest_helper_json_rpc_owner_assert_response {
 // Keeping as a placeholder for doc tests
 #[test]
 fn owner_api_v2_test() {
-	// use crate as grin_wallet_api;
+	// use crate as mwc_wallet_api;
 }

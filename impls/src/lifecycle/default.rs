@@ -1,4 +1,4 @@
-// Copyright 2021 The Grin Developers
+// Copyright 2021 The Mwc Developers
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,7 +16,7 @@
 
 use crate::config::{
 	config, GlobalWalletConfig, GlobalWalletConfigMembers, MQSConfig, TorConfig, WalletConfig,
-	GRIN_WALLET_DIR,
+	MWC_WALLET_DIR,
 };
 use crate::core::global;
 use crate::keychain::Keychain;
@@ -26,8 +26,8 @@ use crate::lifecycle::seed::WalletSeed;
 use crate::util::secp::key::SecretKey;
 use crate::util::ZeroingString;
 use crate::LMDBBackend;
-use grin_wallet_libwallet::types::FLAG_NEW_WALLET;
-use grin_wallet_util::grin_util::logger::LoggingConfig;
+use mwc_wallet_libwallet::types::FLAG_NEW_WALLET;
+use mwc_wallet_util::mwc_util::logger::LoggingConfig;
 use std::fs;
 use std::path::PathBuf;
 
@@ -116,7 +116,7 @@ where
 		let wallet_data_dir = wallet
 			.wallet_data_dir
 			.clone()
-			.unwrap_or(String::from(GRIN_WALLET_DIR));
+			.unwrap_or(String::from(MWC_WALLET_DIR));
 
 		default_config = GlobalWalletConfig {
 			members: Some(GlobalWalletConfigMembers {
@@ -198,7 +198,7 @@ where
 		wallet_data_dir: Option<&str>,
 	) -> Result<(), Error> {
 		let mut data_dir_name = PathBuf::from(self.data_dir.clone());
-		data_dir_name.push(wallet_data_dir.unwrap_or(GRIN_WALLET_DIR));
+		data_dir_name.push(wallet_data_dir.unwrap_or(MWC_WALLET_DIR));
 		let data_dir_name = data_dir_name.to_str().unwrap();
 		let exists = WalletSeed::seed_file_exists(&data_dir_name);
 		if !test_mode {
@@ -250,7 +250,7 @@ where
 		wallet_data_dir: Option<&str>,
 	) -> Result<Option<SecretKey>, Error> {
 		let mut data_dir_name = PathBuf::from(self.data_dir.clone());
-		data_dir_name.push(wallet_data_dir.unwrap_or(GRIN_WALLET_DIR));
+		data_dir_name.push(wallet_data_dir.unwrap_or(MWC_WALLET_DIR));
 		let data_dir_name = data_dir_name.to_str().unwrap();
 		let mut wallet: LMDBBackend<'a, C, K> =
 			match LMDBBackend::new(&data_dir_name, self.node_client.clone()) {
@@ -314,7 +314,7 @@ where
 		wallet_data_dir: Option<&str>,
 	) -> Result<bool, Error> {
 		let mut data_dir_name = PathBuf::from(self.data_dir.clone());
-		data_dir_name.push(wallet_data_dir.unwrap_or(GRIN_WALLET_DIR));
+		data_dir_name.push(wallet_data_dir.unwrap_or(MWC_WALLET_DIR));
 		let data_dir_name = data_dir_name.to_str().unwrap();
 		let res = WalletSeed::seed_file_exists(&data_dir_name).map_err(|e| {
 			Error::CallbackImpl(format!("Error checking for wallet existence, {}", e))
@@ -329,7 +329,7 @@ where
 		wallet_data_dir: Option<&str>,
 	) -> Result<ZeroingString, Error> {
 		let mut data_dir_name = PathBuf::from(self.data_dir.clone());
-		data_dir_name.push(wallet_data_dir.unwrap_or(GRIN_WALLET_DIR));
+		data_dir_name.push(wallet_data_dir.unwrap_or(MWC_WALLET_DIR));
 		let data_dir_name = data_dir_name.to_str().unwrap();
 		let wallet_seed = WalletSeed::from_file(&data_dir_name, password)
 			.map_err(|e| Error::Lifecycle(format!("Error opening wallet seed file, {}", e)))?;
@@ -353,7 +353,7 @@ where
 		wallet_data_dir: Option<&str>,
 	) -> Result<(), Error> {
 		let mut data_dir_name = PathBuf::from(self.data_dir.clone());
-		data_dir_name.push(wallet_data_dir.unwrap_or(GRIN_WALLET_DIR));
+		data_dir_name.push(wallet_data_dir.unwrap_or(MWC_WALLET_DIR));
 		let data_dir_name = data_dir_name.to_str().unwrap();
 		WalletSeed::recover_from_phrase(data_dir_name, mnemonic, password)
 			.map_err(|e| Error::Lifecycle(format!("Error recovering from mnemonic, {}", e)))?;
@@ -368,7 +368,7 @@ where
 		wallet_data_dir: Option<&str>,
 	) -> Result<(), Error> {
 		let mut data_dir_name = PathBuf::from(self.data_dir.clone());
-		data_dir_name.push(wallet_data_dir.unwrap_or(GRIN_WALLET_DIR));
+		data_dir_name.push(wallet_data_dir.unwrap_or(MWC_WALLET_DIR));
 		let data_dir_name = data_dir_name.to_str().unwrap();
 		// get seed for later check
 

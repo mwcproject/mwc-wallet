@@ -1,4 +1,4 @@
-// Copyright 2021 The Grin Developers
+// Copyright 2021 The Mwc Developers
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,15 +16,15 @@
 //! invocations) as needed.
 use crate::api::{self, ApiServer, BasicAuthMiddleware, ResponseFuture, Router, TLSConfig};
 use crate::libwallet::{
-	NodeClient, NodeVersionInfo, Slate, WalletInst, WalletLCProvider, GRIN_BLOCK_HEADER_VERSION,
+	NodeClient, NodeVersionInfo, Slate, WalletInst, WalletLCProvider, MWC_BLOCK_HEADER_VERSION,
 };
 use crate::util::secp::key::SecretKey;
 use crate::util::{from_hex, to_base64, Mutex};
 use crate::Error;
 use futures::channel::oneshot;
-use grin_wallet_api::JsonId;
-use grin_wallet_config::types::{TorBridgeConfig, TorProxyConfig};
-use grin_wallet_util::OnionV3Address;
+use mwc_wallet_api::JsonId;
+use mwc_wallet_config::types::{TorBridgeConfig, TorProxyConfig};
+use mwc_wallet_util::OnionV3Address;
 use hyper::body;
 use hyper::header::HeaderValue;
 use hyper::{Body, Request, Response, StatusCode};
@@ -32,13 +32,13 @@ use qr_code::QrCode;
 use serde::{Deserialize, Serialize};
 use serde_json;
 
-use grin_wallet_impls::{
+use mwc_wallet_impls::{
 	Address, CloseReason, HttpDataSender, MWCMQPublisher, MWCMQSAddress, MWCMQSubscriber,
 	Publisher, SlateSender, Subscriber, SubscriptionHandler,
 };
-use grin_wallet_libwallet::swap::message::Message;
-use grin_wallet_libwallet::wallet_lock;
-use grin_wallet_util::grin_core::core;
+use mwc_wallet_libwallet::swap::message::Message;
+use mwc_wallet_libwallet::wallet_lock;
+use mwc_wallet_util::mwc_core::core;
 
 use crate::apiwallet::{
 	EncryptedRequest, EncryptedResponse, EncryptionErrorResponse, Foreign,
@@ -53,16 +53,16 @@ use crate::keychain::Keychain;
 use chrono::Utc;
 use easy_jsonrpc_mw::{Handler, MaybeReply};
 use ed25519_dalek::PublicKey as DalekPublicKey;
-use grin_wallet_impls::tor;
-use grin_wallet_libwallet::proof::crypto;
-use grin_wallet_libwallet::proof::proofaddress;
-use grin_wallet_libwallet::proof::proofaddress::ProvableAddress;
-use grin_wallet_util::grin_core::core::TxKernel;
-use grin_wallet_util::grin_p2p;
-use grin_wallet_util::grin_p2p::libp2p_connection;
-use grin_wallet_util::grin_util::secp::pedersen::Commitment;
-use grin_wallet_util::grin_util::secp::{ContextFlag, Secp256k1};
-use grin_wallet_util::grin_util::static_secp_instance;
+use mwc_wallet_impls::tor;
+use mwc_wallet_libwallet::proof::crypto;
+use mwc_wallet_libwallet::proof::proofaddress;
+use mwc_wallet_libwallet::proof::proofaddress::ProvableAddress;
+use mwc_wallet_util::mwc_core::core::TxKernel;
+use mwc_wallet_util::mwc_p2p;
+use mwc_wallet_util::mwc_p2p::libp2p_connection;
+use mwc_wallet_util::mwc_util::secp::pedersen::Commitment;
+use mwc_wallet_util::mwc_util::secp::{ContextFlag, Secp256k1};
+use mwc_wallet_util::mwc_util::static_secp_instance;
 use log::Level;
 use std::collections::HashMap;
 use std::convert::TryFrom;
@@ -154,7 +154,7 @@ fn check_middleware(
 				bhv = n.block_header_version;
 			}
 			if let Some(s) = slate {
-				if bhv > 3 && s.version_info.block_header_version < GRIN_BLOCK_HEADER_VERSION {
+				if bhv > 3 && s.version_info.block_header_version < MWC_BLOCK_HEADER_VERSION {
 					Err(crate::libwallet::Error::Compatibility(
 						"Incoming Slate is not compatible with this wallet. \
 						 Please upgrade the node or use a different one."
@@ -452,7 +452,7 @@ where
 				}
 
 				//create the args
-				let params = grin_wallet_libwallet::InitTxArgs {
+				let params = mwc_wallet_libwallet::InitTxArgs {
 					src_acct_name: None, //it will be set in the implementation layer.
 					amount: slate.amount,
 					amount_includes_fee: None,
@@ -709,7 +709,7 @@ where
 	C: NodeClient + 'static,
 	K: Keychain + 'static,
 {
-	if grin_wallet_impls::adapters::get_mwcmqs_brocker().is_some() {
+	if mwc_wallet_impls::adapters::get_mwcmqs_brocker().is_some() {
 		return Err(Error::GenericError(
 			"mwcmqs listener is already running".to_string(),
 		));
@@ -927,12 +927,12 @@ where
 			let last_time_cache_cleanup: RwLock<i64> = RwLock::new(0);
 
 			let output_validation_fn =
-				move |excess: &Commitment| -> Result<Option<TxKernel>, grin_p2p::Error> {
+				move |excess: &Commitment| -> Result<Option<TxKernel>, mwc_p2p::Error> {
 					// Tip is needed in order to request from last 24 hours (1440 blocks)
 					let tip_height = node_client
 						.get_chain_tip()
 						.map_err(|e| {
-							grin_p2p::Error::Libp2pError(format!(
+							mwc_p2p::Error::Libp2pError(format!(
 								"Unable contact the node to get chain tip, {}",
 								e
 							))
@@ -970,7 +970,7 @@ where
 							None,
 						)
 						.map_err(|e| {
-							grin_p2p::Error::Libp2pError(format!(
+							mwc_p2p::Error::Libp2pError(format!(
 								"Unable contact the node to get kernel data, {}",
 								e
 							))

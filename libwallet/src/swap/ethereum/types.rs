@@ -12,13 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::grin_util::to_hex;
+use crate::mwc_util::to_hex;
 use crate::swap::message::SecondaryUpdate;
 use crate::swap::ser::*;
 use crate::swap::types::SecondaryData;
 use crate::swap::Error;
 use regex::Regex;
-use web3::types::{Address, H256};
+use mwc_web3::types::{Address, H256};
 
 /// ETH transaction ready to post (any type). Here it is a redeem tx
 #[derive(Serialize, Deserialize, Debug, Clone)]

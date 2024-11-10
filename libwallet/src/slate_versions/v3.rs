@@ -1,4 +1,4 @@
-// Copyright 2021 The Grin Developers
+// Copyright 2021 The Mwc Developers
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,28 +12,28 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Contains V3 of the slate (grin-wallet 3.0.0)
+//! Contains V3 of the slate (mwc-wallet 3.0.0)
 //! Changes from V2:
 //! * Addition of payment_proof (PaymentInfo struct)
 //! * Addition of a u64 ttl_cutoff_height field
 
 use crate::error::Error;
-use crate::grin_core::core::transaction::OutputFeatures;
-use crate::grin_core::global;
-use crate::grin_core::libtx::secp_ser;
-use crate::grin_core::map_vec;
-use crate::grin_keychain::{BlindingFactor, Identifier};
-use crate::grin_util::secp;
-use crate::grin_util::secp::key::PublicKey;
-use crate::grin_util::secp::pedersen::{Commitment, RangeProof};
-use crate::grin_util::secp::Signature;
+use crate::mwc_core::core::transaction::OutputFeatures;
+use crate::mwc_core::global;
+use crate::mwc_core::libtx::secp_ser;
+use crate::mwc_core::map_vec;
+use crate::mwc_keychain::{BlindingFactor, Identifier};
+use crate::mwc_util::secp;
+use crate::mwc_util::secp::key::PublicKey;
+use crate::mwc_util::secp::pedersen::{Commitment, RangeProof};
+use crate::mwc_util::secp::Signature;
 use crate::proof::proofaddress;
 use crate::proof::proofaddress::ProvableAddress;
 use crate::slate::CompatKernelFeatures;
 use std::convert::TryFrom;
 use uuid::Uuid;
 
-use crate::grin_core::core::transaction::Transaction;
+use crate::mwc_core::core::transaction::Transaction;
 use crate::slate::{ParticipantData, PaymentInfo, Slate, VersionCompatInfo};
 use crate::slate_versions::v2::{
 	InputV2, OutputV2, ParticipantDataV2, SlateV2, TransactionBodyV2, TransactionV2, TxKernelV2,
@@ -184,7 +184,7 @@ pub struct VersionCompatInfoV3 {
 	pub version: u16,
 	/// Original version this slate was converted from
 	pub orig_version: u16,
-	/// Version of grin block header this slate is compatible with
+	/// Version of mwc block header this slate is compatible with
 	pub block_header_version: u16,
 }
 

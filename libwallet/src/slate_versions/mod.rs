@@ -1,4 +1,4 @@
-// Copyright 2021 The Grin Developers
+// Copyright 2021 The Mwc Developers
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -26,7 +26,7 @@ use crate::Error;
 use crate::Slatepacker;
 use ed25519_dalek::PublicKey as DalekPublicKey;
 use ed25519_dalek::SecretKey as DalekSecretKey;
-use grin_wallet_util::grin_util::secp::Secp256k1;
+use mwc_wallet_util::mwc_util::secp::Secp256k1;
 use std::convert::TryFrom;
 
 pub mod ser;
@@ -39,8 +39,8 @@ pub mod v3;
 /// The most recent version of the slate
 pub const CURRENT_SLATE_VERSION: u16 = 3;
 
-/// The grin block header this slate is intended to be compatible with
-pub const GRIN_BLOCK_HEADER_VERSION: u16 = 3;
+/// The mwc block header this slate is intended to be compatible with
+pub const MWC_BLOCK_HEADER_VERSION: u16 = 3;
 
 /// Existing versions of the slate
 #[derive(EnumIter, Serialize, Deserialize, Clone, Debug, PartialEq, PartialOrd, Eq, Ord)]

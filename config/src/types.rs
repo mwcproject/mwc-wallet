@@ -1,4 +1,4 @@
-// Copyright 2021 The Grin Developers
+// Copyright 2021 The Mwc Developers
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,7 +18,7 @@ use std::fmt;
 use std::io;
 use std::path::PathBuf;
 
-use crate::config::GRIN_WALLET_DIR;
+use crate::config::MWC_WALLET_DIR;
 use crate::core::global::ChainTypes;
 use crate::util::logger::LoggingConfig;
 use std::collections::BTreeMap;
@@ -40,7 +40,7 @@ pub struct WalletConfig {
 	pub owner_api_listen_port: Option<u16>,
 	/// Location of the secret for basic auth on the Owner API
 	pub api_secret_path: Option<String>,
-	/// Location of the node api secret for basic auth on the Grin API
+	/// Location of the node api secret for basic auth on the Mwc API
 	pub node_api_secret_path: Option<String>,
 	/// The api address of a running server node against which transaction inputs
 	/// will be checked during send; could be multiple nodes separated by semicolon
@@ -50,7 +50,7 @@ pub struct WalletConfig {
 	/// Whether to include the mwcmqs listener
 	pub owner_api_include_mqs_listener: Option<bool>,
 	///Index used to derive address
-	pub grinbox_address_index: Option<u32>,
+	pub mwcbox_address_index: Option<u32>,
 	/// The directory in which wallet files are stored
 	pub data_file_dir: String,
 	/// If Some(true), don't cache commits alongside output data
@@ -66,7 +66,7 @@ pub struct WalletConfig {
 	/// Wallet data directory. Default none is 'wallet_data'
 	pub wallet_data_dir: Option<String>,
 	/// Scaling factor from transaction weight to transaction fee
-	/// should match accept_fee_base parameter in grin-server
+	/// should match accept_fee_base parameter in mwc-server
 	pub accept_fee_base: Option<u64>,
 	/// Ethereum Swap Contract Address
 	pub eth_swap_contract_address: Option<String>,
@@ -94,7 +94,7 @@ impl Default for WalletConfig {
 			owner_api_include_foreign: Some(false),
 			owner_api_include_mqs_listener: Some(false),
 			data_file_dir: ".".to_string(),
-			grinbox_address_index: None,
+			mwcbox_address_index: None,
 			no_commit_cache: Some(false),
 			tls_certificate_file: None,
 			tls_certificate_key: None,
@@ -173,7 +173,7 @@ impl WalletConfig {
 		//mqs feature
 		self.wallet_data_dir
 			.clone()
-			.unwrap_or(GRIN_WALLET_DIR.to_string())
+			.unwrap_or(MWC_WALLET_DIR.to_string())
 	}
 
 	/// Accept fee base

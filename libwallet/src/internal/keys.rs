@@ -1,4 +1,4 @@
-// Copyright 2021 The Grin Developers
+// Copyright 2021 The Mwc Developers
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,8 +14,8 @@
 
 //! Wallet key management functions
 use crate::error::Error;
-use crate::grin_keychain::{ChildNumber, ExtKeychain, Identifier, Keychain};
-use crate::grin_util::secp::key::SecretKey;
+use crate::mwc_keychain::{ChildNumber, ExtKeychain, Identifier, Keychain};
+use crate::mwc_util::secp::key::SecretKey;
 use crate::types::{AcctPathMapping, NodeClient, WalletBackend};
 use std::collections::HashSet;
 

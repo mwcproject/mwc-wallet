@@ -1,4 +1,4 @@
-// Copyright 2021 The Grin Developers
+// Copyright 2021 The Mwc Developers
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,19 +17,19 @@ use crate::api_impl::foreign;
 use crate::api_impl::owner;
 use crate::api_impl::owner_updater::StatusMessage;
 use crate::api_impl::types::InitTxArgs;
-use crate::grin_core::consensus::{valid_header_version, WEEK_HEIGHT};
-use crate::grin_core::core::Committed;
-use crate::grin_core::core::HeaderVersion;
-use crate::grin_core::core::Transaction;
-use crate::grin_core::global;
-use crate::grin_core::libtx::{proof, tx_fee};
-use crate::grin_keychain::{ChildNumber, Identifier, Keychain, SwitchCommitmentType};
-use crate::grin_util as util;
-use crate::grin_util::secp::key::SecretKey;
-use crate::grin_util::secp::pedersen;
-use crate::grin_util::secp::{ContextFlag, Secp256k1};
-use crate::grin_util::Mutex;
-use crate::grin_util::{from_hex, ToHex};
+use crate::mwc_core::consensus::{valid_header_version, WEEK_HEIGHT};
+use crate::mwc_core::core::Committed;
+use crate::mwc_core::core::HeaderVersion;
+use crate::mwc_core::core::Transaction;
+use crate::mwc_core::global;
+use crate::mwc_core::libtx::{proof, tx_fee};
+use crate::mwc_keychain::{ChildNumber, Identifier, Keychain, SwitchCommitmentType};
+use crate::mwc_util as util;
+use crate::mwc_util::secp::key::SecretKey;
+use crate::mwc_util::secp::pedersen;
+use crate::mwc_util::secp::{ContextFlag, Secp256k1};
+use crate::mwc_util::Mutex;
+use crate::mwc_util::{from_hex, ToHex};
 use crate::internal::tx;
 use crate::internal::{keys, updater};
 use crate::types::*;
@@ -756,7 +756,7 @@ where
 			let client = w.w2n_client().clone();
 			let keychain = w.keychain(keychain_mask)?;
 
-			let mut blocks: Vec<crate::grin_api::BlockPrintable> = Vec::new();
+			let mut blocks: Vec<crate::mwc_api::BlockPrintable> = Vec::new();
 
 			let mut cur_height = start_height;
 			while cur_height <= end_height {
@@ -852,8 +852,8 @@ where
 							out.commit,
 							out.range_proof()?,
 							match out.output_type {
-								crate::grin_api::OutputType::Coinbase => true,
-								crate::grin_api::OutputType::Transaction => false,
+								crate::mwc_api::OutputType::Coinbase => true,
+								crate::mwc_api::OutputType::Transaction => false,
 							},
 							height,
 							out.mmr_index,
@@ -2262,7 +2262,7 @@ where
 }
 
 ///this method is part of the solution to prevent replay attack
-///Which is tracked in this discussion  https://forum.grin.mw/t/replay-attacks-and-possible-mitigations/7415
+///Which is tracked in this discussion  https://forum.mwc.mw/t/replay-attacks-and-possible-mitigations/7415
 /// and this github ticket: https://github.com/mwcproject/mwc-qt-wallet/issues/508
 
 pub fn self_spend_particular_output<'a, L, C, K>(

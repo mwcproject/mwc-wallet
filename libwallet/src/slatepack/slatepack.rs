@@ -1,4 +1,4 @@
-// Copyright 2021 The Grin Developers
+// Copyright 2021 The Mwc Developers
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,29 +16,29 @@
 use ed25519_dalek::{PublicKey as DalekPublicKey, SecretKey as DalekSecretKey, PUBLIC_KEY_LENGTH};
 use std::convert::TryInto;
 
-use crate::grin_util::secp::key::PublicKey;
+use crate::mwc_util::secp::key::PublicKey;
 
 use crate::{Error, ParticipantData, Slate, SlateVersion};
 
 use crate::proof::proofaddress::ProvableAddress;
 use std::io;
 
-use crate::grin_core::core::CommitWrapper;
-use crate::grin_core::core::{
+use crate::mwc_core::core::CommitWrapper;
+use crate::mwc_core::core::{
 	Input, Inputs, KernelFeatures, Output, OutputFeatures, OutputIdentifier, TxKernel,
 };
-use crate::grin_core::global;
-use crate::grin_keychain::{BlindingFactor, ExtKeychain};
-use crate::grin_util::secp::constants::{PEDERSEN_COMMITMENT_SIZE, SECRET_KEY_SIZE};
-use crate::grin_util::secp::pedersen::{Commitment, RangeProof};
-use crate::grin_util::secp::Signature;
-use crate::grin_util::{from_hex, ToHex};
+use crate::mwc_core::global;
+use crate::mwc_keychain::{BlindingFactor, ExtKeychain};
+use crate::mwc_util::secp::constants::{PEDERSEN_COMMITMENT_SIZE, SECRET_KEY_SIZE};
+use crate::mwc_util::secp::pedersen::{Commitment, RangeProof};
+use crate::mwc_util::secp::Signature;
+use crate::mwc_util::{from_hex, ToHex};
 use crate::proof::proofaddress;
 use crate::slate::PaymentInfo;
 use bitstream_io::{BigEndian, BitReader, BitWriter, Endianness};
 use crc::{crc32, Hasher32};
-use grin_wallet_util::grin_core::consensus::WEEK_HEIGHT;
-use grin_wallet_util::grin_util::secp::Secp256k1;
+use mwc_wallet_util::mwc_core::consensus::WEEK_HEIGHT;
+use mwc_wallet_util::mwc_util::secp::Secp256k1;
 use rand::{thread_rng, Rng};
 use ring::aead;
 use smaz;

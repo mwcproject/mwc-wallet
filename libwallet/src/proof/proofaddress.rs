@@ -14,15 +14,15 @@
 
 use super::base58::Base58;
 use crate::error::Error;
-use crate::grin_core::global;
-use crate::grin_keychain::Keychain;
-use crate::grin_util::secp::key::PublicKey;
-use crate::grin_util::secp::key::SecretKey;
+use crate::mwc_core::global;
+use crate::mwc_keychain::Keychain;
+use crate::mwc_util::secp::key::PublicKey;
+use crate::mwc_util::secp::key::SecretKey;
 use crate::proof::crypto;
 use crate::proof::hasher;
 use ed25519_dalek::PublicKey as DalekPublicKey;
 use ed25519_dalek::SecretKey as DalekSecretKey;
-use grin_wallet_util::OnionV3Address;
+use mwc_wallet_util::OnionV3Address;
 use serde::{Deserialize, Deserializer, Serializer};
 use sha2::{Digest, Sha512};
 use std::convert::TryFrom;

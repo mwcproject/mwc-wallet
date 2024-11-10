@@ -13,10 +13,10 @@
 // limitations under the License.
 
 use super::Error;
-use crate::grin_core::global;
-use crate::grin_util::secp::key::SecretKey;
-use crate::grin_util::{from_hex, to_hex};
-use crate::grin_util::{Mutex, RwLock};
+use crate::mwc_core::global;
+use crate::mwc_util::secp::key::SecretKey;
+use crate::mwc_util::{from_hex, to_hex};
+use crate::mwc_util::{Mutex, RwLock};
 use crate::swap::types::{Context, Currency};
 use crate::swap::Swap;
 use base64;

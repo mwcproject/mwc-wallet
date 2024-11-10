@@ -1,4 +1,4 @@
-// Copyright 2021 The Grin Developers
+// Copyright 2021 The Mwc Developers
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -25,9 +25,9 @@ use crate::util::{to_hex, ToHex};
 use chrono::prelude::*;
 use chrono::Local;
 use colored::*;
-use grin_wallet_libwallet::swap::swap::SwapJournalRecord;
-use grin_wallet_libwallet::swap::types::SwapTransactionsConfirmations;
-use grin_wallet_util::grin_util::secp::Secp256k1;
+use mwc_wallet_libwallet::swap::swap::SwapJournalRecord;
+use mwc_wallet_libwallet::swap::types::SwapTransactionsConfirmations;
+use mwc_wallet_util::mwc_util::secp::Secp256k1;
 use prettytable;
 
 /// Display outputs in a pretty way

@@ -14,7 +14,7 @@
 
 use super::client::*;
 use super::rpc::*;
-use crate::grin_util::{from_hex, to_hex};
+use crate::mwc_util::{from_hex, to_hex};
 use crate::swap::types::Currency;
 use crate::swap::Error;
 use bitcoin::{OutPoint, Script, Txid};
@@ -420,9 +420,9 @@ mod tests {
 	use crate::swap::types::Network;
 	use bitcoin_hashes::hex::FromHex;
 	use bitcoin_hashes::sha256d::Hash;
-	use grin_util::from_hex;
-	use grin_util::secp::key::PublicKey;
-	use grin_util::secp::{ContextFlag, Secp256k1};
+	use mwc_util::from_hex;
+	use mwc_util::secp::key::PublicKey;
+	use mwc_util::secp::{ContextFlag, Secp256k1};
 	use rand::{thread_rng, Rng};
 
 	#[test]

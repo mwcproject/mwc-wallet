@@ -53,15 +53,15 @@ diff --git a/libwallet/src/internal/scan.rs b/libwallet/src/internal/scan.rs
 index 9369fcd..daff473 100644
 --- a/libwallet/src/internal/scan.rs
 +++ b/libwallet/src/internal/scan.rs
-@@ -21,7 +21,7 @@ use crate::grin_core::consensus::{valid_header_version, WEEK_HEIGHT};
- use crate::grin_core::core::HeaderVersion;
- use crate::grin_core::global;
- use crate::grin_core::libtx::{proof, tx_fee};
--use crate::grin_keychain::{Identifier, Keychain, SwitchCommitmentType};
-+use crate::grin_keychain::{Identifier, Keychain, SwitchCommitmentType, ChildNumber};
- use crate::grin_util::secp::key::SecretKey;
- use crate::grin_util::secp::pedersen;
- use crate::grin_util::static_secp_instance;
+@@ -21,7 +21,7 @@ use crate::mwc_core::consensus::{valid_header_version, WEEK_HEIGHT};
+ use crate::mwc_core::core::HeaderVersion;
+ use crate::mwc_core::global;
+ use crate::mwc_core::libtx::{proof, tx_fee};
+-use crate::mwc_keychain::{Identifier, Keychain, SwitchCommitmentType};
++use crate::mwc_keychain::{Identifier, Keychain, SwitchCommitmentType, ChildNumber};
+ use crate::mwc_util::secp::key::SecretKey;
+ use crate::mwc_util::secp::pedersen;
+ use crate::mwc_util::static_secp_instance;
 @@ -115,6 +115,7 @@ pub struct RestoredTxStats {
  fn identify_utxo_outputs<'a, K>(
  	keychain: &K,

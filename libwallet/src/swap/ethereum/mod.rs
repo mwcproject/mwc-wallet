@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub use wagyu_ethereum::{
+pub use mwc_wagyu_ethereum::{
 	wordlist::*, EthereumAddress, EthereumAmount, EthereumDerivationPath,
 	EthereumExtendedPrivateKey, EthereumExtendedPublicKey, EthereumFormat, EthereumMnemonic,
 	EthereumNetwork, EthereumPrivateKey, EthereumPublicKey, EthereumTransaction,

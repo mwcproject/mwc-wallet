@@ -1,4 +1,4 @@
-// Copyright 2021 The Grin Developers
+// Copyright 2021 The Mwc Developers
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -13,16 +13,16 @@
 
 #[macro_use]
 extern crate log;
-extern crate grin_wallet_controller as wallet;
-extern crate grin_wallet_impls as impls;
-extern crate grin_wallet_util;
+extern crate mwc_wallet_controller as wallet;
+extern crate mwc_wallet_impls as impls;
+extern crate mwc_wallet_util;
 
-use grin_wallet_libwallet as libwallet;
-use grin_wallet_util::grin_core::core::OutputFeatures;
-use grin_wallet_util::grin_keychain::{
+use mwc_wallet_libwallet as libwallet;
+use mwc_wallet_util::mwc_core::core::OutputFeatures;
+use mwc_wallet_util::mwc_keychain::{
 	mnemonic, BlindingFactor, ExtKeychain, ExtKeychainPath, Keychain, SwitchCommitmentType,
 };
-use grin_wallet_util::grin_util::{secp, ZeroingString};
+use mwc_wallet_util::mwc_util::{secp, ZeroingString};
 use impls::test_framework::LocalWalletClient;
 use rand::{thread_rng, Rng};
 use std::sync::atomic::Ordering;
