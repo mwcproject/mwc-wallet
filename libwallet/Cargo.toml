@@ -1,10 +1,10 @@
 [package]
 name = "mwc_wallet_libwallet"
 version = "5.3.3"
-authors = ["Mwc Developers <mimblewimble@lists.launchpad.net>"]
+authors = ["Mwc Developers <info@mwc.mw>"]
 description = "Simple, private and scalable cryptocurrency implementation based on the MimbleWimble chain format."
 license = "Apache-2.0"
-repository = "https://github.com/mimblewimble/mwc-wallet"
+repository = "https://github.com/mwcproject/mwc-wallet"
 keywords = [ "crypto", "mwc", "mimblewimble" ]
 exclude = ["**/*.mwc", "**/*.mwc2"]
 #build = "src/build/build.rs"

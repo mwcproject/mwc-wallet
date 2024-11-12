@@ -1,7 +1,7 @@
 [package]
 name = "mwc_wallet_util"
 version = "5.3.3"
-authors = ["Mwc Developers <mimblewimble@lists.launchpad.net>"]
+authors = ["Mwc Developers <info@mwc.mw>"]
 description = "Util, for generic utilities and to re-export mwc crates"
 license = "Apache-2.0"
 repository = "https://github.com/mwcproject/mwc-wallet"
