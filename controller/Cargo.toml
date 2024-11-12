@@ -32,8 +32,8 @@ qr_code = "1.1.0"
 colored = "1.6"
 x25519-dalek = "0.6"
 ed25519-dalek = "1.0.0-pre.4"
-mwc-wagyu-ethereum = { git = "https://github.com/mwcproject/wagyu-ethereum", branch = "master" }
-mwc-libp2p = { git = "https://github.com/mwcproject/rust-libp2p", branch = "master", default-features = false, features = [ "noise", "yamux", "mplex", "dns", "tcp-tokio", "ping", "gossipsub"] }
+mwc-wagyu-ethereum = { git = "https://github.com/mwcproject/wagyu-ethereum", version = "0.6.3", branch = "master" }
+mwc-libp2p = { git = "https://github.com/mwcproject/rust-libp2p", version="0.35.3", branch = "master", default-features = false, features = [ "noise", "yamux", "mplex", "dns", "tcp-tokio", "ping", "gossipsub"] }
 #libp2p = { path = "../../rust-libp2p", default-features = false, features = [ "noise", "yamux", "mplex", "dns", "tcp-tokio", "ping", "gossipsub"] }
 
 mwc_wallet_util = { path = "../util", version = "5.3.3" }
