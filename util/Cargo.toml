@@ -21,13 +21,13 @@ tokio = { version = "0.2", features = ["full"] }
 thiserror = "1"
 
 # For Release
-mwc_core = { git = "https://github.com/mwcproject/mwc-node", version="5.3.3", tag = "5.3.3" }
-mwc_keychain = { git = "https://github.com/mwcproject/mwc-node", version="5.3.3", tag = "5.3.3" }
-mwc_chain = { git = "https://github.com/mwcproject/mwc-node", version="5.3.3", tag = "5.3.3" }
-mwc_util = { git = "https://github.com/mwcproject/mwc-node", version="5.3.3", tag = "5.3.3" }
-mwc_api = { git = "https://github.com/mwcproject/mwc-node", version="5.3.3", tag = "5.3.3" }
-mwc_store = { git = "https://github.com/mwcproject/mwc-node", version="5.3.3", tag = "5.3.3" }
-mwc_p2p = { git = "https://github.com/mwcproject/mwc-node", version="5.3.3", tag = "5.3.3" }
+mwc_core = { git = "https://github.com/mwcproject/mwc-node", version="5.3.4", tag = "5.3.4" }
+mwc_keychain = { git = "https://github.com/mwcproject/mwc-node", version="5.3.4", tag = "5.3.4" }
+mwc_chain = { git = "https://github.com/mwcproject/mwc-node", version="5.3.4", tag = "5.3.4" }
+mwc_util = { git = "https://github.com/mwcproject/mwc-node", version="5.3.4", tag = "5.3.4" }
+mwc_api = { git = "https://github.com/mwcproject/mwc-node", version="5.3.4", tag = "5.3.4" }
+mwc_store = { git = "https://github.com/mwcproject/mwc-node", version="5.3.4", tag = "5.3.4" }
+mwc_p2p = { git = "https://github.com/mwcproject/mwc-node", version="5.3.4", tag = "5.3.4" }
 
 # For bleeding edge
 #mwc_core = { git = "https://github.com/mwcproject/mwc-node", branch = "5.3.100" }
