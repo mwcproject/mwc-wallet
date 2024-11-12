@@ -1,4 +1,5 @@
-// Copyright 2021 The Grin Developers
+// Copyright 2019 The Grin Developers
+// Copyright 2024 The Mwc Developers
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,29 +13,29 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Main for building the binary of a Grin Reference Wallet
+//! Main for building the binary of a Mwc Reference Wallet
 
 #[macro_use]
 extern crate clap;
 
-extern crate grin_wallet_util;
+extern crate mwc_wallet_util;
 #[macro_use]
 extern crate log;
 use crate::config::ConfigError;
 use crate::core::global;
 use crate::util::init_logger;
 use clap::{App, AppSettings};
-use grin_wallet_config as config;
-use grin_wallet_impls::HTTPNodeClient;
-use grin_wallet_util::grin_core as core;
-use grin_wallet_util::grin_util as util;
+use mwc_wallet_config as config;
+use mwc_wallet_impls::HTTPNodeClient;
+use mwc_wallet_util::mwc_core as core;
+use mwc_wallet_util::mwc_util as util;
 use std::env;
 use std::path::PathBuf;
 
-use grin_wallet_config::parse_node_address_string;
-use grin_wallet_controller::controller::{set_foreign_api_server, set_owner_api_server};
-use grin_wallet_libwallet::proof::proofaddress;
 use mwc_wallet::cmd;
+use mwc_wallet_config::parse_node_address_string;
+use mwc_wallet_controller::controller::{set_foreign_api_server, set_owner_api_server};
+use mwc_wallet_libwallet::proof::proofaddress;
 
 // include build information
 pub mod built_info {
@@ -189,7 +190,7 @@ fn real_main() -> i32 {
 	let wallet_config = config.clone().members.unwrap().wallet;
 
 	// Default derive index is 1 to match what mwc713 has by default...
-	proofaddress::set_address_index(wallet_config.grinbox_address_index.unwrap_or(0));
+	proofaddress::set_address_index(wallet_config.mwcbox_address_index.unwrap_or(0));
 
 	//parse the nodes address and put them in a vec
 	let node_list = parse_node_address_string(wallet_config.check_node_api_http_addr.clone());

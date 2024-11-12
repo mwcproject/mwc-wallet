@@ -1,4 +1,5 @@
-// Copyright 2021 The Grin Developers
+// Copyright 2019 The Grin Developers
+// Copyright 2024 The Mwc Developers
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,18 +19,18 @@
 use super::swap::ethereum::EthereumWallet;
 use crate::config::{MQSConfig, TorConfig, WalletConfig};
 use crate::error::Error;
-use crate::grin_api::{Libp2pMessages, Libp2pPeers};
-use crate::grin_core::core::hash::Hash;
-use crate::grin_core::core::Committed;
-use crate::grin_core::core::{Output, Transaction, TxKernel};
-use crate::grin_core::libtx::{aggsig, secp_ser};
-use crate::grin_core::{global, ser};
-use crate::grin_keychain::{Identifier, Keychain};
-use crate::grin_util::logger::LoggingConfig;
-use crate::grin_util::secp::key::{PublicKey, SecretKey, ZERO_KEY};
-use crate::grin_util::secp::pedersen::Commitment;
-use crate::grin_util::secp::{self, pedersen, Secp256k1};
-use crate::grin_util::{ToHex, ZeroingString};
+use crate::mwc_api::{Libp2pMessages, Libp2pPeers};
+use crate::mwc_core::core::hash::Hash;
+use crate::mwc_core::core::Committed;
+use crate::mwc_core::core::{Output, Transaction, TxKernel};
+use crate::mwc_core::libtx::{aggsig, secp_ser};
+use crate::mwc_core::{global, ser};
+use crate::mwc_keychain::{Identifier, Keychain};
+use crate::mwc_util::logger::LoggingConfig;
+use crate::mwc_util::secp::key::{PublicKey, SecretKey, ZERO_KEY};
+use crate::mwc_util::secp::pedersen::Commitment;
+use crate::mwc_util::secp::{self, pedersen, Secp256k1};
+use crate::mwc_util::{ToHex, ZeroingString};
 use crate::proof::proofaddress::ProvableAddress;
 use crate::slate::ParticipantMessages;
 use crate::Slate;
@@ -62,14 +63,14 @@ where
 	K: Keychain + 'a,
 {
 	/// Sets the top level system wallet directory
-	/// default is assumed to be ~/.grin/main/wallet_data (or floonet equivalent)
+	/// default is assumed to be ~/.mwc/main/wallet_data (or floonet equivalent)
 	fn set_top_level_directory(&mut self, dir: &str) -> Result<(), Error>;
 
 	/// Sets the top level system wallet directory
-	/// default is assumed to be ~/.grin/main/wallet_data (or floonet equivalent)
+	/// default is assumed to be ~/.mwc/main/wallet_data (or floonet equivalent)
 	fn get_top_level_directory(&self) -> Result<String, Error>;
 
-	/// Output a grin-wallet.toml file into the current top-level system wallet directory
+	/// Output a mwc-wallet.toml file into the current top-level system wallet directory
 	fn create_config(
 		&self,
 		chain_type: &global::ChainTypes,
@@ -405,14 +406,14 @@ pub trait NodeClient: Send + Sync + Clone {
 	/// Reset cache data
 	fn reset_cache(&self);
 
-	/// Posts a transaction to a grin node
+	/// Posts a transaction to a mwc node
 	fn post_tx(&self, tx: &Transaction, fluff: bool) -> Result<(), Error>;
 
 	/// Returns the api version string and block header version as reported
 	/// by the node. Result can be cached for later use
 	fn get_version_info(&mut self) -> Option<NodeVersionInfo>;
 
-	/// retrieves the current tip (height, hash) from the specified grin node
+	/// retrieves the current tip (height, hash) from the specified mwc node
 	/// (<height>, <hash>, <total difficulty>)
 	fn get_chain_tip(&self) -> Result<(u64, String, u64), Error>;
 
@@ -422,7 +423,7 @@ pub trait NodeClient: Send + Sync + Clone {
 	/// Return Connected peers
 	fn get_connected_peer_info(
 		&self,
-	) -> Result<Vec<crate::grin_p2p::types::PeerInfoDisplayLegacy>, Error>;
+	) -> Result<Vec<crate::mwc_p2p::types::PeerInfoDisplayLegacy>, Error>;
 
 	/// Get a kernel and the height of the block it's included in. Returns
 	/// (tx_kernel, height, mmr_index)
@@ -433,7 +434,7 @@ pub trait NodeClient: Send + Sync + Clone {
 		max_height: Option<u64>,
 	) -> Result<Option<(TxKernel, u64, u64)>, Error>;
 
-	/// retrieve a list of outputs from the specified grin node
+	/// retrieve a list of outputs from the specified mwc node
 	/// need "by_height" and "by_id" variants
 	/// Result value: Commit, Height, MMR
 	fn get_outputs_from_node(
@@ -477,7 +478,7 @@ pub trait NodeClient: Send + Sync + Clone {
 		start_height: u64,
 		end_height: u64,
 		threads_number: usize,
-	) -> Result<Vec<crate::grin_api::BlockPrintable>, Error>;
+	) -> Result<Vec<crate::mwc_api::BlockPrintable>, Error>;
 
 	/// Get Node Tor address
 	fn get_libp2p_peers(&self) -> Result<Libp2pPeers, Error>;

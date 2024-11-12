@@ -56,7 +56,7 @@ subcommands:
   - rewind_hash:
       about: Return the hash of the wallet root public key.
   - scan_rewind_hash:
-      about: Scan the UTXO set and return the outputs and the total of grin owned by a view wallet rewind hash.
+      about: Scan the UTXO set and return the outputs and the total of mwc owned by a view wallet rewind hash.
       args:
         - rewind_hash:
             help: Rewind hash of the wallet to be scanned in order to retrieve all the outputs and balance.

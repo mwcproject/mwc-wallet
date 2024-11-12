@@ -1,4 +1,5 @@
-// Copyright 2018 The Grin Developers
+// Copyright 2019 The Grin Developers
+// Copyright 2024 The Mwc Developers
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,7 +17,7 @@
 
 use crate::core::global;
 use crate::util::to_base64;
-use grin_wallet_util::RUNTIME;
+use mwc_wallet_util::RUNTIME;
 use reqwest::header::{
 	HeaderMap, HeaderValue, ACCEPT, AUTHORIZATION, CONNECTION, CONTENT_TYPE, USER_AGENT,
 };

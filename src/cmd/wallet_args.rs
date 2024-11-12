@@ -1,4 +1,5 @@
-// Copyright 2021 The Grin Developers
+// Copyright 2019 The Grin Developers
+// Copyright 2024 The Mwc Developers
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,7 +16,7 @@
 use crate::api::TLSConfig;
 use crate::cli::command_loop;
 use crate::cmd::wallet_args::ParseError::ArgumentError;
-use crate::config::GRIN_WALLET_DIR;
+use crate::config::MWC_WALLET_DIR;
 use crate::util::file::get_first_line;
 use crate::util::secp::key::SecretKey;
 use crate::util::{Mutex, ZeroingString};
@@ -24,26 +25,26 @@ use crate::cmd::wallet::MIN_COMPAT_NODE_VERSION;
 /// Argument parsing and error handling for wallet commands
 use clap::ArgMatches;
 use ed25519_dalek::SecretKey as DalekSecretKey;
-use grin_wallet_api::Owner;
-use grin_wallet_config::parse_node_address_string;
-use grin_wallet_config::{MQSConfig, TorConfig, WalletConfig};
-use grin_wallet_controller::{command, Error};
-use grin_wallet_impls::tor::config::is_tor_address;
-use grin_wallet_impls::{DefaultLCProvider, DefaultWalletImpl};
-use grin_wallet_impls::{PathToSlateGetter, SlateGetter};
-use grin_wallet_libwallet::proof::proofaddress;
-use grin_wallet_libwallet::proof::proofaddress::ProvableAddress;
-use grin_wallet_libwallet::{
+use linefeed::terminal::Signal;
+use linefeed::{Interface, ReadResult};
+use mwc_wallet_api::Owner;
+use mwc_wallet_config::parse_node_address_string;
+use mwc_wallet_config::{MQSConfig, TorConfig, WalletConfig};
+use mwc_wallet_controller::{command, Error};
+use mwc_wallet_impls::tor::config::is_tor_address;
+use mwc_wallet_impls::{DefaultLCProvider, DefaultWalletImpl};
+use mwc_wallet_impls::{PathToSlateGetter, SlateGetter};
+use mwc_wallet_libwallet::proof::proofaddress;
+use mwc_wallet_libwallet::proof::proofaddress::ProvableAddress;
+use mwc_wallet_libwallet::{
 	swap::types::Currency, IssueInvoiceTxArgs, NodeClient, SwapStartArgs, WalletInst,
 	WalletLCProvider,
 };
-use grin_wallet_libwallet::{Slate, SlatePurpose};
-use grin_wallet_util::grin_core::core::amount_to_hr_string;
-use grin_wallet_util::grin_keychain as keychain;
-use grin_wallet_util::grin_util::secp::Secp256k1;
-use grin_wallet_util::{grin_core as core, OnionV3Address};
-use linefeed::terminal::Signal;
-use linefeed::{Interface, ReadResult};
+use mwc_wallet_libwallet::{Slate, SlatePurpose};
+use mwc_wallet_util::mwc_core::core::amount_to_hr_string;
+use mwc_wallet_util::mwc_keychain as keychain;
+use mwc_wallet_util::mwc_util::secp::Secp256k1;
+use mwc_wallet_util::{mwc_core as core, OnionV3Address};
 use rpassword;
 use semver::Version;
 use std::sync::Arc;
@@ -347,7 +348,7 @@ where
 		config
 			.wallet_data_dir
 			.clone()
-			.unwrap_or(GRIN_WALLET_DIR.to_string()),
+			.unwrap_or(MWC_WALLET_DIR.to_string()),
 	);
 	if wallet_data_path.exists() && !test_mode {
 		return Err(ParseError::WalletExists(
@@ -1505,11 +1506,11 @@ where
 	node_client.set_node_api_secret(global_wallet_args.node_api_secret.clone());
 	let node_client_index = node_client.get_node_index();
 
-	// legacy hack to avoid the need for changes in existing grin-wallet.toml files
+	// legacy hack to avoid the need for changes in existing mwc-wallet.toml files
 	// remove `wallet_data` from end of path as
-	// new lifecycle provider assumes grin_wallet.toml is in root of data directory
+	// new lifecycle provider assumes mwc_wallet.toml is in root of data directory
 	let mut top_level_wallet_dir = PathBuf::from(wallet_config.clone().data_file_dir);
-	if top_level_wallet_dir.ends_with(GRIN_WALLET_DIR) {
+	if top_level_wallet_dir.ends_with(MWC_WALLET_DIR) {
 		top_level_wallet_dir.pop();
 		wallet_config.data_file_dir = top_level_wallet_dir.to_str().unwrap().into();
 	}
@@ -1601,7 +1602,7 @@ where
 
 			let wallet_inst = lc.wallet_inst()?;
 
-			grin_wallet_libwallet::swap::trades::init_swap_trade_backend(
+			mwc_wallet_libwallet::swap::trades::init_swap_trade_backend(
 				wallet_inst.get_data_file_dir(),
 				&wallet_config.swap_electrumx_addr,
 				&wallet_config.eth_swap_contract_address,

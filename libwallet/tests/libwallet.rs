@@ -1,4 +1,5 @@
-// Copyright 2021 The Grin Developers
+// Copyright 2019 The Grin Developers
+// Copyright 2024 The Mwc Developers
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -12,16 +13,16 @@
 // limitations under the License.
 
 //! core::libtx specific tests
-use grin_wallet_libwallet::proof::crypto::Hex;
-use grin_wallet_libwallet::Context;
-use grin_wallet_util::grin_core::core::{transaction, FeeFields};
-use grin_wallet_util::grin_core::libtx::{aggsig, proof};
-use grin_wallet_util::grin_keychain::{
+use mwc_wallet_libwallet::proof::crypto::Hex;
+use mwc_wallet_libwallet::Context;
+use mwc_wallet_util::mwc_core::core::{transaction, FeeFields};
+use mwc_wallet_util::mwc_core::libtx::{aggsig, proof};
+use mwc_wallet_util::mwc_keychain::{
 	BlindSum, BlindingFactor, ChildNumber, ExtKeychain, ExtKeychainPath, Keychain,
 	SwitchCommitmentType,
 };
-use grin_wallet_util::grin_util::secp;
-use grin_wallet_util::grin_util::secp::key::{PublicKey, SecretKey};
+use mwc_wallet_util::mwc_util::secp;
+use mwc_wallet_util::mwc_util::secp::key::{PublicKey, SecretKey};
 use rand::thread_rng;
 
 fn kernel_sig_msg() -> secp::Message {

@@ -1,4 +1,5 @@
-// Copyright 2021 The Grin Developers
+// Copyright 2019 The Grin Developers
+// Copyright 2024 The Mwc Developers
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,20 +16,20 @@
 //! Selection of inputs for building transactions
 
 use crate::error::Error;
-use crate::grin_core::core::amount_to_hr_string;
-use crate::grin_core::libtx::{
+use crate::internal::keys;
+use crate::mwc_core::core::amount_to_hr_string;
+use crate::mwc_core::libtx::{
 	build,
 	proof::{ProofBuild, ProofBuilder},
 	tx_fee,
 };
-use crate::grin_keychain::{Identifier, Keychain};
-use crate::grin_util::secp::key::SecretKey;
-use crate::grin_util::secp::pedersen::Commitment;
-use crate::internal::keys;
+use crate::mwc_keychain::{Identifier, Keychain};
+use crate::mwc_util::secp::key::SecretKey;
+use crate::mwc_util::secp::pedersen::Commitment;
 use crate::proof::proofaddress;
 use crate::slate::Slate;
 use crate::types::*;
-use grin_wallet_util::grin_util as util;
+use mwc_wallet_util::mwc_util as util;
 use std::collections::HashMap;
 
 /// Initialize a transaction on the sender side, returns a corresponding

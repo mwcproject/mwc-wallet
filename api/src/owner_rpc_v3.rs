@@ -1,4 +1,5 @@
-// Copyright 2021 The Grin Developers
+// Copyright 2019 The Grin Developers
+// Copyright 2024 The Mwc Developers
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -35,8 +36,8 @@ use crate::util::{static_secp_instance, ZeroingString};
 use crate::{ECDHPubkey, Owner, Token};
 use easy_jsonrpc_mw;
 use ed25519_dalek::PublicKey as DalekPublicKey;
-use grin_wallet_libwallet::proof::proofaddress::ProvableAddress;
 use libwallet::RetrieveTxQueryArgs;
+use mwc_wallet_libwallet::proof::proofaddress::ProvableAddress;
 use rand::thread_rng;
 use std::convert::TryFrom;
 use std::time::Duration;
@@ -54,7 +55,7 @@ pub trait OwnerRpcV3 {
 	# Json rpc example
 
 	```
-	# grin_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
+	# mwc_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
 	# r#"
 	{
 		"jsonrpc": "2.0",
@@ -91,7 +92,7 @@ pub trait OwnerRpcV3 {
 	# Json rpc example
 
 	```
-	# grin_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
+	# mwc_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
 	# r#"
 	{
 		"jsonrpc": "2.0",
@@ -124,7 +125,7 @@ pub trait OwnerRpcV3 {
 	# Json rpc example
 
 	```
-	# grin_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
+	# mwc_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
 	# r#"
 	{
 		"jsonrpc": "2.0",
@@ -157,7 +158,7 @@ pub trait OwnerRpcV3 {
 	# Json rpc example
 
 	```
-	# grin_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
+	# mwc_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
 	# r#"
 	{
 		"jsonrpc": "2.0",
@@ -235,7 +236,7 @@ pub trait OwnerRpcV3 {
 	# Json rpc example
 
 	```
-		# grin_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
+		# mwc_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
 		# r#"
 		{
 			"jsonrpc": "2.0",
@@ -336,10 +337,10 @@ pub trait OwnerRpcV3 {
 
 	/**
 	Networked version of [Owner::retrieve_txs](struct.Owner.html#method.retrieve_txs), which passes only the `tx_query_args`
-	parameter. See  (../grin_wallet_libwallet/types.struct.RetrieveTxQueryArgs.html)
+	parameter. See  (../mwc_wallet_libwallet/types.struct.RetrieveTxQueryArgs.html)
 
 	```
-		# grin_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
+		# mwc_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
 		# r#"
 		{
 			"jsonrpc": "2.0",
@@ -445,7 +446,7 @@ pub trait OwnerRpcV3 {
 	Networked version of [Owner::retrieve_summary_info](struct.Owner.html#method.retrieve_summary_info).
 
 	```
-	# grin_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
+	# mwc_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
 	# r#"
 	{
 		"jsonrpc": "2.0",
@@ -496,7 +497,7 @@ pub trait OwnerRpcV3 {
 	Networked version of [Owner::init_send_tx](struct.Owner.html#method.init_send_tx).
 	```
 	# // Full data request
-	# grin_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
+	# mwc_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
 	# r#"
 	{
 		"jsonrpc": "2.0",
@@ -592,7 +593,7 @@ pub trait OwnerRpcV3 {
 	# ,true, 4, false, false, false, false, false);
 	#
 	# // Short request. minimum_confirmations is optional but we put it, otherwise there will be not enough funds for default value 10
-	# grin_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
+	# mwc_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
 	# r#"
 	{
 		"jsonrpc": "2.0",
@@ -671,7 +672,7 @@ pub trait OwnerRpcV3 {
 	# ,true, 4, false, false, false, false, false);
 	#
 	# // Compact slate request that will be ready for compacting to slatepack
-	# grin_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
+	# mwc_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
 	# r#"
 	{
 		"jsonrpc": "2.0",
@@ -755,7 +756,7 @@ pub trait OwnerRpcV3 {
 	# ,true, 4, false, false, false, false, true);
 	#
 	# // Producing compact slate that can be converted into the slatepack with target_slate_version = 4.
-	# grin_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
+	# mwc_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
 	# r#"
 	{
 		"jsonrpc": "2.0",
@@ -849,7 +850,7 @@ pub trait OwnerRpcV3 {
 
 	```
 	# // Minimal list of arguments
-	# grin_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
+	# mwc_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
 	# r#"
 	{
 		"jsonrpc": "2.0",
@@ -922,7 +923,7 @@ pub trait OwnerRpcV3 {
 	# ,true, 4, false, false, false, false, false);
 	#
 	# // Full list of arguments
-	# grin_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
+	# mwc_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
 	# r#"
 	{
 		"jsonrpc": "2.0",
@@ -998,7 +999,7 @@ pub trait OwnerRpcV3 {
 	# ,true, 4, false, false, false, false, false);
 	#
 	# // Compact Slate, can be converted into the slatepack
-	# grin_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
+	# mwc_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
 	# r#"
 	# {
 		"jsonrpc": "2.0",
@@ -1043,7 +1044,7 @@ pub trait OwnerRpcV3 {
 	/**
 	Networked version of [Owner::get_rewind_hash](struct.Owner.html#method.get_rewind_hash).
 	```
-	# grin_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
+	# mwc_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
 	# r#"
 	{
 		"jsonrpc": "2.0",
@@ -1072,7 +1073,7 @@ pub trait OwnerRpcV3 {
 	/**
 	Networked version of [Owner::scan_rewind_hash](struct.Owner.html#method.scan_rewind_hash).
 	```
-	# grin_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
+	# mwc_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
 	# r#"
 	{
 		"jsonrpc": "2.0",
@@ -1153,7 +1154,7 @@ pub trait OwnerRpcV3 {
 	Networked version of [Owner::process_invoice_tx](struct.Owner.html#method.process_invoice_tx).
 
 	```
-	# grin_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
+	# mwc_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
 	# r#"
 	{
 		"jsonrpc": "2.0",
@@ -1214,7 +1215,7 @@ pub trait OwnerRpcV3 {
 				"max_outputs": 500,
 				"num_change_outputs": 1,
 				"selection_strategy_is_use_all": true,
-				"message": "Ok, here are your grins",
+				"message": "Ok, here are your mwcs",
 				"target_slate_version": null,
 				"payment_proof_recipient_address": null,
 				"ttl_blocks": null,
@@ -1250,8 +1251,8 @@ pub trait OwnerRpcV3 {
 			},
 			{
 			  "id": "1",
-			  "message": "Ok, here are your grins",
-			  "message_sig": "8f07ddd5e9f5179cff19486034181ed76505baaad53e5d994064127b56c5841bba2daf9cbf88c79c31c140108e02ca5051252a90c5c36796b6a86a52315012bf",
+			  "message": "Ok, here are your mwcs",
+			  "message_sig": "8f07ddd5e9f5179cff19486034181ed76505baaad53e5d994064127b56c5841bcf011cad082b7f92cee5cc4546688760c1ec1af07b81d572c8548f39dece9344",
 			  "part_sig": "8f07ddd5e9f5179cff19486034181ed76505baaad53e5d994064127b56c5841b9eff89ca02e15d91c7081062570b61dc60dd5727a35cc2fa329528eb30c86532",
 			  "public_blind_excess": "03b3041e0521339d1f47a5684a391b6185174e020274d02dffea0cc16ddb6b188b",
 			  "public_nonce": "031b84c5567b126440995d3ed5aaba0565d71e1834604819ff9c17f5e9d5dd078f"
@@ -1301,7 +1302,7 @@ pub trait OwnerRpcV3 {
 	# ,true, 4, false, false, false, false, false);
 	#
 	# // Compact slate processing, V3
-	# grin_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
+	# mwc_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
 	# r#"
 		{
 			"jsonrpc": "2.0",
@@ -1365,7 +1366,7 @@ pub trait OwnerRpcV3 {
 					"max_outputs": 500,
 					"num_change_outputs": 1,
 					"selection_strategy_is_use_all": true,
-					"message": "Ok, here are your grins",
+					"message": "Ok, here are your mwcs",
 					"target_slate_version": null,
 					"payment_proof_recipient_address": null,
 					"ttl_blocks": null,
@@ -1402,8 +1403,8 @@ pub trait OwnerRpcV3 {
 				},
 				{
 				  "id": "1",
-				  "message": "Ok, here are your grins",
-				  "message_sig": "8f07ddd5e9f5179cff19486034181ed76505baaad53e5d994064127b56c5841b14be6c976b3f69dd3eb2ec9bfe0134fc9162e668984f1d9592bca8bb46c37087",
+				  "message": "Ok, here are your mwcs",
+				  "message_sig": "8f07ddd5e9f5179cff19486034181ed76505baaad53e5d994064127b56c5841ba6b472f5cbc5ef2745dfc68c43b829dc46ca5a4ea308338c82e42404621a0762",
 				  "part_sig": "8f07ddd5e9f5179cff19486034181ed76505baaad53e5d994064127b56c5841bb431617fb560348f12fb9a288fd758a3189958a50d5cea436417539314b235f9",
 				  "public_blind_excess": "02e3c128e436510500616fef3f9a22b15ca015f407c8c5cf96c9059163c873828f",
 				  "public_nonce": "031b84c5567b126440995d3ed5aaba0565d71e1834604819ff9c17f5e9d5dd078f"
@@ -1455,7 +1456,7 @@ pub trait OwnerRpcV3 {
 	# ,true, 4, false, false, false, false, true);
 	#
 	# // Slatepack payload
-	# grin_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
+	# mwc_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
 	# r#"
 		{
 			"jsonrpc": "2.0",
@@ -1470,7 +1471,7 @@ pub trait OwnerRpcV3 {
 					"max_outputs": 500,
 					"num_change_outputs": 1,
 					"selection_strategy_is_use_all": true,
-					"message": "Ok, here are your grins",
+					"message": "Ok, here are your mwcs",
 					"target_slate_version": null,
 					"payment_proof_recipient_address": null,
 					"ttl_blocks": null,
@@ -1486,7 +1487,7 @@ pub trait OwnerRpcV3 {
 		  "id": 1,
 		  "jsonrpc": "2.0",
 		  "result": {
-			"Ok": "BEGINSLATEPACK. 4D9bM38AJbh1Mmi Zug4ZcEh3poNHnq 5R7SoFwTcrcyXrB 3vd7oLGD7c8mjwf tMgNygr9LgiTFGy fW5ZMbFinEvx3pz BGRhVTotLXXeXh9 my4kTW9piskg7k5 PVLzELvvPbXQoYo TD7TeB8BYtE76ip 47k7w7bj7z3avJP c97VK9oGjqwpTcu dtZqtKRd5HAQYKS PDhMVSpDPU4dxMv Rqgv2qzv5WyajuB NL3XfjT85wCxKTL tz2CYPpMApLSFVX 6G6tyN4ro7Nxgxg W6X7tjMyEjFAeRk NdgQhPEDvtCvSGV eAG73gCjF5h6igb cBirizLBVP8CHyz KRpmB348cFXTV4f jZsJksDcBBw7qpp nqmNdrQzv72V14S QvnmSw5yiJmqfnn xBrbuEHgYSDB4xy eRRgWX1HZQbD4VY 66AKRhydHLa1gWD CopuSKP6dAPjz4z JgvhMeQ22eTwj5R THG4tbXaDyUANNe XSd5zF3BPRFLVtt 1xDUwJX6p65aPGH MNqEKeF4vij9h7k QXvbXUSTeRJUJPN NzsSDBKdyTGLf8B Pq6mswmZEogjaBG SnxYsdwbhcbBHYf HrNHBZVB8AzYtFc YXG219u2CqY2DLB 2KNYBuBW7HDqo22 dG25GacjB3FhGLQ ppcdiC3yyzt5gqE ZE3JwdGKgHvBTTs zhrZuxKMFVFfquM gy7otphm65JScGM 1SHzbAsuKyHvBaX QYzQUwDUSz9Kvki JBNES2LrYjPqeie 6kSXGabbZsHT392 AhUetLGUMaNxpkK 5BQ9MuPcpKsYiKU vk6azPWy8s2jHTG MYq37dx1AbgaUwr zcQ63yN7q1Nv3kr uCvS8m6Eku5DeR3 DeGxmgJ7rmS9aRx 4osvuz4sZpd36U1 4YBf7MXoADY3sP3 fsGT5BcuJUPVdQ3 w2xTBGZKgP1DmmC DKoDH9Dhz27E61N 1U5DYmfwZfT2tXD GrmptRRXoF5Hsg1 NfXC8kJ16gXULLk rFy67oyJrxFmdpA g8A8GgAdQChdkdm RCghrcSEkwN6FD1 AngBsmNQdw5fyqE VhGCq2cZKZsTwmc yXdeJ8Bn6QggUSH 5DD48pfyPeY98N3 JLxZgG4Z6enCsGx 1JE55JEeSUNMv3n q1m19hoem4kh92o 3ymjNp2nsncdVmf TWxQbyDFFDUWHuz Hiwzr4AQbUyJJ3p d8kAS5Wej5vz7dP Rto2QKn1ULALxYe xtyU7vCMaYSeHyY 2gZaje6MUGmvCai zMDhPmQk3AuYBQC i6sCfbJG8NS2Wi2 Bvgc2TbWfWWoN7o WK9uWzCqrR2aKR1 3PE6rPfqRVthU8D EecsHSHADk7hecG Ux7owUsih1xNDm9 f1diGqCiJB6Zwq8 absXJYJp4jYajJU Z6rXPS3cM5nVkrk EBiL8NziKyfA24D 4b7Yux9n7RxC6Su iqsZXY2L6hbvErJ UKb6a5Fvr6gAA7U AGuTbkRsZNpsApS 43PooJ8cysN15Sp EJmLr8XByoGWZW2 E14XsE58jbBXiLE UYuDtfSWJeUMC1M dQyKefVeNfUdSSL 8zVdruFtRU1RLN5 hUoxX9L52rwA77N RC7hkSCiFVrhLQY cQEu631c1pPqqs7 PbdrRE2gseCgS1d CKi7yt2uSDGeAFL WGmQW6995ZxxJWm nur6. ENDSLATEPACK."
+			"Ok": "BEGINSLATEPACK. Sm4xZGYS8duoYWS pt8JCkYPxnShZp3 o91CusaUNkuaAGt WEm5MG2HayRfZ9j RshWAUnxuSsp1AH 62xMedzxR3ueMru f2qLubPQm7Y3c7M 6qQsLkH8cGMRjLC jqpRgoDbujKavMH dTtJxi6JDMrsaj9 ZieNjJayy7Bz7f6 oVkaCGnCwjEX58C sJM4Yb45qXSgmZp A3qbBduCgEmBnMg AocCXC1tHM62uza BUwfY79FZuzYjSS nF3zRGDcHaahPkS KhFr4nLPxejRNtB RxjfGTfMCEP1MKL C7PyQipqth68SpK dL2eSdnV9m7JrYD 8hXL1mpuMT6Wgud kejmnk19K6Yq1Gz kGPveW8U8FSSEm9 oD7MipfCy7ZKuAa e4QbTsnCaTgb8vU Xi8FReExfFgys6i P7nhNyBRx63LGzy iCPJ8GG4qK5NXYe dwtJRjyuHkr7nud 2JNtvAYzFoFivNm CDvutm5Jt1Z7s6h v6m1Z3gg3iD3DTn Hbpj37WAHXzRWJD XpBXrZxPgXdu3qJ t2pU3TzikieNgHH kza6NepbrjN3Jcn xeZY9DBRdWFSLGk xeGqs5GzdxQAdky Z5mC59xwfcU7QGB RxuX66ZKwb5Dhi2 iLrTsGGcQCtB2bn 7uVge6PEa9qhpKz VoeoCMAs6mYypCX 6VzfCmJngvsiGXT uAusyqTG218ZT5J XGJYTu6yfavHf3X HgqQjf7e28y8Ump AirrEbnV8JEpXCs 5cqBwJUY13Jqd7z 2WcZ14Zcxex7cN6 EtXTQTaG17LGk2y Nys4yxYgnq537Cq LMte581nFzPpSNE kvYMtCJ6E4Mj59c zB4XLNmfPYWoP8o gp7zcRUJq6rNgeX jxJsbuUWfNDXZvs RNNMG9HjKztTpF1 RhNSZLQPLUv7oCq 3TKZWCqXEEntsTn X1wFJu8EbvE5J5Z 97DTUedeCGVm2R6 RMNFagqTYhvvzbY 1eyX91qCwrkTNfb zBFtE8j2X6PLi2U TPnTk9sXhoWrHYA iXdm9nzfgGsYMTB Mvhvpg6TsgjcDmg Vz7oVXuqstLjCXz ZY2YRjmv9bwUWNc 3pimJKyFUP9xA5z X2hmxPkCYzMB2gg M9uqmJpJnfF7Mnv urYpvyPA5fBQ2Ee k93kjMBaazT5eEb r5rB9GCg4jMkwEH tVhqfSu7NaUDJiX pt5oWaRCB4Q1cSD oYfA83Qdvs2add4 jVHzjHxhCnY3DP5 zFUTT622jU8GJqC HcuWuMcpRTf21EQ G7PbUorQ21KsJ6K GHJZjXLMLCBErhW rKUTys6ofwRo8Dg 5TY1zQpu7ZuVhdk LCTa58UgJaWJj9j ucU383xqqMwiQFJ 1n8G1JnNmZ9dopC uR1trzDixRauXQB QmYewp3NmuBJ2Yz 1h98s155sqTqTY7 3q89hARR4S1zaYg rQcU37q1E5g1Mvu Wk6fkLwpK1dWPDT qQueq2hBt1XvjQy JVWS6JfRTARZNXb cCGBmMRertgmsPL GryY9ebc6J36ELC 2UHeaQU2Yzb5PXm RbMwhKeUMhEYbcX ee3u2hzA3K3USzh yzCuGpbMs4jtB8f gUVYssTw4Dxj5G1 wmiuPVsF3V2GoED PsfjrFEMfQGCh3Y KwzJfzfLeRbqjth 22qFEFvvVVnpcd5 cqyFWYWo6D9rXLK h1Gi. ENDSLATEPACK."
 		  }
 		}
 	# "#
@@ -1505,7 +1506,7 @@ pub trait OwnerRpcV3 {
 	Networked version of [Owner::tx_lock_outputs](struct.Owner.html#method.tx_lock_outputs).
 
 	```
-	# grin_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
+	# mwc_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
 	# r#"
 	{
 		"jsonrpc": "2.0",
@@ -1586,7 +1587,7 @@ pub trait OwnerRpcV3 {
 	# ,true, 5 ,true, false, false, false, false);
 	#
 	# // test for compact slate case
-	# grin_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
+	# mwc_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
 	# r#"
 	{
 		"jsonrpc": "2.0",
@@ -1646,7 +1647,7 @@ pub trait OwnerRpcV3 {
 	# ,true, 5 ,true, false, false, false, true);
 	#
 	# // Slatepack processing
-	# grin_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
+	# mwc_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
 	# r#"
 	{
 		"jsonrpc": "2.0",
@@ -1683,7 +1684,7 @@ pub trait OwnerRpcV3 {
 	Networked version of [Owner::finalize_tx](struct.Owner.html#method.finalize_tx).
 
 	```
-	# grin_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
+	# mwc_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
 	# r#"
 	{
 		"jsonrpc": "2.0",
@@ -1844,7 +1845,7 @@ pub trait OwnerRpcV3 {
 	# , true, 5, true, true, false, false, false);
 	#
 	# // Compact slate case
-	# grin_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
+	# mwc_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
 	# r#"
 	{
 		"jsonrpc": "2.0",
@@ -2011,7 +2012,7 @@ pub trait OwnerRpcV3 {
 	# , true, 5, true, true, false, false, true);
 	#
 	# // Slatepack processing
-	# grin_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
+	# mwc_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
 	# r#"
 	{
 		"jsonrpc": "2.0",
@@ -2042,7 +2043,7 @@ pub trait OwnerRpcV3 {
 	Networked version of [Owner::post_tx](struct.Owner.html#method.post_tx).
 
 	```
-	# grin_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
+	# mwc_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
 	# r#"
 	{
 		"jsonrpc": "2.0",
@@ -2111,7 +2112,7 @@ pub trait OwnerRpcV3 {
 
 
 	```
-	# grin_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
+	# mwc_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
 	# r#"
 	{
 		"jsonrpc": "2.0",
@@ -2136,7 +2137,7 @@ pub trait OwnerRpcV3 {
 	# "#
 	# , true, 5, true, true, false, false, true);
 	#
-	# grin_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
+	# mwc_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
 	# r#"
 	{
 		"jsonrpc": "2.0",
@@ -2173,7 +2174,7 @@ pub trait OwnerRpcV3 {
 	Networked version of [Owner::get_stored_tx](struct.Owner.html#method.get_stored_tx).
 
 	```
-	# grin_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
+	# mwc_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
 	# r#"
 	{
 		"jsonrpc": "2.0",
@@ -2247,7 +2248,7 @@ pub trait OwnerRpcV3 {
 	Networked version of [Owner::verify_slate_messages](struct.Owner.html#method.verify_slate_messages).
 
 	```
-	# grin_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
+	# mwc_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
 	# r#"
 	{
 		"jsonrpc": "2.0",
@@ -2330,7 +2331,7 @@ pub trait OwnerRpcV3 {
 
 
 	```
-	# grin_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
+	# mwc_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
 	# r#"
 	{
 		"jsonrpc": "2.0",
@@ -2367,7 +2368,7 @@ pub trait OwnerRpcV3 {
 	Networked version of [Owner::node_height](struct.Owner.html#method.node_height).
 
 	```
-	# grin_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
+	# mwc_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
 	# r#"
 	{
 		"jsonrpc": "2.0",
@@ -2455,7 +2456,7 @@ pub trait OwnerRpcV3 {
 	Networked version of [Owner::get_top_level_directory](struct.Owner.html#method.get_top_level_directory).
 
 	```
-	# grin_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
+	# mwc_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
 	# r#"
 	{
 		"jsonrpc": "2.0",
@@ -2484,7 +2485,7 @@ pub trait OwnerRpcV3 {
 	/**
 	Networked version of [Owner::set_top_level_directory](struct.Owner.html#method.set_top_level_directory).
 	```
-	# grin_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
+	# mwc_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
 	# r#"
 	{
 		"jsonrpc": "2.0",
@@ -2518,7 +2519,7 @@ pub trait OwnerRpcV3 {
 	below are for illustration. Note that the values provided for `log_file_path` and `data_file_dir`
 	will be ignored and replaced with the actual values based on the value of `get_top_level_directory`
 	```
-	# grin_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
+	# mwc_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
 	# r#"
 	{
 		"jsonrpc": "2.0",
@@ -2591,7 +2592,7 @@ pub trait OwnerRpcV3 {
 	/**
 	Networked version of [Owner::create_wallet](struct.Owner.html#method.create_wallet).
 	```
-	# grin_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
+	# mwc_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
 	# r#"
 	{
 		"jsonrpc": "2.0",
@@ -2630,7 +2631,7 @@ pub trait OwnerRpcV3 {
 	/**
 	Networked version of [Owner::open_wallet](struct.Owner.html#method.open_wallet).
 	```
-	# grin_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
+	# mwc_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
 	# r#"
 	{
 		"jsonrpc": "2.0",
@@ -2661,7 +2662,7 @@ pub trait OwnerRpcV3 {
 	/**
 	Networked version of [Owner::close_wallet](struct.Owner.html#method.close_wallet).
 	```
-	# grin_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
+	# mwc_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
 	# r#"
 	{
 		"jsonrpc": "2.0",
@@ -2691,7 +2692,7 @@ pub trait OwnerRpcV3 {
 	/**
 	Networked version of [Owner::get_mnemonic](struct.Owner.html#method.get_mnemonic).
 	```
-	# grin_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
+	# mwc_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
 	# r#"
 	{
 		"jsonrpc": "2.0",
@@ -2722,7 +2723,7 @@ pub trait OwnerRpcV3 {
 	/**
 	Networked version of [Owner::change_password](struct.Owner.html#method.change_password).
 	```
-	# grin_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
+	# mwc_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
 	# r#"
 	{
 		"jsonrpc": "2.0",
@@ -2753,7 +2754,7 @@ pub trait OwnerRpcV3 {
 	/**
 	Networked version of [Owner::delete_wallet](struct.Owner.html#method.delete_wallet).
 	```
-	# grin_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
+	# mwc_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
 	# r#"
 	{
 		"jsonrpc": "2.0",
@@ -2782,7 +2783,7 @@ pub trait OwnerRpcV3 {
 	/**
 	Networked version of [Owner::start_updated](struct.Owner.html#method.start_updater).
 	```
-	# grin_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
+	# mwc_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
 	# r#"
 	{
 		"jsonrpc": "2.0",
@@ -2813,7 +2814,7 @@ pub trait OwnerRpcV3 {
 	/**
 	Networked version of [Owner::stop_updater](struct.Owner.html#method.stop_updater).
 	```
-	# grin_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
+	# mwc_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
 	# r#"
 	{
 		"jsonrpc": "2.0",
@@ -2840,7 +2841,7 @@ pub trait OwnerRpcV3 {
 	/**
 	Networked version of [Owner::get_updater_messages](struct.Owner.html#method.get_updater_messages).
 	```
-	# grin_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
+	# mwc_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
 	# r#"
 	{
 		"jsonrpc": "2.0",
@@ -2870,7 +2871,7 @@ pub trait OwnerRpcV3 {
 	/**
 	Networked version of [Owner::get_mqs_address](struct.Owner.html#method.get_mqs_address).
 	```
-	# grin_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
+	# mwc_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
 	# r#"
 	{
 		"jsonrpc": "2.0",
@@ -2904,7 +2905,7 @@ pub trait OwnerRpcV3 {
 	/**
 	Networked version of [Owner::get_wallet_public_address](struct.Owner.html#method.get_wallet_public_address).
 	```
-	# grin_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
+	# mwc_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
 	# r#"
 	{
 		"jsonrpc": "2.0",
@@ -2939,7 +2940,7 @@ pub trait OwnerRpcV3 {
 	Networked version of [Owner::retrieve_payment_proof](struct.Owner.html#method.retrieve_payment_proof).
 	```
 	# // Legacy non compact case
-	# grin_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
+	# mwc_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
 	# r#"
 	{
 		"jsonrpc": "2.0",
@@ -2981,7 +2982,7 @@ pub trait OwnerRpcV3 {
 	# , true, 5, true, true, true, true, false);
 	#
 	# // Comapact slate case, kernel is different now.
-	# grin_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
+	# mwc_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
 	# r#"
 	{
 		"jsonrpc": "2.0",
@@ -3035,7 +3036,7 @@ pub trait OwnerRpcV3 {
 	/**
 	Networked version of [Owner::verify_payment_proof](struct.Owner.html#method.verify_payment_proof).
 	```
-	# grin_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
+	# mwc_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
 	# r#"
 	{
 		"jsonrpc": "2.0",
@@ -3079,7 +3080,7 @@ pub trait OwnerRpcV3 {
 	# , true, 5, true, true, true, true, false);
 	#
 	# // Compact slate case
-	# grin_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
+	# mwc_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
 	# r#"
 	{
 		"jsonrpc": "2.0",
@@ -3132,7 +3133,7 @@ pub trait OwnerRpcV3 {
 	/**
 	Networked version of [Owner::set_tor_config](struct.Owner.html#method.set_tor_config).
 	```
-	# grin_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
+	# mwc_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
 	# r#"
 	{
 		"jsonrpc": "2.0",
@@ -3166,7 +3167,7 @@ pub trait OwnerRpcV3 {
 	/**
 	Networked version of [Owner::build_output](struct.Owner.html#method.build_output).
 	```
-	# grin_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
+	# mwc_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
 	# r#"
 	{
 		"jsonrpc": "2.0",
@@ -3211,7 +3212,7 @@ pub trait OwnerRpcV3 {
 	Networked version of [Owner::encode_slatepack_message](struct.Owner.html#method.encode_slatepack_message).
 	```
 	# // Compact slate processing, V3
-	# grin_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
+	# mwc_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
 	# r#"
 	{
 		"jsonrpc": "2.0",
@@ -3292,7 +3293,7 @@ pub trait OwnerRpcV3 {
 	# ,true, 4, false, false, false, false, true);
 	#
 	# // Converting slate into non encrypted binary, recipient is null
-	# grin_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
+	# mwc_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
 	# r#"
 	{
 		"jsonrpc": "2.0",
@@ -3382,7 +3383,7 @@ pub trait OwnerRpcV3 {
 	/**
 	Networked version of [Owner::decode_slatepack_message](struct.Owner.html#method.decode_slatepack_message).
 	```
-	# grin_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
+	# mwc_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
 	# r#"
 	{
 		"jsonrpc": "2.0",
@@ -3475,7 +3476,7 @@ pub trait OwnerRpcV3 {
 	# , true, 0, false, false, false, false, true);
 	#
 	# // Decode not encrypted slate pack
-	# grin_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
+	# mwc_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
 	# r#"
 	{
 		"jsonrpc": "2.0",
@@ -4138,5 +4139,5 @@ where
 // Keeping as a placeholder for doc tests
 #[test]
 fn owner_api_v3_test() {
-	// use crate as grin_wallet_api;
+	// use crate as mwc_wallet_api;
 }

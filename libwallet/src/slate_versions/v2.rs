@@ -1,4 +1,5 @@
 // Copyright 2019 The Grin Developers
+// Copyright 2024 The Mwc Developers
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -35,13 +36,13 @@
 //!    orig_version: u16,
 //!    block_header_version: u16,
 
-use crate::grin_core::core::transaction::OutputFeatures;
-use crate::grin_core::libtx::secp_ser;
-use crate::grin_keychain::{BlindingFactor, Identifier};
-use crate::grin_util::secp;
-use crate::grin_util::secp::key::PublicKey;
-use crate::grin_util::secp::pedersen::{Commitment, RangeProof};
-use crate::grin_util::secp::Signature;
+use crate::mwc_core::core::transaction::OutputFeatures;
+use crate::mwc_core::libtx::secp_ser;
+use crate::mwc_keychain::{BlindingFactor, Identifier};
+use crate::mwc_util::secp;
+use crate::mwc_util::secp::key::PublicKey;
+use crate::mwc_util::secp::pedersen::{Commitment, RangeProof};
+use crate::mwc_util::secp::Signature;
 use crate::slate::CompatKernelFeatures;
 use crate::slate_versions::v3::{OutputV3, TxKernelV3};
 use crate::types::CbData;
@@ -126,7 +127,7 @@ pub struct VersionCompatInfoV2 {
 	pub version: u16,
 	/// Original version this slate was converted from
 	pub orig_version: u16,
-	/// Version of grin block header this slate is compatible with
+	/// Version of mwc block header this slate is compatible with
 	pub block_header_version: u16,
 }
 

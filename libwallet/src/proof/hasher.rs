@@ -3,24 +3,24 @@ use hmac::{Hmac, Mac, NewMac};
 use ripemd160::Ripemd160;
 use sha2::{Digest, Sha256, Sha512};
 
-use crate::grin_core::global::is_floonet;
-use crate::grin_keychain::extkey_bip32::{BIP32Hasher, ChildNumber, ExtendedPrivKey};
-use crate::grin_keychain::Keychain;
-use crate::grin_keychain::SwitchCommitmentType;
-use crate::grin_util::secp::key::SecretKey;
+use crate::mwc_core::global::is_floonet;
+use crate::mwc_keychain::extkey_bip32::{BIP32Hasher, ChildNumber, ExtendedPrivKey};
+use crate::mwc_keychain::Keychain;
+use crate::mwc_keychain::SwitchCommitmentType;
+use crate::mwc_util::secp::key::SecretKey;
 
 use crate::Error;
 
 type HmacSha512 = Hmac<Sha512>;
 
 #[derive(Clone, Debug)]
-///BIP32GrinboxHasher
-pub struct BIP32GrinboxHasher {
+///BIP32MwcboxHasher
+pub struct BIP32MwcboxHasher {
 	is_floonet: bool,
 	hmac_sha512: HmacSha512,
 }
 
-impl BIP32GrinboxHasher {
+impl BIP32MwcboxHasher {
 	/// New empty hasher
 	pub fn new(is_floonet: bool) -> Self {
 		Self {
@@ -30,7 +30,7 @@ impl BIP32GrinboxHasher {
 	}
 }
 
-impl BIP32Hasher for BIP32GrinboxHasher {
+impl BIP32Hasher for BIP32MwcboxHasher {
 	fn network_priv(&self) -> [u8; 4] {
 		match self.is_floonet {
 			true => [42, 0, 0, 42],
@@ -78,7 +78,7 @@ pub fn derive_address_key<K: Keychain>(keychain: &K, index: u32) -> Result<Secre
 	let root = keychain
 		.derive_key(713, &K::root_key_id(), SwitchCommitmentType::Regular)
 		.map_err(|e| Error::DeriveKeyError(format!("Derive key error, {}", e)))?;
-	let mut hasher = BIP32GrinboxHasher::new(is_floonet());
+	let mut hasher = BIP32MwcboxHasher::new(is_floonet());
 	let secp = keychain.secp();
 	let master = ExtendedPrivKey::new_master(secp, &mut hasher, &root.0)
 		.map_err(|e| Error::DeriveKeyError(format!("Derive key error, {}", e)))?;

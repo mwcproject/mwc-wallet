@@ -1,4 +1,5 @@
-// Copyright 2021 The Grin Developers
+// Copyright 2019 The Grin Developers
+// Copyright 2024 The Mwc Developers
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -30,10 +31,10 @@ pub use ov3::OnionV3Address;
 pub use ov3::OnionV3Error as OnionV3AddressError;
 pub use tokio_runtime::RUNTIME;
 
-pub use grin_api;
-pub use grin_chain;
-pub use grin_core;
-pub use grin_keychain;
-pub use grin_p2p;
-pub use grin_store;
-pub use grin_util;
+pub use mwc_api;
+pub use mwc_chain;
+pub use mwc_core;
+pub use mwc_keychain;
+pub use mwc_p2p;
+pub use mwc_store;
+pub use mwc_util;

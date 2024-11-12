@@ -1,4 +1,5 @@
-// Copyright 2021 The Grin Developers
+// Copyright 2019 The Grin Developers
+// Copyright 2024 The Mwc Developers
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,23 +17,23 @@
 mod common;
 
 use common::{clean_output_dir, create_wallet_proxy, setup};
-use grin_wallet_controller::controller::owner_single_use as owner;
-use grin_wallet_controller::Error;
-use grin_wallet_impls::test_framework::*;
-use grin_wallet_impls::{DefaultLCProvider, PathToSlatePutter, SlatePutter};
-use grin_wallet_libwallet as libwallet;
-use grin_wallet_libwallet::api_impl::types::InitTxArgs;
-use grin_wallet_libwallet::WalletInst;
-use grin_wallet_util::grin_chain as chain;
-use grin_wallet_util::grin_core as core;
-use grin_wallet_util::grin_core::core::hash::Hashed;
-use grin_wallet_util::grin_core::core::Transaction;
-use grin_wallet_util::grin_core::global;
-use grin_wallet_util::grin_keychain::ExtKeychain;
-use grin_wallet_util::grin_util::secp::key::SecretKey;
-use grin_wallet_util::grin_util::secp::Secp256k1;
-use grin_wallet_util::grin_util::Mutex;
 use log::error;
+use mwc_wallet_controller::controller::owner_single_use as owner;
+use mwc_wallet_controller::Error;
+use mwc_wallet_impls::test_framework::*;
+use mwc_wallet_impls::{DefaultLCProvider, PathToSlatePutter, SlatePutter};
+use mwc_wallet_libwallet as libwallet;
+use mwc_wallet_libwallet::api_impl::types::InitTxArgs;
+use mwc_wallet_libwallet::WalletInst;
+use mwc_wallet_util::mwc_chain as chain;
+use mwc_wallet_util::mwc_core as core;
+use mwc_wallet_util::mwc_core::core::hash::Hashed;
+use mwc_wallet_util::mwc_core::core::Transaction;
+use mwc_wallet_util::mwc_core::global;
+use mwc_wallet_util::mwc_keychain::ExtKeychain;
+use mwc_wallet_util::mwc_util::secp::key::SecretKey;
+use mwc_wallet_util::mwc_util::secp::Secp256k1;
+use mwc_wallet_util::mwc_util::Mutex;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;

@@ -1,4 +1,5 @@
-// Copyright 2021 The Grin Developers
+// Copyright 2019 The Grin Developers
+// Copyright 2024 The Mwc Developers
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -20,23 +21,23 @@ extern crate log;
 
 extern crate mwc_wallet;
 
-use grin_wallet_impls::test_framework::{self, LocalWalletClient, WalletProxy};
+use mwc_wallet_impls::test_framework::{self, LocalWalletClient, WalletProxy};
 
 use clap::App;
 use std::thread;
 use std::time::Duration;
 
-use grin_wallet_impls::DefaultLCProvider;
-use grin_wallet_util::grin_keychain::ExtKeychain;
+use mwc_wallet_impls::DefaultLCProvider;
+use mwc_wallet_util::mwc_keychain::ExtKeychain;
 
 mod common;
 use common::{clean_output_dir, execute_command, initial_setup_wallet, instantiate_wallet, setup};
-use grin_wallet_controller::controller;
-use grin_wallet_libwallet::proof::proofaddress::ProvableAddress;
-use grin_wallet_util::grin_core::consensus::calc_mwc_block_reward;
+use mwc_wallet_controller::controller;
+use mwc_wallet_libwallet::proof::proofaddress::ProvableAddress;
+use mwc_wallet_util::mwc_core::consensus::calc_mwc_block_reward;
 
 /// command line tests
-fn command_line_test_impl(test_dir: &str) -> Result<(), grin_wallet_controller::Error> {
+fn command_line_test_impl(test_dir: &str) -> Result<(), mwc_wallet_controller::Error> {
 	setup(test_dir);
 	// Create a new proxy to simulate server and wallet responses
 	let mut wallet_proxy: WalletProxy<
@@ -155,7 +156,7 @@ fn command_line_test_impl(test_dir: &str) -> Result<(), grin_wallet_controller::
 	let (wallet1, mask1_i) =
 		instantiate_wallet(wallet_config1, client1.clone(), "password1", "default")?;
 	let mask1 = (&mask1_i).as_ref();
-	grin_wallet_controller::controller::owner_single_use(
+	mwc_wallet_controller::controller::owner_single_use(
 		Some(wallet1.clone()),
 		mask1,
 		None,
@@ -204,7 +205,7 @@ fn command_line_test_impl(test_dir: &str) -> Result<(), grin_wallet_controller::
 		out_file_name.as_str(),
 		"-g",
 		very_long_message,
-		"0.3", // grin: "10"
+		"0.3", // mwc: "10"
 	];
 	execute_command(&app, test_dir, "wallet1", &client1, arg_vec)?;
 	let arg_vec = vec!["mwc-wallet", "-a", "mining", "-p", "password1", "txs"];
@@ -255,7 +256,7 @@ fn command_line_test_impl(test_dir: &str) -> Result<(), grin_wallet_controller::
 	let mask1 = (&mask1_i).as_ref();
 
 	// Check our transaction log, should have 10 entries
-	grin_wallet_controller::controller::owner_single_use(
+	mwc_wallet_controller::controller::owner_single_use(
 		Some(wallet1.clone()),
 		mask1,
 		None,
@@ -312,13 +313,13 @@ fn command_line_test_impl(test_dir: &str) -> Result<(), grin_wallet_controller::
 		api.set_active_account(m, "account_1")?;
 		let (_, wallet1_info) = api.retrieve_summary_info(m, true, 1)?;
 		assert_eq!(wallet1_info.last_confirmed_height, bh);
-		assert_eq!(wallet1_info.amount_currently_spendable, 300_000_000); // grin: 10_000_000_000,  mwc 0.3 to nano
+		assert_eq!(wallet1_info.amount_currently_spendable, 300_000_000); // mwc: 10_000_000_000,  mwc 0.3 to nano
 		Ok(())
 	})?;
 
 	// Send to wallet 2 with --amount_includes_fee
 	let mut old_balance = 0;
-	grin_wallet_controller::controller::owner_single_use(
+	mwc_wallet_controller::controller::owner_single_use(
 		Some(wallet1.clone()),
 		mask1,
 		None,
@@ -343,7 +344,7 @@ fn command_line_test_impl(test_dir: &str) -> Result<(), grin_wallet_controller::
 		"-d",
 		&file_name,
 		"--amount_includes_fee",
-		"0.25", // grin: "10"
+		"0.25", // mwc: "10"
 	];
 	execute_command(&app, test_dir, "wallet1", &client1, arg_vec)?;
 	// let's check if backup is there
@@ -390,13 +391,13 @@ fn command_line_test_impl(test_dir: &str) -> Result<(), grin_wallet_controller::
 		assert_eq!(
 			wallet1_info.amount_currently_spendable,
 			300_000_000 + 250_000_000 - 8_000_000
-		); // grin: 10_000_000_000,  mwc 0.3 to nano
+		); // mwc: 10_000_000_000,  mwc 0.3 to nano
 		Ok(())
 	})?;
 
 	// Check the new balance of wallet 1 reduced by EXACTLY the tx amount (instead of amount + fee)
 	// This confirms that the TX amount was correctly computed to allow for the fee
-	grin_wallet_controller::controller::owner_single_use(
+	mwc_wallet_controller::controller::owner_single_use(
 		Some(wallet1.clone()),
 		mask1,
 		None,
@@ -527,7 +528,7 @@ fn command_line_test_impl(test_dir: &str) -> Result<(), grin_wallet_controller::
 	)?;
 	let mask1 = (&mask1_i).as_ref();
 
-	grin_wallet_controller::controller::owner_single_use(
+	mwc_wallet_controller::controller::owner_single_use(
 		Some(wallet1.clone()),
 		mask1,
 		None,
@@ -554,7 +555,7 @@ fn command_line_test_impl(test_dir: &str) -> Result<(), grin_wallet_controller::
 		"3",
 		"-s",
 		"smallest",
-		"0.5", // grin: "10"
+		"0.5", // mwc: "10"
 	];
 	execute_command(&app, test_dir, "wallet1", &client1, arg_vec)?;
 
@@ -572,7 +573,7 @@ fn command_line_test_impl(test_dir: &str) -> Result<(), grin_wallet_controller::
 	)?;
 	let mask1 = (&mask1_i).as_ref();
 
-	grin_wallet_controller::controller::owner_single_use(
+	mwc_wallet_controller::controller::owner_single_use(
 		Some(wallet1.clone()),
 		mask1,
 		None,
@@ -597,7 +598,7 @@ fn command_line_test_impl(test_dir: &str) -> Result<(), grin_wallet_controller::
 		"slatepack",
 		"-d",
 		out_file_name.as_str(),
-		"1.2", // grin 10
+		"1.2", // mwc 10
 	];
 	execute_command(&app, test_dir, "wallet1", &client1, arg_vec)?;
 
@@ -616,7 +617,7 @@ fn command_line_test_impl(test_dir: &str) -> Result<(), grin_wallet_controller::
 		"slatepack",
 		"-d",
 		out_file_name.as_str(),
-		"1.5", // grin was 10
+		"1.5", // mwc was 10
 	];
 	execute_command(&app, test_dir, "wallet1", &client1, arg_vec)?;
 
@@ -647,7 +648,7 @@ fn command_line_test_impl(test_dir: &str) -> Result<(), grin_wallet_controller::
 		"fgmrkh7py6grrcv7ks72y5nv5ytbrvhmjaeg3pj7rv3uyqjgqqbpu6yd",
 		"-d",
 		out_file_name.as_str(),
-		"0.45", // 65 at grin test
+		"0.45", // 65 at mwc test
 	];
 	execute_command(&app, test_dir, "wallet2", &client2, arg_vec)?;
 
@@ -688,7 +689,7 @@ fn command_line_test_impl(test_dir: &str) -> Result<(), grin_wallet_controller::
 		tor_addr1.as_str(),
 		"-d",
 		out_file_name.as_str(),
-		"0.45", // 65 at grin test
+		"0.45", // 65 at mwc test
 	];
 	execute_command(&app, test_dir, "wallet2", &client2, arg_vec)?;
 
@@ -770,7 +771,7 @@ fn command_line_test_impl(test_dir: &str) -> Result<(), grin_wallet_controller::
 
 	// get tx output via -tx parameter
 	let mut tx_id = "".to_string();
-	grin_wallet_controller::controller::owner_single_use(
+	mwc_wallet_controller::controller::owner_single_use(
 		Some(wallet2.clone()),
 		mask2,
 		None,
@@ -805,7 +806,7 @@ fn command_line_test_impl(test_dir: &str) -> Result<(), grin_wallet_controller::
 		assert_eq!(
 			wallet1_info.amount_currently_spendable,
 			300_000_000 + 250_000_000 - 8_000_000 + 1_100_000_000 + 450_000_000
-		); // grin: 10_000_000_000,  mwc 0.3 to nano
+		); // mwc: 10_000_000_000,  mwc 0.3 to nano
 		Ok(())
 	})?;
 
@@ -861,7 +862,7 @@ fn command_line_test_impl(test_dir: &str) -> Result<(), grin_wallet_controller::
 	// Check wallet 1 is now empty, except for immature coinbase outputs from recent mining),
 	// and recently matured coinbase outputs, which were not mature at time of spending.
 	// This confirms that the TX amount was correctly computed to allow for the fee
-	grin_wallet_controller::controller::owner_single_use(
+	mwc_wallet_controller::controller::owner_single_use(
 		Some(wallet1.clone()),
 		mask1,
 		None,

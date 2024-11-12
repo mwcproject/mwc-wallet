@@ -18,8 +18,8 @@ use super::state::{
 	JOURNAL_CANCELLED_BYER_LOCK_TOO_MUCH_FUNDS, JOURNAL_CANCELLED_BY_TIMEOUT,
 	JOURNAL_CANCELLED_BY_USER, JOURNAL_NOT_LOCKED,
 };
-use crate::grin_core::core::Weighting;
-use crate::grin_keychain::Keychain;
+use crate::mwc_core::core::Weighting;
+use crate::mwc_keychain::Keychain;
 use crate::swap::fsm::state::{Input, State, StateEtaInfo, StateId, StateProcessRespond};
 use crate::swap::message::Message;
 use crate::swap::swap;
@@ -27,7 +27,7 @@ use crate::swap::types::{check_txs_confirmed, Action, SwapTransactionsConfirmati
 use crate::swap::{BuyApi, Context, Error, Swap, SwapApi};
 use crate::NodeClient;
 use chrono::{Local, TimeZone};
-use grin_wallet_util::grin_util::secp::Secp256k1;
+use mwc_wallet_util::mwc_util::secp::Secp256k1;
 use std::marker::PhantomData;
 use std::sync::Arc;
 

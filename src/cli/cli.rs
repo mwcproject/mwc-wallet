@@ -1,4 +1,5 @@
-// Copyright 2021 The Grin Developers
+// Copyright 2019 The Grin Developers
+// Copyright 2024 The Mwc Developers
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,13 +18,13 @@ use crate::util::secp::key::SecretKey;
 use crate::util::Mutex;
 use clap::{App, AppSettings};
 //use colored::Colorize;
-use grin_wallet_api::Owner;
-use grin_wallet_config::{MQSConfig, TorConfig, WalletConfig};
-use grin_wallet_controller::command::GlobalArgs;
-use grin_wallet_controller::Error;
-use grin_wallet_impls::DefaultWalletImpl;
-use grin_wallet_libwallet::{NodeClient, WalletInst, WalletLCProvider};
-use grin_wallet_util::grin_keychain as keychain;
+use mwc_wallet_api::Owner;
+use mwc_wallet_config::{MQSConfig, TorConfig, WalletConfig};
+use mwc_wallet_controller::command::GlobalArgs;
+use mwc_wallet_controller::Error;
+use mwc_wallet_impls::DefaultWalletImpl;
+use mwc_wallet_libwallet::{NodeClient, WalletInst, WalletLCProvider};
+use mwc_wallet_util::mwc_keychain as keychain;
 use rustyline::completion::{Completer, FilenameCompleter, Pair};
 use rustyline::error::ReadlineError;
 use rustyline::highlight::{Highlighter, MatchingBracketHighlighter};
@@ -189,7 +190,7 @@ where
 
 								let wallet_inst = lc.wallet_inst()?;
 
-								grin_wallet_libwallet::swap::trades::init_swap_trade_backend(
+								mwc_wallet_libwallet::swap::trades::init_swap_trade_backend(
 									wallet_inst.get_data_file_dir(),
 									&wallet_config.swap_electrumx_addr,
 									&wallet_config.eth_swap_contract_address,

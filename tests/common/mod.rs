@@ -1,4 +1,5 @@
-// Copyright 2021 The Grin Developers
+// Copyright 2019 The Grin Developers
+// Copyright 2024 The Mwc Developers
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -14,9 +15,9 @@
 //! Common functions for wallet integration tests
 extern crate mwc_wallet;
 
-use grin_wallet_config as config;
-use grin_wallet_impls::test_framework::LocalWalletClient;
-use grin_wallet_util::grin_util as util;
+use mwc_wallet_config as config;
+use mwc_wallet_impls::test_framework::LocalWalletClient;
+use mwc_wallet_util::mwc_util as util;
 
 use clap::{App, ArgMatches};
 use std::path::PathBuf;
@@ -24,19 +25,19 @@ use std::sync::Arc;
 use std::{env, fs};
 use util::{Mutex, ZeroingString};
 
-use grin_wallet_api::{EncryptedRequest, EncryptedResponse, JsonId};
-use grin_wallet_config::{GlobalWalletConfig, WalletConfig, GRIN_WALLET_DIR};
-use grin_wallet_impls::{DefaultLCProvider, DefaultWalletImpl};
-use grin_wallet_libwallet::{NodeClient, WalletInfo, WalletInst};
-use grin_wallet_util::grin_core::global::{self, ChainTypes};
-use grin_wallet_util::grin_keychain::ExtKeychain;
-use grin_wallet_util::grin_util::from_hex;
+use mwc_wallet_api::{EncryptedRequest, EncryptedResponse, JsonId};
+use mwc_wallet_config::{GlobalWalletConfig, WalletConfig, MWC_WALLET_DIR};
+use mwc_wallet_impls::{DefaultLCProvider, DefaultWalletImpl};
+use mwc_wallet_libwallet::{NodeClient, WalletInfo, WalletInst};
+use mwc_wallet_util::mwc_core::global::{self, ChainTypes};
+use mwc_wallet_util::mwc_keychain::ExtKeychain;
+use mwc_wallet_util::mwc_util::from_hex;
 use util::secp::key::{PublicKey, SecretKey};
 
-use grin_wallet_util::grin_api as api;
 use mwc_wallet::cmd::wallet_args;
+use mwc_wallet_util::mwc_api as api;
 
-use grin_wallet_util::grin_util::secp::Secp256k1;
+use mwc_wallet_util::mwc_util::secp::Secp256k1;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -116,8 +117,8 @@ macro_rules! setup_proxy {
 
 		// Set the wallet proxy listener running
 		thread::spawn(move || {
-			grin_wallet_util::grin_core::global::set_local_chain_type(
-				grin_wallet_util::grin_core::global::ChainTypes::AutomatedTesting,
+			mwc_wallet_util::mwc_core::global::set_local_chain_type(
+				mwc_wallet_util::mwc_core::global::ChainTypes::AutomatedTesting,
 			);
 			if let Err(e) = wallet_proxy.run() {
 				error!("Wallet Proxy error: {}", e);
@@ -152,7 +153,7 @@ pub fn setup_global_chain_type() {
 pub fn config_command_wallet(
 	dir_name: &str,
 	wallet_name: &str,
-) -> Result<(), grin_wallet_controller::Error> {
+) -> Result<(), mwc_wallet_controller::Error> {
 	let mut current_dir;
 	let mut default_config = GlobalWalletConfig::default();
 	current_dir = env::current_dir().unwrap_or_else(|e| {
@@ -164,7 +165,7 @@ pub fn config_command_wallet(
 	let mut config_file_name = current_dir.clone();
 	config_file_name.push("mwc-wallet.toml");
 	if config_file_name.exists() {
-		return Err(grin_wallet_controller::Error::ArgumentError(
+		return Err(mwc_wallet_controller::Error::ArgumentError(
 			"mwc-wallet.toml already exists in the target directory. Please remove it first"
 				.to_owned(),
 		))?;
@@ -239,7 +240,7 @@ pub fn instantiate_wallet(
 		>,
 		Option<SecretKey>,
 	),
-	grin_wallet_controller::Error,
+	mwc_wallet_controller::Error,
 > {
 	wallet_config.chain_type = None;
 	let mut wallet = Box::new(DefaultWalletImpl::<LocalWalletClient>::new(node_client).unwrap())
@@ -253,9 +254,9 @@ pub fn instantiate_wallet(
 	let lc = wallet.lc_provider().unwrap();
 	// legacy hack to avoid the need for changes in existing mwc-wallet.toml files
 	// remove `wallet_data` from end of path as
-	// new lifecycle provider assumes grin_wallet.toml is in root of data directory
+	// new lifecycle provider assumes mwc_wallet.toml is in root of data directory
 	let mut top_level_wallet_dir = PathBuf::from(wallet_config.clone().data_file_dir);
-	if top_level_wallet_dir.ends_with(GRIN_WALLET_DIR) {
+	if top_level_wallet_dir.ends_with(MWC_WALLET_DIR) {
 		top_level_wallet_dir.pop();
 		wallet_config.data_file_dir = top_level_wallet_dir.to_str().unwrap().into();
 	}
@@ -281,7 +282,7 @@ pub fn execute_command(
 	wallet_name: &str,
 	client: &LocalWalletClient,
 	arg_vec: Vec<&str>,
-) -> Result<String, grin_wallet_controller::Error> {
+) -> Result<String, mwc_wallet_controller::Error> {
 	let args = app.clone().get_matches_from(arg_vec);
 	let _ = get_wallet_subcommand(test_dir, wallet_name, args.clone());
 	let config = initial_setup_wallet(test_dir, wallet_name);
@@ -310,7 +311,7 @@ pub fn execute_command_no_setup<C, F>(
 	client: &C,
 	arg_vec: Vec<&str>,
 	f: F,
-) -> Result<String, grin_wallet_controller::Error>
+) -> Result<String, mwc_wallet_controller::Error>
 where
 	C: NodeClient + 'static + Clone,
 	F: FnOnce(
@@ -499,8 +500,8 @@ impl std::fmt::Display for WalletAPIReturnError {
 	}
 }
 
-impl From<grin_wallet_controller::Error> for WalletAPIReturnError {
-	fn from(error: grin_wallet_controller::Error) -> WalletAPIReturnError {
+impl From<mwc_wallet_controller::Error> for WalletAPIReturnError {
+	fn from(error: mwc_wallet_controller::Error) -> WalletAPIReturnError {
 		WalletAPIReturnError {
 			message: error.to_string(),
 			code: -1,

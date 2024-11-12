@@ -1,4 +1,5 @@
-// Copyright 2021 The Grin Developers
+// Copyright 2019 The Grin Developers
+// Copyright 2024 The Mwc Developers
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -12,7 +13,7 @@
 // limitations under the License.
 
 //! core::libtx specific tests
-//use grin_wallet_libwallet::Slate;
+//use mwc_wallet_libwallet::Slate;
 
 // test all slate conversions
 /* TODO: Turn back on upon release of new slate version

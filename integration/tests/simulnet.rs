@@ -1,4 +1,5 @@
-// Copyright 2021 The Grin Developers
+// Copyright 2019 The Grin Developers
+// Copyright 2024 The Mwc Developers
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,10 +13,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-extern crate grin_apiwallet as apiwallet;
-extern crate grin_libwallet as libwallet;
-extern crate grin_refwallet as wallet;
-extern crate grin_wallet_config as wallet_config;
+extern crate mwc_apiwallet as apiwallet;
+extern crate mwc_libwallet as libwallet;
+extern crate mwc_refwallet as wallet;
+extern crate mwc_wallet_config as wallet_config;
 #[macro_use]
 extern crate log;
 
@@ -29,12 +30,12 @@ use self::wallet::controller;
 use self::wallet::lmdb_wallet::LMDBBackend;
 use self::wallet::{HTTPNodeClient, HTTPWalletCommAdapter};
 use self::wallet_config::WalletConfig;
-use grin_api as api;
-use grin_core as core;
-use grin_keychain as keychain;
-use grin_p2p as p2p;
-use grin_servers as servers;
-use grin_util as util;
+use mwc_api as api;
+use mwc_core as core;
+use mwc_keychain as keychain;
+use mwc_p2p as p2p;
+use mwc_servers as servers;
+use mwc_util as util;
 use p2p::PeerAddr;
 use std::cmp;
 use std::default::Default;
@@ -210,7 +211,7 @@ fn simulate_block_propagation() {
 	// TODO - avoid needing to set it in two places?
 	global::set_local_chain_type(ChainTypes::AutomatedTesting);
 
-	let test_name_dir = "grin-prop";
+	let test_name_dir = "mwc-prop";
 	framework::clean_all_output(test_name_dir);
 
 	// instantiates 5 servers on different ports
@@ -270,17 +271,17 @@ fn simulate_full_sync() {
 	// we actually set the chain_type in the ServerConfig below
 	global::set_local_chain_type(ChainTypes::AutomatedTesting);
 
-	let test_name_dir = "grin-sync";
+	let test_name_dir = "mwc-sync";
 	framework::clean_all_output(test_name_dir);
 
-	let s1 = servers::Server::new(framework::config(1000, "grin-sync", 1000)).unwrap();
+	let s1 = servers::Server::new(framework::config(1000, "mwc-sync", 1000)).unwrap();
 	// mine a few blocks on server 1
 	let stop = Arc::new(Mutex::new(StopState::new()));
 	s1.start_test_miner(None, stop.clone());
 	thread::sleep(time::Duration::from_secs(8));
 	s1.stop_test_miner(stop);
 
-	let s2 = servers::Server::new(framework::config(1001, "grin-sync", 1000)).unwrap();
+	let s2 = servers::Server::new(framework::config(1001, "mwc-sync", 1000)).unwrap();
 
 	// Get the current header from s1.
 	let s1_header = s1.chain.head_header().unwrap();
@@ -326,11 +327,11 @@ fn simulate_fast_sync() {
 	// we actually set the chain_type in the ServerConfig below
 	global::set_local_chain_type(ChainTypes::AutomatedTesting);
 
-	let test_name_dir = "grin-fast";
+	let test_name_dir = "mwc-fast";
 	framework::clean_all_output(test_name_dir);
 
 	// start s1 and mine enough blocks to get beyond the fast sync horizon
-	let s1 = servers::Server::new(framework::config(2000, "grin-fast", 2000)).unwrap();
+	let s1 = servers::Server::new(framework::config(2000, "mwc-fast", 2000)).unwrap();
 	let stop = Arc::new(Mutex::new(StopState::new()));
 	s1.start_test_miner(None, stop.clone());
 
@@ -339,7 +340,7 @@ fn simulate_fast_sync() {
 	}
 	s1.stop_test_miner(stop);
 
-	let mut conf = config(2001, "grin-fast", 2000);
+	let mut conf = config(2001, "mwc-fast", 2000);
 	conf.archive_mode = Some(false);
 
 	let s2 = servers::Server::new(conf).unwrap();
@@ -419,7 +420,7 @@ fn simulate_long_fork() {
 	// we actually set the chain_type in the ServerConfig below
 	global::set_local_chain_type(ChainTypes::AutomatedTesting);
 
-	let test_name_dir = "grin-long-fork";
+	let test_name_dir = "mwc-long-fork";
 	framework::clean_all_output(test_name_dir);
 
 	let s = long_fork_test_preparation();
@@ -457,7 +458,7 @@ fn long_fork_test_preparation() -> Vec<servers::Server> {
 	let mut s: Vec<servers::Server> = vec![];
 
 	// start server A and mine 80 blocks to get beyond the fast sync horizon
-	let mut conf = framework::config(2100, "grin-long-fork", 2100);
+	let mut conf = framework::config(2100, "mwc-long-fork", 2100);
 	conf.archive_mode = Some(false);
 	conf.api_secret_path = None;
 	let s0 = servers::Server::new(conf).unwrap();
@@ -484,7 +485,7 @@ fn long_fork_test_preparation() -> Vec<servers::Server> {
 	);
 
 	for i in 1..6 {
-		let mut conf = config(2100 + i, "grin-long-fork", 2100);
+		let mut conf = config(2100 + i, "mwc-long-fork", 2100);
 		conf.archive_mode = Some(false);
 		conf.api_secret_path = None;
 		let si = servers::Server::new(conf).unwrap();
@@ -898,7 +899,7 @@ pub fn create_wallet(
 	Arc::new(Mutex::new(wallet))
 }
 
-/// Intended to replicate https://github.com/mimblewimble/grin/issues/1325
+/// Intended to replicate https://github.com/mimblewimble/mwc/issues/1325
 #[ignore]
 #[test]
 fn replicate_tx_fluff_failure() {

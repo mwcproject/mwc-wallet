@@ -15,7 +15,7 @@
 use crate::swap::fsm::state::{Input, State, StateEtaInfo, StateId, StateProcessRespond};
 use crate::swap::types::SwapTransactionsConfirmations;
 use crate::swap::{Context, Error, Swap};
-use grin_wallet_util::grin_util::secp::Secp256k1;
+use mwc_wallet_util::mwc_util::secp::Secp256k1;
 use std::collections::HashMap;
 
 /// Swap State machine

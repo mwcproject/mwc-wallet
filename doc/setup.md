@@ -5,7 +5,7 @@
 ## Building your own binary
 
 ### Requirements
-1. All the [current requirements](https://github.com/mimblewimble/grin/blob/master/doc/build.md#requirements) of Grin.
+1. All the [current requirements](https://github.com/mimblewimble/mwc/blob/master/doc/build.md#requirements) of Mwc.
 1. [OpenSSL](https://www.openssl.org).
    * macOS with Homebrew:
       ```
@@ -24,7 +24,7 @@ $ cd mwc-wallet
 $ cargo build --release
 ```
 MWC-wallet needs to run against a node, you can connect to a local node and a remote node. 
-For details about how to install a local node, please refer to the page:[Grin's Wiki](https://github.com/mimblewimble/docs/wiki/Wallet-User-Guide)
+For details about how to install a local node, please refer to the page:[Mwc's Wiki](https://github.com/mimblewimble/docs/wiki/Wallet-User-Guide)
 
 The following steps is to show how to run against a remote node. 
 MWC-wallet needs be be initiated first.

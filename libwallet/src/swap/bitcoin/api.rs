@@ -14,12 +14,12 @@
 
 use super::client::BtcNodeClient;
 use super::types::{BtcBuyerContext, BtcData, BtcSellerContext};
-use crate::grin_core::core::Committed;
-use crate::grin_keychain::{Identifier, Keychain, SwitchCommitmentType};
-use crate::grin_util::secp::aggsig::export_secnonce_single as generate_nonce;
-use crate::grin_util::secp::pedersen;
-use crate::grin_util::secp::Message;
-use crate::grin_util::Mutex;
+use crate::mwc_core::core::Committed;
+use crate::mwc_keychain::{Identifier, Keychain, SwitchCommitmentType};
+use crate::mwc_util::secp::aggsig::export_secnonce_single as generate_nonce;
+use crate::mwc_util::secp::pedersen;
+use crate::mwc_util::secp::Message;
+use crate::mwc_util::Mutex;
 use crate::swap::bitcoin::types::BtcTtansaction;
 use crate::swap::bitcoin::Output;
 use crate::swap::ethereum::*;
@@ -33,7 +33,7 @@ use crate::swap::types::{
 use crate::swap::{Error, SellApi, Swap, SwapApi};
 use crate::{NodeClient, Slate};
 use bitcoin::{Script, Txid};
-use grin_wallet_util::grin_util::secp::Secp256k1;
+use mwc_wallet_util::mwc_util::secp::Secp256k1;
 use std::marker::PhantomData;
 use std::sync::Arc;
 

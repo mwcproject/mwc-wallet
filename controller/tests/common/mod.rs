@@ -1,4 +1,5 @@
-// Copyright 2021 The Grin Developers
+// Copyright 2019 The Grin Developers
+// Copyright 2024 The Mwc Developers
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -12,13 +13,13 @@
 // limitations under the License.
 
 //! common functions for tests (instantiating wallet and proxy, mostly)
-extern crate grin_wallet_controller as wallet;
-extern crate grin_wallet_impls as impls;
-extern crate grin_wallet_libwallet as libwallet;
+extern crate mwc_wallet_controller as wallet;
+extern crate mwc_wallet_impls as impls;
+extern crate mwc_wallet_libwallet as libwallet;
 
-use grin_wallet_util::grin_core as core;
-use grin_wallet_util::grin_keychain as keychain;
-use grin_wallet_util::grin_util as util;
+use mwc_wallet_util::mwc_core as core;
+use mwc_wallet_util::mwc_keychain as keychain;
+use mwc_wallet_util::mwc_util as util;
 
 use self::core::global;
 use self::keychain::ExtKeychain;

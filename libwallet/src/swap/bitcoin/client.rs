@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::grin_util::Mutex;
+use crate::mwc_util::Mutex;
 use crate::swap::types::Currency;
 use crate::swap::Error;
 use bitcoin::consensus::Decodable;

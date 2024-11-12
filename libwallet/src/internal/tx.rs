@@ -1,4 +1,5 @@
-// Copyright 2021 The Grin Developers
+// Copyright 2019 The Grin Developers
+// Copyright 2024 The Mwc Developers
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,14 +17,14 @@
 
 use uuid::Uuid;
 
-use crate::grin_core::consensus::valid_header_version;
-use crate::grin_core::core::HeaderVersion;
-use crate::grin_keychain::{Identifier, Keychain};
-use crate::grin_util as util;
-use crate::grin_util::secp::key::SecretKey;
-use crate::grin_util::secp::{pedersen, Signature};
-use crate::grin_util::Mutex;
 use crate::internal::{selection, updater};
+use crate::mwc_core::consensus::valid_header_version;
+use crate::mwc_core::core::HeaderVersion;
+use crate::mwc_keychain::{Identifier, Keychain};
+use crate::mwc_util as util;
+use crate::mwc_util::secp::key::SecretKey;
+use crate::mwc_util::secp::{pedersen, Signature};
+use crate::mwc_util::Mutex;
 use crate::proof::crypto;
 use crate::proof::crypto::Hex;
 use crate::proof::proofaddress;
@@ -38,8 +39,8 @@ use ed25519_dalek::PublicKey as DalekPublicKey;
 use ed25519_dalek::SecretKey as DalekSecretKey;
 use ed25519_dalek::Signature as DalekSignature;
 use ed25519_dalek::{Signer, Verifier};
-use grin_wallet_util::grin_util::secp::Secp256k1;
-use grin_wallet_util::OnionV3Address;
+use mwc_wallet_util::mwc_util::secp::Secp256k1;
+use mwc_wallet_util::OnionV3Address;
 use std::convert::TryFrom;
 
 // static for incrementing test UUIDs
@@ -877,10 +878,10 @@ where
 
 #[cfg(test)]
 mod test {
-	use crate::grin_core::core::KernelFeatures;
-	use crate::grin_core::libtx::{build, ProofBuilder};
-	use crate::grin_keychain::{ExtKeychain, ExtKeychainPath, Keychain};
-	use grin_wallet_util::grin_core::core::FeeFields;
+	use crate::mwc_core::core::KernelFeatures;
+	use crate::mwc_core::libtx::{build, ProofBuilder};
+	use crate::mwc_keychain::{ExtKeychain, ExtKeychainPath, Keychain};
+	use mwc_wallet_util::mwc_core::core::FeeFields;
 
 	#[test]
 	// demonstrate that input.commitment == referenced output.commitment

@@ -18,12 +18,12 @@ use rand::Rng;
 use serde::{Deserialize, Serialize};
 use std::{fmt, fmt::Display, str::FromStr};
 
-use wagyu_ethereum::{
+use mwc_wagyu_ethereum::{
 	wordlist::*, EthereumAddress, EthereumDerivationPath, EthereumExtendedPrivateKey,
 	EthereumExtendedPublicKey, EthereumFormat, EthereumMnemonic, EthereumNetwork,
 	EthereumPrivateKey, EthereumPublicKey, Mainnet, Ropsten,
 };
-use wagyu_model::{
+use mwc_wagyu_model::{
 	AddressError, AmountError, DerivationPathError, ExtendedPrivateKey, ExtendedPrivateKeyError,
 	ExtendedPublicKey, ExtendedPublicKeyError, Mnemonic, MnemonicCount, MnemonicError,
 	MnemonicExtended, PrivateKey, PrivateKeyError, PublicKey, PublicKeyError, TransactionError,

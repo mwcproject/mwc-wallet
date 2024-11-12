@@ -14,11 +14,11 @@
 
 //! Generic implementation of owner API eth functions
 
-use crate::grin_keychain::Keychain;
-use crate::grin_util::Mutex;
+use crate::mwc_keychain::Keychain;
+use crate::mwc_util::Mutex;
 use crate::types::NodeClient;
 use crate::{wallet_lock, WalletInst, WalletLCProvider};
-use grin_wallet_util::grin_core::global;
+use mwc_wallet_util::mwc_core::global;
 use std::sync::Arc;
 
 use crate::swap::ethereum::InfuraNodeClient;

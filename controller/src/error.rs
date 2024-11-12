@@ -1,4 +1,5 @@
-// Copyright 2021 The Grin Developers
+// Copyright 2019 The Grin Developers
+// Copyright 2024 The Mwc Developers
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -135,14 +136,14 @@ pub enum Error {
 	ProcessSwapMessageError(String),
 }
 
-impl From<grin_wallet_libwallet::Error> for Error {
-	fn from(error: grin_wallet_libwallet::Error) -> Error {
+impl From<mwc_wallet_libwallet::Error> for Error {
+	fn from(error: mwc_wallet_libwallet::Error) -> Error {
 		Error::LibWallet(format!("{}", error))
 	}
 }
 
-impl From<grin_wallet_libwallet::swap::Error> for Error {
-	fn from(error: grin_wallet_libwallet::swap::Error) -> Error {
+impl From<mwc_wallet_libwallet::swap::Error> for Error {
+	fn from(error: mwc_wallet_libwallet::swap::Error) -> Error {
 		Error::SwapError(format!("{}", error))
 	}
 }

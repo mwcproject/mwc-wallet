@@ -1,4 +1,5 @@
-// Copyright 2021 The Grin Developers
+// Copyright 2019 The Grin Developers
+// Copyright 2024 The Mwc Developers
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -21,13 +22,13 @@ use crate::libwallet::{
 use crate::util::secp::key::{PublicKey, SecretKey};
 use crate::util::secp::pedersen;
 use crate::util::{from_hex, ToHex};
-use grin_wallet_libwallet::slatepack::SlatePurpose;
-use grin_wallet_libwallet::types::option_duration_as_secs;
+use mwc_wallet_libwallet::slatepack::SlatePurpose;
+use mwc_wallet_libwallet::types::option_duration_as_secs;
 
 use base64;
 use chrono::{DateTime, Utc};
 use ed25519_dalek::PublicKey as DalekPublicKey;
-use grin_wallet_libwallet::proof::proofaddress::ProvableAddress;
+use mwc_wallet_libwallet::proof::proofaddress::ProvableAddress;
 use rand::{thread_rng, Rng};
 use ring::aead;
 use serde_json::{self, Value};
@@ -469,7 +470,7 @@ pub struct SlatepackInfo {
 #[test]
 fn encrypted_request() -> Result<(), Error> {
 	use crate::util::from_hex;
-	use grin_wallet_util::grin_util::static_secp_instance;
+	use mwc_wallet_util::mwc_util::static_secp_instance;
 
 	let sec_key_str = "e00dcc4a009e3427c6b1e1a550c538179d46f3827a13ed74c759c860761caf1e";
 	let shared_key = {

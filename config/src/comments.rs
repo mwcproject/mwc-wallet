@@ -1,4 +1,5 @@
-// Copyright 2021 The Grin Developers
+// Copyright 2019 The Grin Developers
+// Copyright 2024 The Mwc Developers
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,7 +23,7 @@ fn comments() -> HashMap<String, String> {
 	retval.insert(
 		"config_file_version".to_string(),
 		"
-#Version of the Generated Configuration File for the Grin Wallet (DO NOT EDIT)
+#Version of the Generated Configuration File for the Mwc Wallet (DO NOT EDIT)
 "
 		.to_string(),
 	);
@@ -92,7 +93,7 @@ fn comments() -> HashMap<String, String> {
 	retval.insert(
 		"node_api_secret_path".to_string(),
 		"
-#location of the node api secret for basic auth on the Grin API
+#location of the node api secret for basic auth on the Mwc API
 "
 		.to_string(),
 	);
@@ -161,7 +162,7 @@ fn comments() -> HashMap<String, String> {
 		.to_string(),
 	);
 	retval.insert(
-		"grinbox_address_index".to_string(),
+		"mwcbox_address_index".to_string(),
 		"
 # Address derive index. Every new index will give you a new address that will be used for
 # communication with message queue server.

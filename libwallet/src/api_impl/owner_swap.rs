@@ -14,15 +14,15 @@
 
 //! Generic implementation of owner API atomic swap functions
 
-use crate::grin_util::Mutex;
-use crate::{grin_util::secp::key::SecretKey, swap::ethereum::EthereumWallet};
+use crate::mwc_util::Mutex;
+use crate::{mwc_util::secp::key::SecretKey, swap::ethereum::EthereumWallet};
 
-use crate::grin_core::core::Committed;
-use crate::grin_core::{core, global};
-use crate::grin_keychain::ExtKeychainPath;
-use crate::grin_keychain::{Identifier, Keychain, SwitchCommitmentType};
-use crate::grin_util::to_hex;
 use crate::internal::selection;
+use crate::mwc_core::core::Committed;
+use crate::mwc_core::{core, global};
+use crate::mwc_keychain::ExtKeychainPath;
+use crate::mwc_keychain::{Identifier, Keychain, SwitchCommitmentType};
+use crate::mwc_util::to_hex;
 use crate::swap::error::Error;
 use crate::swap::fsm::state::{Input, StateEtaInfo, StateId, StateProcessRespond};
 use crate::swap::message::{Message, SecondaryUpdate, Update};
@@ -159,7 +159,7 @@ where
 
 	if swap_reserved_amount > 0 {
 		let swap_reserved_amount_str =
-			crate::grin_core::core::amount_to_hr_string(swap_reserved_amount, true);
+			crate::mwc_core::core::amount_to_hr_string(swap_reserved_amount, true);
 		info!("Running swaps reserved {} coins", swap_reserved_amount);
 		println!("WARNING. This swap will need to reserve {} MWC. If you don't have enough funds, please cancel it.", swap_reserved_amount_str);
 	}

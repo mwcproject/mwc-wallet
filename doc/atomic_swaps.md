@@ -57,7 +57,7 @@ Password:
 Command 'open' completed
 
 mwc-wallet> swap_start --mwc_amount 5.6 --secondary_currency BTC --secondary_amount 0.087  --mwc_confirmations 500 --secondary_confirmations 6 --message_exchange_time 60 --redeem_time 60 --secondary_address n4GUrta1qhA1Zgy4DUkmDgxULtJKjDhEc6 --who_lock_first seller
-20200804 12:19:27.863 WARN grin_wallet_controller::command - Seller Swap trade is created: 975ab0c2-27f5-45bd-99f2-2c3b01ce0fa5
+20200804 12:19:27.863 WARN mwc_wallet_controller::command - Seller Swap trade is created: 975ab0c2-27f5-45bd-99f2-2c3b01ce0fa5
 Command 'swap_start' completed
 ```
 This command successfully created trade 975ab0c2-27f5-45bd-99f2-2c3b01ce0fa5
@@ -70,8 +70,8 @@ mwc-wallet> open
 Password:
 Command 'open' completed
 mwc-wallet> listen -m mwcmqs
-20200804 12:25:55.310 WARN grin_wallet_controller::controller - Starting MWCMQS Listener
-20200804 12:25:56.207 WARN grin_wallet_impls::adapters::mwcmq -
+20200804 12:25:55.310 WARN mwc_wallet_controller::controller - Starting MWCMQS Listener
+20200804 12:25:56.207 WARN mwc_wallet_impls::adapters::mwcmq -
 mwcmqs listener started for [xmgHFXM1ryJ1ug7kGPsjmDj8Gd7XC18cfhQ8n8uyjxL3JzAq9r73] tid=[tr3MClzoqB1ecFnH0kHBH]
 ```
 
@@ -85,8 +85,8 @@ mwc-wallet> open
 Password:
 Command 'open' completed
 mwc-wallet> listen -m mwcmqs
-20200804 12:25:55.310 WARN grin_wallet_controller::controller - Starting MWCMQS Listener
-20200804 12:25:56.207 WARN grin_wallet_impls::adapters::mwcmq -
+20200804 12:25:55.310 WARN mwc_wallet_controller::controller - Starting MWCMQS Listener
+20200804 12:25:56.207 WARN mwc_wallet_impls::adapters::mwcmq -
 mwcmqs listener started for [xmgHFXM1ryJ1ug7kGPsjmDj8Gd7XC18cfhQ8n8uyjxL3JzAq9r73] tid=[tr3MClzoqB1ecFnH0kHBH]
 mwc-wallet> swap --autoswap --method mwcmqs --dest xmggm9xA2ryzDARaRKNEdbw9rmSHxyLTMCqNua8iSPjCQAvsyx6s --secondary_fee 30 -i 975ab0c2-27f5-45bd-99f2-2c3b01ce0fa5
 

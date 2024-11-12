@@ -1,4 +1,5 @@
-// Copyright 2021 The Grin Developers
+// Copyright 2019 The Grin Developers
+// Copyright 2024 The Mwc Developers
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,16 +20,16 @@ use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
 
 use crate::error::Error;
-use crate::grin_core::consensus::reward;
-use crate::grin_core::core::{Output, TxKernel};
-use crate::grin_core::global;
-use crate::grin_core::libtx::proof::ProofBuilder;
-use crate::grin_core::libtx::reward;
-use crate::grin_keychain::{Identifier, Keychain, SwitchCommitmentType};
-use crate::grin_util as util;
-use crate::grin_util::secp::key::SecretKey;
-use crate::grin_util::secp::pedersen;
 use crate::internal::keys;
+use crate::mwc_core::consensus::reward;
+use crate::mwc_core::core::{Output, TxKernel};
+use crate::mwc_core::global;
+use crate::mwc_core::libtx::proof::ProofBuilder;
+use crate::mwc_core::libtx::reward;
+use crate::mwc_keychain::{Identifier, Keychain, SwitchCommitmentType};
+use crate::mwc_util as util;
+use crate::mwc_util::secp::key::SecretKey;
+use crate::mwc_util::secp::pedersen;
 use crate::types::{
 	NodeClient, OutputData, OutputStatus, TxLogEntry, TxLogEntryType, WalletBackend, WalletInfo,
 };

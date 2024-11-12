@@ -7,10 +7,10 @@ To run this sample:
 First run the Owner API:
 
 ```.sh
-grin-wallet owner_api
+mwc-wallet owner_api
 ```
 
-This sample doesn't use the authentication specified in the wallet's `.api_secret`, so before running the owner_api please ensure api authentication is commented out in `grin-wallet.toml`. Including the authentication token as part of the request is a function of your json-rpc client library of choice, so it's not included in the sample to make setup a bit simpler.
+This sample doesn't use the authentication specified in the wallet's `.api_secret`, so before running the owner_api please ensure api authentication is commented out in `mwc-wallet.toml`. Including the authentication token as part of the request is a function of your json-rpc client library of choice, so it's not included in the sample to make setup a bit simpler.
 
 ensure the client url in `src\index.js` is set correctly:
 

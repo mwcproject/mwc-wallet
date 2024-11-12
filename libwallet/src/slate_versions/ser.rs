@@ -1,4 +1,5 @@
-// Copyright 2021 The Grin Developers
+// Copyright 2019 The Grin Developers
+// Copyright 2024 The Mwc Developers
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -77,7 +78,7 @@ pub mod ov3_serde {
 
 /// Serializes an ed25519 PublicKey to and from hex
 pub mod dalek_pubkey_serde {
-	use crate::grin_util::{from_hex, ToHex};
+	use crate::mwc_util::{from_hex, ToHex};
 	use ed25519_dalek::PublicKey as DalekPublicKey;
 	use serde::{Deserialize, Deserializer, Serializer};
 
@@ -118,7 +119,7 @@ pub mod option_dalek_pubkey_serde {
 	use serde::de::Error;
 	use serde::{Deserialize, Deserializer, Serializer};
 
-	use crate::grin_util::{from_hex, ToHex};
+	use crate::mwc_util::{from_hex, ToHex};
 
 	///
 	pub fn serialize<S>(key: &Option<DalekPublicKey>, serializer: S) -> Result<S::Ok, S::Error>
@@ -163,7 +164,7 @@ pub mod dalek_sig_serde {
 	use serde::{Deserialize, Deserializer, Serializer};
 	use std::convert::TryFrom;
 
-	use crate::grin_util::{from_hex, ToHex};
+	use crate::mwc_util::{from_hex, ToHex};
 
 	///
 	pub fn serialize<S>(sig: &DalekSignature, serializer: S) -> Result<S::Ok, S::Error>
@@ -195,7 +196,7 @@ pub mod option_dalek_sig_serde {
 	use serde::{Deserialize, Deserializer, Serializer};
 	use std::convert::TryFrom;
 
-	use crate::grin_util::{from_hex, ToHex};
+	use crate::mwc_util::{from_hex, ToHex};
 
 	///
 	pub fn serialize<S>(sig: &Option<DalekSignature>, serializer: S) -> Result<S::Ok, S::Error>
@@ -239,7 +240,7 @@ mod test {
 	use super::*;
 	use rand::rngs::mock::StepRng;
 
-	use crate::grin_util::secp;
+	use crate::mwc_util::secp;
 	use ed25519_dalek::Keypair;
 	use ed25519_dalek::PublicKey as DalekPublicKey;
 	use ed25519_dalek::SecretKey as DalekSecretKey;
@@ -247,7 +248,7 @@ mod test {
 	use serde::Deserialize;
 
 	use ed25519_dalek::Signer;
-	use grin_wallet_util::grin_util::secp::{ContextFlag, Secp256k1};
+	use mwc_wallet_util::mwc_util::secp::{ContextFlag, Secp256k1};
 	use serde_json;
 
 	#[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]

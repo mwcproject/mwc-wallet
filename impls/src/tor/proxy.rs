@@ -1,4 +1,5 @@
-// Copyright 2022 The Grin Developers
+// Copyright 2019 The Grin Developers
+// Copyright 2024 The Mwc Developers
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,7 +14,7 @@
 // limitations under the License.
 
 use crate::Error;
-use grin_wallet_config::types::TorProxyConfig;
+use mwc_wallet_config::types::TorProxyConfig;
 use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::str;

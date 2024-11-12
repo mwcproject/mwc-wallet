@@ -1,4 +1,5 @@
-// Copyright 2021 The Grin Developers
+// Copyright 2019 The Grin Developers
+// Copyright 2024 The Mwc Developers
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Grin wallet command-line function implementations
+//! Mwc wallet command-line function implementations
 
 use crate::api::TLSConfig;
 use crate::apiwallet::Owner;
@@ -32,30 +33,30 @@ use crate::{controller, display};
 use ::core::time;
 use chrono::Utc;
 use ed25519_dalek::{PublicKey as DalekPublicKey, SecretKey as DalekSecretKey};
-use grin_wallet_impls::adapters::{
+use mwc_wallet_impls::adapters::{
 	create_swap_message_sender, validate_tor_address, MarketplaceMessageSender,
 };
-use grin_wallet_impls::tor;
-use grin_wallet_impls::{libp2p_messaging, HttpDataSender};
-use grin_wallet_impls::{Address, MWCMQSAddress, Publisher};
-use grin_wallet_libwallet::api_impl::{owner, owner_eth, owner_libp2p, owner_swap};
-use grin_wallet_libwallet::proof::proofaddress::{self, ProvableAddress};
-use grin_wallet_libwallet::proof::tx_proof::TxProof;
-use grin_wallet_libwallet::slate_versions::v2::TransactionV2;
-use grin_wallet_libwallet::slate_versions::v3::{sig_is_blank, TransactionV3};
-use grin_wallet_libwallet::slatepack::SlatePurpose;
-use grin_wallet_libwallet::swap::fsm::state::StateId;
-use grin_wallet_libwallet::swap::trades;
-use grin_wallet_libwallet::swap::types::Action;
-use grin_wallet_libwallet::swap::{message, Swap};
-use grin_wallet_libwallet::{OwnershipProof, Slate, StatusMessage, TxLogEntry, WalletInst};
-use grin_wallet_util::grin_core::consensus::MWC_BASE;
-use grin_wallet_util::grin_core::core::{amount_to_hr_string, Transaction};
-use grin_wallet_util::grin_core::global::{FLOONET_DNS_SEEDS, MAINNET_DNS_SEEDS};
-use grin_wallet_util::grin_p2p::libp2p_connection::ReceivedMessage;
-use grin_wallet_util::grin_p2p::{libp2p_connection, PeerAddr};
-use grin_wallet_util::grin_util::secp::{ContextFlag, Secp256k1};
-use grin_wallet_util::grin_util::static_secp_instance;
+use mwc_wallet_impls::tor;
+use mwc_wallet_impls::{libp2p_messaging, HttpDataSender};
+use mwc_wallet_impls::{Address, MWCMQSAddress, Publisher};
+use mwc_wallet_libwallet::api_impl::{owner, owner_eth, owner_libp2p, owner_swap};
+use mwc_wallet_libwallet::proof::proofaddress::{self, ProvableAddress};
+use mwc_wallet_libwallet::proof::tx_proof::TxProof;
+use mwc_wallet_libwallet::slate_versions::v2::TransactionV2;
+use mwc_wallet_libwallet::slate_versions::v3::{sig_is_blank, TransactionV3};
+use mwc_wallet_libwallet::slatepack::SlatePurpose;
+use mwc_wallet_libwallet::swap::fsm::state::StateId;
+use mwc_wallet_libwallet::swap::trades;
+use mwc_wallet_libwallet::swap::types::Action;
+use mwc_wallet_libwallet::swap::{message, Swap};
+use mwc_wallet_libwallet::{OwnershipProof, Slate, StatusMessage, TxLogEntry, WalletInst};
+use mwc_wallet_util::mwc_core::consensus::MWC_BASE;
+use mwc_wallet_util::mwc_core::core::{amount_to_hr_string, Transaction};
+use mwc_wallet_util::mwc_core::global::{FLOONET_DNS_SEEDS, MAINNET_DNS_SEEDS};
+use mwc_wallet_util::mwc_p2p::libp2p_connection::ReceivedMessage;
+use mwc_wallet_util::mwc_p2p::{libp2p_connection, PeerAddr};
+use mwc_wallet_util::mwc_util::secp::{ContextFlag, Secp256k1};
+use mwc_wallet_util::mwc_util::static_secp_instance;
 use qr_code::{EcLevel, QrCode};
 use serde_json as json;
 use serde_json::json;
@@ -148,7 +149,7 @@ where
 	let mut w_lock = owner_api.wallet_inst.lock();
 	let p = w_lock.lc_provider()?;
 	let m = p.get_mnemonic(None, args.passphrase, wallet_data_dir)?;
-	grin_wallet_impls::lifecycle::show_recovery_phrase(m);
+	mwc_wallet_impls::lifecycle::show_recovery_phrase(m);
 	Ok(())
 }
 
@@ -294,7 +295,7 @@ where
 			let (tx, rx) = mpsc::channel();
 			// Starting printing to console thread.
 			updater = Some(
-				grin_wallet_libwallet::api_impl::owner_updater::start_updater_console_thread(
+				mwc_wallet_libwallet::api_impl::owner_updater::start_updater_console_thread(
 					rx,
 					running.clone(),
 				)?,
@@ -634,7 +635,7 @@ where
 			//if it is mwcmqs, start listner first.
 			match args.method.as_str() {
 				"mwcmqs" => {
-					if grin_wallet_impls::adapters::get_mwcmqs_brocker().is_none() {
+					if mwc_wallet_impls::adapters::get_mwcmqs_brocker().is_none() {
 						//check to see if mqs_config is there, if not, return error
 						let mqs_config_unwrapped;
 						match mqs_config {
@@ -1212,7 +1213,7 @@ where
 		Ok(())
 	})?;
 
-	// Note!!! grin wallet was able to detect if it is invoice by using 'different' participant Ids (issuer use 1, fouset 0)
+	// Note!!! mwc wallet was able to detect if it is invoice by using 'different' participant Ids (issuer use 1, fouset 0)
 	//    Unfortunatelly it is breaks mwc713 backward compatibility (issuer Participant Id 0, fouset 1)
 	//    We choose backward compatibility as more impotant, that is why we need 'is_invoice' flag to compensate that.
 
@@ -2112,9 +2113,9 @@ where
 		secp
 	};
 
-	match grin_wallet_libwallet::proof::tx_proof::verify_tx_proof_wrapper(&tx_pf, &secp) {
+	match mwc_wallet_libwallet::proof::tx_proof::verify_tx_proof_wrapper(&tx_pf, &secp) {
 		Ok((sender, receiver, amount, outputs, kernel)) => {
-			grin_wallet_libwallet::proof::tx_proof::proof_ok(
+			mwc_wallet_libwallet::proof::tx_proof::proof_ok(
 				sender, receiver, amount, outputs, kernel,
 			);
 			Ok(())
@@ -2155,7 +2156,7 @@ where
 pub fn swap_start<L, C, K>(
 	owner_api: &mut Owner<L, C, K>,
 	keychain_mask: Option<&SecretKey>,
-	args: &grin_wallet_libwallet::api_impl::types::SwapStartArgs,
+	args: &mwc_wallet_libwallet::api_impl::types::SwapStartArgs,
 ) -> Result<(), Error>
 where
 	L: WalletLCProvider<'static, C, K> + 'static,
@@ -2803,7 +2804,7 @@ where
 			                           dest: String|
 			      -> Result<
 				(bool, String),
-				grin_wallet_libwallet::swap::Error,
+				mwc_wallet_libwallet::swap::Error,
 			> {
 				let destination_str = format!("{} {}", method, dest);
 				let from_address;
@@ -2812,7 +2813,7 @@ where
 				// And there will be a single call only.
 				match method.as_str() {
 					"mwcmqs" => {
-						if grin_wallet_impls::adapters::get_mwcmqs_brocker().is_none() {
+						if mwc_wallet_impls::adapters::get_mwcmqs_brocker().is_none() {
 							let _ = controller::start_mwcmqs_listener(
 								wallet_inst2,
 								mqs_config.clone(),
@@ -2821,21 +2822,21 @@ where
 								true,
 							)
 							.map_err(|e| {
-								grin_wallet_libwallet::swap::Error::MessageSender(format!(
+								mwc_wallet_libwallet::swap::Error::MessageSender(format!(
 									"Unable to start mwcmqs listener, {}",
 									e
 								))
 							})?;
 							thread::sleep(Duration::from_millis(2000));
 						}
-						from_address = grin_wallet_impls::adapters::get_mwcmqs_brocker()
-							.ok_or(grin_wallet_libwallet::swap::Error::MessageSender(
+						from_address = mwc_wallet_impls::adapters::get_mwcmqs_brocker()
+							.ok_or(mwc_wallet_libwallet::swap::Error::MessageSender(
 								"Unable to start mwcmqs listener".to_string(),
 							))?
 							.0
 							.get_publisher_address()
 							.map_err(|e| {
-								grin_wallet_libwallet::swap::Error::MessageSender(format!(
+								mwc_wallet_libwallet::swap::Error::MessageSender(format!(
 									"Unable to get publisher address {}",
 									e
 								))
@@ -2867,7 +2868,7 @@ where
 							thread::sleep(Duration::from_millis(2000));
 						}
 						from_address = tor::status::get_tor_address().ok_or(
-							grin_wallet_libwallet::swap::Error::MessageSender(
+							mwc_wallet_libwallet::swap::Error::MessageSender(
 								"Tor is not running".to_string(),
 							),
 						)?;
@@ -2876,13 +2877,13 @@ where
 						// File, let's process it here
 						let msg_str = swap_message.to_json()?;
 						let mut file = File::create(dest.clone()).map_err(|e| {
-							grin_wallet_libwallet::swap::Error::MessageSender(format!(
+							mwc_wallet_libwallet::swap::Error::MessageSender(format!(
 								"Unable to create file {}, {}",
 								dest, e
 							))
 						})?;
 						file.write_all(msg_str.as_bytes()).map_err(|e| {
-							grin_wallet_libwallet::swap::Error::MessageSender(format!(
+							mwc_wallet_libwallet::swap::Error::MessageSender(format!(
 								"Unable to store message data to the destination file, {}",
 								e
 							))
@@ -2892,7 +2893,7 @@ where
 					}
 					_ => {
 						error!("Please specify a method (mwcmqs, tor, or file) for transporting swap messages to the other party with whom you're doing the swap!");
-						return Err(grin_wallet_libwallet::swap::Error::MessageSender(
+						return Err(mwc_wallet_libwallet::swap::Error::MessageSender(
 							"Expected 'method' argument is not found".to_string(),
 						));
 					}
@@ -2906,7 +2907,7 @@ where
 					&tor_config2,
 				)
 				.map_err(|e| {
-					grin_wallet_libwallet::swap::Error::MessageSender(format!(
+					mwc_wallet_libwallet::swap::Error::MessageSender(format!(
 						"Unable to create message sender, {}",
 						e
 					))
@@ -2920,13 +2921,13 @@ where
 				let ack = sender
 					.send_swap_message(&swap_message, &secp)
 					.map_err(|e| {
-						grin_wallet_libwallet::swap::Error::MessageSender(format!(
+						mwc_wallet_libwallet::swap::Error::MessageSender(format!(
 							"Failure in sending swap message {} by {}: {}",
 							swap_id2, method, e
 						))
 					})
 					.map_err(|e| {
-						grin_wallet_libwallet::swap::Error::MessageSender(format!(
+						mwc_wallet_libwallet::swap::Error::MessageSender(format!(
 							"Unable to deliver the message, {}",
 							e
 						))
@@ -2994,7 +2995,7 @@ where
 			if args.start_listener {
 				match swap.communication_method.as_str() {
 					"mwcmqs" => {
-						if grin_wallet_impls::adapters::get_mwcmqs_brocker().is_some() {
+						if mwc_wallet_impls::adapters::get_mwcmqs_brocker().is_some() {
 							return Err(Error::GenericError("mwcmqs listener is already running, there is no need to specify '--start_listener' parameter".to_string()));
 						}
 
@@ -3058,10 +3059,10 @@ where
 						Error::ArgumentError(format!("Invalid destination address, {}", e))
 					})?;
 
-					if grin_wallet_impls::adapters::get_mwcmqs_brocker().is_none() {
+					if mwc_wallet_impls::adapters::get_mwcmqs_brocker().is_none() {
 						return Err(Error::GenericError("mqcmqs listener is not running. Please start it with 'listen' command or '--start_listener' argument".to_string()));
 					}
-					from_address = grin_wallet_impls::adapters::get_mwcmqs_brocker()
+					from_address = mwc_wallet_impls::adapters::get_mwcmqs_brocker()
 						.ok_or(Error::GenericError(
 							"Unable to start mwcmqs listener".to_string(),
 						))?
@@ -3103,7 +3104,7 @@ where
 				move |swap_message: message::Message,
 				      method: String,
 				      destination: String|
-				      -> Result<(bool, String), grin_wallet_libwallet::swap::Error> {
+				      -> Result<(bool, String), mwc_wallet_libwallet::swap::Error> {
 					// File is processed, the online send will be handled here
 					let sender = create_swap_message_sender(
 						method.as_str(),
@@ -3112,7 +3113,7 @@ where
 						&tor_config2,
 					)
 					.map_err(|e| {
-						grin_wallet_libwallet::swap::Error::MessageSender(format!(
+						mwc_wallet_libwallet::swap::Error::MessageSender(format!(
 							"Unable to create message sender, {}",
 							e
 						))
@@ -3126,7 +3127,7 @@ where
 					let ack = sender
 						.send_swap_message(&swap_message, &secp)
 						.map_err(|e| {
-							grin_wallet_libwallet::swap::Error::MessageSender(format!(
+							mwc_wallet_libwallet::swap::Error::MessageSender(format!(
 								"Unable to deliver the message {} by {}: {}",
 								swap_id2, method, e
 							))
@@ -3546,10 +3547,10 @@ where
 					return Ok(());
 				}
 				Err(e) => match e {
-					grin_wallet_libwallet::swap::Error::EthBalanceNotEnough => Err(
+					mwc_wallet_libwallet::swap::Error::EthBalanceNotEnough => Err(
 						Error::LibWallet("Not Enough Ether to transfer/gas".to_string()),
 					),
-					grin_wallet_libwallet::swap::Error::ERC20TokenBalanceNotEnough(_error) => {
+					mwc_wallet_libwallet::swap::Error::ERC20TokenBalanceNotEnough(_error) => {
 						Err(Error::LibWallet(format!(
 							"Not Enough ERC-20 Token: {} to transfer",
 							currency

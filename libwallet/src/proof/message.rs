@@ -1,4 +1,5 @@
-// Copyright 2020 The Grin Developers
+// Copyright 2019 The Grin Developers
+// Copyright 2024 The Mwc Developers
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,9 +13,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::grin_util as util;
-use crate::grin_util::secp::key::{PublicKey, SecretKey};
-use crate::grin_util::secp::Secp256k1;
+use crate::mwc_util as util;
+use crate::mwc_util::secp::key::{PublicKey, SecretKey};
+use crate::mwc_util::secp::Secp256k1;
 use rand::{thread_rng, Rng};
 
 use super::proofaddress;

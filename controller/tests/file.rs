@@ -1,4 +1,5 @@
-// Copyright 2021 The Grin Developers
+// Copyright 2019 The Grin Developers
+// Copyright 2024 The Mwc Developers
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -14,10 +15,10 @@
 //! Test a wallet file send/recieve
 #[macro_use]
 extern crate log;
-extern crate grin_wallet_controller as wallet;
-extern crate grin_wallet_impls as impls;
+extern crate mwc_wallet_controller as wallet;
+extern crate mwc_wallet_impls as impls;
 
-use grin_wallet_util::grin_core as core;
+use mwc_wallet_util::mwc_core as core;
 
 use impls::test_framework::{self, LocalWalletClient};
 use impls::{PathToSlateGetter, PathToSlatePutter, SlateGetter, SlatePutter};
@@ -25,16 +26,16 @@ use std::sync::atomic::Ordering;
 use std::thread;
 use std::time::Duration;
 
-use grin_wallet_libwallet::{InitTxArgs, NodeClient};
+use mwc_wallet_libwallet::{InitTxArgs, NodeClient};
 
-use grin_wallet_util::grin_core::global;
+use mwc_wallet_util::mwc_core::global;
 
 use serde_json;
 
 #[macro_use]
 mod common;
 use common::{clean_output_dir, create_wallet_proxy, setup};
-use grin_wallet_util::grin_util::secp::Secp256k1;
+use mwc_wallet_util::mwc_util::secp::Secp256k1;
 
 /// self send impl
 fn file_exchange_test_impl(test_dir: &'static str) -> Result<(), wallet::Error> {

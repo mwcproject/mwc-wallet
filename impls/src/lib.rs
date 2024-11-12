@@ -1,4 +1,5 @@
-// Copyright 2021 The Grin Developers
+// Copyright 2019 The Grin Developers
+// Copyright 2024 The Mwc Developers
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -26,16 +27,16 @@ extern crate log;
 extern crate serde_json;
 #[macro_use]
 extern crate lazy_static;
-use grin_wallet_libwallet as libwallet;
-use grin_wallet_util::grin_api as api;
-use grin_wallet_util::grin_chain as chain;
-use grin_wallet_util::grin_core as core;
-pub use grin_wallet_util::grin_keychain as keychain;
-use grin_wallet_util::grin_p2p;
-use grin_wallet_util::grin_store as store;
-use grin_wallet_util::grin_util as util;
+use mwc_wallet_libwallet as libwallet;
+use mwc_wallet_util::mwc_api as api;
+use mwc_wallet_util::mwc_chain as chain;
+use mwc_wallet_util::mwc_core as core;
+pub use mwc_wallet_util::mwc_keychain as keychain;
+use mwc_wallet_util::mwc_p2p;
+use mwc_wallet_util::mwc_store as store;
+use mwc_wallet_util::mwc_util as util;
 
-use grin_wallet_config as config;
+use mwc_wallet_config as config;
 
 pub mod adapters;
 mod backends;

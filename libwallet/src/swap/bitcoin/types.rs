@@ -13,9 +13,9 @@
 // limitations under the License.
 
 use super::client::Output;
-use crate::grin_keychain::{Identifier, SwitchCommitmentType};
-use crate::grin_util::secp::key::PublicKey;
-use crate::grin_util::secp::{Message, Signature};
+use crate::mwc_keychain::{Identifier, SwitchCommitmentType};
+use crate::mwc_util::secp::key::PublicKey;
+use crate::mwc_util::secp::{Message, Signature};
 use crate::swap::message::SecondaryUpdate;
 use crate::swap::ser::*;
 use crate::swap::swap;
@@ -33,12 +33,12 @@ use byteorder::{ByteOrder, LittleEndian};
 use std::io::Cursor;
 use std::ops::Deref;
 
-use bch::messages::{Tx as BchTx, TxIn as BchTxIn, TxOut as BchTxOut};
 use bitcoin_hashes::hex::ToHex;
 use bitcoin_hashes::{hash160, Hash};
+use mwc_bch::messages::{Tx as BchTx, TxIn as BchTxIn, TxOut as BchTxOut};
 
-use grin_wallet_util::grin_util::secp::Secp256k1;
-use zcash_primitives::transaction as zcash_tx;
+use mwc_wallet_util::mwc_util::secp::Secp256k1;
+use mwc_zcash_primitives::transaction as zcash_tx;
 
 /// BTC transaction ready to post (any type). Here it is a redeem tx
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -191,9 +191,9 @@ impl BtcData {
 			Currency::Bch => {
 				// Bch Address
 				let script_hash = hash160::Hash::hash(&script[..]);
-				let address = bch::address::cashaddr_encode(
+				let address = mwc_bch::address::cashaddr_encode(
 					&script_hash,
-					bch::address::AddressType::P2SH,
+					mwc_bch::address::AddressType::P2SH,
 					bch_network(network),
 				)
 				.map_err(|e| {
@@ -203,9 +203,9 @@ impl BtcData {
 					))
 				})?;
 				// Legacy BCH address is BTC address, some might like it as well
-				let legacy_address = bch::address::legacyaddr_encode(
+				let legacy_address = mwc_bch::address::legacyaddr_encode(
 					&script_hash,
-					bch::address::AddressType::P2SH,
+					mwc_bch::address::AddressType::P2SH,
 					bch_network(network),
 				);
 				Ok(vec![address, legacy_address])
@@ -298,11 +298,11 @@ impl BtcData {
 		let mut outputs: Vec<BchTxOut> = vec![];
 
 		for tx_in in &tx.input {
-			let mut sig_script = bch::script::Script::new();
+			let mut sig_script = mwc_bch::script::Script::new();
 			sig_script.append_slice(tx_in.script_sig.as_bytes());
 
-			let prev_output = bch::messages::OutPoint {
-				hash: bch::util::Hash256::decode(tx_in.previous_output.txid.to_hex().as_str())
+			let prev_output = mwc_bch::messages::OutPoint {
+				hash: mwc_bch::util::Hash256::decode(tx_in.previous_output.txid.to_hex().as_str())
 					.unwrap(),
 				index: tx_in.previous_output.vout,
 			};
@@ -317,9 +317,9 @@ impl BtcData {
 
 		for tx_out in &tx.output {
 			outputs.push(BchTxOut {
-				amount: bch::util::Amount(tx_out.value as i64),
+				amount: mwc_bch::util::Amount(tx_out.value as i64),
 				// Public key script to claim the output
-				pk_script: bch::script::Script(tx_out.script_pubkey.to_bytes()),
+				pk_script: mwc_bch::script::Script(tx_out.script_pubkey.to_bytes()),
 			})
 		}
 
@@ -460,15 +460,15 @@ impl BtcData {
 				// Sign for inputs
 				for idx in 0..tx.input.len() {
 					// Actually BCH team doesn't allow to reuse the cache. REALLY?  WHY?
-					let mut cache = bch::transaction::sighash::SigHashCache::new();
+					let mut cache = mwc_bch::transaction::sighash::SigHashCache::new();
 
-					let sighash_type = bch::transaction::sighash::SIGHASH_ALL
-						| bch::transaction::sighash::SIGHASH_FORKID;
-					let hash = bch::transaction::sighash::sighash(
+					let sighash_type = mwc_bch::transaction::sighash::SIGHASH_ALL
+						| mwc_bch::transaction::sighash::SIGHASH_FORKID;
+					let hash = mwc_bch::transaction::sighash::sighash(
 						&bch_tx,
 						idx,
 						input_script.as_bytes(),
-						bch::util::Amount(input[idx].1 as i64),
+						mwc_bch::util::Amount(input[idx].1 as i64),
 						sighash_type,
 						&mut cache,
 					)
@@ -490,14 +490,14 @@ impl BtcData {
 
 				let mut zcash_tx_data = zcash_tx::TransactionData::new();
 				zcash_tx_data.lock_time = tx.lock_time;
-				//zcash_tx_data.expiry_height = zcash_primitives::consensus::BlockHeight::from_u32(1266946 + 20);
+				//zcash_tx_data.expiry_height = mwc_zcash_primitives::consensus::BlockHeight::from_u32(1266946 + 20);
 				for inp in &tx.input {
 					zcash_tx_data.vin.push(zcash_tx::components::TxIn {
 						prevout: zcash_tx::components::OutPoint::new(
 							inp.previous_output.txid.as_hash().into_inner(),
 							inp.previous_output.vout,
 						),
-						script_sig: zcash_primitives::legacy::Script::default(),
+						script_sig: mwc_zcash_primitives::legacy::Script::default(),
 						sequence: inp.sequence,
 					});
 				}
@@ -506,7 +506,7 @@ impl BtcData {
 						value: zcash_tx::components::Amount::from_u64(out.value).map_err(|_| {
 							Error::Generic("Unable convert amount for ZCash".to_string())
 						})?,
-						script_pubkey: zcash_primitives::legacy::Script(
+						script_pubkey: mwc_zcash_primitives::legacy::Script(
 							out.script_pubkey.to_bytes(),
 						),
 					});
@@ -517,11 +517,11 @@ impl BtcData {
 				for idx in 0..zcash_tx_data.vin.len() {
 					sighash.copy_from_slice(&zcash_tx::signature_hash_data(
 						&zcash_tx_data,
-						zcash_primitives::consensus::BranchId::Canopy,
+						mwc_zcash_primitives::consensus::BranchId::Canopy,
 						zcash_tx::SIGHASH_ALL,
 						zcash_tx::SignableInput::transparent(
 							idx,
-							&zcash_primitives::legacy::Script(input_script.to_bytes()),
+							&mwc_zcash_primitives::legacy::Script(input_script.to_bytes()),
 							zcash_tx::components::Amount::from_u64(input[idx].1)
 								.map_err(|_| Error::Generic("Invalid input amount".to_string()))?,
 						),
@@ -530,7 +530,7 @@ impl BtcData {
 					let msg = Message::from_slice(&sighash).expect("32 bytes");
 
 					zcash_tx_data.vin[idx].script_sig =
-						zcash_primitives::legacy::Script(script_sig(&msg)?.to_bytes());
+						mwc_zcash_primitives::legacy::Script(script_sig(&msg)?.to_bytes());
 				}
 
 				let zcash_tx = zcash_tx_data.freeze()?;
@@ -724,24 +724,24 @@ fn btc_network(network: Network) -> BtcNetwork {
 	}
 }
 
-fn bch_network(network: Network) -> bch::network::Network {
+fn bch_network(network: Network) -> mwc_bch::network::Network {
 	match network {
-		Network::Floonet => bch::network::Network::Testnet,
-		Network::Mainnet => bch::network::Network::Mainnet,
+		Network::Floonet => mwc_bch::network::Network::Testnet,
+		Network::Mainnet => mwc_bch::network::Network::Mainnet,
 	}
 }
 
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::grin_core::global;
-	use crate::grin_core::global::ChainTypes;
-	use crate::grin_util::from_hex;
-	use crate::grin_util::secp::key::{PublicKey, SecretKey};
-	use crate::grin_util::secp::{ContextFlag, Secp256k1};
+	use crate::mwc_core::global;
+	use crate::mwc_core::global::ChainTypes;
+	use crate::mwc_util::from_hex;
+	use crate::mwc_util::secp::key::{PublicKey, SecretKey};
+	use crate::mwc_util::secp::{ContextFlag, Secp256k1};
 	use bitcoin::util::address::Payload;
 	use bitcoin::util::key::PublicKey as BTCPublicKey;
-	use grin_wallet_util::grin_util::static_secp_instance;
+	use mwc_wallet_util::mwc_util::static_secp_instance;
 	use rand::{thread_rng, Rng, RngCore};
 	use std::collections::HashMap;
 

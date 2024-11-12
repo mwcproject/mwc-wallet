@@ -1,4 +1,4 @@
-// Copyright 2021 The Grin Develope;
+// Copyright 2021 The Mwc Develope;
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,20 +16,20 @@
 
 use uuid::Uuid;
 
-use crate::grin_core::core::hash::Hashed;
-use crate::grin_core::core::{Output, OutputFeatures, Transaction};
-use crate::grin_core::libtx::proof;
-use crate::grin_keychain::ViewKey;
-use crate::grin_util::secp::key::SecretKey;
-use crate::grin_util::Mutex;
+use crate::mwc_core::core::hash::Hashed;
+use crate::mwc_core::core::{Output, OutputFeatures, Transaction};
+use crate::mwc_core::libtx::proof;
+use crate::mwc_keychain::ViewKey;
+use crate::mwc_util::secp::key::SecretKey;
+use crate::mwc_util::Mutex;
 use crate::proof::crypto::Hex;
 
 use crate::api_impl::owner_updater::StatusMessage;
-use crate::grin_keychain::{BlindingFactor, Identifier, Keychain, SwitchCommitmentType};
-use crate::grin_util::secp::key::PublicKey;
-use crate::grin_util::secp::Message;
-use crate::grin_util::secp::Secp256k1;
-use crate::grin_util::secp::Signature;
+use crate::mwc_keychain::{BlindingFactor, Identifier, Keychain, SwitchCommitmentType};
+use crate::mwc_util::secp::key::PublicKey;
+use crate::mwc_util::secp::Message;
+use crate::mwc_util::secp::Secp256k1;
+use crate::mwc_util::secp::Signature;
 
 use crate::internal::{keys, scan, selection, tx, updater};
 use crate::slate::{PaymentInfo, Slate};
@@ -64,9 +64,9 @@ const USER_MESSAGE_MAX_LEN: usize = 1000; // We can keep messages as long as we 
 use crate::proof::crypto;
 use crate::proof::proofaddress;
 use crate::proof::proofaddress::ProvableAddress;
-use grin_wallet_util::grin_core::core::Committed;
-use grin_wallet_util::grin_core::global;
-use grin_wallet_util::grin_util::from_hex;
+use mwc_wallet_util::mwc_core::core::Committed;
+use mwc_wallet_util::mwc_core::global;
+use mwc_wallet_util::mwc_util::from_hex;
 
 /// List of accounts
 pub fn accounts<'a, T: ?Sized, C, K>(w: &mut T) -> Result<Vec<AcctPathMapping>, Error>
@@ -112,7 +112,7 @@ where
 	C: NodeClient + 'a,
 	K: Keychain + 'a,
 {
-	use grin_wallet_util::grin_util::ToHex;
+	use mwc_wallet_util::mwc_util::ToHex;
 
 	wallet_lock!(wallet_inst, w);
 	let keychain = w.keychain(keychain_mask)?;
@@ -1758,7 +1758,7 @@ where
 			Error::InvalidOwnershipProof(format!("wallet root signature is invalid, {}", e))
 		})?;
 
-		use grin_wallet_util::grin_util::ToHex;
+		use mwc_wallet_util::mwc_util::ToHex;
 		// we are good so far, reporting viewing key
 		result.viewing_key = Some(ViewKey::rewind_hash(&secp, public_key).to_hex());
 	}

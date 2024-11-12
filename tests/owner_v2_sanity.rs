@@ -1,4 +1,5 @@
 // Copyright 2019 The Grin Developers
+// Copyright 2024 The Mwc Developers
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -19,15 +20,15 @@ extern crate log;
 
 extern crate mwc_wallet;
 
-use grin_wallet_impls::test_framework::{self, LocalWalletClient, WalletProxy};
+use mwc_wallet_impls::test_framework::{self, LocalWalletClient, WalletProxy};
 
 use clap::App;
 use std::thread;
 use std::time::Duration;
 
-use grin_wallet_impls::DefaultLCProvider;
-use grin_wallet_util::grin_core::global;
-use grin_wallet_util::grin_keychain::ExtKeychain;
+use mwc_wallet_impls::DefaultLCProvider;
+use mwc_wallet_util::mwc_core::global;
+use mwc_wallet_util::mwc_keychain::ExtKeychain;
 
 #[macro_use]
 mod common;
@@ -38,7 +39,7 @@ use common::{
 };
 
 #[test]
-fn owner_v2_sanity() -> Result<(), grin_wallet_controller::Error> {
+fn owner_v2_sanity() -> Result<(), mwc_wallet_controller::Error> {
 	// For windows we can't run it because of the leaks. And we dont want to see bunch of warnings as well
 	#[cfg(target_os = "windows")]
 	if true {
@@ -94,7 +95,7 @@ fn owner_v2_sanity() -> Result<(), grin_wallet_controller::Error> {
 	let res = send_request(1, "http://127.0.0.1:3420/v2/owner", req)?;
 	assert!(res.is_ok());
 	let value: RetrieveSummaryInfoResp = res.unwrap();
-	assert_eq!(value.1.amount_currently_spendable, 16_666_666_660); // grin: 420000000000
+	assert_eq!(value.1.amount_currently_spendable, 16_666_666_660); // mwc: 420000000000
 	println!("Response 1: {:?}", value);
 
 	// 2) Send to wallet 2 foreign listener
@@ -105,7 +106,7 @@ fn owner_v2_sanity() -> Result<(), grin_wallet_controller::Error> {
 		"send",
 		"-d",
 		"http://127.0.0.1:23415",
-		"2", // grin: 10    Only one block reward is spendable
+		"2", // mwc: 10    Only one block reward is spendable
 	];
 	let yml = load_yaml!("../src/bin/mwc-wallet.yml");
 	let app = App::from_yaml(yml);

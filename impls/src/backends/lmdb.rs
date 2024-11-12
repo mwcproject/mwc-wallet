@@ -1,4 +1,5 @@
-// Copyright 2021 The Grin Developers
+// Copyright 2019 The Grin Developers
+// Copyright 2024 The Mwc Developers
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -36,8 +37,8 @@ use crate::util::secp::constants::SECRET_KEY_SIZE;
 use crate::util::secp::key::SecretKey;
 use crate::util::{self, ToHex};
 
-use grin_wallet_libwallet::IntegrityContext;
-use grin_wallet_util::grin_core::ser::DeserializationMode;
+use mwc_wallet_libwallet::IntegrityContext;
+use mwc_wallet_util::mwc_core::ser::DeserializationMode;
 use rand::rngs::mock::StepRng;
 use rand::thread_rng;
 
@@ -420,7 +421,7 @@ where
 		}
 	}
 
-	// mwc need to suport extentions mwctx and grintx because 2.4 version has grintx, 3.0 mwctx
+	// mwc need to suport extentions mwctx and mwctx because 2.4 version has mwctx, 3.0 mwctx
 	fn get_stored_tx_by_uuid(&self, uuid: &str) -> Result<Transaction, Error> {
 		let get_stored_tx_by_uuid_ext =
 			|uuid: &str, extention: &str| -> Result<Transaction, Error> {
@@ -437,7 +438,7 @@ where
 			};
 
 		get_stored_tx_by_uuid_ext(uuid, "mwctx")
-			.or_else(|_| get_stored_tx_by_uuid_ext(uuid, "grintx"))
+			.or_else(|_| get_stored_tx_by_uuid_ext(uuid, "mwctx"))
 	}
 
 	fn load_stored_tx(&self, path: &str) -> Result<Transaction, Error> {

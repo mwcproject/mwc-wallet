@@ -15,8 +15,8 @@
 use super::ethereum::*;
 use super::types::{to_eth_address, EthBuyerContext, EthData, EthSellerContext};
 use super::{client::EthNodeClient, eth_address};
-use crate::grin_keychain::{Identifier, Keychain, SwitchCommitmentType};
-use crate::grin_util::{
+use crate::mwc_keychain::{Identifier, Keychain, SwitchCommitmentType};
+use crate::mwc_util::{
 	secp::aggsig::export_secnonce_single as generate_nonce, secp::pedersen, to_hex, Mutex,
 };
 use crate::swap::fsm::machine::StateMachine;
@@ -29,11 +29,11 @@ use crate::swap::types::{
 };
 use crate::swap::{Error, SellApi, Swap, SwapApi};
 use crate::{NodeClient, Slate};
-use grin_wallet_util::grin_core::core::Committed;
-use grin_wallet_util::grin_util::secp::Secp256k1;
+use mwc_wallet_util::mwc_core::core::Committed;
+use mwc_wallet_util::mwc_util::secp::Secp256k1;
+use mwc_web3::types::{Address, H256};
 use std::marker::PhantomData;
 use std::sync::Arc;
-use web3::types::{Address, H256};
 
 /// SwapApi trait implementaiton for ETH
 #[derive(Clone)]

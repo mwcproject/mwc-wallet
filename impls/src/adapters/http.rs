@@ -1,4 +1,5 @@
-// Copyright 2021 The Grin Developers
+// Copyright 2019 The Grin Developers
+// Copyright 2024 The Mwc Developers
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,7 +22,7 @@ use crate::libwallet::Slate;
 use crate::tor::bridge::TorBridge;
 use crate::tor::proxy::TorProxy;
 use crate::{SlateSender, SwapMessageSender};
-use grin_wallet_config::types::{TorBridgeConfig, TorProxyConfig};
+use mwc_wallet_config::types::{TorBridgeConfig, TorProxyConfig};
 use serde::Serialize;
 use serde_json::{json, Value};
 use std::collections::HashMap;
@@ -35,10 +36,10 @@ use crate::tor;
 use crate::tor::config as tor_config;
 use crate::tor::process as tor_process;
 use ed25519_dalek::{PublicKey as DalekPublicKey, SecretKey as DalekSecretKey};
-use grin_wallet_libwallet::address;
-use grin_wallet_libwallet::proof::proofaddress::ProvableAddress;
-use grin_wallet_libwallet::slatepack::SlatePurpose;
-use grin_wallet_util::grin_util::secp::Secp256k1;
+use mwc_wallet_libwallet::address;
+use mwc_wallet_libwallet::proof::proofaddress::ProvableAddress;
+use mwc_wallet_libwallet::slatepack::SlatePurpose;
+use mwc_wallet_util::mwc_util::secp::Secp256k1;
 
 const TOR_CONFIG_PATH: &str = "tor/sender";
 

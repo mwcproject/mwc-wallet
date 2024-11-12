@@ -1,4 +1,5 @@
-// Copyright 2021 The Grin Developers
+// Copyright 2019 The Grin Developers
+// Copyright 2024 The Mwc Developers
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,9 +22,9 @@ use crate::error::Error;
 use crate::libwallet::{Slate, SlateVersion, VersionedSlate};
 use crate::{SlateGetter, SlatePutter};
 use ed25519_dalek::{PublicKey as DalekPublicKey, SecretKey as DalekSecretKey};
-use grin_wallet_libwallet::slatepack;
-use grin_wallet_libwallet::slatepack::SlatePurpose;
-use grin_wallet_util::grin_util::secp::Secp256k1;
+use mwc_wallet_libwallet::slatepack;
+use mwc_wallet_libwallet::slatepack::SlatePurpose;
+use mwc_wallet_util::mwc_util::secp::Secp256k1;
 use std::path::PathBuf;
 
 #[derive(Clone)]

@@ -1,4 +1,5 @@
-// Copyright 2021 The Grin Developers
+// Copyright 2019 The Grin Developers
+// Copyright 2024 The Mwc Developers
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -19,20 +20,20 @@ extern crate log;
 
 extern crate mwc_wallet;
 
-use grin_wallet_api::{ECDHPubkey, JsonId};
-use grin_wallet_impls::test_framework::{self, LocalWalletClient, WalletProxy};
+use mwc_wallet_api::{ECDHPubkey, JsonId};
+use mwc_wallet_impls::test_framework::{self, LocalWalletClient, WalletProxy};
 
 use clap::App;
 use std::thread;
 use std::time::Duration;
 
-use grin_wallet_impls::DefaultLCProvider;
-use grin_wallet_libwallet::{InitTxArgs, Slate, SlateVersion, VersionedSlate};
-use grin_wallet_util::grin_keychain::ExtKeychain;
+use mwc_wallet_impls::DefaultLCProvider;
+use mwc_wallet_libwallet::{InitTxArgs, Slate, SlateVersion, VersionedSlate};
+use mwc_wallet_util::mwc_keychain::ExtKeychain;
 use serde_json;
 
-use grin_wallet_util::grin_core::global;
-use grin_wallet_util::grin_util::Mutex;
+use mwc_wallet_util::mwc_core::global;
+use mwc_wallet_util::mwc_util::Mutex;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -43,10 +44,10 @@ use common::{
 	initial_setup_wallet, instantiate_wallet, send_request, send_request_enc, setup,
 	setup_global_chain_type, RetrieveSummaryInfoResp,
 };
-use grin_wallet_util::grin_util::secp::Secp256k1;
+use mwc_wallet_util::mwc_util::secp::Secp256k1;
 
 #[test]
-fn owner_v3_lifecycle() -> Result<(), grin_wallet_controller::Error> {
+fn owner_v3_lifecycle() -> Result<(), mwc_wallet_controller::Error> {
 	// For windows we can't run it because of the leaks. And we dont want to see bunch of warnings as well
 	#[cfg(target_os = "windows")]
 	if true {
@@ -77,7 +78,7 @@ fn owner_v3_lifecycle() -> Result<(), grin_wallet_controller::Error> {
 		let chain = wallet_proxy.chain.clone();
 
 		// Create wallet 2 manually, which will mine a bit and insert some
-		// grins into the equation
+		// mwcs into the equation
 		let client2 = LocalWalletClient::new("wallet2", wallet_proxy.tx.clone());
 		let arg_vec = vec!["mwc-wallet", "-p", "password", "init", "-h"];
 		execute_command(&app, test_dir, "wallet2", &client2, arg_vec.clone())?;
@@ -158,7 +159,7 @@ fn owner_v3_lifecycle() -> Result<(), grin_wallet_controller::Error> {
 	let value: ECDHPubkey = res.unwrap();
 	let shared_key = derive_ecdh_key(sec_key_str, &value.ecdh_pubkey, &secp);
 
-	// 2) get the top level directory, should default to ~/.grin/auto
+	// 2) get the top level directory, should default to ~/.mwc/auto
 	let req = include_str!("data/v3_reqs/get_top_level.req.json");
 	let res = send_request_enc::<String>(
 		&JsonId::StrId(String::from("1")),
@@ -365,7 +366,7 @@ fn owner_v3_lifecycle() -> Result<(), grin_wallet_controller::Error> {
 	println!("RES 14: {:?}", res);
 	assert!(res.is_ok());
 
-	//15) Ask wallet 2 for some grins
+	//15) Ask wallet 2 for some mwcs
 	let req = serde_json::json!({
 		"jsonrpc": "2.0",
 		"id": 1,
@@ -374,7 +375,7 @@ fn owner_v3_lifecycle() -> Result<(), grin_wallet_controller::Error> {
 			"token": token,
 			"args": {
 				"amount": "6000000000",
-				"message": "geez a block of grins",
+				"message": "geez a block of mwcs",
 				"dest_acct_name": null,
 				"target_slate_version": null
 			}
@@ -392,7 +393,7 @@ fn owner_v3_lifecycle() -> Result<(), grin_wallet_controller::Error> {
 	let mut slate: Slate = res.unwrap().into_slate_plain(false)?;
 
 	// give this slate over to wallet 2 manually
-	grin_wallet_controller::controller::owner_single_use(
+	mwc_wallet_controller::controller::owner_single_use(
 		Some(wallet2.clone()),
 		mask2,
 		None,

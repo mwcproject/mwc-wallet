@@ -1,4 +1,5 @@
-// Copyright 2021 The Grin Developers
+// Copyright 2019 The Grin Developers
+// Copyright 2024 The Mwc Developers
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,14 +23,14 @@
 #![deny(unused_mut)]
 #![warn(missing_docs)]
 
-use grin_wallet_config as config;
-use grin_wallet_util::grin_api;
-use grin_wallet_util::grin_core;
-use grin_wallet_util::grin_keychain;
-use grin_wallet_util::grin_p2p;
-use grin_wallet_util::grin_util;
+use mwc_wallet_config as config;
+use mwc_wallet_util::mwc_api;
+use mwc_wallet_util::mwc_core;
+use mwc_wallet_util::mwc_keychain;
+use mwc_wallet_util::mwc_p2p;
+use mwc_wallet_util::mwc_util;
 
-use grin_wallet_util as util;
+use mwc_wallet_util as util;
 
 use blake2_rfc as blake2;
 
@@ -63,7 +64,7 @@ pub mod swap;
 pub mod types;
 extern crate bitcoin as bitcoin_lib;
 extern crate bitcoin_hashes;
-extern crate zcash_primitives as zcash;
+extern crate mwc_zcash_primitives as zcash;
 
 pub use crate::slatepack::{SlatePurpose, Slatepack, SlatepackArmor, Slatepacker};
 
@@ -73,7 +74,7 @@ pub use crate::error::Error;
 pub use crate::slate::{ParticipantData, ParticipantMessageData, ParticipantMessages, Slate};
 pub use crate::slate_versions::{
 	SlateVersion, VersionedCoinbase, VersionedSlate, CURRENT_SLATE_VERSION,
-	GRIN_BLOCK_HEADER_VERSION,
+	MWC_BLOCK_HEADER_VERSION,
 };
 pub use api_impl::foreign;
 pub use api_impl::owner;

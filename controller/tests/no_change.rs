@@ -1,4 +1,5 @@
-// Copyright 2021 The Grin Developers
+// Copyright 2019 The Grin Developers
+// Copyright 2024 The Mwc Developers
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -14,15 +15,15 @@
 //! Test sender transaction with no change output
 #[macro_use]
 extern crate log;
-extern crate grin_wallet_controller as wallet;
-extern crate grin_wallet_impls as impls;
+extern crate mwc_wallet_controller as wallet;
+extern crate mwc_wallet_impls as impls;
 
-use grin_wallet_util::grin_core as core;
-use grin_wallet_util::grin_core::global;
+use mwc_wallet_util::mwc_core as core;
+use mwc_wallet_util::mwc_core::global;
 
-use grin_wallet_libwallet as libwallet;
 use impls::test_framework::{self, LocalWalletClient};
 use libwallet::{InitTxArgs, IssueInvoiceTxArgs, Slate};
+use mwc_wallet_libwallet as libwallet;
 use std::sync::atomic::Ordering;
 use std::thread;
 use std::time::Duration;

@@ -1,4 +1,4 @@
-// Copyright 2021 The Grin Develope;
+// Copyright 2021 The Mwc Develope;
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,8 +15,8 @@
 //! Functions defining wallet 'addresses', i.e. ed2559 keys based on
 //! a derivation path
 
-use crate::grin_util::from_hex;
-use crate::grin_util::secp::key::SecretKey;
+use crate::mwc_util::from_hex;
+use crate::mwc_util::secp::key::SecretKey;
 use crate::Error;
 
 use data_encoding::BASE32;

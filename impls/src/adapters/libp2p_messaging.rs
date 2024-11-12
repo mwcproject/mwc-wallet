@@ -12,13 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::grin_p2p::libp2p_connection;
+use crate::mwc_p2p::libp2p_connection;
 use crate::util::RwLock;
 use crate::Error;
 use chrono::Utc;
-use grin_wallet_libwallet::IntegrityContext;
-use grin_wallet_util::grin_util::secp::Secp256k1;
-use libp2p::gossipsub::IdentTopic as Topic;
+use mwc_libp2p::gossipsub::IdentTopic as Topic;
+use mwc_wallet_libwallet::IntegrityContext;
+use mwc_wallet_util::mwc_util::secp::Secp256k1;
 use std::thread;
 use uuid::Uuid;
 
