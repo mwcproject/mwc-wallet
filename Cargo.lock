@@ -3102,7 +3102,7 @@ dependencies = [
  "bech32 0.7.3",
  "bitcoin_hashes",
  "bitcoinconsensus",
- "mwc_secp256k1zkp",
+ "mwc_secp256k1zkp 0.7.15",
 ]
 
 [[package]]
@@ -3428,8 +3428,8 @@ dependencies = [
 
 [[package]]
 name = "mwc_api"
-version = "5.3.4"
-source = "git+https://github.com/mwcproject/mwc-node?tag=5.3.4#b8b6d2b42b4a0c13207f718bd7c155ec5cfd38df"
+version = "5.3.5"
+source = "git+https://github.com/mwcproject/mwc-node?tag=5.3.5#6c3e6c179a148cb3e13afe1c64f3441ab5bba883"
 dependencies = [
  "bytes 0.5.6",
  "chrono",
@@ -3462,8 +3462,8 @@ dependencies = [
 
 [[package]]
 name = "mwc_chain"
-version = "5.3.4"
-source = "git+https://github.com/mwcproject/mwc-node?tag=5.3.4#b8b6d2b42b4a0c13207f718bd7c155ec5cfd38df"
+version = "5.3.5"
+source = "git+https://github.com/mwcproject/mwc-node?tag=5.3.5#6c3e6c179a148cb3e13afe1c64f3441ab5bba883"
 dependencies = [
  "bit-vec",
  "bitflags 1.3.2",
@@ -3485,8 +3485,8 @@ dependencies = [
 
 [[package]]
 name = "mwc_core"
-version = "5.3.4"
-source = "git+https://github.com/mwcproject/mwc-node?tag=5.3.4#b8b6d2b42b4a0c13207f718bd7c155ec5cfd38df"
+version = "5.3.5"
+source = "git+https://github.com/mwcproject/mwc-node?tag=5.3.5#6c3e6c179a148cb3e13afe1c64f3441ab5bba883"
 dependencies = [
  "blake2-rfc",
  "byteorder",
@@ -3511,8 +3511,8 @@ dependencies = [
 
 [[package]]
 name = "mwc_keychain"
-version = "5.3.4"
-source = "git+https://github.com/mwcproject/mwc-node?tag=5.3.4#b8b6d2b42b4a0c13207f718bd7c155ec5cfd38df"
+version = "5.3.5"
+source = "git+https://github.com/mwcproject/mwc-node?tag=5.3.5#6c3e6c179a148cb3e13afe1c64f3441ab5bba883"
 dependencies = [
  "blake2-rfc",
  "byteorder",
@@ -3534,8 +3534,8 @@ dependencies = [
 
 [[package]]
 name = "mwc_p2p"
-version = "5.3.4"
-source = "git+https://github.com/mwcproject/mwc-node?tag=5.3.4#b8b6d2b42b4a0c13207f718bd7c155ec5cfd38df"
+version = "5.3.5"
+source = "git+https://github.com/mwcproject/mwc-node?tag=5.3.5#6c3e6c179a148cb3e13afe1c64f3441ab5bba883"
 dependencies = [
  "async-std",
  "bitflags 1.3.2",
@@ -3568,8 +3568,8 @@ dependencies = [
 
 [[package]]
 name = "mwc_pool"
-version = "5.3.4"
-source = "git+https://github.com/mwcproject/mwc-node?tag=5.3.4#b8b6d2b42b4a0c13207f718bd7c155ec5cfd38df"
+version = "5.3.5"
+source = "git+https://github.com/mwcproject/mwc-node?tag=5.3.5#6c3e6c179a148cb3e13afe1c64f3441ab5bba883"
 dependencies = [
  "blake2-rfc",
  "chrono",
@@ -3599,9 +3599,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "mwc_secp256k1zkp"
+version = "0.7.16"
+source = "git+https://github.com/mwcproject/rust-secp256k1-zkp?tag=0.7.16#d922c6fd88ac9af865b216ca7e7f2a97fe8d421d"
+dependencies = [
+ "arrayvec 0.7.6",
+ "cc",
+ "libc",
+ "rand 0.5.6",
+ "serde",
+ "serde_json",
+ "zeroize",
+]
+
+[[package]]
 name = "mwc_store"
-version = "5.3.4"
-source = "git+https://github.com/mwcproject/mwc-node?tag=5.3.4#b8b6d2b42b4a0c13207f718bd7c155ec5cfd38df"
+version = "5.3.5"
+source = "git+https://github.com/mwcproject/mwc-node?tag=5.3.5#6c3e6c179a148cb3e13afe1c64f3441ab5bba883"
 dependencies = [
  "byteorder",
  "croaring",
@@ -3619,8 +3633,8 @@ dependencies = [
 
 [[package]]
 name = "mwc_util"
-version = "5.3.4"
-source = "git+https://github.com/mwcproject/mwc-node?tag=5.3.4#b8b6d2b42b4a0c13207f718bd7c155ec5cfd38df"
+version = "5.3.5"
+source = "git+https://github.com/mwcproject/mwc-node?tag=5.3.5#6c3e6c179a148cb3e13afe1c64f3441ab5bba883"
 dependencies = [
  "backtrace",
  "base64 0.12.3",
@@ -3630,7 +3644,7 @@ dependencies = [
  "lazy_static",
  "log",
  "log4rs",
- "mwc_secp256k1zkp",
+ "mwc_secp256k1zkp 0.7.16",
  "parking_lot 0.10.2",
  "rand 0.6.5",
  "serde",

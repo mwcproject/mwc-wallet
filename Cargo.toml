@@ -55,4 +55,4 @@ remove_dir_all = "0.7"
 easy-jsonrpc-mw = "0.5.4"
 
 [patch.crates-io]
-mwc_secp256k1zkp = { git = "https://github.com/mwcproject/rust-secp256k1-zkp", tag = "0.7.15" }
+mwc_secp256k1zkp = { git = "https://github.com/mwcproject/rust-secp256k1-zkp", tag = "0.7.16" }
