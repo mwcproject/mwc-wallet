@@ -3644,7 +3644,7 @@ dependencies = [
 
 [[package]]
 name = "mwc_wallet"
-version = "5.3.3"
+version = "5.3.4"
 dependencies = [
  "built",
  "clap",
@@ -3677,7 +3677,7 @@ dependencies = [
 
 [[package]]
 name = "mwc_wallet_api"
-version = "5.3.3"
+version = "5.3.4"
 dependencies = [
  "base64 0.12.3",
  "chrono",
@@ -3701,7 +3701,7 @@ dependencies = [
 
 [[package]]
 name = "mwc_wallet_config"
-version = "5.3.3"
+version = "5.3.4"
 dependencies = [
  "dirs 2.0.2",
  "mwc_wallet_util",
@@ -3715,7 +3715,7 @@ dependencies = [
 
 [[package]]
 name = "mwc_wallet_controller"
-version = "5.3.3"
+version = "5.3.4"
 dependencies = [
  "chrono",
  "colored",
@@ -3750,7 +3750,7 @@ dependencies = [
 
 [[package]]
 name = "mwc_wallet_impls"
-version = "5.3.3"
+version = "5.3.4"
 dependencies = [
  "base64 0.12.3",
  "blake2-rfc",
@@ -3785,7 +3785,7 @@ dependencies = [
 
 [[package]]
 name = "mwc_wallet_libwallet"
-version = "5.3.3"
+version = "5.3.4"
 dependencies = [
  "base64 0.12.3",
  "bigdecimal",
@@ -3844,7 +3844,7 @@ dependencies = [
 
 [[package]]
 name = "mwc_wallet_util"
-version = "5.3.3"
+version = "5.3.4"
 dependencies = [
  "data-encoding",
  "ed25519-dalek",
