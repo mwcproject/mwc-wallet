@@ -3096,13 +3096,13 @@ dependencies = [
 
 [[package]]
 name = "mwc-bitcoin"
-version = "0.27.0"
-source = "git+https://github.com/mwcproject/rust-bitcoin?branch=zkp#fee483d18e5223dd62ce95f86417adf7b7111ae0"
+version = "0.27.1"
+source = "git+https://github.com/mwcproject/rust-bitcoin?branch=zkp#1cc66d2fdd2a1a34e43532eb40df39e38fad4175"
 dependencies = [
  "bech32 0.7.3",
  "bitcoin_hashes",
  "bitcoinconsensus",
- "mwc_secp256k1zkp 0.7.15",
+ "mwc_secp256k1zkp",
 ]
 
 [[package]]
@@ -3586,20 +3586,6 @@ dependencies = [
 
 [[package]]
 name = "mwc_secp256k1zkp"
-version = "0.7.15"
-source = "git+https://github.com/mwcproject/rust-secp256k1-zkp?tag=0.7.15#729b97ab3f6eba72366e02c98fe71b36d22f8c9d"
-dependencies = [
- "arrayvec 0.7.6",
- "cc",
- "libc",
- "rand 0.5.6",
- "serde",
- "serde_json",
- "zeroize",
-]
-
-[[package]]
-name = "mwc_secp256k1zkp"
 version = "0.7.16"
 source = "git+https://github.com/mwcproject/rust-secp256k1-zkp?tag=0.7.16#d922c6fd88ac9af865b216ca7e7f2a97fe8d421d"
 dependencies = [
@@ -3644,7 +3630,7 @@ dependencies = [
  "lazy_static",
  "log",
  "log4rs",
- "mwc_secp256k1zkp 0.7.16",
+ "mwc_secp256k1zkp",
  "parking_lot 0.10.2",
  "rand 0.6.5",
  "serde",

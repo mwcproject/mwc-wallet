@@ -64,7 +64,7 @@ bigdecimal = "0.4.2"
 #libp2p = { path = "../../rust-libp2p", default-features = false, features = [ "noise", "yamux", "mplex", "dns", "tcp-tokio", "ping", "gossipsub"] }
 mwc-libp2p = { git = "https://github.com/mwcproject/rust-libp2p", version="0.35.3", branch = "master", default-features = false, features = [ "noise", "yamux", "mplex", "dns", "tcp-tokio", "ping", "gossipsub"] }
 #bitcoin = { version = "0.27", path = "../../rust-bitcoin", features = ["bitcoinconsensus"] }
-mwc-bitcoin = { git = "https://github.com/mwcproject/rust-bitcoin",  version = "0.27", branch = "zkp", features = ["bitcoinconsensus"] }
+mwc-bitcoin = { git = "https://github.com/mwcproject/rust-bitcoin",  version = "0.27.1", branch = "zkp", features = ["bitcoinconsensus"] }
 #bch = { path = "../../rust-bch" }
 mwc-bch = { git = "https://github.com/mwcproject/rust-bch", version = "0.2.0", branch = "master" }
 #web3 = { version = "0.15.0", default-features = false, features = ["ws-tls-async-std", "signing"] }
