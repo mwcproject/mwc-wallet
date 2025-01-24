@@ -667,6 +667,7 @@ where
 		block_fees.fees,
 		test_mode,
 		height,
+		keychain.secp(),
 	)?;
 	Ok((out, kern, block_fees))
 }

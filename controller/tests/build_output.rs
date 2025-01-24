@@ -80,7 +80,7 @@ fn build_output_test_impl(test_dir: &'static str) -> Result<(), libwallet::Error
 		let output = built_output.output;
 		assert_eq!(output.features(), features);
 		assert_eq!(output.commitment(), secp.commit(amount, key).unwrap());
-		output.verify_proof()?;
+		output.verify_proof(&secp)?;
 
 		Ok(())
 	})

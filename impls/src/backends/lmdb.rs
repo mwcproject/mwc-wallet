@@ -146,7 +146,7 @@ where
 		);
 
 		{
-			let batch = store.batch()?;
+			let batch = store.batch_write()?;
 			batch.put_ser(&acct_key, &default_account)?;
 			batch.commit()?;
 		}
@@ -465,7 +465,7 @@ where
 	) -> Result<Box<dyn WalletOutputBatch<K> + 'a>, Error> {
 		Ok(Box::new(Batch {
 			_store: self,
-			db: RefCell::new(Some(self.db.batch()?)),
+			db: RefCell::new(Some(self.db.batch_write()?)),
 			keychain: Some(self.keychain(keychain_mask)?),
 		}))
 	}
@@ -473,14 +473,14 @@ where
 	fn batch_no_mask<'a>(&'a mut self) -> Result<Box<dyn WalletOutputBatch<K> + 'a>, Error> {
 		Ok(Box::new(Batch {
 			_store: self,
-			db: RefCell::new(Some(self.db.batch()?)),
+			db: RefCell::new(Some(self.db.batch_write()?)),
 			keychain: None,
 		}))
 	}
 
 	fn current_child_index<'a>(&mut self, parent_key_id: &Identifier) -> Result<u32, Error> {
 		let index = {
-			let batch = self.db.batch()?;
+			let batch = self.db.batch_read()?;
 			let deriv_key = to_key(DERIV_PREFIX, &mut parent_key_id.to_bytes().to_vec());
 			match batch.get_ser(&deriv_key, None)? {
 				Some(idx) => idx,
@@ -498,7 +498,7 @@ where
 	) -> Result<Identifier, Error> {
 		let parent_key_id = parent_key_id.unwrap_or(&self.parent_key_id).clone();
 		let mut deriv_idx = {
-			let batch = self.db.batch()?;
+			let batch = self.db.batch_read()?;
 			let deriv_key = to_key(DERIV_PREFIX, &mut parent_key_id.to_bytes().to_vec());
 			match batch.get_ser(&deriv_key, None)? {
 				Some(idx) => idx,
@@ -521,7 +521,7 @@ where
 	}
 
 	fn last_confirmed_height<'a>(&mut self) -> Result<u64, Error> {
-		let batch = self.db.batch()?;
+		let batch = self.db.batch_read()?;
 		let height_key = to_key(
 			CONFIRMED_HEIGHT_PREFIX,
 			&mut self.parent_key_id.to_bytes().to_vec(),
@@ -534,7 +534,7 @@ where
 	}
 
 	fn last_scanned_blocks<'a>(&mut self) -> Result<Vec<ScannedBlockInfo>, Error> {
-		let batch = self.db.batch()?;
+		let batch = self.db.batch_read()?;
 		let protocol_version = self.db.protocol_version();
 		let mut blocks: Vec<ScannedBlockInfo> = batch
 			.iter(&[LAST_SCANNED_BLOCK], move |k, mut v| {

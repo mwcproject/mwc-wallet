@@ -1099,9 +1099,9 @@ impl Slate {
 			let tx = self.tx_or_err()?.clone();
 			let kernel_offset = tx.offset.clone();
 			let overage = tx.fee(height) as i64;
-			let tx_excess = tx.sum_commitments(overage)?;
-
 			let secp = keychain.unwrap().secp();
+			let tx_excess = tx.sum_commitments(overage, secp)?;
+
 			// subtract the kernel_excess (built from kernel_offset)
 			let offset_excess = secp.commit(0, kernel_offset.secret_key(secp)?)?;
 			Ok(secp.commit_sum(vec![tx_excess], vec![offset_excess])?)
@@ -1120,7 +1120,8 @@ impl Slate {
 	{
 		self.check_fees(height)?;
 		// build the final excess based on final tx and offset
-		let final_excess = self.calc_excess(keychain.secp(), Some(keychain), height)?;
+		let secp = keychain.secp();
+		let final_excess = self.calc_excess(secp, Some(keychain), height)?;
 
 		debug!("Final Tx excess: {:?}", final_excess);
 
@@ -1141,11 +1142,11 @@ impl Slate {
 			"Final tx: {}",
 			serde_json::to_string_pretty(&final_tx).unwrap()
 		);
-		final_tx.kernels()[0].verify()?;
+		final_tx.kernels()[0].verify(secp)?;
 
 		// confirm the overall transaction is valid (including the updated kernel)
 		// accounting for tx weight limits
-		final_tx.validate(Weighting::AsTransaction, height)?;
+		final_tx.validate(Weighting::AsTransaction, height, secp)?;
 
 		// replace our slate tx with the new one with updated kernel
 		self.tx = Some(final_tx);

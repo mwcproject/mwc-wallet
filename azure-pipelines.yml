@@ -41,7 +41,7 @@ jobs:
         CI_JOB: test-all
       release:
         CI_JOB: release
-        PLATFORM: linux-amd64
+        PLATFORM: linux-x64
   steps:
     - script: |
         sudo apt-get update -yqq
@@ -60,7 +60,7 @@ jobs:
         CI_JOB: test-all
       release:
         CI_JOB: release
-        PLATFORM: macos
+        PLATFORM: macos-x64
   steps:
     - template: '.ci/test.yml'
     - template: '.ci/release.yml'
@@ -89,6 +89,6 @@ jobs:
     matrix:
       release:
         CI_JOB: release
-        PLATFORM: linux-amd64
+        PLATFORM: linux-x64
   steps:
     - template: '.ci/pushdocs.yml'

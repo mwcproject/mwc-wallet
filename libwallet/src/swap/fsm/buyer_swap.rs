@@ -812,7 +812,7 @@ impl<K: Keychain> State for BuyerWaitingForRespondRedeemMessage<K> {
 		context: &Context,
 		height: u64,
 		tx_conf: &SwapTransactionsConfirmations,
-		_secp: &Secp256k1,
+		secp: &Secp256k1,
 	) -> Result<StateProcessRespond, Error> {
 		match input {
 			Input::Cancel => {
@@ -838,7 +838,7 @@ impl<K: Keychain> State for BuyerWaitingForRespondRedeemMessage<K> {
 				if swap
 					.refund_slate
 					.tx_or_err()?
-					.validate(Weighting::AsTransaction, height)
+					.validate(Weighting::AsTransaction, height, secp)
 					.is_ok()
 				{
 					// Was already processed. Can go to the next step
@@ -870,7 +870,7 @@ impl<K: Keychain> State for BuyerWaitingForRespondRedeemMessage<K> {
 				if swap
 					.redeem_slate
 					.tx_or_err()?
-					.validate(Weighting::AsTransaction, height)
+					.validate(Weighting::AsTransaction, height, secp)
 					.is_err()
 				{
 					let (_, redeem, _) = message.unwrap_redeem()?;
@@ -887,7 +887,7 @@ impl<K: Keychain> State for BuyerWaitingForRespondRedeemMessage<K> {
 				debug_assert!(swap
 					.redeem_slate
 					.tx_or_err()?
-					.validate(Weighting::AsTransaction, height,)
+					.validate(Weighting::AsTransaction, height, secp)
 					.is_ok());
 				Ok(StateProcessRespond::new(StateId::BuyerRedeemMwc))
 			}
