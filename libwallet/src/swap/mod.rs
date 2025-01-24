@@ -105,15 +105,29 @@ pub fn is_test_response() -> bool {
 
 #[cfg(test)]
 mod tests {
+	use super::bitcoin::*;
+	use super::ethereum::*;
+	use super::message::Message;
+	use super::types::*;
+	use super::*;
+	use crate::mwc_api::{Libp2pMessages, Libp2pPeers};
 	use crate::mwc_core::core::transaction::Weighting;
+	use crate::mwc_core::core::Committed;
 	use crate::mwc_core::core::{Inputs, KernelFeatures, Transaction, TxKernel};
+	use crate::mwc_core::global;
+	use crate::mwc_core::global::ChainTypes;
 	use crate::mwc_keychain::{ExtKeychain, Identifier, Keychain, SwitchCommitmentType};
 	use crate::mwc_util::secp::key::{PublicKey, SecretKey};
 	use crate::mwc_util::secp::pedersen::{Commitment, RangeProof};
 	use crate::mwc_util::to_hex;
 	use crate::mwc_util::Mutex;
+	use crate::swap::fsm::machine::StateMachine;
+	use crate::swap::fsm::state;
+	use crate::swap::fsm::state::{Input, StateId, StateProcessRespond};
+	use crate::swap::message::{SecondaryUpdate, Update};
 	use crate::{NodeClient, Slate, SlateVersion, VersionedSlate};
 	use bitcoin_lib::network::constants::Network as BtcNetwork;
+	use bitcoin_lib::secp256k1::ContextFlag;
 	use bitcoin_lib::util::key::PublicKey as BtcPublicKey;
 	use bitcoin_lib::{Address, AddressType, Transaction as BtcTransaction, TxOut};
 	use mwc_wallet_util::mwc_util::secp::Secp256k1;
@@ -123,20 +137,6 @@ mod tests {
 	use std::fs::{read_to_string, write};
 	use std::mem;
 	use std::sync::Arc;
-
-	use super::bitcoin::*;
-	use super::ethereum::*;
-	use super::message::Message;
-	use super::types::*;
-	use super::*;
-	use crate::mwc_api::{Libp2pMessages, Libp2pPeers};
-	use crate::mwc_core::core::Committed;
-	use crate::mwc_core::global;
-	use crate::mwc_core::global::ChainTypes;
-	use crate::swap::fsm::machine::StateMachine;
-	use crate::swap::fsm::state;
-	use crate::swap::fsm::state::{Input, StateId, StateProcessRespond};
-	use crate::swap::message::{SecondaryUpdate, Update};
 	extern crate mwc_web3;
 
 	const MWC_UNIT: u64 = 1_000_000_000;
@@ -402,7 +402,8 @@ mod tests {
 		}
 		fn post_tx(&self, tx: &Transaction, _fluff: bool) -> Result<(), crate::Error> {
 			let (height, _, _) = self.get_chain_tip()?;
-			tx.validate(Weighting::AsTransaction, height)
+			let secp = Secp256k1::with_caps(ContextFlag::Commit);
+			tx.validate(Weighting::AsTransaction, height, &secp)
 				.map_err(|e| crate::Error::Node(format!("Node failure, {}", e)))?;
 
 			let mut state = self.state.lock();

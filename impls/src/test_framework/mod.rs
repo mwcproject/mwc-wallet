@@ -31,6 +31,8 @@ use crate::util::secp::key::SecretKey;
 use crate::util::secp::pedersen;
 use crate::util::Mutex;
 use chrono::Duration;
+use mwc_wallet_util::mwc_core::consensus::HeaderDifficultyInfo;
+use std::collections::VecDeque;
 use std::sync::Arc;
 use std::thread;
 
@@ -126,13 +128,18 @@ fn create_block_with_reward(
 	reward_output: Output,
 	reward_kernel: TxKernel,
 ) -> core::core::Block {
-	let next_header_info =
-		consensus::next_difficulty(prev.height + 1, chain.difficulty_iter().unwrap());
+	let mut cache_values: VecDeque<HeaderDifficultyInfo> = VecDeque::new();
+	let next_header_info = consensus::next_difficulty(
+		prev.height + 1,
+		chain.difficulty_iter().unwrap(),
+		&mut cache_values,
+	);
 	let mut b = core::core::Block::new(
 		&prev,
 		txs,
 		next_header_info.clone().difficulty,
 		(reward_output, reward_kernel),
+		chain.secp(),
 	)
 	.unwrap();
 	b.header.timestamp = prev.timestamp + Duration::seconds(60);

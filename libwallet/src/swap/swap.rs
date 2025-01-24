@@ -27,6 +27,7 @@ use crate::mwc_util::secp::pedersen::{Commitment, RangeProof};
 use crate::mwc_util::secp::{Message as SecpMessage, Secp256k1, Signature};
 use crate::swap::fsm::state::StateId;
 use crate::{NodeClient, Slate};
+use bitcoin_lib::secp256k1::ContextFlag;
 use chrono::{DateTime, Utc};
 use std::convert::TryInto;
 use uuid::Uuid;
@@ -584,7 +585,8 @@ pub fn publish_transaction<C: NodeClient>(
 	fluff: bool,
 ) -> Result<(), Error> {
 	let (height, _, _) = node_client.get_chain_tip()?;
-	tx.validate(Weighting::AsTransaction, height)
+	let secp = Secp256k1::with_caps(ContextFlag::Commit);
+	tx.validate(Weighting::AsTransaction, height, &secp)
 		.map_err(|e| Error::UnexpectedAction(format!("slate is not valid, {}", e)))?;
 
 	node_client.post_tx(tx, fluff)?;
