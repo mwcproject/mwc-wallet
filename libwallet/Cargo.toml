@@ -1,6 +1,6 @@
 [package]
 name = "mwc_wallet_libwallet"
-version = "5.3.4"
+version = "5.3.5"
 authors = ["Mwc Developers <info@mwc.mw>"]
 description = "Simple, private and scalable cryptocurrency implementation based on the MimbleWimble chain format."
 license = "Apache-2.0"
@@ -76,8 +76,8 @@ mwc-zcash_primitives = { git = "https://github.com/mwcproject/librustzcash", ver
 #zcash_primitives = { path = "../../librustzcash/zcash_primitives", features = ["transparent-inputs"] }
 
 
-mwc_wallet_util = { path = "../util", version = "5.3.4" }
-mwc_wallet_config = { path = "../config", version = "5.3.4" }
+mwc_wallet_util = { path = "../util", version = "5.3.5" }
+mwc_wallet_config = { path = "../config", version = "5.3.5" }
 
 [target.'cfg(any(target_os = "android", target_os = "linux"))'.dependencies]
 libc = { version = "0.2.69", default-features = false }
