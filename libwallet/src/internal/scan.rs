@@ -1299,6 +1299,7 @@ where
 	// we might unCancel transaction if output was found but all mapped transactions are cancelled (user just a cheater)
 	validate_outputs_ownership(
 		wallet_inst.clone(),
+		keychain_mask,
 		&mut outputs,
 		&mut transactions,
 		status_send_channel,
@@ -1663,10 +1664,35 @@ where
 	Ok(())
 }
 
+fn delete_duplicated_coinbase_transactions<'a, L, C, K>(
+	wallet_inst: Arc<Mutex<Box<dyn WalletInst<'a, L, C, K>>>>,
+	keychain_mask: Option<&SecretKey>,
+	collided_coinbase_txs: &Vec<TxLogEntry>,
+) -> Result<(), Error>
+where
+	L: WalletLCProvider<'a, C, K>,
+	C: NodeClient + 'a,
+	K: Keychain + 'a,
+{
+	// correcting the problem, deleting all tx except the firt one
+	wallet_lock!(wallet_inst, w);
+	let mut batch = w.batch(keychain_mask)?;
+
+	for i in 1..collided_coinbase_txs.len() {
+		batch.delete_tx_log_entry(
+			collided_coinbase_txs[i].id,
+			&collided_coinbase_txs[i].parent_key_id,
+		)?;
+	}
+
+	Ok(())
+}
+
 // Checking for output to transaction mapping. We don't want to see active outputs without trsansaction or with cancelled transactions
 // we might unCancel transaction if output was found but all mapped transactions are cancelled (user just a cheater)
 fn validate_outputs_ownership<'a, L, C, K>(
 	wallet_inst: Arc<Mutex<Box<dyn WalletInst<'a, L, C, K>>>>,
+	keychain_mask: Option<&SecretKey>,
 	outputs: &mut HashMap<String, WalletOutputInfo>,
 	transactions: &mut HashMap<String, WalletTxInfo>,
 	status_send_channel: &Option<Sender<StatusMessage>>,
@@ -1725,13 +1751,34 @@ fn validate_outputs_ownership<'a, L, C, K>(
 		// Fortunatelly transaction issue doesn't affect the balance of send logic.
 		// So we can just report to user that he can't trust the transactions Data
 		if out_active > 1 {
-			report_transaction_collision(
-				status_send_channel,
-				&w_out.commit,
-				&w_out.tx_output_uuid,
-				&transactions,
-				false,
-			);
+			// If it is mining transaction with a single output, we can fix that.
+
+			let mut collided_coinbase_txs: Vec<TxLogEntry> = Vec::new();
+			for tx_uuid in &w_out.tx_output_uuid {
+				if let Some(tx) = transactions.get(tx_uuid) {
+					if tx.tx_log.tx_type == TxLogEntryType::ConfirmedCoinbase {
+						collided_coinbase_txs.push(tx.tx_log.clone());
+					}
+				}
+			}
+
+			if collided_coinbase_txs.len() > 1 {
+				if let Err(e) = delete_duplicated_coinbase_transactions(
+					wallet_inst.clone(),
+					keychain_mask,
+					&collided_coinbase_txs,
+				) {
+					error!("Unable to delete duplicated coinbase transacitons, {}", e);
+				}
+			} else {
+				report_transaction_collision(
+					status_send_channel,
+					&w_out.commit,
+					&w_out.tx_output_uuid,
+					&transactions,
+					false,
+				);
+			}
 		}
 
 		if in_active > 1 {
@@ -2160,7 +2207,7 @@ fn report_transaction_collision(
 	transactions: &HashMap<String, WalletTxInfo>,
 	inputs: bool,
 ) {
-	// We don't want to teport collision for old transactions. Migration could be a reason. Those messages
+	// We don't want to report collision for old transactions. Migration could be a reason. Those messages
 	// are aknowledged and users didn't recreate the wallet to get rid of them.
 	// 4-5 month from now transaction should be valid. Expected that all users are migrated the wallet by that time
 	let height_limit = if global::is_mainnet() {

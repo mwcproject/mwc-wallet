@@ -333,6 +333,9 @@ where
 	/// save a tx log entry
 	fn save_tx_log_entry(&mut self, t: TxLogEntry, parent_id: &Identifier) -> Result<(), Error>;
 
+	/// Delete tx log entry.
+	fn delete_tx_log_entry(&mut self, tx_id: u32, parent_id: &Identifier) -> Result<(), Error>;
+
 	/// rename account, old_name -> new_name
 	fn rename_acct_path(
 		&mut self,
