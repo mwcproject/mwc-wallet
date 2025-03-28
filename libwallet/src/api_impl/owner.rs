@@ -1240,6 +1240,13 @@ where
 	for output in w.iter() {
 		write_info(format!("{:?}", output), file.as_mut(), status_send_channel);
 	}
+	for output in w.archive_iter() {
+		write_info(
+			format!("Archived  {:?}", output),
+			file.as_mut(),
+			status_send_channel,
+		);
+	}
 
 	write_info(
 		String::from("Wallet Transactions:"),

@@ -61,6 +61,14 @@ where
 		.filter(|out| show_spent || out.status != OutputStatus::Spent)
 		.collect::<Vec<_>>();
 
+	if show_spent {
+		for out in wallet.archive_iter() {
+			if out.status == OutputStatus::Spent {
+				outputs.push(out);
+			}
+		}
+	}
+
 	// only include outputs with a given tx_id if provided
 	if let Some(tx) = tx {
 		let mut tx_commits: HashSet<String> = HashSet::new();

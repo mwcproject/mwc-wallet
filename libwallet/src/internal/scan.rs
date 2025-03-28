@@ -37,12 +37,13 @@ use crate::types::*;
 use crate::ReplayMitigationConfig;
 use crate::{wallet_lock, Error};
 use blake2_rfc::blake2b::blake2b;
+use mwc_wallet_util::mwc_chain::Chain;
+use mwc_wallet_util::mwc_core::consensus::DAY_HEIGHT;
 use std::cmp;
 use std::collections::{HashMap, HashSet};
 use std::sync::mpsc::Sender;
 use std::sync::Arc;
 use uuid::Uuid;
-
 // Wallet - node sync up strategy. We can request blocks from the node and analyze them. 1 week of blocks can be requested in theory.
 // Or we can validate tx kernels, outputs e.t.c
 
@@ -2020,6 +2021,9 @@ where
 		batch.delete(&o2d.key_id, &o2d.mmr_index)?;
 	}
 
+	// It is a save heihgt, we can't rollback there at node level
+	let archive_height = Chain::height_2_archive_height(tip_height).saturating_sub(DAY_HEIGHT * 2);
+
 	// Save Slate Outputs to DB
 	for output in outputs.values() {
 		if output.updated {
@@ -2042,6 +2046,30 @@ where
 				)));
 			}
 			batch.delete(&output.output.key_id, &output.output.mmr_index)?;
+		}
+
+		// Archiving very old spent ouput can go into archive
+		if output.output.height < archive_height {
+			match output.output.status {
+				OutputStatus::Spent => batch.archive_output(&output.output.key_id)?,
+				OutputStatus::Reverted | OutputStatus::Unconfirmed => {
+					// check if transactions are not confirmed and not concelled, then we can archive such transactions
+					let mut need_wait = false;
+					for tx_id in &output.tx_output_uuid {
+						if let Some(tx) = transactions.get(tx_id) {
+							if tx.tx_log.tx_type == TxLogEntryType::TxReceived
+								|| tx.tx_log.tx_type == TxLogEntryType::TxSent
+							{
+								need_wait = true;
+							}
+						}
+					}
+					if !need_wait {
+						batch.archive_output(&output.output.key_id)?;
+					}
+				}
+				_ => {}
+			}
 		}
 	}
 
