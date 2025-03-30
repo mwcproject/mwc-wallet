@@ -223,6 +223,9 @@ where
 	/// Iterate over all output data stored by the backend
 	fn tx_log_iter<'a>(&'a self) -> Box<dyn Iterator<Item = TxLogEntry> + 'a>;
 
+	/// Iterate over all output data stored by the backend
+	fn tx_log_archive_iter<'a>(&'a self) -> Box<dyn Iterator<Item = TxLogEntry> + 'a>;
+
 	/// Iterate over all stored account paths
 	fn acct_path_iter<'a>(&'a self) -> Box<dyn Iterator<Item = AcctPathMapping> + 'a>;
 
@@ -236,7 +239,7 @@ where
 	fn get_stored_tx(&self, entry: &TxLogEntry) -> Result<Option<Transaction>, Error>;
 
 	/// Load transaction by UUID. Needed for mwc713
-	fn get_stored_tx_by_uuid(&self, uuid: &str) -> Result<Transaction, Error>;
+	fn get_stored_tx_by_uuid(&self, uuid: &str, archived: bool) -> Result<Transaction, Error>;
 
 	/// Load a txn from specified file
 	fn load_stored_tx(&self, path: &str) -> Result<Transaction, Error>;
@@ -342,6 +345,12 @@ where
 
 	/// Iterate over tx log data stored by the backend
 	fn tx_log_iter(&self) -> Box<dyn Iterator<Item = TxLogEntry>>;
+
+	/// Iterate over tx log archived data
+	fn tx_log_archive_iter(&self) -> Box<dyn Iterator<Item = TxLogEntry>>;
+
+	/// Move transaction into archive
+	fn archive_transaction(&mut self, tx: &TxLogEntry) -> Result<(), Error>;
 
 	/// save a tx log entry
 	fn save_tx_log_entry(&mut self, t: TxLogEntry, parent_id: &Identifier) -> Result<(), Error>;

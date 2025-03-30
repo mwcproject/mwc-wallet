@@ -1258,7 +1258,7 @@ where
 		// Checking if Slate is available
 		if let Some(uuid) = tx_log.tx_slate_id {
 			let uuid_str = uuid.to_string();
-			match w.get_stored_tx_by_uuid(&uuid_str) {
+			match w.get_stored_tx_by_uuid(&uuid_str, false) {
 				Ok(t) => {
 					write_info(
 						format!("   Slate for {}: {:?}", uuid_str, t),
@@ -1268,6 +1268,28 @@ where
 				}
 				Err(_) => write_info(
 					format!("   Slate for {} not found", uuid_str),
+					file.as_mut(),
+					status_send_channel,
+				),
+			}
+		}
+	}
+
+	for tx_log in w.tx_log_archive_iter() {
+		write_info(format!("{:?}", tx_log), file.as_mut(), status_send_channel);
+		// Checking if Slate is available
+		if let Some(uuid) = tx_log.tx_slate_id {
+			let uuid_str = uuid.to_string();
+			match w.get_stored_tx_by_uuid(&uuid_str, true) {
+				Ok(t) => {
+					write_info(
+						format!("   Archived Slate for {}: {:?}", uuid_str, t),
+						file.as_mut(),
+						status_send_channel,
+					);
+				}
+				Err(_) => write_info(
+					format!("   Archived Slate for {} not found", uuid_str),
 					file.as_mut(),
 					status_send_channel,
 				),

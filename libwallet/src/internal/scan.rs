@@ -37,6 +37,7 @@ use crate::types::*;
 use crate::ReplayMitigationConfig;
 use crate::{wallet_lock, Error};
 use blake2_rfc::blake2b::blake2b;
+use chrono::{Duration, Utc};
 use mwc_wallet_util::mwc_chain::Chain;
 use mwc_wallet_util::mwc_core::consensus::DAY_HEIGHT;
 use std::cmp;
@@ -683,7 +684,7 @@ where
 
 			let mut wtx = WalletTxInfo::new(uuid_str, tx.clone());
 
-			if let Ok(transaction) = w.get_stored_tx_by_uuid(&tx_uuid_str) {
+			if let Ok(transaction) = w.get_stored_tx_by_uuid(&tx_uuid_str, false) {
 				wtx.add_transaction(transaction);
 			};
 			transactions_id2uuid.insert(
@@ -1272,6 +1273,9 @@ where
 		}
 	}*/
 
+	// It is a save heihgt, we can't rollback there at node level
+	let archive_height = Chain::height_2_archive_height(tip_height).saturating_sub(DAY_HEIGHT * 2);
+
 	// Validated outputs states against the chain
 	let mut found_parents: HashMap<Identifier, u32> = HashMap::new();
 	let outputs2del = validate_outputs(
@@ -1330,6 +1334,7 @@ where
 			&last_output,
 			&transactions,
 			status_send_channel,
+			archive_height,
 		)?;
 	}
 
@@ -2000,6 +2005,7 @@ fn store_transactions_outputs<'a, L, C, K>(
 	last_output: &String,
 	transactions: &HashMap<String, WalletTxInfo>,
 	status_send_channel: &Option<Sender<StatusMessage>>,
+	archive_height: u64,
 ) -> Result<(), Error>
 where
 	L: WalletLCProvider<'a, C, K>,
@@ -2010,19 +2016,42 @@ where
 	let node_client = w.w2n_client().clone();
 	let mut batch = w.batch(keychain_mask)?;
 
+	// This time is secondary, used if TX output_height is not defined
+	let tx_time_to_archive = Utc::now() - Duration::days(5);
+
 	// Slate based Transacitons
 	for tx in transactions.values() {
 		if tx.updated {
 			batch.save_tx_log_entry(tx.tx_log.clone(), &tx.tx_log.parent_key_id)?;
+		}
+
+		// checking if can archive the transaction
+		// Can archive if there is no connections with non archived outputs AND it below horizon:
+		let mut can_archive_tx = if tx.tx_log.output_height == 0 {
+			tx.tx_log.creation_ts < tx_time_to_archive
+		} else {
+			tx.tx_log.output_height < archive_height
+		};
+
+		if can_archive_tx {
+			// Checking if no not archived outputs are exist
+			for outpt in &tx.output_commit {
+				if outputs.contains_key(outpt) {
+					can_archive_tx = false;
+					break;
+				}
+			}
+		}
+
+		if can_archive_tx {
+			// Archiving transactions into IMDB and mwctx files
+			batch.archive_transaction(&tx.tx_log)?;
 		}
 	}
 
 	for o2d in outputs2del {
 		batch.delete(&o2d.key_id, &o2d.mmr_index)?;
 	}
-
-	// It is a save heihgt, we can't rollback there at node level
-	let archive_height = Chain::height_2_archive_height(tip_height).saturating_sub(DAY_HEIGHT * 2);
 
 	// Save Slate Outputs to DB
 	for output in outputs.values() {
