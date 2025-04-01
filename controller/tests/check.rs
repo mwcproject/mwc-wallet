@@ -124,7 +124,7 @@ fn scan_impl(test_dir: &'static str) -> Result<(), wallet::Error> {
 		assert_eq!(wallet1_info.total, bh * reward);
 		assert_eq!(wallet1_info.amount_currently_spendable, (bh - cm) * reward);
 		// check tx log as well
-		let (_, txs) = api.retrieve_txs(m, true, None, None, None)?;
+		let (_, txs) = api.retrieve_txs(m, true, None, None, None, None)?;
 		let (c, _) = libwallet::TxLogEntry::sum_confirmed(&txs);
 		assert_eq!(wallet1_info.total, c);
 		assert_eq!(txs.len(), bh as usize);
@@ -156,7 +156,7 @@ fn scan_impl(test_dir: &'static str) -> Result<(), wallet::Error> {
 	wallet::controller::owner_single_use(Some(wallet1.clone()), mask1, None, |api, m| {
 		// For MWC we don't 'refresh_from_node'. Otherwise issue will be corrected
 		let (_, wallet1_info) = api.retrieve_summary_info(m, false, 1)?;
-		let (_, txs) = api.retrieve_txs(m, false, None, None, None)?;
+		let (_, txs) = api.retrieve_txs(m, false, None, None, None, None)?;
 		let (c, _) = libwallet::TxLogEntry::sum_confirmed(&txs);
 		assert!(wallet1_info.total != c);
 		Ok(())

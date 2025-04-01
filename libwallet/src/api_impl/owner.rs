@@ -205,6 +205,7 @@ where
 			false,
 			None,
 			None,
+			None,
 		)?;
 
 		if !txs.is_empty() {
@@ -235,6 +236,7 @@ pub fn retrieve_txs<'a, L, C, K>(
 	tx_id: Option<u32>,
 	tx_slate_id: Option<Uuid>,
 	query_args: Option<RetrieveTxQueryArgs>,
+	show_last_four_days: Option<bool>,
 ) -> Result<(bool, Vec<TxLogEntry>), Error>
 where
 	L: WalletLCProvider<'a, C, K>,
@@ -259,6 +261,7 @@ where
 		false,
 		None,
 		None,
+		show_last_four_days,
 	)?;
 
 	Ok((validated, txs))
@@ -320,6 +323,7 @@ where
 		refresh_from_node,
 		tx_id,
 		tx_slate_id,
+		None,
 		None,
 	)?;
 	if txs.1.len() != 1 {
@@ -405,6 +409,7 @@ where
 		None,
 		Some(&parent_key_id),
 		false,
+		None,
 		None,
 		None,
 	)
@@ -698,6 +703,7 @@ where
 		None,
 		Some(&parent_key_id),
 		use_test_rng,
+		None,
 		None,
 		None,
 	)?;

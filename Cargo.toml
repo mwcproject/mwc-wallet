@@ -52,7 +52,7 @@ serde = "1"
 serde_derive = "1"
 serde_json = "1"
 remove_dir_all = "0.7"
-easy-jsonrpc-mw = "0.5.4"
+easy-jsonrpc-mwc = { git = "https://github.com/mwcproject/easy-jsonrpc-mwc", version = "0.5.5", branch = "master" }
 
 [patch.crates-io]
 mwc_secp256k1zkp = { git = "https://github.com/mwcproject/rust-secp256k1-zkp", tag = "0.7.16" }

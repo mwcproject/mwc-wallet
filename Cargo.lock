@@ -1440,7 +1440,19 @@ version = "0.5.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d3b1a91569d50e3bba3c9febb22ef54d78c6e8a8d8dd91ae859896c8ba05f4e3"
 dependencies = [
- "easy-jsonrpc-proc-macro-mw",
+ "easy-jsonrpc-proc-macro-mw 0.5.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "jsonrpc-core 10.1.0",
+ "rand 0.6.5",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "easy-jsonrpc-mwc"
+version = "0.5.5"
+source = "git+https://github.com/mwcproject/easy-jsonrpc-mwc?branch=master#7d6e0cdca9be27db769120b40f8b0b071dbed208"
+dependencies = [
+ "easy-jsonrpc-proc-macro-mw 0.5.1 (git+https://github.com/mwcproject/easy-jsonrpc-mwc?branch=master)",
  "jsonrpc-core 10.1.0",
  "rand 0.6.5",
  "serde",
@@ -1452,6 +1464,17 @@ name = "easy-jsonrpc-proc-macro-mw"
 version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a6368dbd2c6685fb84fc6e6a4749917ddc98905793fd06341c7e11a2504f2724"
+dependencies = [
+ "heck",
+ "proc-macro2 0.4.30",
+ "quote 0.6.13",
+ "syn 0.15.44",
+]
+
+[[package]]
+name = "easy-jsonrpc-proc-macro-mw"
+version = "0.5.1"
+source = "git+https://github.com/mwcproject/easy-jsonrpc-mwc?branch=master#7d6e0cdca9be27db769120b40f8b0b071dbed208"
 dependencies = [
  "heck",
  "proc-macro2 0.4.30",
@@ -3728,7 +3751,7 @@ version = "5.3.5"
 dependencies = [
  "built",
  "clap",
- "easy-jsonrpc-mw",
+ "easy-jsonrpc-mwc",
  "ed25519-dalek",
  "funty",
  "lazy_static",
@@ -3762,7 +3785,7 @@ dependencies = [
  "base64 0.12.3",
  "chrono",
  "colored",
- "easy-jsonrpc-mw",
+ "easy-jsonrpc-mwc",
  "ed25519-dalek",
  "log",
  "mwc_wallet_config",
@@ -3799,7 +3822,7 @@ version = "5.3.5"
 dependencies = [
  "chrono",
  "colored",
- "easy-jsonrpc-mw",
+ "easy-jsonrpc-mwc",
  "ed25519-dalek",
  "futures 0.3.31",
  "hyper",
@@ -4186,9 +4209,9 @@ dependencies = [
 
 [[package]]
 name = "once_cell"
-version = "1.21.2"
+version = "1.21.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c2806eaa3524762875e21c3dcd057bc4b7bfa01ce4da8d46be1cd43649e1cc6b"
+checksum = "42f5e15c9953c5e4ccceeb2e7382a716482c34515315f7b03532b8b4e8393d2d"
 
 [[package]]
 name = "opaque-debug"
@@ -5864,9 +5887,9 @@ dependencies = [
 
 [[package]]
 name = "socket2"
-version = "0.5.8"
+version = "0.5.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c970269d99b64e60ec3bd6ad27270092a5394c4e309314b18ae3fe575695fbe8"
+checksum = "4f5fd57c80058a56cf5c777ab8a126398ece8e442983605d280a44ce79d0edef"
 dependencies = [
  "libc",
  "windows-sys 0.52.0",
@@ -6227,7 +6250,7 @@ dependencies = [
  "libc",
  "mio 1.0.3",
  "pin-project-lite 0.2.16",
- "socket2 0.5.8",
+ "socket2 0.5.9",
  "windows-sys 0.52.0",
 ]
 

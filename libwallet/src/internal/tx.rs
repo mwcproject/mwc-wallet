@@ -437,12 +437,16 @@ where
 	C: NodeClient + 'a,
 	K: Keychain + 'a,
 {
-	let mut tx_id_string = String::new();
-	if let Some(tx_id) = tx_id {
-		tx_id_string = tx_id.to_string();
+	let tx_id_string = if let Some(tx_id) = tx_id {
+		tx_id.to_string()
 	} else if let Some(tx_slate_id) = tx_slate_id {
-		tx_id_string = tx_slate_id.to_string();
-	}
+		tx_slate_id.to_string()
+	} else {
+		return Err(Error::TransactionCancellationError(
+			"Transaction is not defined. Please specify tx_id or tx_slate_id fields.",
+		));
+	};
+
 	let tx_vec = updater::retrieve_txs(
 		wallet,
 		keychain_mask,
@@ -451,6 +455,7 @@ where
 		None,
 		Some(&parent_key_id),
 		false,
+		None,
 		None,
 		None,
 	)?;
@@ -505,6 +510,7 @@ where
 		None,
 		None,
 		false,
+		None,
 		None,
 		None,
 	)?;
@@ -605,6 +611,7 @@ where
 		None,
 		None,
 		false,
+		None,
 		None,
 		None,
 	)?;
@@ -717,6 +724,7 @@ where
 		None,
 		None,
 		false,
+		None,
 		None,
 		None,
 	)?;

@@ -513,7 +513,7 @@ where
 	/// let tx_slate_id = None;
 	///
 	/// // Return all TxLogEntries
-	/// let result = api_owner.retrieve_txs(None, update_from_node, tx_id, tx_slate_id, None);
+	/// let result = api_owner.retrieve_txs(None, update_from_node, tx_id, tx_slate_id, None, Some(true));
 	///
 	/// if let Ok((was_updated, tx_log_entries)) = result {
 	///     //...
@@ -527,6 +527,7 @@ where
 		tx_id: Option<u32>,
 		tx_slate_id: Option<Uuid>,
 		tx_query_args: Option<RetrieveTxQueryArgs>,
+		show_last_four_days: Option<bool>,
 	) -> Result<(bool, Vec<TxLogEntry>), Error> {
 		let tx = {
 			let t = self.status_tx.lock();
@@ -544,6 +545,7 @@ where
 			tx_id,
 			tx_slate_id,
 			tx_query_args,
+			show_last_four_days,
 		)?;
 		if self.doctest_mode {
 			res.1 = res
@@ -1294,7 +1296,7 @@ where
 	/// let tx_slate_id = None;
 	///
 	/// // Return all TxLogEntries
-	/// let result = api_owner.retrieve_txs(None, update_from_node, tx_id, tx_slate_id, None);
+	/// let result = api_owner.retrieve_txs(None, update_from_node, tx_id, tx_slate_id, None, None);
 	///
 	/// if let Ok((was_updated, tx_log_entries)) = result {
 	///     let stored_tx = api_owner.get_stored_tx(None, &tx_log_entries[0]).unwrap();
@@ -2213,7 +2215,7 @@ where
 	///
 	/// let res = api_owner.start_updater(None, Duration::from_secs(60));
 	///
-	/// let messages = api_owner.get_updater_messages(10000);
+	/// let messages = api_owner.get_updater_messages(Some(10000));
 	///
 	/// if let Ok(_) = res {
 	///   // ...
@@ -2221,9 +2223,12 @@ where
 	///
 	/// ```
 
-	pub fn get_updater_messages(&self, count: usize) -> Result<Vec<StatusMessage>, Error> {
+	pub fn get_updater_messages(&self, count: Option<u32>) -> Result<Vec<StatusMessage>, Error> {
 		let mut q = self.updater_messages.lock();
-		let index = q.len().saturating_sub(count);
+		let index = match count {
+			Some(count) => q.len().saturating_sub(count as usize),
+			None => 0,
+		};
 		Ok(q.split_off(index))
 	}
 

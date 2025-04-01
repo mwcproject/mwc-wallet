@@ -61,7 +61,7 @@ fn test_wallet_tx_filtering(
 
 		// Min ID
 		let tx_results = api
-			.retrieve_txs(mask, true, None, None, Some(tx_query_args))?
+			.retrieve_txs(mask, true, None, None, Some(tx_query_args), None)?
 			.1;
 		assert_eq!(tx_results[0].id, 5);
 		assert_eq!(tx_results[tx_results.len() - 1].id, 33);
@@ -71,7 +71,7 @@ fn test_wallet_tx_filtering(
 		tx_query_args.min_id = Some(5);
 		tx_query_args.max_id = Some(20);
 		let tx_results = api
-			.retrieve_txs(mask, true, None, None, Some(tx_query_args))?
+			.retrieve_txs(mask, true, None, None, Some(tx_query_args), None)?
 			.1;
 		assert_eq!(tx_results[0].id, 5);
 		assert_eq!(tx_results[tx_results.len() - 1].id, 20);
@@ -82,7 +82,7 @@ fn test_wallet_tx_filtering(
 		tx_query_args.min_id = Some(5);
 		tx_query_args.max_id = Some(50);
 		let tx_results = api
-			.retrieve_txs(mask, true, None, None, Some(tx_query_args))?
+			.retrieve_txs(mask, true, None, None, Some(tx_query_args), None)?
 			.1;
 		assert_eq!(tx_results.len(), 28);
 
@@ -93,7 +93,7 @@ fn test_wallet_tx_filtering(
 		tx_query_args.min_id = Some(5);
 		tx_query_args.max_id = Some(50);
 		let tx_results = api
-			.retrieve_txs(mask, true, None, None, Some(tx_query_args))?
+			.retrieve_txs(mask, true, None, None, Some(tx_query_args), None)?
 			.1;
 		assert_eq!(tx_results.len(), 14);
 
@@ -104,7 +104,7 @@ fn test_wallet_tx_filtering(
 		tx_query_args.min_id = Some(5);
 		tx_query_args.max_id = Some(50);
 		let tx_results = api
-			.retrieve_txs(mask, true, None, None, Some(tx_query_args))?
+			.retrieve_txs(mask, true, None, None, Some(tx_query_args), None)?
 			.1;
 		assert_eq!(tx_results.len(), 15);
 
@@ -116,7 +116,7 @@ fn test_wallet_tx_filtering(
 		tx_query_args.min_id = Some(5);
 		tx_query_args.max_id = Some(50);
 		let tx_results = api
-			.retrieve_txs(mask, true, None, None, Some(tx_query_args))?
+			.retrieve_txs(mask, true, None, None, Some(tx_query_args), None)?
 			.1;
 		assert_eq!(tx_results.len(), 0);
 
@@ -124,7 +124,7 @@ fn test_wallet_tx_filtering(
 		let mut tx_query_args = RetrieveTxQueryArgs::default();
 		tx_query_args.include_sent_only = Some(true);
 		let tx_results = api
-			.retrieve_txs(mask, true, None, None, Some(tx_query_args))?
+			.retrieve_txs(mask, true, None, None, Some(tx_query_args), None)?
 			.1;
 		assert_eq!(tx_results.len(), 15);
 
@@ -132,7 +132,7 @@ fn test_wallet_tx_filtering(
 		let mut tx_query_args = RetrieveTxQueryArgs::default();
 		tx_query_args.include_received_only = Some(true);
 		let tx_results = api
-			.retrieve_txs(mask, true, None, None, Some(tx_query_args))?
+			.retrieve_txs(mask, true, None, None, Some(tx_query_args), None)?
 			.1;
 		assert_eq!(tx_results.len(), 0);
 
@@ -140,7 +140,7 @@ fn test_wallet_tx_filtering(
 		let mut tx_query_args = RetrieveTxQueryArgs::default();
 		tx_query_args.include_reverted_only = Some(true);
 		let tx_results = api
-			.retrieve_txs(mask, true, None, None, Some(tx_query_args))?
+			.retrieve_txs(mask, true, None, None, Some(tx_query_args), None)?
 			.1;
 		assert_eq!(tx_results.len(), 0);
 
@@ -148,7 +148,7 @@ fn test_wallet_tx_filtering(
 		let mut tx_query_args = RetrieveTxQueryArgs::default();
 		tx_query_args.include_coinbase_only = Some(true);
 		let tx_results = api
-			.retrieve_txs(mask, true, None, None, Some(tx_query_args))?
+			.retrieve_txs(mask, true, None, None, Some(tx_query_args), None)?
 			.1;
 		assert_eq!(tx_results.len(), 19);
 
@@ -156,7 +156,7 @@ fn test_wallet_tx_filtering(
 		let mut tx_query_args = RetrieveTxQueryArgs::default();
 		tx_query_args.min_amount = Some(14_000_000 + 8_000_000); // 8m are fees
 		let tx_results = api
-			.retrieve_txs(mask, true, None, None, Some(tx_query_args))?
+			.retrieve_txs(mask, true, None, None, Some(tx_query_args), None)?
 			.1;
 		assert_eq!(tx_results.len(), 19 + 8);
 
@@ -165,7 +165,7 @@ fn test_wallet_tx_filtering(
 		tx_query_args.min_amount = Some(14_000_000 + 8_000_000);
 		tx_query_args.max_amount = Some(2_380_952_380 - 1);
 		let tx_results = api
-			.retrieve_txs(mask, true, None, None, Some(tx_query_args))?
+			.retrieve_txs(mask, true, None, None, Some(tx_query_args), None)?
 			.1;
 		assert_eq!(tx_results.len(), 8);
 
@@ -173,7 +173,7 @@ fn test_wallet_tx_filtering(
 		let mut tx_query_args = RetrieveTxQueryArgs::default();
 		tx_query_args.min_amount = Some(2_380_952_380);
 		let tx_results = api
-			.retrieve_txs(mask, true, None, None, Some(tx_query_args))?
+			.retrieve_txs(mask, true, None, None, Some(tx_query_args), None)?
 			.1;
 		assert_eq!(tx_results.len(), 19);
 
@@ -181,7 +181,7 @@ fn test_wallet_tx_filtering(
 		let mut tx_query_args = RetrieveTxQueryArgs::default();
 		tx_query_args.sort_order = Some(libwallet::RetrieveTxQuerySortOrder::Desc);
 		let tx_results = api
-			.retrieve_txs(mask, true, None, None, Some(tx_query_args))?
+			.retrieve_txs(mask, true, None, None, Some(tx_query_args), None)?
 			.1;
 
 		assert_eq!(tx_results[0].id, 33);
@@ -192,7 +192,7 @@ fn test_wallet_tx_filtering(
 		tx_query_args.sort_order = Some(libwallet::RetrieveTxQuerySortOrder::Desc);
 		tx_query_args.sort_field = Some(RetrieveTxQuerySortField::TotalAmount);
 		let tx_results = api
-			.retrieve_txs(mask, true, None, None, Some(tx_query_args))?
+			.retrieve_txs(mask, true, None, None, Some(tx_query_args), None)?
 			.1;
 		assert_eq!(tx_results[0].amount_credited, 2_380_952_380);
 

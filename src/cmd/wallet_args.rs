@@ -997,10 +997,14 @@ pub fn parse_txs_args(args: &ArgMatches) -> Result<command::TxsArgs, ParseError>
 		None => None,
 		Some(c) => Some(parse_u64(c, "count")? as u32),
 	};
+
+	let show_last_four_days = args.is_present("show_last_four_days");
+
 	Ok(command::TxsArgs {
 		id: tx_id,
 		tx_slate_id: tx_slate_id,
 		count: count,
+		show_last_four_days: Some(show_last_four_days),
 	})
 }
 

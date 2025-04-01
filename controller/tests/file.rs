@@ -209,7 +209,7 @@ fn file_exchange_test_impl(test_dir: &'static str) -> Result<(), wallet::Error> 
 
 	// Check messages, all participants should have both
 	wallet::controller::owner_single_use(Some(wallet1.clone()), mask1, None, |api, m| {
-		let (_, tx) = api.retrieve_txs(m, true, None, Some(slate.id), None)?;
+		let (_, tx) = api.retrieve_txs(m, true, None, Some(slate.id), None, None)?;
 		assert_eq!(
 			tx[0].clone().messages.unwrap().messages[0].message,
 			Some(message.to_owned())
@@ -225,7 +225,7 @@ fn file_exchange_test_impl(test_dir: &'static str) -> Result<(), wallet::Error> 
 	})?;
 
 	wallet::controller::owner_single_use(Some(wallet2.clone()), mask2, None, |api, m| {
-		let (_, tx) = api.retrieve_txs(m, true, None, Some(slate.id), None)?;
+		let (_, tx) = api.retrieve_txs(m, true, None, Some(slate.id), None, None)?;
 		assert_eq!(
 			tx[0].clone().messages.unwrap().messages[0].message,
 			Some(message.to_owned())

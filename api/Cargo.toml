@@ -16,13 +16,13 @@ serde = "1"
 rand = "0.6"
 serde_derive = "1"
 serde_json = "1"
-easy-jsonrpc-mw = "0.5.4"
 chrono = { version = "0.4.11", features = ["serde"] }
 ring = "0.16"
 base64 = "0.12"
 ed25519-dalek = "1.0.0-pre.4"
 colored = "1.6"
 x25519-dalek = "0.6"
+easy-jsonrpc-mwc = { git = "https://github.com/mwcproject/easy-jsonrpc-mwc", version = "0.5.5", branch = "master" }
 
 mwc_wallet_libwallet = { path = "../libwallet", version = "5.3.5" }
 mwc_wallet_config = { path = "../config", version = "5.3.5" }

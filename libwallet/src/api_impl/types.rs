@@ -259,6 +259,7 @@ pub struct IssueInvoiceTxArgs {
 	pub address: Option<String>,
 	/// Slatepack recipient. If defined will send as a slatepack. Otherwise as not encrypted. Will be ignored for MQS
 	/// ProvableAddress has to be tor (DalekPublicKey) address
+	#[serde(default)]
 	pub slatepack_recipient: Option<ProvableAddress>,
 }
 

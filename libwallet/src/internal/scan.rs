@@ -1376,6 +1376,7 @@ where
 			false,
 			None,
 			None,
+			Some(true),
 		)?;
 
 		for tx_log in &transactions {

@@ -1663,6 +1663,7 @@ pub struct TxsArgs {
 	pub id: Option<u32>,
 	pub tx_slate_id: Option<Uuid>,
 	pub count: Option<u32>,
+	pub show_last_four_days: Option<bool>,
 }
 
 pub fn txs<L, C, K>(
@@ -1681,7 +1682,14 @@ where
 	controller::owner_single_use(None, keychain_mask, Some(owner_api), |api, m| {
 		let res = api.node_height(m)?;
 		// Note advanced query args not currently supported by command line client
-		let (validated, txs) = api.retrieve_txs(m, true, args.id, args.tx_slate_id, None)?;
+		let (validated, txs) = api.retrieve_txs(
+			m,
+			true,
+			args.id,
+			args.tx_slate_id,
+			None,
+			args.show_last_four_days,
+		)?;
 		let include_status = !args.id.is_some() && !args.tx_slate_id.is_some();
 		// If view count is specified, restrict the TX list to `txs.len() - count`
 		let first_tx = args
@@ -1861,7 +1869,7 @@ where
 	K: keychain::Keychain + 'static,
 {
 	controller::owner_single_use(None, keychain_mask, Some(owner_api), |api, m| {
-		let (_, txs) = api.retrieve_txs(m, true, Some(args.id), None, None)?;
+		let (_, txs) = api.retrieve_txs(m, true, Some(args.id), None, None, None)?;
 		let stored_tx = api.get_stored_tx(m, &txs[0])?;
 		if stored_tx.is_none() {
 			error!(

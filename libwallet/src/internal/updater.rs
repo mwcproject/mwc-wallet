@@ -38,6 +38,8 @@ use crate::{
 	RetrieveTxQuerySortOrder,
 };
 
+use mwc_wallet_util::mwc_chain::Chain;
+use mwc_wallet_util::mwc_core::consensus::DAY_HEIGHT;
 use num_bigint::BigInt;
 
 /// Retrieve all of the outputs (doesn't attempt to update from node)
@@ -61,7 +63,17 @@ where
 		.filter(|out| show_spent || out.status != OutputStatus::Spent)
 		.collect::<Vec<_>>();
 
-	if show_spent {
+	let need_archived = match tx {
+		Some(tx) => {
+			let tip_height = wallet.w2n_client().get_chain_tip()?.0;
+			let archive_height =
+				Chain::height_2_archive_height(tip_height).saturating_sub(DAY_HEIGHT * 2);
+			tx.output_height < archive_height
+		}
+		None => false,
+	};
+
+	if show_spent || need_archived {
 		for out in wallet.archive_iter() {
 			if out.status == OutputStatus::Spent {
 				outputs.push(out);
@@ -279,6 +291,7 @@ fn filter_tx_entry(tx_entry: &TxLogEntry, query_args: &RetrieveTxQueryArgs) -> b
 pub fn apply_advanced_tx_list_filtering<'a, T: ?Sized, C, K>(
 	wallet: &mut T,
 	query_args: &RetrieveTxQueryArgs,
+	height_limit: u64,
 ) -> Vec<TxLogEntry>
 where
 	T: WalletBackend<'a, C, K>,
@@ -293,10 +306,16 @@ where
 		}
 	}
 
-	for tx in wallet.tx_log_archive_iter() {
-		if filter_tx_entry(&tx, query_args) {
-			return_txs.push(tx);
+	if height_limit > 0 {
+		for tx in wallet.tx_log_archive_iter() {
+			if filter_tx_entry(&tx, query_args) {
+				return_txs.push(tx);
+			}
 		}
+
+		return_txs.retain(|tx| {
+			tx.output_height >= height_limit || (!tx.confirmed && !tx.is_cancelled_reverted())
+		});
 	}
 
 	// Now apply requested sorting
@@ -395,6 +414,7 @@ pub fn retrieve_txs<'a, T: ?Sized, C, K>(
 	outstanding_only: bool,
 	pagination_start: Option<u32>,
 	pagination_len: Option<u32>,
+	show_last_four_days: Option<bool>,
 ) -> Result<Vec<TxLogEntry>, Error>
 where
 	T: WalletBackend<'a, C, K>,
@@ -402,10 +422,22 @@ where
 	K: Keychain + 'a,
 {
 	let mut txs;
+
+	let show_last_four_days = show_last_four_days.unwrap_or(false);
+	let height_limit = if show_last_four_days {
+		wallet
+			.w2n_client()
+			.get_chain_tip()?
+			.0
+			.saturating_sub(4 * DAY_HEIGHT)
+	} else {
+		0
+	};
+
 	// Adding in new transaction list query logic. If `tx_id` or `tx_slate_id`
 	// is provided, then `query_args` is ignored and old logic is followed.
 	if query_args.is_some() && tx_id.is_none() && tx_slate_id.is_none() {
-		txs = apply_advanced_tx_list_filtering(wallet, &query_args.unwrap())
+		txs = apply_advanced_tx_list_filtering(wallet, &query_args.unwrap(), height_limit)
 	} else {
 		txs = wallet
 			.tx_log_iter()
@@ -420,7 +452,7 @@ where
 			})
 			.collect();
 
-		if !((tx_id.is_some() || tx_slate_id.is_some()) && !txs.is_empty()) {
+		if !(((tx_id.is_some() || tx_slate_id.is_some()) && !txs.is_empty()) || height_limit > 0) {
 			for tx_entry in wallet.tx_log_archive_iter() {
 				if filter_tx_entry2(
 					&tx_entry,
@@ -432,6 +464,12 @@ where
 					txs.push(tx_entry)
 				}
 			}
+		}
+
+		if height_limit > 0 {
+			txs.retain(|tx| {
+				tx.output_height >= height_limit || (!tx.confirmed && !tx.is_cancelled_reverted())
+			})
 		}
 
 		txs.sort_by_key(|tx| tx.creation_ts);

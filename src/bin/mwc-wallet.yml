@@ -438,6 +438,10 @@ subcommands:
             short: c
             long: count
             takes_value: true
+        - show_last_four_days:
+            help: Show transactions for last four days. Default is false. Intended for usage with a mining/exchange wallets that have huge number of transactions. This flag limits transaction output data.
+            long: show_last_four_days
+            takes_value: false
   - post:
       about: Posts a finalized transaction to the chain
       args:
