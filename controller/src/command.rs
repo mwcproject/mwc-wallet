@@ -757,7 +757,9 @@ where
 					.map_err(|e| {
 						Error::IO(format!("Unable to store the file at {}, {}", args.dest, e))
 					})?;
-					api.tx_lock_outputs(m, &slate, Some(String::from("file")), 0)?;
+					if !slate.compact_slate {
+						api.tx_lock_outputs(m, &slate, Some(String::from("file")), 0)?;
+					}
 
 					if !args.dest.is_empty() {
 						println!(
@@ -782,6 +784,7 @@ where
 					return Ok(());
 				}
 				"self" => {
+					debug_assert!(!slate.compact_slate);
 					api.tx_lock_outputs(m, &slate, Some(String::from("self")), 0)?;
 					let km = match keychain_mask.as_ref() {
 						None => None,
@@ -824,7 +827,9 @@ where
 						error!("Error validating participant messages: {}", e);
 						e
 					})?;
-					api.tx_lock_outputs(m, &slate, Some(args.dest.clone()), 0)?; //this step needs to be done before finalizing the slate
+					if !slate.compact_slate {
+						api.tx_lock_outputs(m, &slate, Some(args.dest.clone()), 0)?; //this step needs to be done before finalizing the slate
+					}
 				}
 			}
 

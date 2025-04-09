@@ -1356,7 +1356,16 @@ where
 	if neeed_init_last_scaned {
 		// Let's still scan for last 100 blocks. That might be a mining wallet like tests has.
 		if tip_height > 100 {
-			let header = w.w2n_client().get_header_info(tip_height - 100)?;
+			// let's find commit's/txs min heights
+			let mut max_height = tip_height - 100;
+			for output in w.iter() {
+				let h = output.height.saturating_sub(100);
+				if h < max_height {
+					max_height = h;
+				}
+			}
+
+			let header = w.w2n_client().get_header_info(max_height)?;
 			let blocks: Vec<ScannedBlockInfo> =
 				vec![ScannedBlockInfo::new(header.height, header.hash)];
 
