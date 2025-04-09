@@ -205,10 +205,6 @@ where
 	/// Get output data by id
 	fn get(&self, id: &Identifier, mmr_index: &Option<u64>) -> Result<OutputData, Error>;
 
-	/// Output key might or might not include mmr_index. Search checking data for a range of the keys. So the output will be
-	/// found for both options
-	fn search_output(&self, output_key_id: &Identifier) -> Result<OutputData, Error>;
-
 	/// Iterate over archive outputs data stored by the backend
 	fn archive_iter<'a>(&'a self) -> Box<dyn Iterator<Item = OutputData> + 'a>;
 
@@ -297,9 +293,6 @@ where
 
 	/// Gets output data by id
 	fn get(&self, id: &Identifier, mmr_index: &Option<u64>) -> Result<OutputData, Error>;
-
-	/// Output can be stored with mmr index or not. search_output does checking for both cases
-	fn search_output(&self, output_key_id: &Identifier) -> Result<OutputData, Error>;
 
 	/// Iterate over all output data stored by the backend
 	fn iter(&self) -> Box<dyn Iterator<Item = OutputData>>;

@@ -94,8 +94,8 @@ impl OutputResult {
 	/// Compare parameters.
 	pub fn params_equal_to(&self, output: &OutputData) -> bool {
 		// Skipping commit because caller does selection by that
-		// mmr index excluded because it serve mostly flag purpose
 		self.key_id == output.key_id
+			&& self.mmr_index == output.mmr_index.unwrap_or(0)
 			&& self.n_child == output.n_child
 			&& self.value == output.value
 			&& self.height == output.height
@@ -105,6 +105,7 @@ impl OutputResult {
 
 	/// Copy self params into output
 	pub fn params_push_to(&self, output: &mut OutputData) {
+		output.mmr_index = Some(self.mmr_index);
 		output.key_id = self.key_id.clone();
 		output.n_child = self.n_child;
 		output.value = self.value;
@@ -1484,9 +1485,7 @@ where
 				// Sync up the data. ch_out is source of truth
 				if !ch_out.params_equal_to(&w_out.output) {
 					// Some parameters can be updated. ch_out is source if truth
-					if ch_out.key_id != w_out.output.key_id {
-						outputs2del.push(w_out.output.clone());
-					}
+					outputs2del.push(w_out.output.clone());
 					ch_out.params_push_to(&mut w_out.output);
 					w_out.updated = true;
 				}
@@ -2050,6 +2049,7 @@ where
 		}
 	}
 
+	// Need delete first and save after. Delete happens on data update, the DB key be the same
 	for o2d in outputs2del {
 		batch.delete(&o2d.key_id, &o2d.mmr_index)?;
 	}

@@ -350,38 +350,6 @@ where
 		self.parent_key_id.clone()
 	}
 
-	// Output key might or might not include mmr_index. Search checking data for a range of the keys. So the output will be
-	// found for both options
-	fn search_output(&self, output_key_id: &Identifier) -> Result<OutputData, Error> {
-		let key = to_key(OUTPUT_PREFIX, output_key_id.to_bytes().to_vec());
-
-		let protocol_version = self.db.protocol_version();
-		let iter = self
-			.db
-			.iter(&key, move |_, mut v| {
-				ser::deserialize(
-					&mut v,
-					protocol_version,
-					ser::DeserializationMode::default(),
-				)
-				.map_err(From::from)
-			})
-			.expect("deserialize")
-			.into_iter();
-
-		match iter
-			.filter(|output: &OutputData| output.key_id == *output_key_id)
-			.next()
-		{
-			Some(output) => Ok(output),
-			None => Err(mwc_wallet_util::mwc_store::Error::NotFoundErr(format!(
-				"Key ID: {}",
-				output_key_id
-			))
-			.into()),
-		}
-	}
-
 	fn get(&self, id: &Identifier, mmr_index: &Option<u64>) -> Result<OutputData, Error> {
 		let key = match mmr_index {
 			Some(i) => to_key_u64(OUTPUT_PREFIX, &mut id.to_bytes().to_vec(), *i),
@@ -750,38 +718,6 @@ where
 			|| format!("Key ID: {}", id),
 		)
 		.map_err(|e| e.into())
-	}
-
-	// Output key might or might not include mmr_index. Search checking data for a range of the keys. So the output will be
-	// found for both options
-	fn search_output(&self, output_key_id: &Identifier) -> Result<OutputData, Error> {
-		let key = to_key(OUTPUT_PREFIX, output_key_id.to_bytes().to_vec());
-
-		let db = self.db.borrow();
-		let db = db.as_ref().unwrap();
-		let protocol_version = db.protocol_version();
-		let iter = db
-			.iter(&key, move |_, mut v| {
-				ser::deserialize(
-					&mut v,
-					protocol_version,
-					ser::DeserializationMode::default(),
-				)
-				.map_err(From::from)
-			})?
-			.into_iter();
-
-		match iter
-			.filter(|output: &OutputData| output.key_id == *output_key_id)
-			.next()
-		{
-			Some(output) => Ok(output),
-			None => Err(mwc_wallet_util::mwc_store::Error::NotFoundErr(format!(
-				"Key ID: {}",
-				output_key_id
-			))
-			.into()),
-		}
 	}
 
 	fn iter(&self) -> Box<dyn Iterator<Item = OutputData>> {

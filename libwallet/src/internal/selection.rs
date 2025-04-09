@@ -960,14 +960,15 @@ where
 	)?;
 
 	let mut parts = vec![];
-	let inputs_data: HashMap<Identifier, u64> = context
-		.get_inputs()
-		.iter()
-		.map(|(id, _, value)| (id.clone(), value.clone()))
-		.collect();
 
-	for input_id in inputs_data.keys() {
-		let out = wallet.search_output(input_id)?;
+	for (id, mmr, amount) in context.get_inputs() {
+		let out = wallet.get(&id, &mmr)?;
+		if amount != out.value {
+			return Err(Error::GenericError(format!(
+				"Internal error. Output value {} doesn't match expected {} for {} {:?}",
+				out.value, amount, id, mmr
+			)));
+		}
 		if out.is_coinbase {
 			parts.push(build::coinbase_input(out.value, out.key_id.clone()));
 		} else {
@@ -975,14 +976,14 @@ where
 		}
 	}
 
-	let output_data: HashMap<Identifier, u64> = context
-		.get_outputs()
-		.iter()
-		.map(|(id, _, value)| (id.clone(), value.clone()))
-		.collect();
-
-	for output_id in output_data.keys() {
-		if let Ok(out) = wallet.search_output(output_id) {
+	for (id, mmr, amount) in context.get_outputs() {
+		if let Ok(out) = wallet.get(&id, &mmr) {
+			if amount != out.value {
+				return Err(Error::GenericError(format!(
+					"Internal error. Output value {} doesn't match expected {} for {} {:?}",
+					out.value, amount, id, mmr
+				)));
+			}
 			parts.push(build::output(out.value, out.key_id.clone()));
 		}
 	}
