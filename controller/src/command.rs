@@ -757,7 +757,8 @@ where
 					.map_err(|e| {
 						Error::IO(format!("Unable to store the file at {}, {}", args.dest, e))
 					})?;
-					if !slate.compact_slate {
+					// Late lock expected to do the lock at finalize step. Don't do that now
+					if !init_args.late_lock.unwrap_or(false) {
 						api.tx_lock_outputs(m, &slate, Some(String::from("file")), 0)?;
 					}
 
@@ -827,7 +828,8 @@ where
 						error!("Error validating participant messages: {}", e);
 						e
 					})?;
-					if !slate.compact_slate {
+					// Late lock expected to do the lock at finalize step. Don't do that now
+					if !init_args.late_lock.unwrap_or(false) {
 						api.tx_lock_outputs(m, &slate, Some(args.dest.clone()), 0)?; //this step needs to be done before finalizing the slate
 					}
 				}

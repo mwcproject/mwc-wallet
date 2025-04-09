@@ -259,7 +259,6 @@ where
 	/// Next child ID when we want to create a new output, based on current parent
 	fn next_child(
 		&mut self,
-		keychain_mask: Option<&SecretKey>,
 		parent_key_id: Option<&Identifier>,
 		height: Option<u64>,
 	) -> Result<Identifier, Error>;

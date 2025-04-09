@@ -602,15 +602,15 @@ where
 
 	fn next_child<'a>(
 		&mut self,
-		keychain_mask: Option<&SecretKey>,
 		parent_key_id: Option<&Identifier>,
 		height: Option<u64>,
 	) -> Result<Identifier, Error> {
 		let parent_key_id = parent_key_id.unwrap_or(&self.parent_key_id).clone();
+		// Locking DB to the read - update - write workflow. Need make it atomic, so no child duplicaiton will be possible
+		let batch = self.db.batch_write()?;
+		let child_db_key = to_key(DERIV_PREFIX, &mut parent_key_id.to_bytes().to_vec());
 		let mut deriv_idx = {
-			let batch = self.db.batch_read()?;
-			let deriv_key = to_key(DERIV_PREFIX, &mut parent_key_id.to_bytes().to_vec());
-			match batch.get_ser(&deriv_key, None)? {
+			match batch.get_ser(&child_db_key, None)? {
 				Some(idx) => idx,
 				None => 0,
 			}
@@ -624,8 +624,7 @@ where
 			return_path.path[3] = ChildNumber::from(hei as u32); //put the height in the last index.
 		}
 		deriv_idx += 1;
-		let mut batch = self.batch(keychain_mask)?;
-		batch.save_child_index(&parent_key_id, deriv_idx)?;
+		batch.put_ser(&child_db_key, &deriv_idx)?;
 		batch.commit()?;
 		Ok(Identifier::from_path(&return_path))
 	}

@@ -230,7 +230,6 @@ where
 	let context = create_context(
 		&mut **w,
 		Some(&ethereum_wallet),
-		keychain_mask,
 		&mut swap_api,
 		&keychain,
 		secondary_currency,
@@ -1969,7 +1968,6 @@ where
 			let context = create_context(
 				&mut **w,
 				Some(&ethereum_wallet.clone()),
-				keychain_mask,
 				&mut swap_api,
 				&keychain,
 				offer_update.secondary_currency,
@@ -2090,7 +2088,6 @@ where
 fn create_context<'a, T: ?Sized, C, K>(
 	wallet: &mut T,
 	ethereum_wallet: Option<&EthereumWallet>,
-	keychain_mask: Option<&SecretKey>,
 	swap_api: &mut Box<dyn SwapApi<K> + 'a>,
 	keychain: &K,
 	secondary_currency: Currency,
@@ -2125,7 +2122,7 @@ where
 	};
 
 	for _ in 0..secondary_key_size {
-		keys.push(wallet.next_child(keychain_mask, Some(&parent_key_id), None)?);
+		keys.push(wallet.next_child(Some(&parent_key_id), None)?);
 	}
 
 	let context = (**swap_api).create_context(

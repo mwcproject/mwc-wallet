@@ -663,9 +663,9 @@ where
 	let key_id = match key_id {
 		Some(key_id) => match keys::retrieve_existing_key(wallet, key_id, None) {
 			Ok(k) => k.0,
-			Err(_) => keys::next_available_key(wallet, keychain_mask, None)?,
+			Err(_) => keys::next_available_key(wallet, None)?,
 		},
-		None => keys::next_available_key(wallet, keychain_mask, None)?,
+		None => keys::next_available_key(wallet, None)?,
 	};
 
 	{

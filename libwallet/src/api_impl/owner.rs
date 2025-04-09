@@ -1900,7 +1900,7 @@ where
 {
 	let k = w.keychain(keychain_mask)?;
 
-	let key_id = keys::next_available_key(&mut *w, keychain_mask, None)?;
+	let key_id = keys::next_available_key(&mut *w, None)?;
 
 	let blind = k.derive_key(amount, &key_id, SwitchCommitmentType::Regular)?;
 	let commit = k.secp().commit(amount, blind.clone())?;

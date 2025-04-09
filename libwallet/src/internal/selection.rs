@@ -65,7 +65,6 @@ where
 {
 	let (elems, inputs, change_amounts_derivations, fee) = select_send_tx(
 		wallet,
-		keychain_mask,
 		slate.amount,
 		amount_includes_fee,
 		min_fee,
@@ -334,7 +333,7 @@ where
 		for oaui in output_amounts_unwrapped {
 			sum = sum + oaui;
 			key_vec_amounts.push((
-				keys::next_available_key(wallet, keychain_mask, Some(&parent_key_id))?,
+				keys::next_available_key(wallet, Some(&parent_key_id))?,
 				oaui,
 			));
 			i = i + 1;
@@ -359,7 +358,7 @@ where
 				let key_str = key_id_opt.unwrap();
 				Identifier::from_hex(key_str)?
 			} else {
-				keys::next_available_key(wallet, keychain_mask, Some(&parent_key_id))?
+				keys::next_available_key(wallet, Some(&parent_key_id))?
 			};
 
 			let output_amount: u64 = if i == num_outputs - 1 {
@@ -498,7 +497,6 @@ where
 /// selecting outputs to spend and building the change.
 pub fn select_send_tx<'a, T: ?Sized, C, K, B>(
 	wallet: &mut T,
-	keychain_mask: Option<&SecretKey>,
 	amount: u64,
 	amount_includes_fee: bool,
 	min_fee: &Option<u64>,
@@ -549,7 +547,6 @@ where
 	let (parts, change_amounts_derivations) = inputs_and_change(
 		&coins,
 		wallet,
-		keychain_mask,
 		amount,
 		fee,
 		change_outputs,
@@ -707,7 +704,6 @@ where
 pub fn inputs_and_change<'a, T: ?Sized, C, K, B>(
 	coins: &[OutputData],
 	wallet: &mut T,
-	keychain_mask: Option<&SecretKey>,
 	amount: u64,
 	fee: u64,
 	num_change_outputs: usize,
@@ -768,7 +764,7 @@ where
 				part_change
 			};
 
-			let change_key = wallet.next_child(keychain_mask, None, Some(current_height))?;
+			let change_key = wallet.next_child(None, Some(current_height))?;
 
 			change_amounts_derivations.push((change_amount, change_key.clone(), None));
 			parts.push(build::output(change_amount, change_key));
