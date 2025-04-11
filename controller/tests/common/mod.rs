@@ -102,9 +102,13 @@ pub fn setup_global_chain_type() {
 }
 
 pub fn create_wallet_proxy(
-	test_dir: &str,
-) -> WalletProxy<DefaultLCProvider<LocalWalletClient, ExtKeychain>, LocalWalletClient, ExtKeychain>
-{
+	test_dir: String,
+) -> WalletProxy<
+	'static,
+	DefaultLCProvider<'static, LocalWalletClient, ExtKeychain>,
+	LocalWalletClient,
+	ExtKeychain,
+> {
 	WalletProxy::new(test_dir)
 }
 

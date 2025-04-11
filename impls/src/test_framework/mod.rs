@@ -32,7 +32,7 @@ use crate::util::secp::pedersen;
 use crate::util::Mutex;
 use chrono::Duration;
 use mwc_wallet_util::mwc_core::consensus::HeaderDifficultyInfo;
-use std::collections::VecDeque;
+use std::collections::{HashSet, VecDeque};
 use std::sync::Arc;
 use std::thread;
 
@@ -253,8 +253,8 @@ pub fn send_to_dest<'a, L, C, K>(
 	dest: &str,
 	amount: u64,
 	test_mode: bool,
-	outputs: Option<Vec<String>>, // outputs to include into the transaction
-	routputs: usize,              // Number of resulting outputs. Normally it is 1
+	outputs: Option<HashSet<String>>, // outputs to include into the transaction
+	routputs: usize,                  // Number of resulting outputs. Normally it is 1
 ) -> Result<(), libwallet::Error>
 where
 	L: WalletLCProvider<'a, C, K>,

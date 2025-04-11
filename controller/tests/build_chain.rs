@@ -34,9 +34,9 @@ mod common;
 use common::{clean_output_dir, create_wallet_proxy, setup};
 
 /// Builds a chain with real transactions up to the given height
-fn build_chain(test_dir: &'static str, block_height: usize) -> Result<(), libwallet::Error> {
+fn build_chain(test_dir: &str, block_height: usize) -> Result<(), libwallet::Error> {
 	// Create a new proxy to simulate server and wallet responses
-	let mut wallet_proxy = create_wallet_proxy(test_dir);
+	let mut wallet_proxy = create_wallet_proxy(test_dir.into());
 	let chain = wallet_proxy.chain.clone();
 	let stopper = wallet_proxy.running.clone();
 

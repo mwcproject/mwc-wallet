@@ -3550,7 +3550,7 @@ pub fn run_doctest_owner(
 		DefaultLCProvider<LocalWalletClient, ExtKeychain>,
 		LocalWalletClient,
 		ExtKeychain,
-	> = WalletProxy::new(test_dir);
+	> = WalletProxy::new(test_dir.into());
 	let chain = wallet_proxy.chain.clone();
 
 	let rec_phrase_1 = util::ZeroingString::from(

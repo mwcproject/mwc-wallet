@@ -34,10 +34,10 @@ mod common;
 use common::{clean_output_dir, create_wallet_proxy, setup, setup_global_chain_type};
 
 /// updater thread test impl
-fn updater_thread_test_impl(test_dir: &'static str) -> Result<(), wallet::Error> {
+fn updater_thread_test_impl(test_dir: &str) -> Result<(), wallet::Error> {
 	global::set_local_chain_type(global::ChainTypes::AutomatedTesting);
 	// Create a new proxy to simulate server and wallet responses
-	let mut wallet_proxy = create_wallet_proxy(test_dir);
+	let mut wallet_proxy = create_wallet_proxy(test_dir.into());
 	let chain = wallet_proxy.chain.clone();
 	let stopper = wallet_proxy.running.clone();
 

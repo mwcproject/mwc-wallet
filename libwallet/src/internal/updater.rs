@@ -535,6 +535,20 @@ where
 		}
 		_ => {}
 	}
+
+	if let Some(slate_id) = &tx.tx_slate_id {
+		if let Err(e) = batch.delete_private_context(slate_id.as_bytes(), 0) {
+			if !e.to_string().contains("MDB_NOTFOUND") {
+				return Err(e);
+			}
+		}
+		if let Err(e) = batch.delete_private_context(slate_id.as_bytes(), 1) {
+			if !e.to_string().contains("MDB_NOTFOUND") {
+				return Err(e);
+			}
+		}
+	}
+
 	batch.save_tx_log_entry(tx, parent_key_id)?;
 	batch.commit()?;
 	Ok(())

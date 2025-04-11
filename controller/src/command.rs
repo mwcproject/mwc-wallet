@@ -549,8 +549,8 @@ pub struct SendArgs {
 	pub ttl_blocks: Option<u64>,
 	pub exclude_change_outputs: bool,
 	pub minimum_confirmations_change_outputs: u64,
-	pub address: Option<String>,      //this is only for file proof.
-	pub outputs: Option<Vec<String>>, // Outputs to use. If None, all outputs can be used
+	pub address: Option<String>,          //this is only for file proof.
+	pub outputs: Option<HashSet<String>>, // Outputs to use. If None, all outputs can be used
 	pub slatepack_recipient: Option<ProvableAddress>, // Destination for slatepack. The address will be the same as for payment_proof_address. The role is different.
 	pub late_lock: bool,
 	pub min_fee: Option<u64>,

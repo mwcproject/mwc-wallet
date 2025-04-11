@@ -208,11 +208,11 @@ fn test_wallet_tx_filtering(
 
 /// Builds a wallet + chain with a few transactions, and return wallet for further testing
 fn build_chain_for_tx_filtering(
-	test_dir: &'static str,
+	test_dir: &str,
 	block_height: usize,
 ) -> Result<(), libwallet::Error> {
 	// Create a new proxy to simulate server and wallet responses
-	let mut wallet_proxy = create_wallet_proxy(test_dir);
+	let mut wallet_proxy = create_wallet_proxy(test_dir.into());
 	let chain = wallet_proxy.chain.clone();
 	let stopper = wallet_proxy.running.clone();
 

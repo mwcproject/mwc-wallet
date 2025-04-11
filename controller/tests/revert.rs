@@ -54,7 +54,7 @@ type Wallet = Arc<
 >;
 
 fn revert(
-	test_dir: &'static str,
+	test_dir: &str,
 ) -> Result<
 	(
 		Arc<chain::Chain>,
@@ -69,11 +69,11 @@ fn revert(
 	),
 	Error,
 > {
-	let mut wallet_proxy = create_wallet_proxy(test_dir);
+	let mut wallet_proxy = create_wallet_proxy(test_dir.into());
 	let stopper = wallet_proxy.running.clone();
 	let chain = wallet_proxy.chain.clone();
 	let test_dir2 = format!("{}/chain2", test_dir);
-	let wallet_proxy2 = create_wallet_proxy(&test_dir2);
+	let wallet_proxy2 = create_wallet_proxy(test_dir2);
 	let chain2 = wallet_proxy2.chain.clone();
 	let stopper2 = wallet_proxy2.running.clone();
 	let secp = Secp256k1::new();

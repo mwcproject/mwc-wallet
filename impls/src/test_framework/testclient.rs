@@ -96,7 +96,7 @@ where
 	K: Keychain + 'a,
 {
 	/// Create a new client that will communicate with the given mwc node
-	pub fn new(chain_dir: &str) -> Self {
+	pub fn new(chain_dir: String) -> Self {
 		set_local_chain_type(ChainTypes::AutomatedTesting);
 		let genesis_block = pow::mine_genesis_block().unwrap();
 		let dir_name = format!("{}/.mwc", chain_dir);
@@ -110,7 +110,7 @@ where
 		.unwrap();
 		let (tx, rx) = channel();
 		WalletProxy {
-			chain_dir: chain_dir.to_owned(),
+			chain_dir: chain_dir,
 			chain: Arc::new(c),
 			tx: tx,
 			rx: rx,

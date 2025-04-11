@@ -47,6 +47,7 @@ use mwc_wallet_util::mwc_util::secp::Secp256k1;
 use mwc_wallet_util::{mwc_core as core, OnionV3Address};
 use rpassword;
 use semver::Version;
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::{
 	convert::TryFrom,
@@ -617,7 +618,7 @@ pub fn parse_send_args(args: &ArgMatches) -> Result<command::SendArgs, ParseErro
 				.unwrap()
 				.split(",")
 				.map(|s| s.to_string())
-				.collect::<Vec<String>>(),
+				.collect::<HashSet<String>>(),
 		),
 		false => None,
 	};

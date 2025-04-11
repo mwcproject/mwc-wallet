@@ -72,7 +72,7 @@ fn owner_v3_lifecycle() -> Result<(), mwc_wallet_controller::Error> {
 				ExtKeychain,
 			>,
 		>,
-	> = Arc::new(Mutex::new(WalletProxy::new(test_dir)));
+	> = Arc::new(Mutex::new(WalletProxy::new(test_dir.into())));
 	let (chain, wallet2, mask2_i) = {
 		let mut wallet_proxy = wallet_proxy_a.lock();
 		let chain = wallet_proxy.chain.clone();

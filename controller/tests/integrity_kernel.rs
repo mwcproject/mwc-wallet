@@ -47,10 +47,10 @@ use std::collections::HashMap;
 use std::convert::TryInto;
 
 /// self send impl
-fn integrity_kernel_impl(test_dir: &'static str) -> Result<(), wallet::Error> {
+fn integrity_kernel_impl(test_dir: &str) -> Result<(), wallet::Error> {
 	// Create a new proxy to simulate server and wallet responses
 	global::set_local_chain_type(global::ChainTypes::AutomatedTesting);
-	let mut wallet_proxy = create_wallet_proxy(test_dir);
+	let mut wallet_proxy = create_wallet_proxy(test_dir.into());
 	let chain = wallet_proxy.chain.clone();
 
 	// Create a new wallet test client, and set its queues to communicate with the

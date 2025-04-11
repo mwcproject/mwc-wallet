@@ -44,7 +44,7 @@ fn command_line_test_impl(test_dir: &str) -> Result<(), mwc_wallet_controller::E
 		DefaultLCProvider<LocalWalletClient, ExtKeychain>,
 		LocalWalletClient,
 		ExtKeychain,
-	> = WalletProxy::new(test_dir);
+	> = WalletProxy::new(test_dir.into());
 	let chain = wallet_proxy.chain.clone();
 
 	// load app yaml. If it don't exist, just say so and exit

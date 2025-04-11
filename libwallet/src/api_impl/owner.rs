@@ -534,6 +534,7 @@ where
 			keychain_mask,
 			&mut slate,
 			&args.min_fee,
+			None,
 			args.minimum_confirmations,
 			args.max_outputs as usize,
 			args.num_change_outputs as usize,
@@ -595,6 +596,35 @@ where
 	// recieve the transaction back
 	{
 		let mut batch = w.batch(keychain_mask)?;
+
+		// We need to create transaction now, so user can cancel transaction and delete the context that we are saving below
+		// If it is late lock - it is needed for sure.
+		// If not late lock - still better to create because we don't want to have stale context in any case
+
+		// Note, this transaction will be overwritten with more details at lock_tx_content.
+		// This record for cancellation
+
+		let log_id = batch.next_tx_log_id(&parent_key_id)?;
+		let mut t = TxLogEntry::new(parent_key_id.clone(), TxLogEntryType::TxSent, log_id);
+		t.tx_slate_id = Some(slate.id);
+		t.fee = Some(context.fee);
+		t.ttl_cutoff_height = slate.ttl_cutoff_height.clone();
+		if t.ttl_cutoff_height == Some(0) {
+			t.ttl_cutoff_height = None;
+		}
+		t.address = args.address.clone();
+		t.kernel_lookup_min_height = Some(slate.height);
+
+		t.num_inputs = 0;
+		t.input_commits = vec![];
+		t.amount_debited = slate.amount;
+
+		// write the output representing our change
+		t.num_outputs = 0;
+		t.output_commits = vec![];
+		t.amount_credited = 0;
+		batch.save_tx_log_entry(t, &parent_key_id)?;
+
 		batch.save_private_context(slate.id.as_bytes(), 0, &context)?;
 		batch.commit()?;
 	}
@@ -742,6 +772,7 @@ where
 		keychain_mask,
 		&mut ret_slate,
 		&args.min_fee,
+		None,
 		args.minimum_confirmations,
 		args.max_outputs as usize,
 		args.num_change_outputs as usize,
@@ -901,6 +932,7 @@ where
 			keychain_mask,
 			&mut temp_sl,
 			&args.min_fee,
+			Some(context.fee),
 			args.minimum_confirmations,
 			args.max_outputs as usize,
 			args.num_change_outputs as usize,

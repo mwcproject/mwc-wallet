@@ -54,7 +54,7 @@ macro_rules! setup_proxy {
 			DefaultLCProvider<LocalWalletClient, ExtKeychain>,
 			LocalWalletClient,
 			ExtKeychain,
-		> = WalletProxy::new($test_dir);
+		> = WalletProxy::new($test_dir.into());
 		let $chain = wallet_proxy.chain.clone();
 
 		// load app yaml. If it don't exist, just say so and exit

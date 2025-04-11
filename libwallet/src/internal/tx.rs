@@ -15,6 +15,7 @@
 
 //! Transaction building functions
 
+use std::collections::HashSet;
 use uuid::Uuid;
 
 use crate::internal::{selection, updater};
@@ -111,8 +112,8 @@ pub fn estimate_send_tx<'a, T: ?Sized, C, K>(
 	num_change_outputs: usize,
 	selection_strategy_is_use_all: bool,
 	parent_key_id: &Identifier,
-	outputs: &Option<Vec<String>>, // outputs to include into the transaction
-	routputs: usize,               // Number of resulting outputs. Normally it is 1
+	outputs: &Option<HashSet<String>>, // outputs to include into the transaction
+	routputs: usize,                   // Number of resulting outputs. Normally it is 1
 	exclude_change_outputs: bool,
 	change_output_minimum_confirmations: u64,
 ) -> Result<
@@ -143,6 +144,7 @@ where
 		amount,
 		amount_includes_fee,
 		min_fee,
+		None,
 		current_height,
 		minimum_confirmations,
 		max_outputs,
@@ -164,6 +166,7 @@ pub fn add_inputs_to_slate<'a, T: ?Sized, C, K>(
 	keychain_mask: Option<&SecretKey>,
 	slate: &mut Slate,
 	min_fee: &Option<u64>,
+	fixed_fee: Option<u64>,
 	minimum_confirmations: u64,
 	max_outputs: usize,
 	num_change_outputs: usize,
@@ -173,8 +176,8 @@ pub fn add_inputs_to_slate<'a, T: ?Sized, C, K>(
 	message: Option<String>,
 	is_initator: bool,
 	use_test_rng: bool,
-	outputs: &Option<Vec<String>>, // outputs to include into the transaction
-	routputs: usize,               // Number of resulting outputs. Normally it is 1
+	outputs: &Option<HashSet<String>>, // outputs to include into the transaction
+	routputs: usize,                   // Number of resulting outputs. Normally it is 1
 	exclude_change_outputs: bool,
 	change_output_minimum_confirmations: u64,
 	amount_includes_fee: bool,
@@ -199,6 +202,7 @@ where
 		keychain_mask,
 		slate,
 		min_fee,
+		fixed_fee,
 		minimum_confirmations,
 		max_outputs,
 		num_change_outputs,
@@ -341,6 +345,7 @@ where
 		init_tx_args.amount,
 		init_tx_args.amount_includes_fee.unwrap_or(false),
 		&init_tx_args.min_fee,
+		None,
 		current_height,
 		init_tx_args.minimum_confirmations,
 		init_tx_args.max_outputs as usize,

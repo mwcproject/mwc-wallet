@@ -36,10 +36,10 @@ use common::{clean_output_dir, create_wallet_proxy, setup};
 /// Exercises the Transaction API fully with a test NodeClient operating
 /// directly on a chain instance
 /// Callable with any type of wallet
-fn basic_transaction_api(test_dir: &'static str) -> Result<(), wallet::Error> {
+fn basic_transaction_api(test_dir: &str) -> Result<(), wallet::Error> {
 	global::set_local_chain_type(global::ChainTypes::AutomatedTesting);
 	// Create a new proxy to simulate server and wallet responses
-	let mut wallet_proxy = create_wallet_proxy(test_dir);
+	let mut wallet_proxy = create_wallet_proxy(test_dir.into());
 	let chain = wallet_proxy.chain.clone();
 	let stopper = wallet_proxy.running.clone();
 
@@ -403,10 +403,10 @@ fn basic_transaction_api(test_dir: &'static str) -> Result<(), wallet::Error> {
 
 /// Test rolling back transactions and outputs when a transaction is never
 /// posted to a chain
-fn tx_rollback(test_dir: &'static str) -> Result<(), wallet::Error> {
+fn tx_rollback(test_dir: &str) -> Result<(), wallet::Error> {
 	global::set_local_chain_type(global::ChainTypes::AutomatedTesting);
 	// Create a new proxy to simulate server and wallet responses
-	let mut wallet_proxy = create_wallet_proxy(test_dir);
+	let mut wallet_proxy = create_wallet_proxy(test_dir.into());
 	let chain = wallet_proxy.chain.clone();
 	let stopper = wallet_proxy.running.clone();
 

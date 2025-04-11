@@ -77,11 +77,11 @@ fn slate_from_packed(
 }
 
 /// self send impl
-fn slatepack_exchange_test_impl(test_dir: &'static str) -> Result<(), libwallet::Error> {
+fn slatepack_exchange_test_impl(test_dir: &str) -> Result<(), libwallet::Error> {
 	global::set_local_chain_type(global::ChainTypes::AutomatedTesting);
 
 	// Create a new proxy to simulate server and wallet responses
-	let mut wallet_proxy = create_wallet_proxy(test_dir);
+	let mut wallet_proxy = create_wallet_proxy(test_dir.into());
 	let chain = wallet_proxy.chain.clone();
 	let stopper = wallet_proxy.running.clone();
 	let secp = Secp256k1::new();

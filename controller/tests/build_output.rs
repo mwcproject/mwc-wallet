@@ -34,14 +34,14 @@ use std::time::Duration;
 mod common;
 use common::{clean_output_dir, create_wallet_proxy, setup};
 
-fn build_output_test_impl(test_dir: &'static str) -> Result<(), libwallet::Error> {
+fn build_output_test_impl(test_dir: &str) -> Result<(), libwallet::Error> {
 	// Generate seed so we can verify the blinding factor is derived correctly
 	let seed: [u8; 32] = thread_rng().gen();
 	let keychain = ExtKeychain::from_seed(&seed, false).unwrap();
 	let mnemonic = mnemonic::from_entropy(&seed).unwrap();
 
 	// Create a new proxy to simulate server and wallet responses
-	let mut wallet_proxy = create_wallet_proxy(test_dir);
+	let mut wallet_proxy = create_wallet_proxy(test_dir.into());
 	let stopper = wallet_proxy.running.clone();
 
 	create_wallet_and_add!(

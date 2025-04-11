@@ -31,9 +31,9 @@ use common::{clean_output_dir, create_wallet_proxy, setup};
 use mwc_wallet_util::mwc_core::consensus::calc_mwc_block_reward;
 
 /// self send impl
-fn late_lock_test_impl(test_dir: &'static str) -> Result<(), libwallet::Error> {
+fn late_lock_test_impl(test_dir: &str) -> Result<(), libwallet::Error> {
 	// Create a new proxy to simulate server and wallet responses
-	let mut wallet_proxy = create_wallet_proxy(test_dir);
+	let mut wallet_proxy = create_wallet_proxy(test_dir.into());
 	let chain = wallet_proxy.chain.clone();
 	let stopper = wallet_proxy.running.clone();
 

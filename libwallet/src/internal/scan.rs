@@ -2390,8 +2390,8 @@ where
 	let fee = tx_fee(1, 1, 1); //there is only one input and one output and one kernel
 							//let amount = output.eligible_to_spend(current_height, minimum_confirmations);
 
-	let mut output_vec = Vec::new();
-	output_vec.push(commit_string);
+	let mut output_vec = HashSet::new();
+	output_vec.insert(commit_string);
 	let args = InitTxArgs {
 		src_acct_name: address.clone(),
 		amount: amount - fee,
