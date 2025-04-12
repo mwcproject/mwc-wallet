@@ -661,16 +661,17 @@ where
 		false => amount + fee,
 	};
 
-	// We need to add a change address or amount with fee is more than total
+	// If change required...
 	if total != amount_with_fee {
 		// reseting to trigger first retry cycle
 		total = 0;
 
 		let num_outputs = change_outputs + routputs;
-		fee = calc_fees(coins.len(), num_outputs, min_fee, &fixed_fee)?;
+
+		// Here fixed fee ignored with purpose, it is not a case here, fixed can be broken
 		amount_with_fee = match amount_includes_fee {
 			true => amount,
-			false => amount + fee,
+			false => amount + calc_fees(coins.len(), num_outputs, min_fee, &None)?,
 		};
 
 		let (optimal_outputs_num, min_outputs_num) =
@@ -706,6 +707,7 @@ where
 			fee = calc_fees(coins.len(), num_outputs, min_fee, &fixed_fee)?;
 
 			total = coins.iter().map(|c| c.value).sum();
+			let prev_amount_with_fee = amount_with_fee;
 			amount_with_fee = match amount_includes_fee {
 				true => amount,
 				false => amount + fee,
@@ -713,7 +715,7 @@ where
 
 			// Checking if new solution is better (has more outputs)
 			// Don't checking outputs limit because light overcounting is fine
-			if coins.len() <= coins_len {
+			if coins.len() <= coins_len && prev_amount_with_fee >= amount_with_fee {
 				break;
 			}
 		}
@@ -786,6 +788,18 @@ where
 	if change == 0 {
 		debug!("No change (sending exactly amount + fee), no change outputs to build");
 	} else {
+		// we don't want part_change to be zero. Also we really don't want many small change outputs
+		// If change less then 0.1 MWC, let's make it in one output.  1-in 2-out Tx fee will is: 4*2+1-1 = 0.008 MWC
+		// We don't want many small outputs like that
+		let num_change_outputs = if num_change_outputs > 1
+			&& change / (num_change_outputs as u64) < 100_000_000
+		{
+			warn!("Transaction requested has {} change outputs with change amount {}. We don't want create many small outputs, the number of change outputs is reduced to 1", num_change_outputs, change);
+			1
+		} else {
+			num_change_outputs
+		};
+
 		debug!(
 			"Building change outputs: total change: {} ({} outputs)",
 			change, num_change_outputs
