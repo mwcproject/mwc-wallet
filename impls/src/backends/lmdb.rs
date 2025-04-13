@@ -38,7 +38,7 @@ use crate::util::secp::key::SecretKey;
 use crate::util::{self, ToHex};
 
 use mwc_wallet_libwallet::IntegrityContext;
-use mwc_wallet_util::mwc_core::ser::DeserializationMode;
+use mwc_wallet_util::mwc_core::ser::{DeserializationMode, Readable};
 use rand::rngs::mock::StepRng;
 use rand::thread_rng;
 
@@ -186,7 +186,7 @@ where
 		db_path.exists()
 	}
 
-	fn tx_log_iter_impl<'a>(&'a self, prefix: u8) -> Box<dyn Iterator<Item = TxLogEntry> + 'a> {
+	fn iter_impl<'a, T: Readable + 'a>(&'a self, prefix: u8) -> Box<dyn Iterator<Item = T> + 'a> {
 		let protocol_version = self.db.protocol_version();
 		let prefix_iter = self.db.iter(&[prefix], move |_, mut v| {
 			ser::deserialize(
@@ -360,39 +360,19 @@ where
 	}
 
 	fn iter<'a>(&'a self) -> Box<dyn Iterator<Item = OutputData> + 'a> {
-		let protocol_version = self.db.protocol_version();
-		let prefix_iter = self.db.iter(&[OUTPUT_PREFIX], move |_, mut v| {
-			ser::deserialize(
-				&mut v,
-				protocol_version,
-				ser::DeserializationMode::default(),
-			)
-			.map_err(From::from)
-		});
-		let iter = prefix_iter.expect("deserialize").into_iter();
-		Box::new(iter)
+		self.iter_impl(OUTPUT_PREFIX)
 	}
 
 	fn archive_iter<'a>(&'a self) -> Box<dyn Iterator<Item = OutputData> + 'a> {
-		let protocol_version = self.db.protocol_version();
-		let prefix_iter = self.db.iter(&[OUTPUT_ARCHIVE_PREFIX], move |_, mut v| {
-			ser::deserialize(
-				&mut v,
-				protocol_version,
-				ser::DeserializationMode::default(),
-			)
-			.map_err(From::from)
-		});
-		let iter = prefix_iter.expect("deserialize").into_iter();
-		Box::new(iter)
+		self.iter_impl(OUTPUT_ARCHIVE_PREFIX)
 	}
 
 	fn tx_log_iter<'a>(&'a self) -> Box<dyn Iterator<Item = TxLogEntry> + 'a> {
-		self.tx_log_iter_impl(TX_LOG_ENTRY_PREFIX)
+		self.iter_impl(TX_LOG_ENTRY_PREFIX)
 	}
 
 	fn tx_log_archive_iter<'a>(&'a self) -> Box<dyn Iterator<Item = TxLogEntry> + 'a> {
-		self.tx_log_iter_impl(TX_ARCHIVE_LOG_ENTRY_PREFIX)
+		self.iter_impl(TX_ARCHIVE_LOG_ENTRY_PREFIX)
 	}
 
 	fn get_private_context(
@@ -668,7 +648,7 @@ where
 	C: NodeClient,
 	K: Keychain,
 {
-	fn tx_log_iter_impl(&self, prefix: u8) -> Box<dyn Iterator<Item = TxLogEntry>> {
+	fn iter_impl<T: Readable + 'static>(&self, prefix: u8) -> Box<dyn Iterator<Item = T>> {
 		let db = self.db.borrow();
 		let db = db.as_ref().unwrap();
 		let protocol_version = db.protocol_version();
@@ -721,19 +701,7 @@ where
 	}
 
 	fn iter(&self) -> Box<dyn Iterator<Item = OutputData>> {
-		let db = self.db.borrow();
-		let db = db.as_ref().unwrap();
-		let protocol_version = db.protocol_version();
-		let prefix_iter = db.iter(&[OUTPUT_PREFIX], move |_, mut v| {
-			ser::deserialize(
-				&mut v,
-				protocol_version,
-				ser::DeserializationMode::default(),
-			)
-			.map_err(From::from)
-		});
-		let iter = prefix_iter.expect("deserialize").into_iter();
-		Box::new(iter)
+		self.iter_impl(OUTPUT_PREFIX)
 	}
 
 	fn archive_output(&mut self, output_key_id: &Identifier) -> Result<(), Error> {
@@ -803,11 +771,11 @@ where
 	}
 
 	fn tx_log_iter(&self) -> Box<dyn Iterator<Item = TxLogEntry>> {
-		self.tx_log_iter_impl(TX_LOG_ENTRY_PREFIX)
+		self.iter_impl(TX_LOG_ENTRY_PREFIX)
 	}
 
 	fn tx_log_archive_iter(&self) -> Box<dyn Iterator<Item = TxLogEntry>> {
-		self.tx_log_iter_impl(TX_ARCHIVE_LOG_ENTRY_PREFIX)
+		self.iter_impl(TX_ARCHIVE_LOG_ENTRY_PREFIX)
 	}
 
 	/// Move transaction into archive
@@ -1102,6 +1070,26 @@ where
 			.unwrap()
 			.delete(&ctx_key)
 			.map_err(|e| e.into())
+	}
+
+	fn private_context_iter(&self) -> Box<dyn Iterator<Item = (Vec<u8>, Context)>> {
+		let db = self.db.borrow();
+		let db = db.as_ref().unwrap();
+		let protocol_version = db.protocol_version();
+		let prefix_iter = db.iter(&[PRIVATE_TX_CONTEXT_PREFIX], move |ctx_key, mut v| {
+			let prefix_len = 2;
+			let slate_id_len = ctx_key.len() - prefix_len - 8;
+			let slate_id = ctx_key[prefix_len..prefix_len + slate_id_len].to_vec();
+
+			let context = ser::deserialize(
+				&mut v,
+				protocol_version,
+				ser::DeserializationMode::default(),
+			)?;
+			Ok((slate_id, context))
+		});
+		let iter = prefix_iter.expect("deserialize").into_iter();
+		Box::new(iter)
 	}
 
 	fn commit(&self) -> Result<(), Error> {

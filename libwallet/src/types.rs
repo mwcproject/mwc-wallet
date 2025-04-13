@@ -275,6 +275,8 @@ where
 
 /// New wallet with empty seed mark. Needed to skip first long scan
 pub const FLAG_NEW_WALLET: u64 = 1;
+/// Need to clean private context on the first wallet run
+pub const FLAG_CONTEXT_CLEARED: u64 = 2;
 
 /// Batch trait to update the output data backend atomically. Trying to use a
 /// batch after commit MAY result in a panic. Due to this being a trait, the
@@ -366,6 +368,9 @@ where
 
 	/// Save an output as locked in the backend
 	fn lock_output(&mut self, out: &mut OutputData) -> Result<(), Error>;
+
+	/// Iterate through all private context. Return tx uuid from the key and the Context
+	fn private_context_iter(&self) -> Box<dyn Iterator<Item = (Vec<u8>, Context)>>;
 
 	/// Saves the private context associated with a slate id
 	fn save_private_context(

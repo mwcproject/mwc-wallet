@@ -27,10 +27,13 @@ use crate::lifecycle::seed::WalletSeed;
 use crate::util::secp::key::SecretKey;
 use crate::util::ZeroingString;
 use crate::LMDBBackend;
-use mwc_wallet_libwallet::types::FLAG_NEW_WALLET;
+use mwc_wallet_libwallet::types::{FLAG_CONTEXT_CLEARED, FLAG_NEW_WALLET};
+use mwc_wallet_libwallet::{Context, TxLogEntryType};
 use mwc_wallet_util::mwc_util::logger::LoggingConfig;
+use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
+use uuid::Uuid;
 
 pub struct DefaultLCProvider<'a, C, K>
 where
@@ -297,6 +300,39 @@ where
 			.map_err(|e| Error::Lifecycle(format!("Error deriving keychain, {}", e)))?;
 
 		let mask = wallet.set_keychain(Box::new(keychain), create_mask, use_test_rng)?;
+
+		{
+			let mut batch = wallet.batch(mask.as_ref())?;
+			if !batch.load_flag(FLAG_CONTEXT_CLEARED, false)? {
+				let mut contexts: HashMap<Uuid, Context> = batch
+					.private_context_iter()
+					.map(|(slate, context)| {
+						(
+							Uuid::from_slice(&slate)
+								.expect("Broken UUID data into the context data storage"),
+							context,
+						)
+					})
+					.collect();
+
+				for tx in batch.tx_log_iter() {
+					if tx.tx_type == TxLogEntryType::TxSent && !tx.confirmed {
+						// It is transactions for what we left the data from
+						if let Some(slate_id) = &tx.tx_slate_id {
+							contexts.remove(slate_id);
+						}
+					}
+				}
+
+				for (uuid, context) in contexts {
+					batch.delete_private_context(uuid.as_bytes(), context.participant_id)?;
+				}
+
+				batch.save_flag(FLAG_CONTEXT_CLEARED)?;
+			}
+			batch.commit()?;
+		}
+
 		self.backend = Some(Box::new(wallet));
 		Ok(mask)
 	}
