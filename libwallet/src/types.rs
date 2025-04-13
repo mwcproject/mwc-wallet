@@ -277,6 +277,8 @@ where
 pub const FLAG_NEW_WALLET: u64 = 1;
 /// Need to clean private context on the first wallet run
 pub const FLAG_CONTEXT_CLEARED: u64 = 2;
+/// Need to correct outputs root_key_id values to recover from prev bug
+pub const FLAG_OUTPUTS_ROOT_KEY_ID_CORRECTION: u64 = 3;
 
 /// Batch trait to update the output data backend atomically. Trying to use a
 /// batch after commit MAY result in a panic. Due to this being a trait, the
