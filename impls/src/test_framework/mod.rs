@@ -31,6 +31,7 @@ use crate::util::secp::key::SecretKey;
 use crate::util::secp::pedersen;
 use crate::util::Mutex;
 use chrono::Duration;
+use mwc_wallet_libwallet::wallet_lock;
 use mwc_wallet_util::mwc_core::consensus::HeaderDifficultyInfo;
 use std::collections::{HashSet, VecDeque};
 use std::sync::Arc;
@@ -230,6 +231,7 @@ pub fn award_blocks_to_wallet<'a, L, C, K>(
 	keychain_mask: Option<&SecretKey>,
 	number: usize,
 	pause_between: bool,
+	tx_pool: &mut Vec<Transaction>,
 ) -> Result<(), libwallet::Error>
 where
 	L: WalletLCProvider<'a, C, K>,
@@ -237,7 +239,8 @@ where
 	K: keychain::Keychain + 'a,
 {
 	for _ in 0..number {
-		award_block_to_wallet(chain, &[], wallet.clone(), keychain_mask)?;
+		award_block_to_wallet(chain, &tx_pool, wallet.clone(), keychain_mask)?;
+		tx_pool.clear();
 		if pause_between {
 			thread::sleep(std::time::Duration::from_millis(100));
 		}
@@ -261,39 +264,37 @@ where
 	C: NodeClient + 'a,
 	K: keychain::Keychain + 'a,
 {
-	// Caller need to update the wallet first
-	owner::update_wallet_state(wallet.clone(), keychain_mask, &None)?;
+	let (slate, client) = {
+		wallet_lock!(wallet, w);
+		// Caller need to update the wallet first
+		owner::update_wallet_state(&mut **w, keychain_mask, &None)?;
 
-	let slate = {
-		let mut w_lock = wallet.lock();
-		let w = w_lock.lc_provider()?.wallet_inst()?;
-		let args = InitTxArgs {
-			src_acct_name: None,
-			amount,
-			minimum_confirmations: 2,
-			max_outputs: 500,
-			num_change_outputs: 1,
-			selection_strategy_is_use_all: true,
-			outputs,
-			..Default::default()
+		let slate = {
+			let args = InitTxArgs {
+				src_acct_name: None,
+				amount,
+				minimum_confirmations: 2,
+				max_outputs: 500,
+				num_change_outputs: 1,
+				selection_strategy_is_use_all: true,
+				outputs,
+				..Default::default()
+			};
+			let slate_i = owner::init_send_tx(&mut **w, keychain_mask, &args, test_mode, routputs)?;
+			let slate = client.send_tx_slate_direct(dest, &slate_i)?;
+			owner::tx_lock_outputs(
+				&mut **w,
+				keychain_mask,
+				&slate,
+				Some(String::from(dest)),
+				0,
+				true,
+			)?;
+			let (slate, _) = owner::finalize_tx(&mut **w, keychain_mask, &slate, false, true)?;
+			slate
 		};
-		let slate_i = owner::init_send_tx(&mut **w, keychain_mask, &args, test_mode, routputs)?;
-		let slate = client.send_tx_slate_direct(dest, &slate_i)?;
-		owner::tx_lock_outputs(
-			&mut **w,
-			keychain_mask,
-			&slate,
-			Some(String::from(dest)),
-			0,
-			true,
-		)?;
-		let (slate, _) = owner::finalize_tx(&mut **w, keychain_mask, &slate, false, true)?;
-		slate
-	};
-	let client = {
-		let mut w_lock = wallet.lock();
-		let w = w_lock.lc_provider()?.wallet_inst()?;
-		w.w2n_client().clone()
+		let client = { w.w2n_client().clone() };
+		(slate, client)
 	};
 	owner::post_tx(&client, slate.tx_or_err()?, false)?; // mines a block
 	Ok(())

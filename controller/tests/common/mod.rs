@@ -26,6 +26,7 @@ use self::keychain::ExtKeychain;
 use self::libwallet::WalletInst;
 use impls::test_framework::{LocalWalletClient, WalletProxy};
 use impls::{DefaultLCProvider, DefaultWalletImpl};
+use mwc_wallet_util::mwc_core::core::Transaction;
 use std::sync::Arc;
 use util::secp::key::SecretKey;
 use util::{Mutex, ZeroingString};
@@ -103,13 +104,14 @@ pub fn setup_global_chain_type() {
 
 pub fn create_wallet_proxy(
 	test_dir: String,
+	tx_pool: Arc<Mutex<Vec<Transaction>>>,
 ) -> WalletProxy<
 	'static,
 	DefaultLCProvider<'static, LocalWalletClient, ExtKeychain>,
 	LocalWalletClient,
 	ExtKeychain,
 > {
-	WalletProxy::new(test_dir)
+	WalletProxy::new(test_dir, tx_pool)
 }
 
 pub fn create_local_wallet(

@@ -26,7 +26,7 @@ use crate::mwc_util::Mutex;
 
 use crate::api_impl::owner;
 use crate::types::NodeClient;
-use crate::Error;
+use crate::{wallet_lock, Error};
 use crate::{WalletInst, WalletLCProvider};
 use std::thread::JoinHandle;
 
@@ -200,8 +200,9 @@ where
 
 			let sec = if wallet_opened {
 				// Business goes here
+				wallet_lock!(self.wallet_inst, w);
 				owner::update_wallet_state(
-					self.wallet_inst.clone(),
+					&mut **w,
 					(&keychain_mask).as_ref(),
 					status_send_channel,
 				)?;

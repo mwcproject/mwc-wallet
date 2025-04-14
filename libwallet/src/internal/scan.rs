@@ -34,8 +34,8 @@ use crate::mwc_util::secp::{ContextFlag, Secp256k1};
 use crate::mwc_util::Mutex;
 use crate::mwc_util::{from_hex, ToHex};
 use crate::types::*;
+use crate::Error;
 use crate::ReplayMitigationConfig;
-use crate::{wallet_lock, Error};
 use blake2_rfc::blake2b::blake2b;
 use chrono::{Duration, Utc};
 use mwc_wallet_util::mwc_chain::Chain;
@@ -43,7 +43,6 @@ use mwc_wallet_util::mwc_core::consensus::DAY_HEIGHT;
 use std::cmp;
 use std::collections::{HashMap, HashSet};
 use std::sync::mpsc::Sender;
-use std::sync::Arc;
 use uuid::Uuid;
 // Wallet - node sync up strategy. We can request blocks from the node and analyze them. 1 week of blocks can be requested in theory.
 // Or we can validate tx kernels, outputs e.t.c
@@ -407,8 +406,8 @@ where
 }
 
 /// Respore missing outputs. Shared with mwc713
-fn restore_missing_output<'a, L, C, K>(
-	wallet_inst: Arc<Mutex<Box<dyn WalletInst<'a, L, C, K>>>>,
+fn restore_missing_output<'a, T: ?Sized, C, K>(
+	wallet: &mut T,
 	keychain_mask: Option<&SecretKey>,
 	output: OutputResult,
 	commit2transactionuuid: &HashMap<String, String>,
@@ -416,15 +415,13 @@ fn restore_missing_output<'a, L, C, K>(
 	found_parents: &mut HashMap<Identifier, u32>,
 ) -> Result<(), Error>
 where
-	L: WalletLCProvider<'a, C, K>,
+	T: WalletBackend<'a, C, K>,
 	C: NodeClient + 'a,
 	K: Keychain + 'a,
 {
-	wallet_lock!(wallet_inst, w);
-
-	let node_client = w.w2n_client().clone();
-	let commit = w.calc_commit_for_cache(keychain_mask, output.value, &output.key_id)?;
-	let mut batch = w.batch(keychain_mask)?;
+	let node_client = wallet.w2n_client().clone();
+	let commit = wallet.calc_commit_for_cache(keychain_mask, output.value, &output.key_id)?;
+	let mut batch = wallet.batch(keychain_mask)?;
 
 	let parent_key_id = output.key_id.parent_path();
 	let mut path = parent_key_id.to_path();
@@ -589,8 +586,8 @@ impl WalletTxInfo {
 //			- outputs from the chain
 // Then build the transaction map that mapped to Outputs and
 //     Outputs map that mapped to the transactions
-fn get_wallet_and_chain_data<'a, L, C, K>(
-	wallet_inst: Arc<Mutex<Box<dyn WalletInst<'a, L, C, K>>>>,
+fn get_wallet_and_chain_data<'a, T: ?Sized, C, K>(
+	wallet: &mut T,
 	keychain_mask: Option<&SecretKey>,
 	start_height: u64,
 	end_height: u64,
@@ -608,7 +605,7 @@ fn get_wallet_and_chain_data<'a, L, C, K>(
 	Error,
 >
 where
-	L: WalletLCProvider<'a, C, K>,
+	T: WalletBackend<'a, C, K>,
 	C: NodeClient + 'a,
 	K: Keychain + 'a,
 {
@@ -631,9 +628,8 @@ where
 	let mut transactions: HashMap<String, WalletTxInfo> = HashMap::new();
 	let chain_outs: Vec<OutputResult>;
 	{
-		wallet_lock!(wallet_inst.clone(), w);
 		// First, reading data from the wallet
-		for w_out in w.iter().filter(|w| w.commit.is_some()) {
+		for w_out in wallet.iter().filter(|w| w.commit.is_some()) {
 			outputs.insert(
 				w_out.commit.clone().unwrap(),
 				WalletOutputInfo::new(w_out.clone()),
@@ -658,7 +654,7 @@ where
 
 		// Collecting Transactions from the wallet. UUID need to be known, otherwise
 		// transaction is non complete and can be ignored.
-		for tx in w.tx_log_iter() {
+		for tx in wallet.tx_log_iter() {
 			if !tx.confirmed {
 				not_confirmed_txs += 1;
 			}
@@ -685,7 +681,7 @@ where
 
 			let mut wtx = WalletTxInfo::new(uuid_str, tx.clone());
 
-			if let Ok(transaction) = w.get_stored_tx_by_uuid(&tx_uuid_str, false) {
+			if let Ok(transaction) = wallet.get_stored_tx_by_uuid(&tx_uuid_str, false) {
 				wtx.add_transaction(transaction);
 			};
 			transactions_id2uuid.insert(
@@ -758,8 +754,8 @@ where
 				}
 			}
 
-			let client = w.w2n_client().clone();
-			let keychain = w.keychain(keychain_mask)?;
+			let client = wallet.w2n_client().clone();
+			let keychain = wallet.keychain(keychain_mask)?;
 
 			let mut blocks: Vec<crate::mwc_api::BlockPrintable> = Vec::new();
 
@@ -927,8 +923,8 @@ where
 		} else {
 			debug!("get_wallet_and_chain_data using check whatever needed strategy");
 			// Full data update.
-			let client = w.w2n_client().clone();
-			let keychain = w.keychain(keychain_mask)?;
+			let client = wallet.w2n_client().clone();
+			let keychain = wallet.keychain(keychain_mask)?;
 
 			// Retrieve the actual PMMR index range we're looking for
 			let pmmr_range = client.height_range_to_pmmr_indices(start_height, Some(end_height))?;
@@ -966,7 +962,7 @@ where
 			}
 
 			// Validate kernels from transaction. Kernel are a source of truth
-			let client = w.w2n_client().clone();
+			let client = wallet.w2n_client().clone();
 			for tx in transactions.values_mut() {
 				if !(tx.tx_log.confirmed || tx.tx_log.is_cancelled_reverted())
 					|| tx.tx_log.output_height >= start_height
@@ -1112,7 +1108,7 @@ where
 				.map(|out| pedersen::Commitment::from_vec(out.unwrap()))
 				.collect();
 
-			let client = w.w2n_client().clone();
+			let client = wallet.w2n_client().clone();
 
 			// Node will return back only Commits that are exist now.
 			let active_commits: HashMap<pedersen::Commitment, (String, u64, u64)> =
@@ -1131,7 +1127,7 @@ where
 		//convert the commitment to string in self_spend list
 
 		for output in self_spend_candidate_list {
-			let commit = w
+			let commit = wallet
 				.calc_commit_for_cache(keychain_mask, output.value, &output.key_id)
 				.unwrap()
 				.unwrap();
@@ -1150,7 +1146,7 @@ where
 	);
 	for output in self_spend_candidate_light_list {
 		self_spend_particular_output(
-			wallet_inst.clone(),
+			wallet,
 			keychain_mask,
 			output.value,
 			output.commit,
@@ -1165,15 +1161,15 @@ where
 
 /// Scan outputs with a given rewind hash view wallet.
 /// Retrieve all outputs information that belongs to it.
-pub fn scan_rewind_hash<'a, L, C, K>(
-	wallet_inst: Arc<Mutex<Box<dyn WalletInst<'a, L, C, K>>>>,
+pub fn scan_rewind_hash<'a, T: ?Sized, C, K>(
+	wallet: &mut T,
 	rewind_hash: String,
 	start_height: u64,
 	end_height: u64,
 	status_send_channel: &Option<Sender<StatusMessage>>,
 ) -> Result<ViewWallet, Error>
 where
-	L: WalletLCProvider<'a, C, K>,
+	T: WalletBackend<'a, C, K>,
 	C: NodeClient + 'a,
 	K: Keychain + 'a,
 {
@@ -1184,10 +1180,8 @@ where
 			0,
 		));
 	}
-	let client = {
-		wallet_lock!(wallet_inst, w);
-		w.w2n_client().clone()
-	};
+	let client = wallet.w2n_client().clone();
+
 	// Retrieve the actual PMMR index range we're looking for
 	let pmmr_range = client.height_range_to_pmmr_indices(start_height, Some(end_height))?;
 
@@ -1218,8 +1212,8 @@ where
 /// Check / repair wallet contents by scanning against chain
 /// assume wallet contents have been freshly updated with contents
 /// of latest block
-pub fn scan<'a, L, C, K>(
-	wallet_inst: Arc<Mutex<Box<dyn WalletInst<'a, L, C, K>>>>,
+pub fn scan<'a, T: ?Sized, C, K>(
+	wallet: &mut T,
 	keychain_mask: Option<&SecretKey>,
 	del_unconfirmed: bool,
 	start_height: u64,
@@ -1229,7 +1223,7 @@ pub fn scan<'a, L, C, K>(
 	do_full_outputs_refresh: bool,
 ) -> Result<(), Error>
 where
-	L: WalletLCProvider<'a, C, K>,
+	T: WalletBackend<'a, C, K>,
 	C: NodeClient + 'a,
 	K: Keychain + 'a,
 {
@@ -1245,7 +1239,7 @@ where
 	// Collect the data form the chain and from the wallet
 	let replay_config = get_replay_config();
 	let (mut outputs, chain_outs, mut transactions, last_output) = get_wallet_and_chain_data(
-		wallet_inst.clone(),
+		wallet,
 		keychain_mask.clone(),
 		start_height,
 		tip_height,
@@ -1280,7 +1274,7 @@ where
 	// Validated outputs states against the chain
 	let mut found_parents: HashMap<Identifier, u32> = HashMap::new();
 	let outputs2del = validate_outputs(
-		wallet_inst.clone(),
+		wallet,
 		keychain_mask.clone(),
 		start_height,
 		&chain_outs,
@@ -1294,7 +1288,7 @@ where
 	// We don't want to cancel the transactions. Let's user do that.
 	// We can uncancel transactions if it is confirmed
 	let _result = validate_transactions(
-		wallet_inst.clone(),
+		wallet,
 		keychain_mask,
 		&mut transactions,
 		&outputs,
@@ -1304,7 +1298,7 @@ where
 	// Checking for output to transaction mapping. We don't want to see active outputs without trsansaction or with cancelled transactions
 	// we might unCancel transaction if output was found but all mapped transactions are cancelled (user just a cheater)
 	validate_outputs_ownership(
-		wallet_inst.clone(),
+		wallet,
 		keychain_mask,
 		&mut outputs,
 		&mut transactions,
@@ -1327,7 +1321,7 @@ where
 	// Apply last data updates and saving the data into DB.
 	{
 		store_transactions_outputs(
-			wallet_inst.clone(),
+			wallet,
 			keychain_mask.clone(),
 			&outputs2del,
 			&mut outputs,
@@ -1341,7 +1335,7 @@ where
 
 	{
 		restore_labels(
-			wallet_inst.clone(),
+			wallet,
 			keychain_mask.clone(),
 			&found_parents,
 			status_send_channel,
@@ -1351,10 +1345,8 @@ where
 	// Updating confirmed height record. The height at what we finish updating the data
 	// Updating 'done' job for all accounts that was involved. Update was done for all accounts- let's update that
 	{
-		wallet_lock!(wallet_inst, w);
-
-		let accounts: Vec<Identifier> = w.acct_path_iter().map(|m| m.path).collect();
-		let mut batch = w.batch(keychain_mask)?;
+		let accounts: Vec<Identifier> = wallet.acct_path_iter().map(|m| m.path).collect();
+		let mut batch = wallet.batch(keychain_mask)?;
 
 		for par_id in &accounts {
 			batch.save_last_confirmed_height(par_id, tip_height)?;
@@ -1365,10 +1357,8 @@ where
 	// Cancel any cancellable transactions with an expired TTL
 	// We need to do that at the end when all scan data is updated and written. Otherwise data can be overwritten on updates
 	{
-		wallet_lock!(wallet_inst, w);
-
 		let transactions = updater::retrieve_txs(
-			&mut **w,
+			wallet,
 			keychain_mask,
 			None,
 			None,
@@ -1388,7 +1378,7 @@ where
 			if let Some(h) = tx_log.ttl_cutoff_height {
 				if tip_height >= h {
 					match tx::cancel_tx(
-						&mut **w,
+						wallet,
 						keychain_mask,
 						&tx_log.parent_key_id,
 						Some(tx_log.id),
@@ -1447,8 +1437,8 @@ where
 // Returns Output that need to be deleted. It is possible because
 // We might find that Key Id is broken and Outputs are stored by this key_id.
 // That is why we need to delete prev copy.
-fn validate_outputs<'a, L, C, K>(
-	wallet_inst: Arc<Mutex<Box<dyn WalletInst<'a, L, C, K>>>>,
+fn validate_outputs<'a, T: ?Sized, C, K>(
+	wallet: &mut T,
 	keychain_mask: Option<&SecretKey>,
 	start_height: u64,
 	chain_outs: &Vec<OutputResult>,
@@ -1458,7 +1448,7 @@ fn validate_outputs<'a, L, C, K>(
 	found_parents: &mut HashMap<Identifier, u32>,
 ) -> Result<Vec<OutputData>, Error>
 where
-	L: WalletLCProvider<'a, C, K>,
+	T: WalletBackend<'a, C, K>,
 	C: NodeClient + 'a,
 	K: Keychain + 'a,
 {
@@ -1530,7 +1520,7 @@ where
 					)));
 				}
 				restore_missing_output(
-					wallet_inst.clone(),
+					wallet,
 					keychain_mask,
 					ch_out.clone(),
 					&commit2transactionuuid,
@@ -1580,19 +1570,18 @@ where
 // Processing slate based transactions. Just need to update 'confirmed flag' and height
 // We don't want to cancel the transactions. Let's user do that.
 // We can uncancel transactions if it is confirmed
-fn validate_transactions<'a, L, C, K>(
-	wallet_inst: Arc<Mutex<Box<dyn WalletInst<'a, L, C, K>>>>,
+fn validate_transactions<'a, T: ?Sized, C, K>(
+	wallet: &mut T,
 	_keychain_mask: Option<&SecretKey>,
 	transactions: &mut HashMap<String, WalletTxInfo>,
 	outputs: &HashMap<String, WalletOutputInfo>,
 	status_send_channel: &Option<Sender<StatusMessage>>,
 ) -> Result<(), Error>
 where
-	L: WalletLCProvider<'a, C, K>,
+	T: WalletBackend<'a, C, K>,
 	C: NodeClient + 'a,
 	K: Keychain + 'a,
 {
-	wallet_lock!(wallet_inst, w);
 	for tx_info in transactions.values_mut() {
 		// Checking the kernel - the source of truth for transactions
 		if tx_info.kernel_validation.is_some() {
@@ -1613,8 +1602,9 @@ where
 				if !tx_info.tx_log.confirmed {
 					tx_info.tx_log.confirmed = true;
 
-					if let Ok(hdr_info) =
-						w.w2n_client().get_header_info(tx_info.tx_log.output_height)
+					if let Ok(hdr_info) = wallet
+						.w2n_client()
+						.get_header_info(tx_info.tx_log.output_height)
 					{
 						tx_info
 							.tx_log
@@ -1656,7 +1646,7 @@ where
 			}
 		}
 
-		let _update_result = update_non_kernel_transaction(&mut **w, tx_info, outputs);
+		let _update_result = update_non_kernel_transaction(wallet, tx_info, outputs);
 
 		// Update confirmation flag fr the cancelled.
 		if tx_info.tx_log.is_cancelled_reverted() {
@@ -1670,19 +1660,18 @@ where
 	Ok(())
 }
 
-fn delete_duplicated_coinbase_transactions<'a, L, C, K>(
-	wallet_inst: Arc<Mutex<Box<dyn WalletInst<'a, L, C, K>>>>,
+fn delete_duplicated_coinbase_transactions<'a, T: ?Sized, C, K>(
+	wallet: &mut T,
 	keychain_mask: Option<&SecretKey>,
 	collided_coinbase_txs: &Vec<TxLogEntry>,
 ) -> Result<(), Error>
 where
-	L: WalletLCProvider<'a, C, K>,
+	T: WalletBackend<'a, C, K>,
 	C: NodeClient + 'a,
 	K: Keychain + 'a,
 {
 	// correcting the problem, deleting all tx except the firt one
-	wallet_lock!(wallet_inst, w);
-	let mut batch = w.batch(keychain_mask)?;
+	let mut batch = wallet.batch(keychain_mask)?;
 
 	for i in 1..collided_coinbase_txs.len() {
 		batch.delete_tx_log_entry(
@@ -1696,14 +1685,14 @@ where
 
 // Checking for output to transaction mapping. We don't want to see active outputs without trsansaction or with cancelled transactions
 // we might unCancel transaction if output was found but all mapped transactions are cancelled (user just a cheater)
-fn validate_outputs_ownership<'a, L, C, K>(
-	wallet_inst: Arc<Mutex<Box<dyn WalletInst<'a, L, C, K>>>>,
+fn validate_outputs_ownership<'a, T: ?Sized, C, K>(
+	wallet: &mut T,
 	keychain_mask: Option<&SecretKey>,
 	outputs: &mut HashMap<String, WalletOutputInfo>,
 	transactions: &mut HashMap<String, WalletTxInfo>,
 	status_send_channel: &Option<Sender<StatusMessage>>,
 ) where
-	L: WalletLCProvider<'a, C, K>,
+	T: WalletBackend<'a, C, K>,
 	C: NodeClient + 'a,
 	K: Keychain + 'a,
 {
@@ -1770,7 +1759,7 @@ fn validate_outputs_ownership<'a, L, C, K>(
 
 			if collided_coinbase_txs.len() > 1 {
 				if let Err(e) = delete_duplicated_coinbase_transactions(
-					wallet_inst.clone(),
+					wallet,
 					keychain_mask,
 					&collided_coinbase_txs,
 				) {
@@ -1818,7 +1807,7 @@ fn validate_outputs_ownership<'a, L, C, K>(
 				}
 				if out_active == 0 && out_cancelled_uuid.len() > 0 {
 					let _result = recover_first_cancelled(
-						wallet_inst.clone(),
+						wallet,
 						status_send_channel,
 						&w_out.tx_input_uuid,
 						transactions,
@@ -1829,7 +1818,7 @@ fn validate_outputs_ownership<'a, L, C, K>(
 				// output have to have some valid transation. User cancel all of them?
 				if out_active == 0 && out_cancelled_uuid.len() > 0 {
 					let _result = recover_first_cancelled(
-						wallet_inst.clone(),
+						wallet,
 						status_send_channel,
 						&w_out.tx_output_uuid,
 						transactions,
@@ -1837,7 +1826,7 @@ fn validate_outputs_ownership<'a, L, C, K>(
 				}
 				if in_active == 0 && in_cancelled_uuid.len() > 0 {
 					let _result = recover_first_cancelled(
-						wallet_inst.clone(),
+						wallet,
 						status_send_channel,
 						&w_out.tx_input_uuid,
 						transactions,
@@ -1868,7 +1857,7 @@ fn validate_outputs_ownership<'a, L, C, K>(
 				}
 				if out_active == 0 && out_cancelled_uuid.len() > 0 {
 					let _result = recover_first_cancelled(
-						wallet_inst.clone(),
+						wallet,
 						status_send_channel,
 						&w_out.tx_output_uuid,
 						transactions,
@@ -1996,8 +1985,8 @@ fn validate_consistancy(
 }
 
 // Apply last data updates and saving the data into DB.
-fn store_transactions_outputs<'a, L, C, K>(
-	wallet_inst: Arc<Mutex<Box<dyn WalletInst<'a, L, C, K>>>>,
+fn store_transactions_outputs<'a, T: ?Sized, C, K>(
+	wallet: &mut T,
 	keychain_mask: Option<&SecretKey>,
 	outputs2del: &Vec<OutputData>,
 	outputs: &mut HashMap<String, WalletOutputInfo>,
@@ -2008,13 +1997,12 @@ fn store_transactions_outputs<'a, L, C, K>(
 	archive_height: u64,
 ) -> Result<(), Error>
 where
-	L: WalletLCProvider<'a, C, K>,
+	T: WalletBackend<'a, C, K>,
 	C: NodeClient + 'a,
 	K: Keychain + 'a,
 {
-	wallet_lock!(wallet_inst, w);
-	let node_client = w.w2n_client().clone();
-	let mut batch = w.batch(keychain_mask)?;
+	let node_client = wallet.w2n_client().clone();
+	let mut batch = wallet.batch(keychain_mask)?;
 
 	// This time is secondary, used if TX output_height is not defined
 	let tx_time_to_archive = Utc::now() - Duration::days(5);
@@ -2217,20 +2205,19 @@ where
 }
 
 // restore labels, account paths and child derivation indices
-fn restore_labels<'a, L, C, K>(
-	wallet_inst: Arc<Mutex<Box<dyn WalletInst<'a, L, C, K>>>>,
+fn restore_labels<'a, T: ?Sized, C, K>(
+	wallet: &mut T,
 	keychain_mask: Option<&SecretKey>,
 	found_parents: &HashMap<Identifier, u32>,
 	status_send_channel: &Option<Sender<StatusMessage>>,
 ) -> Result<(), Error>
 where
-	L: WalletLCProvider<'a, C, K>,
+	T: WalletBackend<'a, C, K>,
 	C: NodeClient + 'a,
 	K: Keychain + 'a,
 {
-	wallet_lock!(wallet_inst, w);
 	let label_base = "account";
-	let accounts: Vec<Identifier> = w.acct_path_iter().map(|m| m.path).collect();
+	let accounts: Vec<Identifier> = wallet.acct_path_iter().map(|m| m.path).collect();
 	let mut acct_index = accounts.len();
 	for (path, max_child_index) in found_parents.iter() {
 		// Only restore paths that don't exist
@@ -2242,12 +2229,12 @@ where
 					label, path
 				)));
 			}
-			keys::set_acct_path(&mut **w, keychain_mask, &label, path)?;
+			keys::set_acct_path(wallet, keychain_mask, &label, path)?;
 			acct_index += 1;
 		}
-		let current_child_index = w.current_child_index(&path)?;
+		let current_child_index = wallet.current_child_index(&path)?;
 		if *max_child_index >= current_child_index {
-			let mut batch = w.batch(keychain_mask)?;
+			let mut batch = wallet.batch(keychain_mask)?;
 			debug!("Next child for account {} is {}", path, max_child_index + 1);
 			batch.save_child_index(path, max_child_index + 1)?;
 			batch.commit()?;
@@ -2320,18 +2307,17 @@ fn report_transaction_collision(
 // By some reasons output exist but all related transactions are cancelled. Let's activate one of them
 // Note! There is no analisys what transaction to activate. As a result that can trigger the transaction collision.
 // We don't want to implement complicated algorithm to handle that. User suppose to be sane and not cancell transactions without reason.
-fn recover_first_cancelled<'a, L, C, K>(
-	wallet_inst: Arc<Mutex<Box<dyn WalletInst<'a, L, C, K>>>>,
+fn recover_first_cancelled<'a, T: ?Sized, C, K>(
+	wallet: &mut T,
 	status_send_channel: &Option<Sender<StatusMessage>>,
 	tx_uuid: &HashSet<String>,
 	transactions: &mut HashMap<String, WalletTxInfo>,
 ) -> Result<(), Error>
 where
-	L: WalletLCProvider<'a, C, K>,
+	T: WalletBackend<'a, C, K>,
 	C: NodeClient + 'a,
 	K: Keychain + 'a,
 {
-	wallet_lock!(wallet_inst, w);
 	// let's revert first non cancelled
 	for uuid in tx_uuid {
 		if let Some(wtx) = transactions.get_mut(uuid) {
@@ -2348,7 +2334,10 @@ where
 					),
 				};
 				wtx.tx_log.confirmed = true;
-				if let Ok(hdr_info) = w.w2n_client().get_header_info(wtx.tx_log.output_height) {
+				if let Ok(hdr_info) = wallet
+					.w2n_client()
+					.get_header_info(wtx.tx_log.output_height)
+				{
 					wtx.tx_log.update_confirmation_ts(hdr_info.confirmed_time);
 				}
 				wtx.updated = true;
@@ -2372,8 +2361,8 @@ where
 ///Which is tracked in this discussion  https://forum.mwc.mw/t/replay-attacks-and-possible-mitigations/7415
 /// and this github ticket: https://github.com/mwcproject/mwc-qt-wallet/issues/508
 
-pub fn self_spend_particular_output<'a, L, C, K>(
-	wallet_inst: Arc<Mutex<Box<dyn WalletInst<'a, L, C, K>>>>,
+pub fn self_spend_particular_output<'a, T: ?Sized, C, K>(
+	wallet: &mut T,
 	keychain_mask: Option<&SecretKey>,
 	amount: u64,
 	commit_string: String,
@@ -2382,7 +2371,7 @@ pub fn self_spend_particular_output<'a, L, C, K>(
 	_minimum_confirmations: u64,
 ) -> Result<(), Error>
 where
-	L: WalletLCProvider<'a, C, K>,
+	T: WalletBackend<'a, C, K>,
 	C: NodeClient + 'a,
 	K: Keychain + 'a,
 {
@@ -2406,9 +2395,8 @@ where
 
 	let mut slate;
 	{
-		wallet_lock!(wallet_inst, w);
 		//send
-		slate = owner::init_send_tx(&mut **w, keychain_mask, &args, false, 1)?;
+		slate = owner::init_send_tx(wallet, keychain_mask, &args, false, 1)?;
 		//receiver
 		let mut dest_account_name: Option<String> = None;
 		let address_string;
@@ -2417,7 +2405,7 @@ where
 			dest_account_name = Some(address_string);
 		}
 		slate = foreign::receive_tx(
-			&mut **w,
+			wallet,
 			keychain_mask,
 			&slate,
 			address.clone(),
@@ -2429,17 +2417,15 @@ where
 			false,
 		)?
 		.0;
-		owner::tx_lock_outputs(&mut **w, keychain_mask, &slate, address, 0, false)?;
-		slate = owner::finalize_tx(&mut **w, keychain_mask, &slate, false, false)
+		owner::tx_lock_outputs(wallet, keychain_mask, &slate, address, 0, false)?;
+		slate = owner::finalize_tx(wallet, keychain_mask, &slate, false, false)
 			.unwrap()
 			.0;
 	}
 	let client = {
-		let mut w_lock = wallet_inst.lock();
-		let w = w_lock.lc_provider()?.wallet_inst()?;
 		// Test keychain mask, to keep API consistent
-		let _ = w.keychain(keychain_mask)?;
-		w.w2n_client().clone()
+		let _ = wallet.keychain(keychain_mask)?;
+		wallet.w2n_client().clone()
 	};
 	owner::post_tx(&client, slate.tx_or_err()?, false)?;
 	Ok(())

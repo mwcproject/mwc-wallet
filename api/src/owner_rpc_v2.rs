@@ -33,9 +33,11 @@ use crate::util::Mutex;
 use crate::{Owner, OwnerRpcV3};
 use easy_jsonrpc_mwc;
 use ed25519_dalek::PublicKey as DalekPublicKey;
+use libwallet::wallet_lock_test;
 use mwc_wallet_libwallet::proof::proofaddress::{self, ProvableAddress};
 use mwc_wallet_util::mwc_util::secp::Secp256k1;
 use std::convert::TryFrom;
+use std::ops::DerefMut;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -3546,11 +3548,12 @@ pub fn run_doctest_owner(
 	let _ = fs::remove_dir_all(test_dir);
 	global::set_local_chain_type(ChainTypes::AutomatedTesting);
 
+	let tx_pool: Arc<Mutex<Vec<Transaction>>> = Arc::new(Mutex::new(Vec::new()));
 	let mut wallet_proxy: WalletProxy<
 		DefaultLCProvider<LocalWalletClient, ExtKeychain>,
 		LocalWalletClient,
 		ExtKeychain,
-	> = WalletProxy::new(test_dir.into());
+	> = WalletProxy::new(test_dir.into(), tx_pool.clone());
 	let chain = wallet_proxy.chain.clone();
 
 	let rec_phrase_1 = util::ZeroingString::from(
@@ -3657,6 +3660,7 @@ pub fn run_doctest_owner(
 			(&mask1).as_ref(),
 			1 as usize,
 			false,
+			tx_pool.lock().deref_mut(),
 		);
 		//update local outputs after each block, so transaction IDs stay consistent
 		let (wallet_refreshed, _) = api_impl::owner::retrieve_summary_info(
@@ -3697,7 +3701,10 @@ pub fn run_doctest_owner(
 	let w2_slatepack_address = ProvableAddress::from_tor_pub_key(&w2_tor_pubkey);
 
 	if perform_tx {
-		api_impl::owner::update_wallet_state(wallet1.clone(), (&mask1).as_ref(), &None).unwrap();
+		{
+			wallet_lock_test!(wallet1, w);
+			api_impl::owner::update_wallet_state(&mut **w, (&mask1).as_ref(), &None).unwrap();
+		}
 
 		let amount = 2_000_000_000;
 		let mut w_lock = wallet1.lock();
@@ -3843,6 +3850,7 @@ pub fn run_doctest_owner(
 			(&mask1).as_ref(),
 			3 as usize,
 			false,
+			tx_pool.lock().deref_mut(),
 		);
 	}
 

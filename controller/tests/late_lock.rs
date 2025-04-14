@@ -21,7 +21,9 @@ extern crate mwc_wallet_libwallet as libwallet;
 
 use self::libwallet::{InitTxArgs, Slate};
 use impls::test_framework::{self, LocalWalletClient};
+use std::ops::DerefMut;
 use std::sync::atomic::Ordering;
+use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
@@ -29,11 +31,14 @@ use std::time::Duration;
 mod common;
 use common::{clean_output_dir, create_wallet_proxy, setup};
 use mwc_wallet_util::mwc_core::consensus::calc_mwc_block_reward;
+use mwc_wallet_util::mwc_core::core::Transaction;
+use mwc_wallet_util::mwc_util::Mutex;
 
 /// self send impl
 fn late_lock_test_impl(test_dir: &str) -> Result<(), libwallet::Error> {
 	// Create a new proxy to simulate server and wallet responses
-	let mut wallet_proxy = create_wallet_proxy(test_dir.into());
+	let tx_pool: Arc<Mutex<Vec<Transaction>>> = Arc::new(Mutex::new(Vec::new()));
+	let mut wallet_proxy = create_wallet_proxy(test_dir.into(), tx_pool.clone());
 	let chain = wallet_proxy.chain.clone();
 	let stopper = wallet_proxy.running.clone();
 
@@ -93,7 +98,14 @@ fn late_lock_test_impl(test_dir: &str) -> Result<(), libwallet::Error> {
 		w.set_parent_key_id_by_name("account1")?;
 	}
 
-	test_framework::award_blocks_to_wallet(&chain, wallet_mining.clone(), mask1, 10, false)?;
+	test_framework::award_blocks_to_wallet(
+		&chain,
+		wallet_mining.clone(),
+		mask1,
+		10,
+		false,
+		tx_pool.lock().deref_mut(),
+	)?;
 
 	// update/test contents of both accounts
 	wallet::controller::owner_single_use(Some(wallet_mining.clone()), mask1, None, |api, m| {
@@ -182,7 +194,14 @@ fn late_lock_test_impl(test_dir: &str) -> Result<(), libwallet::Error> {
 	)
 	.unwrap();
 
-	test_framework::award_blocks_to_wallet(&chain, wallet_mining.clone(), mask1, 3, false)?;
+	test_framework::award_blocks_to_wallet(
+		&chain,
+		wallet_mining.clone(),
+		mask1,
+		4,
+		false,
+		tx_pool.lock().deref_mut(),
+	)?;
 
 	// update/test contents of both accounts
 	wallet::controller::owner_single_use(Some(wallet_mining.clone()), mask1, None, |api, m| {

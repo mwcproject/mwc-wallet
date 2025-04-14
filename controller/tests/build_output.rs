@@ -20,13 +20,14 @@ extern crate mwc_wallet_util;
 
 use impls::test_framework::LocalWalletClient;
 use mwc_wallet_libwallet as libwallet;
-use mwc_wallet_util::mwc_core::core::OutputFeatures;
+use mwc_wallet_util::mwc_core::core::{OutputFeatures, Transaction};
 use mwc_wallet_util::mwc_keychain::{
 	mnemonic, BlindingFactor, ExtKeychain, ExtKeychainPath, Keychain, SwitchCommitmentType,
 };
-use mwc_wallet_util::mwc_util::{secp, ZeroingString};
+use mwc_wallet_util::mwc_util::{secp, Mutex, ZeroingString};
 use rand::{thread_rng, Rng};
 use std::sync::atomic::Ordering;
+use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
@@ -41,7 +42,8 @@ fn build_output_test_impl(test_dir: &str) -> Result<(), libwallet::Error> {
 	let mnemonic = mnemonic::from_entropy(&seed).unwrap();
 
 	// Create a new proxy to simulate server and wallet responses
-	let mut wallet_proxy = create_wallet_proxy(test_dir.into());
+	let tx_pool: Arc<Mutex<Vec<Transaction>>> = Arc::new(Mutex::new(Vec::new()));
+	let mut wallet_proxy = create_wallet_proxy(test_dir.into(), tx_pool.clone());
 	let stopper = wallet_proxy.running.clone();
 
 	create_wallet_and_add!(

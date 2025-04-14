@@ -22,7 +22,9 @@ extern crate mwc_wallet_util;
 use impls::test_framework::{self, LocalWalletClient};
 use libwallet::{InitTxArgs, Slate};
 use mwc_wallet_libwallet as libwallet;
+use std::ops::DerefMut;
 use std::sync::atomic::Ordering;
+use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
@@ -30,13 +32,16 @@ use std::time::Duration;
 mod common;
 use common::{clean_output_dir, create_wallet_proxy, setup};
 use mwc_wallet_libwallet::proof::proofaddress::ProvableAddress;
+use mwc_wallet_util::mwc_core::core::Transaction;
 use mwc_wallet_util::mwc_core::global;
+use mwc_wallet_util::mwc_util::Mutex;
 
 /// Various tests on accounts within the same wallet
 fn payment_proofs_test_impl(test_dir: &str) -> Result<(), wallet::Error> {
 	// Create a new proxy to simulate server and wallet responses
 	global::set_local_chain_type(global::ChainTypes::AutomatedTesting);
-	let mut wallet_proxy = create_wallet_proxy(test_dir.into());
+	let tx_pool: Arc<Mutex<Vec<Transaction>>> = Arc::new(Mutex::new(Vec::new()));
+	let mut wallet_proxy = create_wallet_proxy(test_dir.into(), tx_pool.clone());
 	let chain = wallet_proxy.chain.clone();
 	let stopper = wallet_proxy.running.clone();
 
@@ -78,8 +83,14 @@ fn payment_proofs_test_impl(test_dir: &str) -> Result<(), wallet::Error> {
 
 	// Do some mining
 	let bh = 10u64;
-	let _ =
-		test_framework::award_blocks_to_wallet(&chain, wallet1.clone(), mask1, bh as usize, false);
+	let _ = test_framework::award_blocks_to_wallet(
+		&chain,
+		wallet1.clone(),
+		mask1,
+		bh as usize,
+		false,
+		tx_pool.lock().deref_mut(),
+	);
 
 	let mut address = None;
 	wallet::controller::owner_single_use(Some(wallet2.clone()), mask2, None, |api, m| {
@@ -156,7 +167,14 @@ fn payment_proofs_test_impl(test_dir: &str) -> Result<(), wallet::Error> {
 		Ok(())
 	})?;
 
-	let _ = test_framework::award_blocks_to_wallet(&chain, wallet1.clone(), mask1, 2, false);
+	let _ = test_framework::award_blocks_to_wallet(
+		&chain,
+		wallet1.clone(),
+		mask1,
+		2,
+		false,
+		tx_pool.lock().deref_mut(),
+	);
 
 	wallet::controller::owner_single_use(Some(wallet1.clone()), mask1, None, |sender_api, m| {
 		// Check payment proof here

@@ -20,6 +20,8 @@ extern crate mwc_wallet_impls as impls;
 
 use mwc_wallet_util::mwc_core as core;
 use mwc_wallet_util::mwc_keychain as keychain;
+use std::ops::DerefMut;
+use std::sync::Arc;
 
 use self::core::global;
 use self::keychain::{ExtKeychain, Keychain};
@@ -33,12 +35,15 @@ use std::time::Duration;
 #[macro_use]
 mod common;
 use common::{clean_output_dir, create_wallet_proxy, setup};
+use mwc_wallet_util::mwc_core::core::Transaction;
+use mwc_wallet_util::mwc_util::Mutex;
 
 /// Various tests on accounts within the same wallet
 fn accounts_test_impl(test_dir: &str) -> Result<(), wallet::Error> {
 	global::set_local_chain_type(global::ChainTypes::AutomatedTesting);
 	// Create a new proxy to simulate server and wallet responses
-	let mut wallet_proxy = create_wallet_proxy(test_dir.into());
+	let tx_pool: Arc<Mutex<Vec<Transaction>>> = Arc::new(Mutex::new(Vec::new()));
+	let mut wallet_proxy = create_wallet_proxy(test_dir.into(), tx_pool.clone());
 	let chain = wallet_proxy.chain.clone();
 	let stopper = wallet_proxy.running.clone();
 
@@ -121,14 +126,28 @@ fn accounts_test_impl(test_dir: &str) -> Result<(), wallet::Error> {
 		w.set_parent_key_id_by_name("account1")?;
 		assert_eq!(w.parent_key_id(), ExtKeychain::derive_key_id(2, 1, 0, 0, 0));
 	}
-	let _ = test_framework::award_blocks_to_wallet(&chain, wallet1.clone(), mask1, 7, false);
+	let _ = test_framework::award_blocks_to_wallet(
+		&chain,
+		wallet1.clone(),
+		mask1,
+		7,
+		false,
+		tx_pool.lock().deref_mut(),
+	);
 
 	{
 		wallet_inst!(wallet1, w);
 		w.set_parent_key_id_by_name("account2")?;
 		assert_eq!(w.parent_key_id(), ExtKeychain::derive_key_id(2, 2, 0, 0, 0));
 	}
-	let _ = test_framework::award_blocks_to_wallet(&chain, wallet1.clone(), mask1, 5, false);
+	let _ = test_framework::award_blocks_to_wallet(
+		&chain,
+		wallet1.clone(),
+		mask1,
+		5,
+		false,
+		tx_pool.lock().deref_mut(),
+	);
 
 	// Should have 5 in account1 (5 spendable), 5 in account (2 spendable)
 	wallet::controller::owner_single_use(Some(wallet1.clone()), mask1, None, |api, m| {
@@ -210,6 +229,16 @@ fn accounts_test_impl(test_dir: &str) -> Result<(), wallet::Error> {
 		api.post_tx(m, slate.tx_or_err()?, false)?;
 		Ok(())
 	})?;
+
+	// apply post txs
+	let _ = test_framework::award_blocks_to_wallet(
+		&chain,
+		wallet1.clone(),
+		mask1,
+		1,
+		false,
+		tx_pool.lock().deref_mut(),
+	);
 
 	wallet::controller::owner_single_use(Some(wallet1.clone()), mask1, None, |api, m| {
 		let (_, wallet1_info) = api.retrieve_summary_info(m, false, 1)?;

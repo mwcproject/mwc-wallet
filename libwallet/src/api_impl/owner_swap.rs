@@ -106,7 +106,7 @@ where
 		.map(|o| (o.output.commit.clone().unwrap(), o.output.value))
 		.collect();
 
-	wallet_lock!(wallet_inst.clone(), w);
+	wallet_lock!(wallet_inst, w);
 	let node_client = w.w2n_client().clone();
 	let ethereum_wallet = w.get_ethereum_wallet()?.clone();
 	let keychain = w.keychain(keychain_mask)?;

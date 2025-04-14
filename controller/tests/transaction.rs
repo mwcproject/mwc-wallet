@@ -19,19 +19,22 @@ extern crate mwc_wallet_controller as wallet;
 extern crate mwc_wallet_impls as impls;
 extern crate mwc_wallet_libwallet as libwallet;
 
-use mwc_wallet_util::mwc_core as core;
-use std::convert::TryInto;
-
 use self::core::core::transaction;
 use self::core::global;
 use self::libwallet::{InitTxArgs, OutputStatus, Slate};
 use impls::test_framework::{self, LocalWalletClient};
+use mwc_wallet_util::mwc_core as core;
+use std::convert::TryInto;
+use std::ops::DerefMut;
 use std::sync::atomic::Ordering;
+use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
 mod common;
 use common::{clean_output_dir, create_wallet_proxy, setup};
+use mwc_wallet_util::mwc_core::core::Transaction;
+use mwc_wallet_util::mwc_util::Mutex;
 
 /// Exercises the Transaction API fully with a test NodeClient operating
 /// directly on a chain instance
@@ -39,7 +42,8 @@ use common::{clean_output_dir, create_wallet_proxy, setup};
 fn basic_transaction_api(test_dir: &str) -> Result<(), wallet::Error> {
 	global::set_local_chain_type(global::ChainTypes::AutomatedTesting);
 	// Create a new proxy to simulate server and wallet responses
-	let mut wallet_proxy = create_wallet_proxy(test_dir.into());
+	let tx_pool: Arc<Mutex<Vec<Transaction>>> = Arc::new(Mutex::new(Vec::new()));
+	let mut wallet_proxy = create_wallet_proxy(test_dir.into(), tx_pool.clone());
 	let chain = wallet_proxy.chain.clone();
 	let stopper = wallet_proxy.running.clone();
 
@@ -80,7 +84,14 @@ fn basic_transaction_api(test_dir: &str) -> Result<(), wallet::Error> {
 	let reward = core::consensus::MWC_FIRST_GROUP_REWARD;
 	let cm = global::coinbase_maturity();
 	// mine a few blocks
-	let _ = test_framework::award_blocks_to_wallet(&chain, wallet1.clone(), mask1, 10, false);
+	let _ = test_framework::award_blocks_to_wallet(
+		&chain,
+		wallet1.clone(),
+		mask1,
+		10,
+		false,
+		tx_pool.lock().deref_mut(),
+	);
 
 	// Check wallet 1 contents are as expected
 	wallet::controller::owner_single_use(Some(wallet1.clone()), mask1, None, |api, m| {
@@ -189,6 +200,16 @@ fn basic_transaction_api(test_dir: &str) -> Result<(), wallet::Error> {
 		Ok(())
 	})?;
 
+	// apply posted tx
+	let _ = test_framework::award_blocks_to_wallet(
+		&chain,
+		wallet1.clone(),
+		mask1,
+		1,
+		false,
+		tx_pool.lock().deref_mut(),
+	);
+
 	// Check wallet 1 contents are as expected
 	wallet::controller::owner_single_use(Some(wallet1.clone()), mask1, None, |api, m| {
 		let (wallet1_refreshed, wallet1_info) = api.retrieve_summary_info(m, true, 1)?;
@@ -226,7 +247,14 @@ fn basic_transaction_api(test_dir: &str) -> Result<(), wallet::Error> {
 	})?;
 
 	// mine a few more blocks
-	let _ = test_framework::award_blocks_to_wallet(&chain, wallet1.clone(), mask1, 3, false);
+	let _ = test_framework::award_blocks_to_wallet(
+		&chain,
+		wallet1.clone(),
+		mask1,
+		3,
+		false,
+		tx_pool.lock().deref_mut(),
+	);
 
 	// refresh wallets and retrieve info/tests for each wallet after maturity
 	wallet::controller::owner_single_use(Some(wallet1.clone()), mask1, None, |api, m| {
@@ -315,6 +343,16 @@ fn basic_transaction_api(test_dir: &str) -> Result<(), wallet::Error> {
 		Ok(())
 	})?;
 
+	// apply posted tx
+	let _ = test_framework::award_blocks_to_wallet(
+		&chain,
+		wallet1.clone(),
+		mask1,
+		1,
+		false,
+		tx_pool.lock().deref_mut(),
+	);
+
 	wallet::controller::owner_single_use(Some(wallet1.clone()), mask1, None, |sender_api, m| {
 		let (refreshed, _wallet1_info) = sender_api.retrieve_summary_info(m, true, 1)?;
 		assert!(refreshed);
@@ -326,6 +364,20 @@ fn basic_transaction_api(test_dir: &str) -> Result<(), wallet::Error> {
 			.unwrap();
 		let stored_tx = sender_api.get_stored_tx(m, &tx)?;
 		sender_api.post_tx(m, &stored_tx.unwrap(), false)?;
+		Ok(())
+	})?;
+
+	// apply posted tx
+	let _ = test_framework::award_blocks_to_wallet(
+		&chain,
+		wallet1.clone(),
+		mask1,
+		1,
+		false,
+		tx_pool.lock().deref_mut(),
+	);
+
+	wallet::controller::owner_single_use(Some(wallet1.clone()), mask1, None, |sender_api, m| {
 		let (_, wallet1_info) = sender_api.retrieve_summary_info(m, true, 1)?;
 		// should be mined now
 		assert_eq!(
@@ -336,7 +388,14 @@ fn basic_transaction_api(test_dir: &str) -> Result<(), wallet::Error> {
 	})?;
 
 	// mine a few more blocks
-	let _ = test_framework::award_blocks_to_wallet(&chain, wallet1.clone(), mask1, 3, false);
+	let _ = test_framework::award_blocks_to_wallet(
+		&chain,
+		wallet1.clone(),
+		mask1,
+		4,
+		false,
+		tx_pool.lock().deref_mut(),
+	);
 
 	// check wallet2 has stored transaction
 	wallet::controller::owner_single_use(Some(wallet2.clone()), mask2, None, |api, m| {
@@ -406,7 +465,8 @@ fn basic_transaction_api(test_dir: &str) -> Result<(), wallet::Error> {
 fn tx_rollback(test_dir: &str) -> Result<(), wallet::Error> {
 	global::set_local_chain_type(global::ChainTypes::AutomatedTesting);
 	// Create a new proxy to simulate server and wallet responses
-	let mut wallet_proxy = create_wallet_proxy(test_dir.into());
+	let tx_pool: Arc<Mutex<Vec<Transaction>>> = Arc::new(Mutex::new(Vec::new()));
+	let mut wallet_proxy = create_wallet_proxy(test_dir.into(), tx_pool.clone());
 	let chain = wallet_proxy.chain.clone();
 	let stopper = wallet_proxy.running.clone();
 
@@ -445,7 +505,14 @@ fn tx_rollback(test_dir: &str) -> Result<(), wallet::Error> {
 	let reward = core::consensus::MWC_FIRST_GROUP_REWARD;
 	let cm = global::coinbase_maturity(); // assume all testing precedes soft fork height
 									   // mine a few blocks
-	let _ = test_framework::award_blocks_to_wallet(&chain, wallet1.clone(), mask1, 5, false);
+	let _ = test_framework::award_blocks_to_wallet(
+		&chain,
+		wallet1.clone(),
+		mask1,
+		5,
+		false,
+		tx_pool.lock().deref_mut(),
+	);
 
 	let amount = core::consensus::MWC_FIRST_GROUP_REWARD / 2;
 	let mut slate = Slate::blank(1, false);
@@ -524,7 +591,14 @@ fn tx_rollback(test_dir: &str) -> Result<(), wallet::Error> {
 
 	// wallet 1 is bold and doesn't ever post the transaction
 	// mine a few more blocks
-	let _ = test_framework::award_blocks_to_wallet(&chain, wallet1.clone(), mask1, 5, false);
+	let _ = test_framework::award_blocks_to_wallet(
+		&chain,
+		wallet1.clone(),
+		mask1,
+		5,
+		false,
+		tx_pool.lock().deref_mut(),
+	);
 
 	// Wallet 1 decides to roll back instead
 	wallet::controller::owner_single_use(Some(wallet1.clone()), mask1, None, |api, m| {

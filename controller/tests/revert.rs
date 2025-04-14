@@ -34,6 +34,7 @@ use mwc_wallet_util::mwc_keychain::ExtKeychain;
 use mwc_wallet_util::mwc_util::secp::key::SecretKey;
 use mwc_wallet_util::mwc_util::secp::Secp256k1;
 use mwc_wallet_util::mwc_util::Mutex;
+use std::ops::DerefMut;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -69,11 +70,12 @@ fn revert(
 	),
 	Error,
 > {
-	let mut wallet_proxy = create_wallet_proxy(test_dir.into());
+	let tx_pool: Arc<Mutex<Vec<Transaction>>> = Arc::new(Mutex::new(Vec::new()));
+	let mut wallet_proxy = create_wallet_proxy(test_dir.into(), tx_pool.clone());
 	let stopper = wallet_proxy.running.clone();
 	let chain = wallet_proxy.chain.clone();
 	let test_dir2 = format!("{}/chain2", test_dir);
-	let wallet_proxy2 = create_wallet_proxy(test_dir2);
+	let wallet_proxy2 = create_wallet_proxy(test_dir2, tx_pool.clone());
 	let chain2 = wallet_proxy2.chain.clone();
 	let stopper2 = wallet_proxy2.running.clone();
 	let secp = Secp256k1::new();
@@ -127,7 +129,14 @@ fn revert(
 
 	// Mine some blocks
 	let bh = 10u64;
-	award_blocks_to_wallet(&chain, wallet1.clone(), mask1, bh as usize, false)?;
+	award_blocks_to_wallet(
+		&chain,
+		wallet1.clone(),
+		mask1,
+		bh as usize,
+		false,
+		tx_pool.lock().deref_mut(),
+	)?;
 
 	// Sanity check contents
 	owner(Some(wallet1.clone()), mask1, None, |api, m| {

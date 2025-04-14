@@ -35,22 +35,25 @@ mod common;
 use common::{clean_output_dir, create_wallet_proxy, setup};
 use mwc_libp2p::identity::Keypair;
 use mwc_wallet_libwallet::internal::updater;
-use mwc_wallet_libwallet::{owner, TxLogEntryType};
+use mwc_wallet_libwallet::{owner, wallet_lock_test, TxLogEntryType};
 use mwc_wallet_util::mwc_core::core::hash::Hash;
-use mwc_wallet_util::mwc_core::core::{KernelFeatures, TxKernel};
+use mwc_wallet_util::mwc_core::core::{KernelFeatures, Transaction, TxKernel};
 use mwc_wallet_util::mwc_core::libtx::aggsig;
 use mwc_wallet_util::mwc_p2p::libp2p_connection;
-use mwc_wallet_util::mwc_util::secp;
 use mwc_wallet_util::mwc_util::secp::pedersen::Commitment;
 use mwc_wallet_util::mwc_util::secp::Message;
+use mwc_wallet_util::mwc_util::{secp, Mutex};
 use std::collections::HashMap;
 use std::convert::TryInto;
+use std::ops::DerefMut;
+use std::sync::Arc;
 
 /// self send impl
 fn integrity_kernel_impl(test_dir: &str) -> Result<(), wallet::Error> {
 	// Create a new proxy to simulate server and wallet responses
 	global::set_local_chain_type(global::ChainTypes::AutomatedTesting);
-	let mut wallet_proxy = create_wallet_proxy(test_dir.into());
+	let tx_pool: Arc<Mutex<Vec<Transaction>>> = Arc::new(Mutex::new(Vec::new()));
+	let mut wallet_proxy = create_wallet_proxy(test_dir.into(), tx_pool.clone());
 	let chain = wallet_proxy.chain.clone();
 
 	// Create a new wallet test client, and set its queues to communicate with the
@@ -79,8 +82,18 @@ fn integrity_kernel_impl(test_dir: &str) -> Result<(), wallet::Error> {
 	let reward = core::consensus::MWC_FIRST_GROUP_REWARD;
 
 	// 4 is a lock height for coinbase. We want 2 mining rewards to spend.
-	let _ = test_framework::award_blocks_to_wallet(&chain, wallet1.clone(), mask1, 5, false);
-	let _ = owner::perform_refresh_from_node(wallet1.clone(), mask1, &None)?;
+	let _ = test_framework::award_blocks_to_wallet(
+		&chain,
+		wallet1.clone(),
+		mask1,
+		5,
+		false,
+		tx_pool.lock().deref_mut(),
+	);
+	{
+		wallet_lock_test!(wallet1, w1);
+		let _ = owner::perform_refresh_from_node(&mut **w1, mask1, &None)?;
+	}
 
 	// Check wallet 1 contents are as expected
 	wallet::controller::owner_single_use(Some(wallet1.clone()), mask1, None, |api, m| {
@@ -148,8 +161,18 @@ fn integrity_kernel_impl(test_dir: &str) -> Result<(), wallet::Error> {
 	assert_eq!(integral_balance[0].1, false);
 
 	// Mine a block, the transaction should be confirmed
-	let _ = test_framework::award_blocks_to_wallet(&chain, wallet1.clone(), mask1, 1, false);
-	let _ = owner::perform_refresh_from_node(wallet1.clone(), mask1, &None)?;
+	let _ = test_framework::award_blocks_to_wallet(
+		&chain,
+		wallet1.clone(),
+		mask1,
+		1,
+		false,
+		tx_pool.lock().deref_mut(),
+	);
+	{
+		wallet_lock_test!(wallet1, w1);
+		let _ = owner::perform_refresh_from_node(&mut **w1, mask1, &None)?;
+	}
 
 	let (account, outputs, _height, integral_balance) =
 		libwallet::owner_libp2p::get_integral_balance(wallet1.clone(), mask1)?;
@@ -160,8 +183,29 @@ fn integrity_kernel_impl(test_dir: &str) -> Result<(), wallet::Error> {
 	assert_eq!(integral_balance[0].1, false); // Now should be confirmed...
 	assert_eq!(integral_balance[0].0.expiration_height, 1446 + 3);
 
-	let _ = test_framework::award_blocks_to_wallet(&chain, wallet1.clone(), mask1, 2, false);
-	let _ = owner::perform_refresh_from_node(wallet1.clone(), mask1, &None)?;
+	let _ = test_framework::award_blocks_to_wallet(
+		&chain,
+		wallet1.clone(),
+		mask1,
+		2,
+		false,
+		tx_pool.lock().deref_mut(),
+	);
+	{
+		wallet_lock_test!(wallet1, w1);
+		let _ = owner::perform_refresh_from_node(&mut **w1, mask1, &None)?;
+	}
+
+	// apply posted transaction
+	let _ = test_framework::award_blocks_to_wallet(
+		&chain,
+		wallet1.clone(),
+		mask1,
+		1,
+		false,
+		tx_pool.lock().deref_mut(),
+	);
+
 	let (account, outputs, _height, integral_balance) =
 		libwallet::owner_libp2p::get_integral_balance(wallet1.clone(), mask1)?;
 	assert!(account.is_some());
@@ -193,8 +237,28 @@ fn integrity_kernel_impl(test_dir: &str) -> Result<(), wallet::Error> {
 	);
 
 	// Mine a block, the second transaction should be confirmed
-	let _ = test_framework::award_blocks_to_wallet(&chain, wallet1.clone(), mask1, 3, false);
-	let _ = owner::perform_refresh_from_node(wallet1.clone(), mask1, &None)?;
+	let _ = test_framework::award_blocks_to_wallet(
+		&chain,
+		wallet1.clone(),
+		mask1,
+		3,
+		false,
+		tx_pool.lock().deref_mut(),
+	);
+	{
+		wallet_lock_test!(wallet1, w1);
+		let _ = owner::perform_refresh_from_node(&mut **w1, mask1, &None)?;
+	}
+
+	// apply posted transaction
+	let _ = test_framework::award_blocks_to_wallet(
+		&chain,
+		wallet1.clone(),
+		mask1,
+		1,
+		false,
+		tx_pool.lock().deref_mut(),
+	);
 
 	let (account, outputs, _height, integral_balance) =
 		libwallet::owner_libp2p::get_integral_balance(wallet1.clone(), mask1)?;

@@ -20,6 +20,8 @@ extern crate mwc_wallet_impls as impls;
 
 use mwc_wallet_util::mwc_core as core;
 use mwc_wallet_util::mwc_util as util;
+use std::ops::DerefMut;
+use std::sync::Arc;
 
 use self::core::consensus;
 use self::core::global;
@@ -35,7 +37,9 @@ use util::ZeroingString;
 #[macro_use]
 mod common;
 use common::{clean_output_dir, create_wallet_proxy, setup};
+use mwc_wallet_util::mwc_core::core::Transaction;
 use mwc_wallet_util::mwc_util::secp::Secp256k1;
+use mwc_wallet_util::mwc_util::Mutex;
 
 macro_rules! send_to_dest {
 	($a:expr, $m: expr, $b:expr, $c:expr, $d:expr) => {
@@ -53,7 +57,8 @@ macro_rules! wallet_info {
 fn scan_impl(test_dir: &str) -> Result<(), wallet::Error> {
 	global::set_local_chain_type(global::ChainTypes::AutomatedTesting);
 	// Create a new proxy to simulate server and wallet responses
-	let mut wallet_proxy = create_wallet_proxy(test_dir.into());
+	let tx_pool: Arc<Mutex<Vec<Transaction>>> = Arc::new(Mutex::new(Vec::new()));
+	let mut wallet_proxy = create_wallet_proxy(test_dir.into(), tx_pool.clone());
 	let chain = wallet_proxy.chain.clone();
 	let stopper = wallet_proxy.running.clone();
 	let secp = Secp256k1::new();
@@ -113,8 +118,14 @@ fn scan_impl(test_dir: &str) -> Result<(), wallet::Error> {
 
 	// Do some mining
 	let bh = 20u64;
-	let _ =
-		test_framework::award_blocks_to_wallet(&chain, wallet1.clone(), mask1, bh as usize, false);
+	let _ = test_framework::award_blocks_to_wallet(
+		&chain,
+		wallet1.clone(),
+		mask1,
+		bh as usize,
+		false,
+		tx_pool.lock().deref_mut(),
+	);
 
 	// Sanity check contents
 	wallet::controller::owner_single_use(Some(wallet1.clone()), mask1, None, |api, m| {
@@ -230,7 +241,7 @@ fn scan_impl(test_dir: &str) -> Result<(), wallet::Error> {
 	Ok(())
 }
 
-fn two_wallets_one_seed_impl(test_dir: &str) -> Result<(), wallet::Error> {
+fn two_wallets_one_seed_impl(test_dir: &str) {
 	global::set_local_chain_type(global::ChainTypes::AutomatedTesting);
 	let seed_phrase = "affair pistol cancel crush garment candy ancient flag work \
 	                   market crush dry stand focus mutual weapon offer ceiling rival turn team spring \
@@ -238,7 +249,8 @@ fn two_wallets_one_seed_impl(test_dir: &str) -> Result<(), wallet::Error> {
 	let seed_phrase = Some(ZeroingString::from(seed_phrase));
 
 	// Create a new proxy to simulate server and wallet responses
-	let mut wallet_proxy = create_wallet_proxy(test_dir.into());
+	let tx_pool: Arc<Mutex<Vec<Transaction>>> = Arc::new(Mutex::new(Vec::new()));
+	let mut wallet_proxy = create_wallet_proxy(test_dir.into(), tx_pool.clone());
 	let chain = wallet_proxy.chain.clone();
 	let stopper = wallet_proxy.running.clone();
 
@@ -394,6 +406,7 @@ fn two_wallets_one_seed_impl(test_dir: &str) -> Result<(), wallet::Error> {
 		miner_mask,
 		bh as usize,
 		false,
+		tx_pool.lock().deref_mut(),
 	);
 
 	// send some funds to wallets 1
@@ -403,21 +416,48 @@ fn two_wallets_one_seed_impl(test_dir: &str) -> Result<(), wallet::Error> {
 		m_client.clone(),
 		"wallet1",
 		base_amount * 1
-	)?;
+	)
+	.unwrap();
+	let _ = test_framework::award_blocks_to_wallet(
+		&chain,
+		miner.clone(),
+		miner_mask,
+		1,
+		false,
+		tx_pool.lock().deref_mut(),
+	);
 	send_to_dest!(
 		miner.clone(),
 		miner_mask,
 		m_client.clone(),
 		"wallet1",
 		base_amount * 2
-	)?;
+	)
+	.unwrap();
+	let _ = test_framework::award_blocks_to_wallet(
+		&chain,
+		miner.clone(),
+		miner_mask,
+		1,
+		false,
+		tx_pool.lock().deref_mut(),
+	);
 	send_to_dest!(
 		miner.clone(),
 		miner_mask,
 		m_client.clone(),
 		"wallet1",
 		base_amount * 3
-	)?;
+	)
+	.unwrap();
+	let _ = test_framework::award_blocks_to_wallet(
+		&chain,
+		miner.clone(),
+		miner_mask,
+		1,
+		false,
+		tx_pool.lock().deref_mut(),
+	);
 	bh += 3;
 
 	// 0) Check repair when all is okay should leave wallet contents alone
@@ -427,7 +467,8 @@ fn two_wallets_one_seed_impl(test_dir: &str) -> Result<(), wallet::Error> {
 		assert_eq!(info.amount_currently_spendable, base_amount * 6);
 		assert_eq!(info.total, base_amount * 6);
 		Ok(())
-	})?;
+	})
+	.unwrap();
 
 	// send some funds to wallet 2
 	send_to_dest!(
@@ -436,34 +477,68 @@ fn two_wallets_one_seed_impl(test_dir: &str) -> Result<(), wallet::Error> {
 		m_client.clone(),
 		"wallet2",
 		base_amount * 4
-	)?;
+	)
+	.unwrap();
+	let _ = test_framework::award_blocks_to_wallet(
+		&chain,
+		miner.clone(),
+		miner_mask,
+		1,
+		false,
+		tx_pool.lock().deref_mut(),
+	);
 	send_to_dest!(
 		miner.clone(),
 		miner_mask,
 		m_client.clone(),
 		"wallet2",
 		base_amount * 5
-	)?;
+	)
+	.unwrap();
+	let _ = test_framework::award_blocks_to_wallet(
+		&chain,
+		miner.clone(),
+		miner_mask,
+		1,
+		false,
+		tx_pool.lock().deref_mut(),
+	);
 	send_to_dest!(
 		miner.clone(),
 		miner_mask,
 		m_client.clone(),
 		"wallet2",
 		base_amount * 6
-	)?;
+	)
+	.unwrap();
+	let _ = test_framework::award_blocks_to_wallet(
+		&chain,
+		miner.clone(),
+		miner_mask,
+		1,
+		false,
+		tx_pool.lock().deref_mut(),
+	);
 	bh += 3;
 
-	let _ = test_framework::award_blocks_to_wallet(&chain, miner.clone(), miner_mask, cm, false);
+	let _ = test_framework::award_blocks_to_wallet(
+		&chain,
+		miner.clone(),
+		miner_mask,
+		cm,
+		false,
+		tx_pool.lock().deref_mut(),
+	);
 	bh += cm as u64;
 
 	// confirm balances
 	// since info is now performing a partial scan, these should confirm
 	// as containing all outputs
-	let info = wallet_info!(wallet1.clone(), mask1)?;
+	let info = wallet_info!(wallet1.clone(), mask1).unwrap();
 	assert_eq!(info.amount_currently_spendable, base_amount * 21);
 	assert_eq!(info.total, base_amount * 21);
 
-	let info = wallet_info!(wallet2.clone(), mask2)?;
+	let info = wallet_info!(wallet2.clone(), mask2).unwrap();
 	assert_eq!(info.amount_currently_spendable, base_amount * 21);
 	assert_eq!(info.total, base_amount * 21);
 
@@ -474,7 +549,8 @@ fn two_wallets_one_seed_impl(test_dir: &str) -> Result<(), wallet::Error> {
 	wallet::controller::owner_single_use(Some(wallet3.clone()), mask3, None, |api, m| {
 		api.scan(m, None, false)?;
 		Ok(())
-	})?;
+	})
+	.unwrap();
 
 	wallet::controller::owner_single_use(Some(wallet3.clone()), mask3, None, |api, m| {
 		let info = wallet_info!(wallet3.clone(), m)?;
@@ -483,13 +559,15 @@ fn two_wallets_one_seed_impl(test_dir: &str) -> Result<(), wallet::Error> {
 		assert_eq!(info.amount_currently_spendable, base_amount * 21);
 		assert_eq!(info.total, base_amount * 21);
 		Ok(())
-	})?;
+	})
+	.unwrap();
 
 	// 2) scan should recover them into a single wallet
 	wallet::controller::owner_single_use(Some(wallet1.clone()), mask1, None, |api, m| {
 		api.scan(m, None, true)?;
 		Ok(())
-	})?;
+	})
+	.unwrap();
 
 	wallet::controller::owner_single_use(Some(wallet1.clone()), mask1, None, |api, m| {
 		let info = wallet_info!(wallet1.clone(), m)?;
@@ -497,7 +575,8 @@ fn two_wallets_one_seed_impl(test_dir: &str) -> Result<(), wallet::Error> {
 		assert_eq!(outputs.len(), 6);
 		assert_eq!(info.amount_currently_spendable, base_amount * 21);
 		Ok(())
-	})?;
+	})
+	.unwrap();
 
 	// 3) If I recover from seed and start using the wallet without restoring,
 	// scan should restore the older outputs
@@ -509,24 +588,58 @@ fn two_wallets_one_seed_impl(test_dir: &str) -> Result<(), wallet::Error> {
 		m_client.clone(),
 		"wallet4",
 		base_amount * 7
-	)?;
+	)
+	.unwrap();
+	let _ = test_framework::award_blocks_to_wallet(
+		&chain,
+		miner.clone(),
+		miner_mask,
+		1,
+		false,
+		tx_pool.lock().deref_mut(),
+	);
 	send_to_dest!(
 		miner.clone(),
 		miner_mask,
 		m_client.clone(),
 		"wallet4",
 		base_amount * 8
-	)?;
+	)
+	.unwrap();
+	let _ = test_framework::award_blocks_to_wallet(
+		&chain,
+		miner.clone(),
+		miner_mask,
+		1,
+		false,
+		tx_pool.lock().deref_mut(),
+	);
 	send_to_dest!(
 		miner.clone(),
 		miner_mask,
 		m_client.clone(),
 		"wallet4",
 		base_amount * 9
-	)?;
+	)
+	.unwrap();
+	let _ = test_framework::award_blocks_to_wallet(
+		&chain,
+		miner.clone(),
+		miner_mask,
+		1,
+		false,
+		tx_pool.lock().deref_mut(),
+	);
 	bh += 3;
 
-	let _ = test_framework::award_blocks_to_wallet(&chain, miner.clone(), miner_mask, cm, false);
+	let _ = test_framework::award_blocks_to_wallet(
+		&chain,
+		miner.clone(),
+		miner_mask,
+		cm,
+		false,
+		tx_pool.lock().deref_mut(),
+	);
 	bh += cm as u64;
 
 	wallet::controller::owner_single_use(Some(wallet4.clone()), mask4, None, |api, m| {
@@ -535,12 +648,14 @@ fn two_wallets_one_seed_impl(test_dir: &str) -> Result<(), wallet::Error> {
 		assert_eq!(outputs.len(), 9);
 		assert_eq!(info.amount_currently_spendable, base_amount * 45);
 		Ok(())
-	})?;
+	})
+	.unwrap();
 
 	wallet::controller::owner_single_use(Some(wallet5.clone()), mask5, None, |api, m| {
 		api.scan(m, None, false)?;
 		Ok(())
-	})?;
+	})
+	.unwrap();
 
 	wallet::controller::owner_single_use(Some(wallet5.clone()), mask5, None, |api, m| {
 		let info = wallet_info!(wallet5.clone(), m)?;
@@ -548,7 +663,8 @@ fn two_wallets_one_seed_impl(test_dir: &str) -> Result<(), wallet::Error> {
 		assert_eq!(outputs.len(), 9);
 		assert_eq!(info.amount_currently_spendable, base_amount * (45));
 		Ok(())
-	})?;
+	})
+	.unwrap();
 
 	// 4) If I recover from seed and start using the wallet without restoring,
 	// scan should restore the older outputs
@@ -558,29 +674,57 @@ fn two_wallets_one_seed_impl(test_dir: &str) -> Result<(), wallet::Error> {
 		m_client.clone(),
 		"wallet6",
 		base_amount * 10
-	)?;
+	)
+	.unwrap();
+	let _ = test_framework::award_blocks_to_wallet(
+		&chain,
+		miner.clone(),
+		miner_mask,
+		1,
+		false,
+		tx_pool.lock().deref_mut(),
+	);
 	send_to_dest!(
 		miner.clone(),
 		miner_mask,
 		m_client.clone(),
 		"wallet6",
 		base_amount * 11
-	)?;
+	)
+	.unwrap();
+	let _ = test_framework::award_blocks_to_wallet(
+		&chain,
+		miner.clone(),
+		miner_mask,
+		1,
+		false,
+		tx_pool.lock().deref_mut(),
+	);
 	send_to_dest!(
 		miner.clone(),
 		miner_mask,
 		m_client.clone(),
 		"wallet6",
 		base_amount * 12
-	)?;
+	)
+	.unwrap();
+	let _ = test_framework::award_blocks_to_wallet(
+		&chain,
+		miner.clone(),
+		miner_mask,
+		1,
+		false,
+		tx_pool.lock().deref_mut(),
+	);
 	bh += 3;
 
 	let _ = test_framework::award_blocks_to_wallet(
 		&chain,
 		miner.clone(),
 		miner_mask,
-		cm as usize,
+		cm,
 		false,
+		tx_pool.lock().deref_mut(),
 	);
 	bh += cm as u64;
 
@@ -590,12 +734,14 @@ fn two_wallets_one_seed_impl(test_dir: &str) -> Result<(), wallet::Error> {
 		assert_eq!(outputs.len(), 12);
 		assert_eq!(info.amount_currently_spendable, base_amount * 78);
 		Ok(())
-	})?;
+	})
+	.unwrap();
 
 	wallet::controller::owner_single_use(Some(wallet6.clone()), mask6, None, |api, m| {
 		api.scan(m, None, true)?;
 		Ok(())
-	})?;
+	})
+	.unwrap();
 
 	wallet::controller::owner_single_use(Some(wallet6.clone()), mask6, None, |api, m| {
 		let info = wallet_info!(wallet6.clone(), m)?;
@@ -603,7 +749,8 @@ fn two_wallets_one_seed_impl(test_dir: &str) -> Result<(), wallet::Error> {
 		assert_eq!(outputs.len(), 12);
 		assert_eq!(info.amount_currently_spendable, base_amount * (78));
 		Ok(())
-	})?;
+	})
+	.unwrap();
 
 	// 5) Start using same seed with a different account, amounts should
 	// be distinct and restore should return funds from other account
@@ -614,21 +761,48 @@ fn two_wallets_one_seed_impl(test_dir: &str) -> Result<(), wallet::Error> {
 		m_client.clone(),
 		"wallet7",
 		base_amount * 13
-	)?;
+	)
+	.unwrap();
+	let _ = test_framework::award_blocks_to_wallet(
+		&chain,
+		miner.clone(),
+		miner_mask,
+		1,
+		false,
+		tx_pool.lock().deref_mut(),
+	);
 	send_to_dest!(
 		miner.clone(),
 		miner_mask,
 		m_client.clone(),
 		"wallet7",
 		base_amount * 14
-	)?;
+	)
+	.unwrap();
+	let _ = test_framework::award_blocks_to_wallet(
+		&chain,
+		miner.clone(),
+		miner_mask,
+		1,
+		false,
+		tx_pool.lock().deref_mut(),
+	);
 	send_to_dest!(
 		miner.clone(),
 		miner_mask,
 		m_client.clone(),
 		"wallet7",
 		base_amount * 15
-	)?;
+	)
+	.unwrap();
+	let _ = test_framework::award_blocks_to_wallet(
+		&chain,
+		miner.clone(),
+		miner_mask,
+		1,
+		false,
+		tx_pool.lock().deref_mut(),
+	);
 	bh += 3;
 
 	// mix it up a bit
@@ -636,7 +810,8 @@ fn two_wallets_one_seed_impl(test_dir: &str) -> Result<(), wallet::Error> {
 		api.create_account_path(m, "account_1")?;
 		api.set_active_account(m, "account_1")?;
 		Ok(())
-	})?;
+	})
+	.unwrap();
 
 	send_to_dest!(
 		miner.clone(),
@@ -644,25 +819,59 @@ fn two_wallets_one_seed_impl(test_dir: &str) -> Result<(), wallet::Error> {
 		m_client.clone(),
 		"wallet7",
 		base_amount * 1
-	)?;
+	)
+	.unwrap();
+	let _ = test_framework::award_blocks_to_wallet(
+		&chain,
+		miner.clone(),
+		miner_mask,
+		1,
+		false,
+		tx_pool.lock().deref_mut(),
+	);
 	send_to_dest!(
 		miner.clone(),
 		miner_mask,
 		m_client.clone(),
 		"wallet7",
 		base_amount * 2
-	)?;
+	)
+	.unwrap();
+	let _ = test_framework::award_blocks_to_wallet(
+		&chain,
+		miner.clone(),
+		miner_mask,
+		1,
+		false,
+		tx_pool.lock().deref_mut(),
+	);
 	send_to_dest!(
 		miner.clone(),
 		miner_mask,
 		m_client.clone(),
 		"wallet7",
 		base_amount * 3
-	)?;
+	)
+	.unwrap();
+	let _ = test_framework::award_blocks_to_wallet(
+		&chain,
+		miner.clone(),
+		miner_mask,
+		1,
+		false,
+		tx_pool.lock().deref_mut(),
+	);
 	bh += 3;
 
 	// check balances
-	let _ = test_framework::award_blocks_to_wallet(&chain, miner.clone(), miner_mask, cm, false);
+	let _ = test_framework::award_blocks_to_wallet(
+		&chain,
+		miner.clone(),
+		miner_mask,
+		cm,
+		false,
+		tx_pool.lock().deref_mut(),
+	);
 	bh += cm as u64;
 
 	wallet::controller::owner_single_use(Some(wallet7.clone()), mask7, None, |api, m| {
@@ -676,7 +885,8 @@ fn two_wallets_one_seed_impl(test_dir: &str) -> Result<(), wallet::Error> {
 		assert_eq!(outputs.len(), 15);
 		assert_eq!(info.amount_currently_spendable, base_amount * 120);
 		Ok(())
-	})?;
+	})
+	.unwrap();
 
 	wallet::controller::owner_single_use(Some(wallet8.clone()), mask8, None, |api, m| {
 		api.scan(m, None, false)?;
@@ -690,7 +900,8 @@ fn two_wallets_one_seed_impl(test_dir: &str) -> Result<(), wallet::Error> {
 		assert_eq!(outputs.len(), 3);
 		assert_eq!(info.amount_currently_spendable, base_amount * 6);
 		Ok(())
-	})?;
+	})
+	.unwrap();
 
 	// 6) Start using same seed with a different account, now overwriting
 	// ids on account 2 as well, scan should get all outputs created
@@ -700,7 +911,8 @@ fn two_wallets_one_seed_impl(test_dir: &str) -> Result<(), wallet::Error> {
 		api.create_account_path(m, "account_1")?;
 		api.set_active_account(m, "account_1")?;
 		Ok(())
-	})?;
+	})
+	.unwrap();
 
 	send_to_dest!(
 		miner.clone(),
@@ -708,21 +920,48 @@ fn two_wallets_one_seed_impl(test_dir: &str) -> Result<(), wallet::Error> {
 		m_client.clone(),
 		"wallet9",
 		base_amount * 4
-	)?;
+	)
+	.unwrap();
+	let _ = test_framework::award_blocks_to_wallet(
+		&chain,
+		miner.clone(),
+		miner_mask,
+		1,
+		false,
+		tx_pool.lock().deref_mut(),
+	);
 	send_to_dest!(
 		miner.clone(),
 		miner_mask,
 		m_client.clone(),
 		"wallet9",
 		base_amount * 5
-	)?;
+	)
+	.unwrap();
+	let _ = test_framework::award_blocks_to_wallet(
+		&chain,
+		miner.clone(),
+		miner_mask,
+		1,
+		false,
+		tx_pool.lock().deref_mut(),
+	);
 	send_to_dest!(
 		miner.clone(),
 		miner_mask,
 		m_client.clone(),
 		"wallet9",
 		base_amount * 6
-	)?;
+	)
+	.unwrap();
+	let _ = test_framework::award_blocks_to_wallet(
+		&chain,
+		miner.clone(),
+		miner_mask,
+		1,
+		false,
+		tx_pool.lock().deref_mut(),
+	);
 	bh += 3;
 	let _bh = bh;
 
@@ -743,9 +982,17 @@ fn two_wallets_one_seed_impl(test_dir: &str) -> Result<(), wallet::Error> {
 		assert_eq!(outputs.len(), 15);
 		assert_eq!(info.amount_currently_spendable, base_amount * 120);
 		Ok(())
-	})?;
+	})
+	.unwrap();
 
-	let _ = test_framework::award_blocks_to_wallet(&chain, miner.clone(), miner_mask, cm, false);
+	let _ = test_framework::award_blocks_to_wallet(
+		&chain,
+		miner.clone(),
+		miner_mask,
+		cm,
+		false,
+		tx_pool.lock().deref_mut(),
+	);
 
 	// 7) Ensure scan creates missing accounts
 	wallet::controller::owner_single_use(Some(wallet10.clone()), mask10, None, |api, m| {
@@ -762,19 +1009,20 @@ fn two_wallets_one_seed_impl(test_dir: &str) -> Result<(), wallet::Error> {
 		assert_eq!(outputs.len(), 15);
 		assert_eq!(info.amount_currently_spendable, base_amount * 120);
 		Ok(())
-	})?;
+	})
+	.unwrap();
 
 	// let logging finish
 	stopper.store(false, Ordering::Relaxed);
 	thread::sleep(Duration::from_millis(200));
-	Ok(())
 }
 
 // Testing output scanning functionality, easier here as the testing framework
 // is all here
 fn output_scanning_impl(test_dir: &str) -> Result<(), wallet::Error> {
 	global::set_local_chain_type(global::ChainTypes::AutomatedTesting);
-	let mut wallet_proxy = create_wallet_proxy(test_dir.into());
+	let tx_pool: Arc<Mutex<Vec<Transaction>>> = Arc::new(Mutex::new(Vec::new()));
+	let mut wallet_proxy = create_wallet_proxy(test_dir.into(), tx_pool.clone());
 	let chain = wallet_proxy.chain.clone();
 	let stopper = wallet_proxy.running.clone();
 	// Create a new wallet test client, and set its queues to communicate with the
@@ -799,8 +1047,14 @@ fn output_scanning_impl(test_dir: &str) -> Result<(), wallet::Error> {
 
 	// Do some mining
 	let bh = 20u64;
-	let _ =
-		test_framework::award_blocks_to_wallet(&chain, wallet1.clone(), mask1, bh as usize, false);
+	let _ = test_framework::award_blocks_to_wallet(
+		&chain,
+		wallet1.clone(),
+		mask1,
+		bh as usize,
+		false,
+		tx_pool.lock().deref_mut(),
+	);
 
 	// Now some chain scanning
 	{
@@ -873,9 +1127,7 @@ fn scan() {
 fn two_wallets_one_seed() {
 	let test_dir = "test_output/two_wallets_one_seed";
 	setup(test_dir);
-	if let Err(e) = two_wallets_one_seed_impl(test_dir) {
-		panic!("Libwallet Error: {}", e);
-	}
+	two_wallets_one_seed_impl(test_dir);
 	clean_output_dir(test_dir);
 }
 

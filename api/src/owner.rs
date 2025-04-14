@@ -42,7 +42,7 @@ use crate::libwallet::{
 use crate::util::logger::LoggingConfig;
 use crate::util::secp::key::SecretKey;
 use crate::util::{from_hex, Mutex, ZeroingString};
-use libwallet::{OwnershipProof, OwnershipProofValidation, RetrieveTxQueryArgs};
+use libwallet::{wallet_lock, OwnershipProof, OwnershipProofValidation, RetrieveTxQueryArgs};
 use mwc_wallet_util::mwc_util::secp::key::PublicKey;
 use mwc_wallet_util::mwc_util::static_secp_instance;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -295,8 +295,7 @@ where
 		&self,
 		keychain_mask: Option<&SecretKey>,
 	) -> Result<Vec<AcctPathMapping>, Error> {
-		let mut w_lock = self.wallet_inst.lock();
-		let w = w_lock.lc_provider()?.wallet_inst()?;
+		wallet_lock!(self.wallet_inst, w);
 		// Test keychain mask, to keep API consistent
 		let _ = w.keychain(keychain_mask)?;
 		owner::accounts(&mut **w)
@@ -347,8 +346,7 @@ where
 		keychain_mask: Option<&SecretKey>,
 		label: &str,
 	) -> Result<Identifier, Error> {
-		let mut w_lock = self.wallet_inst.lock();
-		let w = w_lock.lc_provider()?.wallet_inst()?;
+		wallet_lock!(self.wallet_inst, w);
 		owner::create_account_path(&mut **w, keychain_mask, label)
 	}
 
@@ -395,8 +393,7 @@ where
 		keychain_mask: Option<&SecretKey>,
 		label: &str,
 	) -> Result<(), Error> {
-		let mut w_lock = self.wallet_inst.lock();
-		let w = w_lock.lc_provider()?.wallet_inst()?;
+		wallet_lock!(self.wallet_inst, w);
 		// Test keychain mask, to keep API consistent
 		let _ = w.keychain(keychain_mask)?;
 		owner::set_active_account(&mut **w, label)
@@ -708,7 +705,8 @@ where
 	) -> Result<Slate, Error> {
 		let address = args.address.clone();
 
-		owner::update_wallet_state(self.wallet_inst.clone(), keychain_mask, &None)?;
+		wallet_lock!(self.wallet_inst, w);
+		owner::update_wallet_state(&mut **w, keychain_mask, &None)?;
 		let send_args = args.send_args.clone();
 		//minimum_confirmations cannot be zero.
 		let minimum_confirmations = args.minimum_confirmations.clone();
@@ -768,11 +766,8 @@ where
 			None
 		};
 
-		let mut slate = {
-			let mut w_lock = self.wallet_inst.lock();
-			let w = w_lock.lc_provider()?.wallet_inst()?;
-			owner::init_send_tx(&mut **w, keychain_mask, &args, self.doctest_mode, routputs)?
-		};
+		let mut slate =
+			{ owner::init_send_tx(&mut **w, keychain_mask, &args, self.doctest_mode, routputs)? };
 
 		match send_args {
 			Some(sa) => {
@@ -781,8 +776,6 @@ where
 				match sender_info {
 					Some((sender, other_wallet_info)) => {
 						let (slatepack_secret, height, secp) = {
-							let mut w_lock = self.wallet_inst.lock();
-							let w = w_lock.lc_provider()?.wallet_inst()?;
 							let keychain = w.keychain(keychain_mask)?;
 							let (height, _, _) = w.w2n_client().get_chain_tip()?;
 							let slatepack_secret =
@@ -893,8 +886,7 @@ where
 		keychain_mask: Option<&SecretKey>,
 		args: &IssueInvoiceTxArgs,
 	) -> Result<Slate, Error> {
-		let mut w_lock = self.wallet_inst.lock();
-		let w = w_lock.lc_provider()?.wallet_inst()?;
+		wallet_lock!(self.wallet_inst, w);
 		owner::issue_invoice_tx(&mut **w, keychain_mask, args, self.doctest_mode, 1)
 	}
 
@@ -959,7 +951,9 @@ where
 		slate: &Slate,
 		args: &InitTxArgs,
 	) -> Result<Slate, Error> {
-		owner::update_wallet_state(self.wallet_inst.clone(), keychain_mask, &None)?;
+		wallet_lock!(self.wallet_inst, w);
+
+		owner::update_wallet_state(&mut **w, keychain_mask, &None)?;
 
 		//minimum_confirmations cannot be zero.
 		let minimum_confirmations = args.minimum_confirmations.clone();
@@ -968,8 +962,6 @@ where
 				"minimum_confirmations can not smaller than 1".to_owned(),
 			));
 		}
-		let mut w_lock = self.wallet_inst.lock();
-		let w = w_lock.lc_provider()?.wallet_inst()?;
 		owner::process_invoice_tx(
 			&mut **w,
 			keychain_mask,
@@ -1043,8 +1035,7 @@ where
 		address: Option<String>,
 		participant_id: usize,
 	) -> Result<(), Error> {
-		let mut w_lock = self.wallet_inst.lock();
-		let w = w_lock.lc_provider()?.wallet_inst()?;
+		wallet_lock!(self.wallet_inst, w);
 		owner::tx_lock_outputs(
 			&mut **w,
 			keychain_mask,
@@ -1120,8 +1111,7 @@ where
 		keychain_mask: Option<&SecretKey>,
 		slate: &Slate,
 	) -> Result<Slate, Error> {
-		let mut w_lock = self.wallet_inst.lock();
-		let w = w_lock.lc_provider()?.wallet_inst()?;
+		wallet_lock!(self.wallet_inst, w);
 		let (slate_res, _context) =
 			owner::finalize_tx(&mut **w, keychain_mask, slate, true, self.doctest_mode)?;
 
@@ -1187,8 +1177,7 @@ where
 		fluff: bool,
 	) -> Result<(), Error> {
 		let client = {
-			let mut w_lock = self.wallet_inst.lock();
-			let w = w_lock.lc_provider()?.wallet_inst()?;
+			wallet_lock!(self.wallet_inst, w);
 			// Test keychain mask, to keep API consistent
 			let _ = w.keychain(keychain_mask)?;
 			w.w2n_client().clone()
@@ -1310,8 +1299,7 @@ where
 		keychain_mask: Option<&SecretKey>,
 		tx_log_entry: &TxLogEntry,
 	) -> Result<Option<Transaction>, Error> {
-		let mut w_lock = self.wallet_inst.lock();
-		let w = w_lock.lc_provider()?.wallet_inst()?;
+		wallet_lock!(self.wallet_inst, w);
 		// Test keychain mask, to keep API consistent
 		let _ = w.keychain(keychain_mask)?;
 		owner::get_stored_tx(&**w, tx_log_entry)
@@ -1319,8 +1307,7 @@ where
 
 	/// Loads a stored transaction from a file
 	pub fn load_stored_tx(&self, file: &String) -> Result<Transaction, Error> {
-		let mut w_lock = self.wallet_inst.lock();
-		let w = w_lock.lc_provider()?.wallet_inst()?;
+		wallet_lock!(self.wallet_inst, w);
 		owner::load_stored_tx(&**w, file)
 	}
 
@@ -1381,8 +1368,7 @@ where
 		slate: &Slate,
 	) -> Result<(), Error> {
 		{
-			let mut w_lock = self.wallet_inst.lock();
-			let w = w_lock.lc_provider()?.wallet_inst()?;
+			wallet_lock!(self.wallet_inst, w);
 			// Test keychain mask, to keep API consistent
 			let _ = w.keychain(keychain_mask)?;
 		}
@@ -1596,8 +1582,7 @@ where
 		keychain_mask: Option<&SecretKey>,
 	) -> Result<NodeHeightResult, Error> {
 		{
-			let mut w_lock = self.wallet_inst.lock();
-			let w = w_lock.lc_provider()?.wallet_inst()?;
+			wallet_lock!(self.wallet_inst, w);
 			// Test keychain mask, to keep API consistent
 			let _ = w.keychain(keychain_mask)?;
 		}
@@ -2473,7 +2458,10 @@ where
 		params: &SwapStartArgs,
 	) -> Result<String, Error> {
 		// Updating wallet state first because we need to select outputs.
-		owner::update_wallet_state(self.wallet_inst.clone(), keychain_mask, &None)?;
+		{
+			wallet_lock!(self.wallet_inst, w);
+			owner::update_wallet_state(&mut **w, keychain_mask, &None)?;
+		}
 		owner_swap::swap_start(self.wallet_inst.clone(), keychain_mask, params)
 			.map_err(|e| e.into())
 	}
@@ -2720,8 +2708,7 @@ where
 		),
 		Error,
 	> {
-		let mut w_lock = self.wallet_inst.lock();
-		let w = w_lock.lc_provider()?.wallet_inst()?;
+		wallet_lock!(self.wallet_inst, w);
 		foreign::decrypt_slate(&mut **w, keychain_mask, encrypted_slate, address_index)
 	}
 
@@ -2736,8 +2723,7 @@ where
 		address_index: Option<u32>,
 		use_test_rng: bool,
 	) -> Result<VersionedSlate, Error> {
-		let mut w_lock = self.wallet_inst.lock();
-		let w = w_lock.lc_provider()?.wallet_inst()?;
+		wallet_lock!(self.wallet_inst, w);
 		foreign::encrypt_slate(
 			&mut **w,
 			keychain_mask,
@@ -2757,8 +2743,7 @@ where
 		features: OutputFeatures,
 		amount: u64,
 	) -> Result<BuiltOutput, Error> {
-		let mut w_lock = self.wallet_inst.lock();
-		let w = w_lock.lc_provider()?.wallet_inst()?;
+		wallet_lock!(self.wallet_inst, w);
 		owner::build_output(&mut **w, keychain_mask, features, amount)
 	}
 }

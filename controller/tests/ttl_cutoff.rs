@@ -23,19 +23,24 @@ use impls::test_framework::{self, LocalWalletClient};
 use libwallet::{InitTxArgs, Slate, TxLogEntryType};
 use mwc_wallet_libwallet as libwallet;
 use mwc_wallet_util::mwc_core::global;
+use std::ops::DerefMut;
 use std::sync::atomic::Ordering;
+use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
 #[macro_use]
 mod common;
 use common::{clean_output_dir, create_wallet_proxy, setup};
+use mwc_wallet_util::mwc_core::core::Transaction;
+use mwc_wallet_util::mwc_util::Mutex;
 
 /// Test cutoff block times
 fn ttl_cutoff_test_impl(test_dir: &str) -> Result<(), wallet::Error> {
 	global::set_local_chain_type(global::ChainTypes::AutomatedTesting);
 	// Create a new proxy to simulate server and wallet responses
-	let mut wallet_proxy = create_wallet_proxy(test_dir.into());
+	let tx_pool: Arc<Mutex<Vec<Transaction>>> = Arc::new(Mutex::new(Vec::new()));
+	let mut wallet_proxy = create_wallet_proxy(test_dir.into(), tx_pool.clone());
 	let chain = wallet_proxy.chain.clone();
 	let stopper = wallet_proxy.running.clone();
 
@@ -77,8 +82,14 @@ fn ttl_cutoff_test_impl(test_dir: &str) -> Result<(), wallet::Error> {
 
 	// Do some mining
 	let bh = 10u64;
-	let _ =
-		test_framework::award_blocks_to_wallet(&chain, wallet1.clone(), mask1, bh as usize, false);
+	let _ = test_framework::award_blocks_to_wallet(
+		&chain,
+		wallet1.clone(),
+		mask1,
+		bh as usize,
+		false,
+		tx_pool.lock().deref_mut(),
+	);
 
 	let amount = 2_000_000_000; // mwc had 60_000_000_000
 	let mut slate = Slate::blank(1, false);
@@ -107,7 +118,14 @@ fn ttl_cutoff_test_impl(test_dir: &str) -> Result<(), wallet::Error> {
 	})?;
 
 	// Now mine past the block, and check again. Transaction should be gone.
-	let _ = test_framework::award_blocks_to_wallet(&chain, wallet1.clone(), mask1, 2, false);
+	let _ = test_framework::award_blocks_to_wallet(
+		&chain,
+		wallet1.clone(),
+		mask1,
+		2,
+		false,
+		tx_pool.lock().deref_mut(),
+	);
 
 	wallet::controller::owner_single_use(Some(wallet1.clone()), mask1, None, |sender_api, m| {
 		let (_, txs) = sender_api.retrieve_txs(m, true, None, Some(slate.id), None, None)?;
@@ -156,7 +174,14 @@ fn ttl_cutoff_test_impl(test_dir: &str) -> Result<(), wallet::Error> {
 	})?;
 
 	// Mine past the ttl block and try to send
-	let _ = test_framework::award_blocks_to_wallet(&chain, wallet1.clone(), mask1, 2, false);
+	let _ = test_framework::award_blocks_to_wallet(
+		&chain,
+		wallet1.clone(),
+		mask1,
+		2,
+		false,
+		tx_pool.lock().deref_mut(),
+	);
 
 	// Wallet 2 will need to have updated past the TTL
 	wallet::controller::owner_single_use(Some(wallet2.clone()), mask2, None, |sender_api, m| {

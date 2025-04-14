@@ -20,6 +20,8 @@ extern crate mwc_wallet_impls as impls;
 
 use mwc_wallet_util::mwc_core as core;
 use mwc_wallet_util::mwc_core::global;
+use std::ops::DerefMut;
+use std::sync::Arc;
 
 use impls::test_framework::{self, LocalWalletClient};
 use libwallet::{InitTxArgs, IssueInvoiceTxArgs, Slate};
@@ -31,6 +33,8 @@ use std::time::Duration;
 #[macro_use]
 mod common;
 use common::{clean_output_dir, create_wallet_proxy, setup};
+use mwc_wallet_util::mwc_core::core::Transaction;
+use mwc_wallet_util::mwc_util::Mutex;
 
 fn broken_change_test_impl(
 	test_dir: &str,
@@ -39,7 +43,8 @@ fn broken_change_test_impl(
 	test_send: bool,
 ) -> Result<(), wallet::Error> {
 	global::set_local_chain_type(global::ChainTypes::AutomatedTesting);
-	let mut wallet_proxy = create_wallet_proxy(test_dir.into());
+	let tx_pool: Arc<Mutex<Vec<Transaction>>> = Arc::new(Mutex::new(Vec::new()));
+	let mut wallet_proxy = create_wallet_proxy(test_dir.into(), tx_pool.clone());
 	let chain = wallet_proxy.chain.clone();
 	let stopper = wallet_proxy.running.clone();
 
@@ -84,7 +89,14 @@ fn broken_change_test_impl(
 	let output_num = 5;
 
 	// Mine into wallet 1
-	let _ = test_framework::award_blocks_to_wallet(&chain, wallet1.clone(), mask1, 4 + 3, false);
+	let _ = test_framework::award_blocks_to_wallet(
+		&chain,
+		wallet1.clone(),
+		mask1,
+		4 + 3,
+		false,
+		tx_pool.lock().deref_mut(),
+	);
 	let fee = core::libtx::tx_fee(inputs_num, output_num + 1, 1);
 
 	// send a single block's worth of transactions with minimal strategy

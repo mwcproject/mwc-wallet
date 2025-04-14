@@ -21,6 +21,8 @@ extern crate mwc_wallet_libwallet as libwallet;
 
 use mwc_wallet_util::mwc_core as core;
 use mwc_wallet_util::mwc_core::global;
+use std::ops::DerefMut;
+use std::sync::Arc;
 
 use self::libwallet::{InitTxArgs, Slate};
 use impls::test_framework::{self, LocalWalletClient};
@@ -33,13 +35,16 @@ use std::time::Duration;
 mod common;
 use common::{clean_output_dir, create_wallet_proxy, setup};
 use libwallet::NodeClient;
+use mwc_wallet_util::mwc_core::core::Transaction;
 use mwc_wallet_util::mwc_util::secp::Secp256k1;
+use mwc_wallet_util::mwc_util::Mutex;
 
 /// self send impl
 fn file_repost_test_impl(test_dir: &str) -> Result<(), wallet::Error> {
 	// Create a new proxy to simulate server and wallet responses
 	global::set_local_chain_type(global::ChainTypes::AutomatedTesting);
-	let mut wallet_proxy = create_wallet_proxy(test_dir.into());
+	let tx_pool: Arc<Mutex<Vec<Transaction>>> = Arc::new(Mutex::new(Vec::new()));
+	let mut wallet_proxy = create_wallet_proxy(test_dir.into(), tx_pool.clone());
 	let chain = wallet_proxy.chain.clone();
 	let stopper = wallet_proxy.running.clone();
 	let secp = Secp256k1::new();
@@ -100,8 +105,14 @@ fn file_repost_test_impl(test_dir: &str) -> Result<(), wallet::Error> {
 		w.set_parent_key_id_by_name("mining")?;
 	}
 	let mut bh = 10u64;
-	let _ =
-		test_framework::award_blocks_to_wallet(&chain, wallet1.clone(), mask1, bh as usize, false);
+	let _ = test_framework::award_blocks_to_wallet(
+		&chain,
+		wallet1.clone(),
+		mask1,
+		bh as usize,
+		false,
+		tx_pool.lock().deref_mut(),
+	);
 
 	let send_file = format!("{}/part_tx_1.tx", test_dir);
 	let receive_file = format!("{}/part_tx_2.tx", test_dir);
@@ -132,7 +143,14 @@ fn file_repost_test_impl(test_dir: &str) -> Result<(), wallet::Error> {
 		Ok(())
 	})?;
 
-	let _ = test_framework::award_blocks_to_wallet(&chain, wallet1.clone(), mask1, 3, false);
+	let _ = test_framework::award_blocks_to_wallet(
+		&chain,
+		wallet1.clone(),
+		mask1,
+		3,
+		false,
+		tx_pool.lock().deref_mut(),
+	);
 	bh += 3;
 
 	// wallet 1 receives file to different account, completes
@@ -179,11 +197,17 @@ fn file_repost_test_impl(test_dir: &str) -> Result<(), wallet::Error> {
 		let (_, txs) = api.retrieve_txs(m, true, None, Some(slate.id), None, None)?;
 		let stored_tx = api.get_stored_tx(m, &txs[0])?;
 		api.post_tx(m, &stored_tx.unwrap(), false)?;
-		bh += 1;
 		Ok(())
 	})?;
 
-	let _ = test_framework::award_blocks_to_wallet(&chain, wallet1.clone(), mask1, 3, false);
+	let _ = test_framework::award_blocks_to_wallet(
+		&chain,
+		wallet1.clone(),
+		mask1,
+		3,
+		false,
+		tx_pool.lock().deref_mut(),
+	);
 	bh += 3;
 
 	// update/test contents of both accounts
@@ -239,7 +263,14 @@ fn file_repost_test_impl(test_dir: &str) -> Result<(), wallet::Error> {
 		Ok(())
 	})?;
 
-	let _ = test_framework::award_blocks_to_wallet(&chain, wallet1.clone(), mask1, 3, false);
+	let _ = test_framework::award_blocks_to_wallet(
+		&chain,
+		wallet1.clone(),
+		mask1,
+		3,
+		false,
+		tx_pool.lock().deref_mut(),
+	);
 	bh += 3;
 
 	// Now repost from cached
@@ -247,11 +278,17 @@ fn file_repost_test_impl(test_dir: &str) -> Result<(), wallet::Error> {
 		let (_, txs) = api.retrieve_txs(m, true, None, Some(slate.id), None, None)?;
 		let stored_tx = api.get_stored_tx(m, &txs[0])?;
 		api.post_tx(m, &stored_tx.unwrap(), false)?;
-		bh += 1;
 		Ok(())
 	})?;
 
-	let _ = test_framework::award_blocks_to_wallet(&chain, wallet1.clone(), mask1, 3, false);
+	let _ = test_framework::award_blocks_to_wallet(
+		&chain,
+		wallet1.clone(),
+		mask1,
+		3,
+		false,
+		tx_pool.lock().deref_mut(),
+	);
 	bh += 3;
 	//
 	// update/test contents of both accounts

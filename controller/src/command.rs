@@ -49,7 +49,9 @@ use mwc_wallet_libwallet::swap::fsm::state::StateId;
 use mwc_wallet_libwallet::swap::trades;
 use mwc_wallet_libwallet::swap::types::Action;
 use mwc_wallet_libwallet::swap::{message, Swap};
-use mwc_wallet_libwallet::{OwnershipProof, Slate, StatusMessage, TxLogEntry, WalletInst};
+use mwc_wallet_libwallet::{
+	wallet_lock, OwnershipProof, Slate, StatusMessage, TxLogEntry, WalletInst,
+};
 use mwc_wallet_util::mwc_core::consensus::MWC_BASE;
 use mwc_wallet_util::mwc_core::core::{amount_to_hr_string, Transaction};
 use mwc_wallet_util::mwc_core::global::{FLOONET_DNS_SEEDS, MAINNET_DNS_SEEDS};
@@ -717,8 +719,7 @@ where
 			}
 
 			let (slatepack_secret, slatepack_sender, height, secp) = {
-				let mut w_lock = api.wallet_inst.lock();
-				let w = w_lock.lc_provider()?.wallet_inst()?;
+				wallet_lock!(api.wallet_inst, w);
 				let keychain = w.keychain(keychain_mask)?;
 				let slatepack_secret =
 					proofaddress::payment_proof_address_dalek_secret(&keychain, None)?;
@@ -962,8 +963,7 @@ where
 	};
 	controller::foreign_single_use(owner_api.wallet_inst.clone(), km, |api| {
 		let (slatepack_secret, height, secp) = {
-			let mut w_lock = api.wallet_inst.lock();
-			let w = w_lock.lc_provider()?.wallet_inst()?;
+			wallet_lock!(api.wallet_inst, w);
 			let keychain = w.keychain(keychain_mask)?;
 			let slatepack_secret =
 				proofaddress::payment_proof_address_dalek_secret(&keychain, None)?;
@@ -1070,8 +1070,7 @@ where
 	};
 	controller::foreign_single_use(owner_api.wallet_inst.clone(), km, |api| {
 		let (slatepack_secret, height, secp) = {
-			let mut w_lock = api.wallet_inst.lock();
-			let w = w_lock.lc_provider()?.wallet_inst()?;
+			wallet_lock!(api.wallet_inst, w);
 			let keychain = w.keychain(keychain_mask)?;
 			let slatepack_secret =
 				proofaddress::payment_proof_address_dalek_secret(&keychain, None)?;
@@ -1180,8 +1179,7 @@ where
 
 	controller::owner_single_use(None, keychain_mask, Some(owner_api), |api, m| {
 		let (slatepack_secret, height, secp) = {
-			let mut w_lock = api.wallet_inst.lock();
-			let w = w_lock.lc_provider()?.wallet_inst()?;
+			wallet_lock!(api.wallet_inst, w);
 			let keychain = w.keychain(m)?;
 			let slatepack_secret = proofaddress::payment_proof_address_secret(&keychain, None)?;
 			let slatepack_secret = DalekSecretKey::from_bytes(&slatepack_secret.0)
@@ -1289,8 +1287,7 @@ where
 	if args.dest.is_some() || slatepack_format {
 		controller::owner_single_use(None, keychain_mask, Some(owner_api), |api, m| {
 			let (slatepack_secret, secp) = {
-				let mut w_lock = api.wallet_inst.lock();
-				let w = w_lock.lc_provider()?.wallet_inst()?;
+				wallet_lock!(api.wallet_inst, w);
 				let keychain = w.keychain(m)?;
 				let slatepack_secret = proofaddress::payment_proof_address_secret(&keychain, None)?;
 				let slatepack_secret = DalekSecretKey::from_bytes(&slatepack_secret.0)
@@ -1361,8 +1358,7 @@ where
 		let slate = api.issue_invoice_tx(m, &args.issue_args)?;
 
 		let (slatepack_secret, tor_address, secp) = {
-			let mut w_lock = api.wallet_inst.lock();
-			let w = w_lock.lc_provider()?.wallet_inst()?;
+			wallet_lock!(api.wallet_inst, w);
 			let keychain = w.keychain(keychain_mask)?;
 			let slatepack_secret =
 				proofaddress::payment_proof_address_dalek_secret(&keychain, None)?;
@@ -1427,8 +1423,7 @@ where
 	K: keychain::Keychain + 'static,
 {
 	let (slatepack_secret, tor_address, height, secp) = {
-		let mut w_lock = owner_api.wallet_inst.lock();
-		let w = w_lock.lc_provider()?.wallet_inst()?;
+		wallet_lock!(owner_api.wallet_inst, w);
 		let keychain = w.keychain(keychain_mask)?;
 		let slatepack_secret = proofaddress::payment_proof_address_dalek_secret(&keychain, None)?;
 		let slatepack_pk = DalekPublicKey::from(&slatepack_secret);
@@ -1784,8 +1779,7 @@ where
 
 	controller::owner_single_use(None, keychain_mask, Some(owner_api), |api, m| {
 		let (slatepack_secret, height, secp) = {
-			let mut w_lock = api.wallet_inst.lock();
-			let w = w_lock.lc_provider()?.wallet_inst()?;
+			wallet_lock!(api.wallet_inst, w);
 			let keychain = w.keychain(keychain_mask)?;
 			let slatepack_secret =
 				proofaddress::payment_proof_address_dalek_secret(&keychain, None)?;
@@ -3590,7 +3584,10 @@ where
 	K: keychain::Keychain + 'static,
 {
 	// Let's do refresh first
-	let _ = owner::perform_refresh_from_node(wallet_inst.clone(), keychain_mask, &None)?;
+	{
+		wallet_lock!(wallet_inst, w);
+		let _ = owner::perform_refresh_from_node(&mut **w, keychain_mask, &None)?;
+	}
 
 	let mut json_res = JsonMap::new();
 
@@ -3814,8 +3811,7 @@ where
 			}
 			if peers.len() == 0 {
 				// let's add peer is possible
-				let mut w_lock = wallet_inst.lock();
-				let w = w_lock.lc_provider()?.wallet_inst()?;
+				wallet_lock!(wallet_inst, w);
 				match w.w2n_client().get_libp2p_peers() {
 					Ok(libp2p_peers) => {
 						for addr in libp2p_peers.libp2p_peers {
@@ -3864,8 +3860,7 @@ where
 			}
 
 			if peers.len() < 5 {
-				let mut w_lock = wallet_inst.lock();
-				let w = w_lock.lc_provider()?.wallet_inst()?;
+				wallet_lock!(wallet_inst, w);
 				if let Ok(messages) = w.w2n_client().get_libp2p_messages() {
 					let mut inject_msgs: Vec<ReceivedMessage> = vec![];
 
@@ -4168,8 +4163,7 @@ where
 
 	if args.check_integrity_expiration {
 		let tip_height = {
-			let mut w_lock = wallet_inst.lock();
-			let w = w_lock.lc_provider()?.wallet_inst()?;
+			wallet_lock!(wallet_inst, w);
 			w.w2n_client().get_chain_tip()?.0
 		};
 

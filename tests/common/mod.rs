@@ -48,13 +48,13 @@ use url::Url;
 // Set up 2 wallets and launch the test proxy behind them
 #[macro_export]
 macro_rules! setup_proxy {
-	($test_dir: expr, $chain: ident, $wallet1: ident, $client1: ident, $mask1: ident, $wallet2: ident, $client2: ident, $mask2: ident) => {
+	($test_dir: expr,  $tx_pool: ident, $chain: ident, $wallet1: ident, $client1: ident, $mask1: ident, $wallet2: ident, $client2: ident, $mask2: ident) => {
 		// Create a new proxy to simulate server and wallet responses
 		let mut wallet_proxy: WalletProxy<
 			DefaultLCProvider<LocalWalletClient, ExtKeychain>,
 			LocalWalletClient,
 			ExtKeychain,
-		> = WalletProxy::new($test_dir.into());
+		> = WalletProxy::new($test_dir.into(), $tx_pool.clone());
 		let $chain = wallet_proxy.chain.clone();
 
 		// load app yaml. If it don't exist, just say so and exit
