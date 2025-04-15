@@ -1268,7 +1268,7 @@ where
 		}
 	}*/
 
-	// It is a save heihgt, we can't rollback there at node level
+	// It is a safe height, we can't rollback there at node level
 	let archive_height = Chain::height_2_archive_height(tip_height).saturating_sub(DAY_HEIGHT * 2);
 
 	// Validated outputs states against the chain
@@ -1670,7 +1670,7 @@ where
 	C: NodeClient + 'a,
 	K: Keychain + 'a,
 {
-	// correcting the problem, deleting all tx except the firt one
+	// correcting the problem, deleting all tx except the first one
 	let mut batch = wallet.batch(keychain_mask)?;
 
 	for i in 1..collided_coinbase_txs.len() {

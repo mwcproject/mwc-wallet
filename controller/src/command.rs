@@ -89,7 +89,6 @@ pub struct GlobalArgs {
 	pub account: Option<String>,
 	pub api_secret: Option<String>,
 	pub node_api_secret: Option<String>,
-	pub show_spent: bool,
 	pub password: Option<ZeroingString>,
 	pub tls_conf: Option<TLSConfig>,
 }
@@ -1633,10 +1632,15 @@ where
 	Ok(())
 }
 
+pub struct OutputsArgs {
+	pub show_spent: bool,
+}
+
 pub fn outputs<L, C, K>(
 	owner_api: &mut Owner<L, C, K>,
 	keychain_mask: Option<&SecretKey>,
 	g_args: &GlobalArgs,
+	args: OutputsArgs,
 	dark_scheme: bool,
 ) -> Result<(), Error>
 where
@@ -1647,7 +1651,7 @@ where
 	let updater_running = owner_api.updater_running.load(Ordering::Relaxed);
 	controller::owner_single_use(None, keychain_mask, Some(owner_api), |api, m| {
 		let res = api.node_height(m)?;
-		let (validated, outputs) = api.retrieve_outputs(m, g_args.show_spent, true, None)?;
+		let (validated, outputs) = api.retrieve_outputs(m, args.show_spent, true, None)?;
 		display::outputs(
 			&g_args.account,
 			res.height,

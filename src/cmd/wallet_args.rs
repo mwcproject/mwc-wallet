@@ -295,10 +295,6 @@ pub fn parse_global_args(
 	args: &ArgMatches,
 ) -> Result<command::GlobalArgs, ParseError> {
 	let account = args.value_of("account").map(|s| s.to_string());
-	let mut show_spent = false;
-	if args.is_present("show_spent") {
-		show_spent = true;
-	}
 	let api_secret = get_first_line(config.api_secret_path.clone());
 	let node_api_secret = get_first_line(config.node_api_secret_path.clone());
 	let password = match args.value_of("pass") {
@@ -322,7 +318,6 @@ pub fn parse_global_args(
 
 	Ok(command::GlobalArgs {
 		account: account,
-		show_spent: show_spent,
 		api_secret: api_secret,
 		node_api_secret: node_api_secret,
 		password: password,
@@ -972,6 +967,12 @@ pub fn parse_check_args(args: &ArgMatches) -> Result<command::CheckArgs, ParseEr
 		start_height,
 		backwards_from_tip,
 		delete_unconfirmed,
+	})
+}
+
+pub fn parse_outputs_args(args: &ArgMatches) -> Result<command::OutputsArgs, ParseError> {
+	Ok(command::OutputsArgs {
+		show_spent: args.is_present("show_spent"),
 	})
 }
 
@@ -1827,12 +1828,16 @@ where
 				wallet_config.dark_background_color_scheme.unwrap_or(true),
 			)
 		}
-		("outputs", Some(_)) => command::outputs(
-			owner_api,
-			km,
-			&global_wallet_args,
-			wallet_config.dark_background_color_scheme.unwrap_or(true),
-		),
+		("outputs", Some(args)) => {
+			let a = arg_parse!(parse_outputs_args(&args));
+			command::outputs(
+				owner_api,
+				km,
+				&global_wallet_args,
+				a,
+				wallet_config.dark_background_color_scheme.unwrap_or(true),
+			)
+		}
 		("txs", Some(args)) => {
 			let a = arg_parse!(parse_txs_args(&args));
 			command::txs(

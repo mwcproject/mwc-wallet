@@ -306,13 +306,13 @@ where
 		}
 	}
 
-	if height_limit > 0 {
+	if height_limit == 0 {
 		for tx in wallet.tx_log_archive_iter() {
 			if filter_tx_entry(&tx, query_args) {
 				return_txs.push(tx);
 			}
 		}
-
+	} else {
 		return_txs.retain(|tx| {
 			tx.output_height >= height_limit || (!tx.confirmed && !tx.is_cancelled_reverted())
 		});
