@@ -41,6 +41,15 @@ macro_rules! wallet_inst {
 }
 
 #[macro_export]
+macro_rules! wallet_inst_test {
+	($wallet:ident, $w: ident) => {
+		let mut w_lock = $wallet.lock();
+		let lc = w_lock.lc_provider().unwrap();
+		let $w = lc.wallet_inst().unwrap();
+	};
+}
+
+#[macro_export]
 macro_rules! create_wallet_and_add {
 	($client:ident, $wallet: ident, $mask: ident, $test_dir: expr, $name: expr, $seed_phrase: expr, $proxy: expr, $create_mask: expr) => {
 		let $client = LocalWalletClient::new($name, $proxy.tx.clone());

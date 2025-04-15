@@ -677,13 +677,11 @@ where
 
 	fn save(&mut self, out: OutputData) -> Result<(), Error> {
 		// Save the output data to the db.
-		{
-			let key = match out.mmr_index {
-				Some(i) => to_key_u64(OUTPUT_PREFIX, &mut out.key_id.to_bytes().to_vec(), i),
-				None => to_key(OUTPUT_PREFIX, &mut out.key_id.to_bytes().to_vec()),
-			};
-			self.db.borrow().as_ref().unwrap().put_ser(&key, &out)?;
-		}
+		let key = match out.mmr_index {
+			Some(i) => to_key_u64(OUTPUT_PREFIX, &mut out.key_id.to_bytes().to_vec(), i),
+			None => to_key(OUTPUT_PREFIX, &mut out.key_id.to_bytes().to_vec()),
+		};
+		self.db.borrow().as_ref().unwrap().put_ser(&key, &out)?;
 
 		Ok(())
 	}
@@ -704,48 +702,36 @@ where
 		self.iter_impl(OUTPUT_PREFIX)
 	}
 
-	fn archive_output(&mut self, output_key_id: &Identifier) -> Result<(), Error> {
-		let key = to_key(OUTPUT_PREFIX, output_key_id.to_bytes().to_vec());
+	fn archive_output(&mut self, out: &OutputData) -> Result<(), Error> {
+		let mut key = match out.mmr_index {
+			Some(i) => to_key_u64(OUTPUT_PREFIX, out.key_id.to_bytes().to_vec(), i),
+			None => to_key(OUTPUT_PREFIX, out.key_id.to_bytes().to_vec()),
+		};
 
 		let db = self.db.borrow();
 		let db = db.as_ref().unwrap();
-		let protocol_version = db.protocol_version();
-		let outputs: Vec<(Vec<u8>, OutputData)> = db
-			.iter(&key, move |key, mut v| {
-				Ok((
-					key.to_vec(),
-					ser::deserialize(
-						&mut v,
-						protocol_version,
-						ser::DeserializationMode::default(),
-					)?,
-				))
-			})?
-			.collect();
 
-		for (key, output) in &outputs {
-			if output.key_id == *output_key_id {
-				// delete current copy, data can be duplicated, so delete can fail
-				let _ = db.delete(&key);
-				// moving it into the archive
-				let mut key = key.clone();
-				key[0] = OUTPUT_ARCHIVE_PREFIX;
-				db.put_ser(&key, output)?;
-			}
-		}
+		db.delete(&key)?;
+
+		key[0] = OUTPUT_ARCHIVE_PREFIX;
+		db.put_ser(&key, &out)?;
 
 		Ok(())
 	}
 
 	fn delete(&mut self, id: &Identifier, mmr_index: &Option<u64>) -> Result<(), Error> {
 		// Delete the output data.
-		{
-			let key = match mmr_index {
-				Some(i) => to_key_u64(OUTPUT_PREFIX, &mut id.to_bytes().to_vec(), *i),
-				None => to_key(OUTPUT_PREFIX, &mut id.to_bytes().to_vec()),
-			};
-			let _ = self.db.borrow().as_ref().unwrap().delete(&key);
-		}
+		let key = match mmr_index {
+			Some(i) => to_key_u64(OUTPUT_PREFIX, &mut id.to_bytes().to_vec(), *i),
+			None => to_key(OUTPUT_PREFIX, &mut id.to_bytes().to_vec()),
+		};
+		let _ = self.db.borrow().as_ref().unwrap().delete(&key);
+
+		let key = match mmr_index {
+			Some(i) => to_key_u64(OUTPUT_ARCHIVE_PREFIX, &mut id.to_bytes().to_vec(), *i),
+			None => to_key(OUTPUT_ARCHIVE_PREFIX, &mut id.to_bytes().to_vec()),
+		};
+		let _ = self.db.borrow().as_ref().unwrap().delete(&key);
 
 		Ok(())
 	}
@@ -957,8 +943,20 @@ where
 			&mut parent_id.to_bytes().to_vec(),
 			tx_id as u64,
 		);
-		self.db.borrow().as_ref().unwrap().delete(&tx_log_key)?;
-		Ok(())
+		let res1 = self.db.borrow().as_ref().unwrap().delete(&tx_log_key);
+
+		let tx_log_key = to_key_u64(
+			TX_ARCHIVE_LOG_ENTRY_PREFIX,
+			&mut parent_id.to_bytes().to_vec(),
+			tx_id as u64,
+		);
+		let res2 = self.db.borrow().as_ref().unwrap().delete(&tx_log_key);
+
+		if res1.is_ok() || res2.is_ok() {
+			Ok(())
+		} else {
+			res1.map_err(|e| e.into())
+		}
 	}
 
 	fn rename_acct_path(

@@ -305,7 +305,7 @@ where
 	fn delete(&mut self, id: &Identifier, mmr_index: &Option<u64>) -> Result<(), Error>;
 
 	/// Move output into archive
-	fn archive_output(&mut self, output_key_id: &Identifier) -> Result<(), Error>;
+	fn archive_output(&mut self, out: &OutputData) -> Result<(), Error>;
 
 	/// Save last stored child index of a given parent
 	fn save_child_index(&mut self, parent_key_id: &Identifier, child_n: u32) -> Result<(), Error>;

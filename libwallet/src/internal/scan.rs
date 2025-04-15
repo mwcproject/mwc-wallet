@@ -2011,29 +2011,29 @@ where
 	for tx in transactions.values() {
 		if tx.updated {
 			batch.save_tx_log_entry(tx.tx_log.clone(), &tx.tx_log.parent_key_id)?;
-		}
-
-		// checking if can archive the transaction
-		// Can archive if there is no connections with non archived outputs AND it below horizon:
-		let mut can_archive_tx = if tx.tx_log.output_height == 0 {
-			tx.tx_log.creation_ts < tx_time_to_archive
 		} else {
-			tx.tx_log.output_height < archive_height
-		};
+			// checking if can archive the transaction
+			// Can archive if there is no connections with non archived outputs AND it below horizon:
+			let mut can_archive_tx = if tx.tx_log.output_height == 0 {
+				tx.tx_log.creation_ts < tx_time_to_archive
+			} else {
+				tx.tx_log.output_height < archive_height
+			};
 
-		if can_archive_tx {
-			// Checking if no not archived outputs are exist
-			for outpt in &tx.output_commit {
-				if outputs.contains_key(outpt) {
-					can_archive_tx = false;
-					break;
+			if can_archive_tx {
+				// Checking if no not archived outputs are exist
+				for outpt in &tx.output_commit {
+					if outputs.contains_key(outpt) {
+						can_archive_tx = false;
+						break;
+					}
 				}
 			}
-		}
 
-		if can_archive_tx {
-			// Archiving transactions into IMDB and mwctx files
-			batch.archive_transaction(&tx.tx_log)?;
+			if can_archive_tx {
+				// Archiving transactions into IMDB and mwctx files
+				batch.archive_transaction(&tx.tx_log)?;
+			}
 		}
 	}
 
@@ -2046,13 +2046,11 @@ where
 	for output in outputs.values() {
 		if output.updated {
 			batch.save(output.output.clone())?;
-		}
-
-		// Unconfirmed without any transactions must be deleted as well
-		if (output.is_orphan_output() && !output.output.is_coinbase) ||
+		} else if (output.is_orphan_output() && !output.output.is_coinbase) ||
 			// Delete expired mining outputs
 			( output.output.is_coinbase && (output.output.status == OutputStatus::Unconfirmed || output.output.status == OutputStatus::Reverted) && ((output.output.height < tip_height) || (output.commit != *last_output)) )
 		{
+			// Unconfirmed without any transactions must be deleted as well
 			if let Some(ref s) = status_send_channel {
 				let _ = s.send(StatusMessage::Warning(format!(
 					"Deleting unconfirmed Output not mapped to any transaction. Commit: {}",
@@ -2064,14 +2062,32 @@ where
 				)));
 			}
 			batch.delete(&output.output.key_id, &output.output.mmr_index)?;
-		}
-
-		// Archiving very old spent ouput can go into archive
-		if output.output.height < archive_height {
+		} else if !output.updated
+			&& !output.output.is_spendable()
+			&& output.output.height < archive_height
+		{
+			// Archiving very old spent output can go into archive
+			// we can move only not updated outputs...
 			match output.output.status {
-				OutputStatus::Spent => batch.archive_output(&output.output.key_id)?,
+				OutputStatus::Spent => {
+					// Height needs to come from the transactions. That is the only source of truth
+					let mut need_wait = false;
+					for tx_id in &output.tx_input_uuid {
+						if let Some(tx) = transactions.get(tx_id) {
+							if tx.tx_log.output_height != 0
+								&& tx.tx_log.output_height >= archive_height
+							{
+								need_wait = true;
+								break;
+							}
+						}
+					}
+					if !need_wait {
+						batch.archive_output(&output.output)?;
+					}
+				}
 				OutputStatus::Reverted | OutputStatus::Unconfirmed => {
-					// check if transactions are not confirmed and not concelled, then we can archive such transactions
+					// check if transactions are not confirmed and not concelled, then we can archive such output
 					let mut need_wait = false;
 					for tx_id in &output.tx_output_uuid {
 						if let Some(tx) = transactions.get(tx_id) {
@@ -2079,11 +2095,12 @@ where
 								|| tx.tx_log.tx_type == TxLogEntryType::TxSent
 							{
 								need_wait = true;
+								break;
 							}
 						}
 					}
 					if !need_wait {
-						batch.archive_output(&output.output.key_id)?;
+						batch.archive_output(&output.output)?;
 					}
 				}
 				_ => {}
