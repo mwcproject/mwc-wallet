@@ -854,7 +854,9 @@ where
 	C: NodeClient + 'a,
 	K: Keychain + 'a,
 {
-	let context = w.get_private_context(keychain_mask, slate.id.as_bytes(), participant_id)?;
+	let context = w
+		.get_private_context(keychain_mask, slate.id.as_bytes(), participant_id)
+		.map_err(|_| Error::TransactionWasFinalizedOrCancelled(format!("{}", slate.id)))?;
 	let mut excess_override = None;
 
 	let mut sl = slate.clone();
@@ -904,7 +906,9 @@ where
 	let mut sl = slate.clone();
 	sl.height = w.w2n_client().get_chain_tip()?.0;
 	check_ttl(w, &sl, refresh_from_node)?;
-	let mut context = w.get_private_context(keychain_mask, sl.id.as_bytes(), 0)?;
+	let mut context = w
+		.get_private_context(keychain_mask, sl.id.as_bytes(), 0)
+		.map_err(|_| Error::TransactionWasFinalizedOrCancelled(format!("{}", sl.id)))?;
 	let keychain = w.keychain(keychain_mask)?;
 	let parent_key_id = context.parent_key_id.clone();
 

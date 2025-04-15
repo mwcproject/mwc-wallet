@@ -281,7 +281,9 @@ where
 	let mut sl = slate.clone();
 	check_ttl(w, &sl, refresh_from_node)?;
 	// Participant id 0 for mwc713 compatibility
-	let context = w.get_private_context(keychain_mask, sl.id.as_bytes(), 0)?;
+	let context = w
+		.get_private_context(keychain_mask, sl.id.as_bytes(), 0)
+		.map_err(|_| Error::TransactionWasFinalizedOrCancelled(format!("{}", sl.id)))?;
 	let mut slate_message = String::new();
 	for participant_data in &slate.participant_data {
 		if let Some(msg2) = &participant_data.message {
