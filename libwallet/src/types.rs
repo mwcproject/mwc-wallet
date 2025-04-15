@@ -205,6 +205,9 @@ where
 	/// Get output data by id
 	fn get(&self, id: &Identifier, mmr_index: &Option<u64>) -> Result<OutputData, Error>;
 
+	/// Iterate over archive outputs data stored by the backend
+	fn archive_iter<'a>(&'a self) -> Box<dyn Iterator<Item = OutputData> + 'a>;
+
 	/// Retrieves the private context associated with a given slate id
 	fn get_private_context(
 		&mut self,
@@ -215,6 +218,9 @@ where
 
 	/// Iterate over all output data stored by the backend
 	fn tx_log_iter<'a>(&'a self) -> Box<dyn Iterator<Item = TxLogEntry> + 'a>;
+
+	/// Iterate over all output data stored by the backend
+	fn tx_log_archive_iter<'a>(&'a self) -> Box<dyn Iterator<Item = TxLogEntry> + 'a>;
 
 	/// Iterate over all stored account paths
 	fn acct_path_iter<'a>(&'a self) -> Box<dyn Iterator<Item = AcctPathMapping> + 'a>;
@@ -229,7 +235,7 @@ where
 	fn get_stored_tx(&self, entry: &TxLogEntry) -> Result<Option<Transaction>, Error>;
 
 	/// Load transaction by UUID. Needed for mwc713
-	fn get_stored_tx_by_uuid(&self, uuid: &str) -> Result<Transaction, Error>;
+	fn get_stored_tx_by_uuid(&self, uuid: &str, archived: bool) -> Result<Transaction, Error>;
 
 	/// Load a txn from specified file
 	fn load_stored_tx(&self, path: &str) -> Result<Transaction, Error>;
@@ -249,7 +255,6 @@ where
 	/// Next child ID when we want to create a new output, based on current parent
 	fn next_child(
 		&mut self,
-		keychain_mask: Option<&SecretKey>,
 		parent_key_id: Option<&Identifier>,
 		height: Option<u64>,
 	) -> Result<Identifier, Error>;
@@ -270,6 +275,10 @@ where
 
 /// New wallet with empty seed mark. Needed to skip first long scan
 pub const FLAG_NEW_WALLET: u64 = 1;
+/// Need to clean private context on the first wallet run
+pub const FLAG_CONTEXT_CLEARED: u64 = 2;
+/// Need to correct outputs root_key_id values to recover from prev bug
+pub const FLAG_OUTPUTS_ROOT_KEY_ID_CORRECTION: u64 = 3;
 
 /// Batch trait to update the output data backend atomically. Trying to use a
 /// batch after commit MAY result in a panic. Due to this being a trait, the
@@ -294,6 +303,9 @@ where
 
 	/// Delete data about an output from the backend
 	fn delete(&mut self, id: &Identifier, mmr_index: &Option<u64>) -> Result<(), Error>;
+
+	/// Move output into archive
+	fn archive_output(&mut self, out: &OutputData) -> Result<(), Error>;
 
 	/// Save last stored child index of a given parent
 	fn save_child_index(&mut self, parent_key_id: &Identifier, child_n: u32) -> Result<(), Error>;
@@ -330,8 +342,17 @@ where
 	/// Iterate over tx log data stored by the backend
 	fn tx_log_iter(&self) -> Box<dyn Iterator<Item = TxLogEntry>>;
 
+	/// Iterate over tx log archived data
+	fn tx_log_archive_iter(&self) -> Box<dyn Iterator<Item = TxLogEntry>>;
+
+	/// Move transaction into archive
+	fn archive_transaction(&mut self, tx: &TxLogEntry) -> Result<(), Error>;
+
 	/// save a tx log entry
 	fn save_tx_log_entry(&mut self, t: TxLogEntry, parent_id: &Identifier) -> Result<(), Error>;
+
+	/// Delete tx log entry.
+	fn delete_tx_log_entry(&mut self, tx_id: u32, parent_id: &Identifier) -> Result<(), Error>;
 
 	/// rename account, old_name -> new_name
 	fn rename_acct_path(
@@ -349,6 +370,9 @@ where
 
 	/// Save an output as locked in the backend
 	fn lock_output(&mut self, out: &mut OutputData) -> Result<(), Error>;
+
+	/// Iterate through all private context. Return tx uuid from the key and the Context
+	fn private_context_iter(&self) -> Box<dyn Iterator<Item = (Vec<u8>, Context)>>;
 
 	/// Saves the private context associated with a slate id
 	fn save_private_context(

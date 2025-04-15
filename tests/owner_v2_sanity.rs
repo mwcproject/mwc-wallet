@@ -21,6 +21,8 @@ extern crate log;
 extern crate mwc_wallet;
 
 use mwc_wallet_impls::test_framework::{self, LocalWalletClient, WalletProxy};
+use std::ops::DerefMut;
+use std::sync::Arc;
 
 use clap::App;
 use std::thread;
@@ -37,6 +39,8 @@ use common::{
 	clean_output_dir, execute_command, initial_setup_wallet, instantiate_wallet, send_request,
 	setup,
 };
+use mwc_wallet_util::mwc_core::core::Transaction;
+use mwc_wallet_util::mwc_util::Mutex;
 
 #[test]
 fn owner_v2_sanity() -> Result<(), mwc_wallet_controller::Error> {
@@ -52,12 +56,19 @@ fn owner_v2_sanity() -> Result<(), mwc_wallet_controller::Error> {
 	// Running update thread, we can't set local to it...
 	global::init_global_chain_type(global::ChainTypes::AutomatedTesting);
 
-	setup_proxy!(test_dir, chain, wallet1, client1, mask1, wallet2, client2, _mask2);
+	let tx_pool: Arc<Mutex<Vec<Transaction>>> = Arc::new(Mutex::new(Vec::new()));
+	setup_proxy!(test_dir, tx_pool, chain, wallet1, client1, mask1, wallet2, client2, _mask2);
 
 	// add some blocks manually
 	let bh = 10u64;
-	let _ =
-		test_framework::award_blocks_to_wallet(&chain, wallet1.clone(), mask1, bh as usize, false);
+	let _ = test_framework::award_blocks_to_wallet(
+		&chain,
+		wallet1.clone(),
+		mask1,
+		bh as usize,
+		false,
+		tx_pool.lock().deref_mut(),
+	);
 	let client1_2 = client1.clone();
 
 	// run the owner listener on wallet 1

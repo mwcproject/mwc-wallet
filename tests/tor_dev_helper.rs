@@ -21,6 +21,8 @@ extern crate log;
 extern crate mwc_wallet;
 
 use mwc_wallet_impls::test_framework::{self, LocalWalletClient, WalletProxy};
+use std::ops::DerefMut;
+use std::sync::Arc;
 
 use clap::App;
 use std::thread;
@@ -34,7 +36,8 @@ use mwc_wallet_util::mwc_util as util;
 #[macro_use]
 mod common;
 use common::{execute_command, initial_setup_wallet, instantiate_wallet, setup_global_chain_type};
-
+use mwc_wallet_util::mwc_core::core::Transaction;
+use mwc_wallet_util::mwc_util::Mutex;
 // Development testing helper for tor/socks investigation.
 // Not (yet) to be run as part of automated testing
 
@@ -57,7 +60,8 @@ fn socks_tor() -> Result<(), mwc_wallet_controller::Error> {
 	let app = App::from_yaml(yml);
 	setup_no_clean();
 
-	setup_proxy!(test_dir, chain, wallet1, client1, mask1, wallet2, client2, _mask2);
+	let tx_pool: Arc<Mutex<Vec<Transaction>>> = Arc::new(Mutex::new(Vec::new()));
+	setup_proxy!(test_dir, tx_pool, chain, wallet1, client1, mask1, wallet2, client2, _mask2);
 
 	// Tor should be running at this point for wallet 2, with a hidden service
 	// bound to the listening port 53415. By default, tor will also be running
@@ -86,8 +90,14 @@ fn socks_tor() -> Result<(), mwc_wallet_controller::Error> {
 
 	// mine into wallet 1 a bit
 	let bh = 5u64;
-	let _ =
-		test_framework::award_blocks_to_wallet(&chain, wallet1.clone(), mask1, bh as usize, false);
+	let _ = test_framework::award_blocks_to_wallet(
+		&chain,
+		wallet1.clone(),
+		mask1,
+		bh as usize,
+		false,
+		tx_pool.lock().deref_mut(),
+	);
 
 	// now, test send from wallet 1 over tor
 	let arg_vec = vec![

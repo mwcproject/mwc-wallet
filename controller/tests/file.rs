@@ -19,6 +19,8 @@ extern crate mwc_wallet_controller as wallet;
 extern crate mwc_wallet_impls as impls;
 
 use mwc_wallet_util::mwc_core as core;
+use std::ops::DerefMut;
+use std::sync::Arc;
 
 use impls::test_framework::{self, LocalWalletClient};
 use impls::{PathToSlateGetter, PathToSlatePutter, SlateGetter, SlatePutter};
@@ -35,13 +37,16 @@ use serde_json;
 #[macro_use]
 mod common;
 use common::{clean_output_dir, create_wallet_proxy, setup};
+use mwc_wallet_util::mwc_core::core::Transaction;
 use mwc_wallet_util::mwc_util::secp::Secp256k1;
+use mwc_wallet_util::mwc_util::Mutex;
 
 /// self send impl
-fn file_exchange_test_impl(test_dir: &'static str) -> Result<(), wallet::Error> {
+fn file_exchange_test_impl(test_dir: &str) -> Result<(), wallet::Error> {
 	global::set_local_chain_type(global::ChainTypes::AutomatedTesting);
 	// Create a new proxy to simulate server and wallet responses
-	let mut wallet_proxy = create_wallet_proxy(test_dir);
+	let tx_pool: Arc<Mutex<Vec<Transaction>>> = Arc::new(Mutex::new(Vec::new()));
+	let mut wallet_proxy = create_wallet_proxy(test_dir.into(), tx_pool.clone());
 	let chain = wallet_proxy.chain.clone();
 	let stopper = wallet_proxy.running.clone();
 	let secp = Secp256k1::new();
@@ -102,8 +107,14 @@ fn file_exchange_test_impl(test_dir: &'static str) -> Result<(), wallet::Error> 
 		w.set_parent_key_id_by_name("mining")?;
 	}
 	let mut bh = 10u64;
-	let _ =
-		test_framework::award_blocks_to_wallet(&chain, wallet1.clone(), mask1, bh as usize, false);
+	let _ = test_framework::award_blocks_to_wallet(
+		&chain,
+		wallet1.clone(),
+		mask1,
+		bh as usize,
+		false,
+		tx_pool.lock().deref_mut(),
+	);
 
 	let send_file = format!("{}/part_tx_1.tx", test_dir);
 	let receive_file = format!("{}/part_tx_2.tx", test_dir);
@@ -182,11 +193,17 @@ fn file_exchange_test_impl(test_dir: &'static str) -> Result<(), wallet::Error> 
 		api.verify_slate_messages(m, &slate)?;
 		slate = api.finalize_tx(m, &slate)?;
 		api.post_tx(m, slate.tx_or_err()?, false)?;
-		bh += 1;
 		Ok(())
 	})?;
 
-	let _ = test_framework::award_blocks_to_wallet(&chain, wallet1.clone(), mask1, 3, false);
+	let _ = test_framework::award_blocks_to_wallet(
+		&chain,
+		wallet1.clone(),
+		mask1,
+		3,
+		false,
+		tx_pool.lock().deref_mut(),
+	);
 	bh += 3;
 
 	// Check total in mining account
@@ -209,7 +226,7 @@ fn file_exchange_test_impl(test_dir: &'static str) -> Result<(), wallet::Error> 
 
 	// Check messages, all participants should have both
 	wallet::controller::owner_single_use(Some(wallet1.clone()), mask1, None, |api, m| {
-		let (_, tx) = api.retrieve_txs(m, true, None, Some(slate.id), None)?;
+		let (_, tx) = api.retrieve_txs(m, true, None, Some(slate.id), None, None)?;
 		assert_eq!(
 			tx[0].clone().messages.unwrap().messages[0].message,
 			Some(message.to_owned())
@@ -225,7 +242,7 @@ fn file_exchange_test_impl(test_dir: &'static str) -> Result<(), wallet::Error> 
 	})?;
 
 	wallet::controller::owner_single_use(Some(wallet2.clone()), mask2, None, |api, m| {
-		let (_, tx) = api.retrieve_txs(m, true, None, Some(slate.id), None)?;
+		let (_, tx) = api.retrieve_txs(m, true, None, Some(slate.id), None, None)?;
 		assert_eq!(
 			tx[0].clone().messages.unwrap().messages[0].message,
 			Some(message.to_owned())

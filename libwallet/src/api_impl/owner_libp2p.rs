@@ -214,6 +214,7 @@ where
 		false,
 		None,
 		None,
+		Some(true),
 	)?;
 
 	let mut tx_uuid: HashMap<Uuid, (bool, u64)> = HashMap::new();

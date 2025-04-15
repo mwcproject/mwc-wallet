@@ -106,7 +106,7 @@ where
 		.map(|o| (o.output.commit.clone().unwrap(), o.output.value))
 		.collect();
 
-	wallet_lock!(wallet_inst.clone(), w);
+	wallet_lock!(wallet_inst, w);
 	let node_client = w.w2n_client().clone();
 	let ethereum_wallet = w.get_ethereum_wallet()?.clone();
 	let keychain = w.keychain(keychain_mask)?;
@@ -164,7 +164,7 @@ where
 		println!("WARNING. This swap will need to reserve {} MWC. If you don't have enough funds, please cancel it.", swap_reserved_amount_str);
 	}
 
-	let outputs: Vec<String> = outs.keys().map(|k| k.clone()).collect();
+	let outputs: HashSet<String> = outs.keys().map(|k| k.clone()).collect();
 	let secondary_currency = Currency::try_from(params.secondary_currency.as_str())?;
 	let secondary_amount = secondary_currency.amount_from_hr_string(&params.secondary_amount)?;
 
@@ -211,6 +211,7 @@ where
 			params.mwc_amount,
 			false,
 			&None,
+			None,
 			height,
 			params.minimum_confirmations.unwrap_or(10),
 			500,
@@ -230,7 +231,6 @@ where
 	let context = create_context(
 		&mut **w,
 		Some(&ethereum_wallet),
-		keychain_mask,
 		&mut swap_api,
 		&keychain,
 		secondary_currency,
@@ -1969,7 +1969,6 @@ where
 			let context = create_context(
 				&mut **w,
 				Some(&ethereum_wallet.clone()),
-				keychain_mask,
 				&mut swap_api,
 				&keychain,
 				offer_update.secondary_currency,
@@ -2090,7 +2089,6 @@ where
 fn create_context<'a, T: ?Sized, C, K>(
 	wallet: &mut T,
 	ethereum_wallet: Option<&EthereumWallet>,
-	keychain_mask: Option<&SecretKey>,
 	swap_api: &mut Box<dyn SwapApi<K> + 'a>,
 	keychain: &K,
 	secondary_currency: Currency,
@@ -2125,7 +2123,7 @@ where
 	};
 
 	for _ in 0..secondary_key_size {
-		keys.push(wallet.next_child(keychain_mask, Some(&parent_key_id), None)?);
+		keys.push(wallet.next_child(Some(&parent_key_id), None)?);
 	}
 
 	let context = (**swap_api).create_context(

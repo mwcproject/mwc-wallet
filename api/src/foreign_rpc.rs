@@ -21,17 +21,20 @@ use crate::libwallet::{
 	Slate, SlateVersion, VersionInfo, VersionedCoinbase, VersionedSlate, WalletLCProvider,
 };
 use crate::{Foreign, ForeignCheckMiddlewareFn};
-use easy_jsonrpc_mw;
+use easy_jsonrpc_mwc;
 use ed25519_dalek::PublicKey as DalekPublicKey;
 use libwallet::slatepack::SlatePurpose;
+use libwallet::wallet_lock_test;
 use mwc_wallet_libwallet::proof::proofaddress::{self, ProvableAddress};
+use mwc_wallet_util::mwc_core::core::Transaction;
 use mwc_wallet_util::mwc_util::secp::Secp256k1;
+use std::ops::DerefMut;
 
 /// Public definition used to generate Foreign jsonrpc api.
 /// * When running `mwc-wallet listen` with defaults, the V2 api is available at
 /// `localhost:3415/v2/foreign`
 /// * The endpoint only supports POST operations, with the json-rpc request as the body
-#[easy_jsonrpc_mw::rpc]
+#[easy_jsonrpc_mwc::rpc]
 pub trait ForeignRpc {
 	/**
 	Networked version of [Foreign::check_version](struct.Foreign.html#method.check_version).
@@ -1051,7 +1054,7 @@ pub fn run_doctest_foreign(
 	init_invoice_tx: bool,
 	compact_slate: bool,
 ) -> Result<Option<serde_json::Value>, String> {
-	use easy_jsonrpc_mw::Handler;
+	use easy_jsonrpc_mwc::Handler;
 	use mwc_wallet_impls::test_framework::{self, LocalWalletClient, WalletProxy};
 	use mwc_wallet_impls::{DefaultLCProvider, DefaultWalletImpl};
 	use mwc_wallet_libwallet::{api_impl, WalletInst};
@@ -1071,11 +1074,12 @@ pub fn run_doctest_foreign(
 	let _ = fs::remove_dir_all(test_dir);
 	global::set_local_chain_type(ChainTypes::AutomatedTesting);
 
+	let tx_pool: Arc<Mutex<Vec<Transaction>>> = Arc::new(Mutex::new(Vec::new()));
 	let mut wallet_proxy: WalletProxy<
 		DefaultLCProvider<LocalWalletClient, ExtKeychain>,
 		LocalWalletClient,
 		ExtKeychain,
-	> = WalletProxy::new(test_dir);
+	> = WalletProxy::new(test_dir.into(), tx_pool.clone());
 	let chain = wallet_proxy.chain.clone();
 
 	let rec_phrase_1 = util::ZeroingString::from(
@@ -1175,6 +1179,7 @@ pub fn run_doctest_foreign(
 			(&mask1).as_ref(),
 			1 as usize,
 			false,
+			tx_pool.lock().deref_mut(),
 		);
 		//update local outputs after each block, so transaction IDs stay consistent
 		let (wallet_refreshed, _) = api_impl::owner::retrieve_summary_info(
@@ -1227,7 +1232,10 @@ pub fn run_doctest_foreign(
 
 			api_impl::owner::issue_invoice_tx(&mut **w, (&mask2).as_ref(), &args, true, 1).unwrap()
 		};
-		api_impl::owner::update_wallet_state(wallet1.clone(), (&mask1).as_ref(), &None).unwrap();
+		{
+			wallet_lock_test!(wallet1.clone(), w1);
+			api_impl::owner::update_wallet_state(&mut **w1, (&mask1).as_ref(), &None).unwrap();
+		}
 		slate = {
 			let mut w_lock = wallet1.lock();
 			let w = w_lock.lc_provider().unwrap().wallet_inst().unwrap();
@@ -1273,7 +1281,10 @@ pub fn run_doctest_foreign(
 		}
 	}
 
-	api_impl::owner::update_wallet_state(wallet1.clone(), (&mask1).as_ref(), &None).unwrap();
+	{
+		wallet_lock_test!(wallet1.clone(), w1);
+		api_impl::owner::update_wallet_state(&mut **w1, (&mask1).as_ref(), &None).unwrap();
+	}
 	if init_tx {
 		let amount = 2_000_000_000;
 		let mut w_lock = wallet1.lock();

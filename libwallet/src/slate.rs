@@ -1137,7 +1137,11 @@ impl Slate {
 		let final_tx = final_tx.clone().replace_kernel(kernel);
 
 		// confirm the kernel verifies successfully before proceeding
-		debug!("Validating final transaction");
+		debug!(
+			"Validating final transaction. Inputs: {}  Outputs: {}",
+			final_tx.body.inputs.len(),
+			final_tx.body.outputs.len()
+		);
 		trace!(
 			"Final tx: {}",
 			serde_json::to_string_pretty(&final_tx).unwrap()

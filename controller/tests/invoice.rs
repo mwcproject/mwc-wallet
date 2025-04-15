@@ -21,6 +21,8 @@ extern crate mwc_wallet_impls as impls;
 use mwc_wallet_libwallet as libwallet;
 use mwc_wallet_util::mwc_core as core;
 use mwc_wallet_util::mwc_core::global;
+use std::ops::DerefMut;
+use std::sync::Arc;
 
 use impls::test_framework::{self, LocalWalletClient};
 use libwallet::{InitTxArgs, IssueInvoiceTxArgs, Slate};
@@ -31,12 +33,15 @@ use std::time::Duration;
 #[macro_use]
 mod common;
 use common::{clean_output_dir, create_wallet_proxy, setup};
+use mwc_wallet_util::mwc_core::core::Transaction;
+use mwc_wallet_util::mwc_util::Mutex;
 
 /// self send impl
-fn invoice_tx_impl(test_dir: &'static str) -> Result<(), wallet::Error> {
+fn invoice_tx_impl(test_dir: &str) -> Result<(), wallet::Error> {
 	global::set_local_chain_type(global::ChainTypes::AutomatedTesting);
 	// Create a new proxy to simulate server and wallet responses
-	let mut wallet_proxy = create_wallet_proxy(test_dir);
+	let tx_pool: Arc<Mutex<Vec<Transaction>>> = Arc::new(Mutex::new(Vec::new()));
+	let mut wallet_proxy = create_wallet_proxy(test_dir.into(), tx_pool.clone());
 	let chain = wallet_proxy.chain.clone();
 	let stopper = wallet_proxy.running.clone();
 
@@ -87,8 +92,14 @@ fn invoice_tx_impl(test_dir: &'static str) -> Result<(), wallet::Error> {
 		w.set_parent_key_id_by_name("mining")?;
 	}
 	let mut bh = 10u64;
-	let _ =
-		test_framework::award_blocks_to_wallet(&chain, wallet1.clone(), mask1, bh as usize, false);
+	let _ = test_framework::award_blocks_to_wallet(
+		&chain,
+		wallet1.clone(),
+		mask1,
+		bh as usize,
+		false,
+		tx_pool.lock().deref_mut(),
+	);
 
 	// Sanity check wallet 1 contents
 	wallet::controller::owner_single_use(Some(wallet1.clone()), mask1, None, |api, m| {
@@ -139,15 +150,21 @@ fn invoice_tx_impl(test_dir: &'static str) -> Result<(), wallet::Error> {
 		api.post_tx(m, slate.tx_or_err()?, false)?;
 		Ok(())
 	})?;
-	bh += 1;
 
-	let _ = test_framework::award_blocks_to_wallet(&chain, wallet1.clone(), mask1, 3, false);
+	let _ = test_framework::award_blocks_to_wallet(
+		&chain,
+		wallet1.clone(),
+		mask1,
+		3,
+		false,
+		tx_pool.lock().deref_mut(),
+	);
 	bh += 3;
 
 	// Check transaction log for wallet 2
 	wallet::controller::owner_single_use(Some(wallet2.clone()), mask2, None, |api, m| {
 		let (_, wallet2_info) = api.retrieve_summary_info(m, true, 1)?;
-		let (refreshed, txs) = api.retrieve_txs(m, true, None, None, None)?;
+		let (refreshed, txs) = api.retrieve_txs(m, true, None, None, None, None)?;
 		assert!(refreshed);
 		assert!(txs.len() == 1);
 		println!(
@@ -163,7 +180,7 @@ fn invoice_tx_impl(test_dir: &'static str) -> Result<(), wallet::Error> {
 	// exists
 	wallet::controller::owner_single_use(Some(wallet1.clone()), mask1, None, |api, m| {
 		let (_, wallet1_info) = api.retrieve_summary_info(m, true, 1)?;
-		let (refreshed, txs) = api.retrieve_txs(m, true, None, None, None)?;
+		let (refreshed, txs) = api.retrieve_txs(m, true, None, None, None, None)?;
 		assert!(refreshed);
 		assert_eq!(txs.len() as u64, bh + 1);
 		println!(
@@ -204,7 +221,14 @@ fn invoice_tx_impl(test_dir: &'static str) -> Result<(), wallet::Error> {
 	})?;
 
 	// test that payee can only cancel once
-	let _ = test_framework::award_blocks_to_wallet(&chain, wallet1.clone(), mask1, 3, false);
+	let _ = test_framework::award_blocks_to_wallet(
+		&chain,
+		wallet1.clone(),
+		mask1,
+		3,
+		false,
+		tx_pool.lock().deref_mut(),
+	);
 	//bh += 3;
 
 	wallet::controller::owner_single_use(Some(wallet2.clone()), mask2, None, |api, m| {

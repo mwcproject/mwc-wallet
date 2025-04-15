@@ -47,6 +47,7 @@ use mwc_wallet_util::mwc_util::secp::Secp256k1;
 use mwc_wallet_util::{mwc_core as core, OnionV3Address};
 use rpassword;
 use semver::Version;
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::{
 	convert::TryFrom,
@@ -294,10 +295,6 @@ pub fn parse_global_args(
 	args: &ArgMatches,
 ) -> Result<command::GlobalArgs, ParseError> {
 	let account = args.value_of("account").map(|s| s.to_string());
-	let mut show_spent = false;
-	if args.is_present("show_spent") {
-		show_spent = true;
-	}
 	let api_secret = get_first_line(config.api_secret_path.clone());
 	let node_api_secret = get_first_line(config.node_api_secret_path.clone());
 	let password = match args.value_of("pass") {
@@ -321,7 +318,6 @@ pub fn parse_global_args(
 
 	Ok(command::GlobalArgs {
 		account: account,
-		show_spent: show_spent,
 		api_secret: api_secret,
 		node_api_secret: node_api_secret,
 		password: password,
@@ -617,7 +613,7 @@ pub fn parse_send_args(args: &ArgMatches) -> Result<command::SendArgs, ParseErro
 				.unwrap()
 				.split(",")
 				.map(|s| s.to_string())
-				.collect::<Vec<String>>(),
+				.collect::<HashSet<String>>(),
 		),
 		false => None,
 	};
@@ -974,6 +970,12 @@ pub fn parse_check_args(args: &ArgMatches) -> Result<command::CheckArgs, ParseEr
 	})
 }
 
+pub fn parse_outputs_args(args: &ArgMatches) -> Result<command::OutputsArgs, ParseError> {
+	Ok(command::OutputsArgs {
+		show_spent: args.is_present("show_spent"),
+	})
+}
+
 pub fn parse_txs_args(args: &ArgMatches) -> Result<command::TxsArgs, ParseError> {
 	let tx_id = match args.value_of("id") {
 		None => None,
@@ -997,10 +999,14 @@ pub fn parse_txs_args(args: &ArgMatches) -> Result<command::TxsArgs, ParseError>
 		None => None,
 		Some(c) => Some(parse_u64(c, "count")? as u32),
 	};
+
+	let show_last_four_days = args.is_present("show_last_four_days");
+
 	Ok(command::TxsArgs {
 		id: tx_id,
 		tx_slate_id: tx_slate_id,
 		count: count,
+		show_last_four_days: Some(show_last_four_days),
 	})
 }
 
@@ -1822,12 +1828,16 @@ where
 				wallet_config.dark_background_color_scheme.unwrap_or(true),
 			)
 		}
-		("outputs", Some(_)) => command::outputs(
-			owner_api,
-			km,
-			&global_wallet_args,
-			wallet_config.dark_background_color_scheme.unwrap_or(true),
-		),
+		("outputs", Some(args)) => {
+			let a = arg_parse!(parse_outputs_args(&args));
+			command::outputs(
+				owner_api,
+				km,
+				&global_wallet_args,
+				a,
+				wallet_config.dark_background_color_scheme.unwrap_or(true),
+			)
+		}
 		("txs", Some(args)) => {
 			let a = arg_parse!(parse_txs_args(&args));
 			command::txs(

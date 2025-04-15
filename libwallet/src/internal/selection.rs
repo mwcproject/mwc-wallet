@@ -29,8 +29,9 @@ use crate::mwc_util::secp::pedersen::Commitment;
 use crate::proof::proofaddress;
 use crate::slate::Slate;
 use crate::types::*;
+use mwc_wallet_util::mwc_core::libtx::{inputs_for_fee_points, inputs_for_minimal_fee};
 use mwc_wallet_util::mwc_util as util;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 /// Initialize a transaction on the sender side, returns a corresponding
 /// libwallet transaction slate with the appropriate inputs selected,
@@ -43,6 +44,7 @@ pub fn build_send_tx<'a, T: ?Sized, C, K>(
 	keychain_mask: Option<&SecretKey>,
 	slate: &mut Slate,
 	min_fee: &Option<u64>,
+	fixed_fee: Option<u64>, // Max fee to limit fee for late_lock case
 	minimum_confirmations: u64,
 	max_outputs: usize,
 	change_outputs: usize,
@@ -51,8 +53,8 @@ pub fn build_send_tx<'a, T: ?Sized, C, K>(
 	participant_id: usize,
 	use_test_nonce: bool,
 	is_initiator: bool,
-	outputs: &Option<Vec<String>>, // outputs to include into the transaction
-	routputs: usize,               // Number of resulting outputs. Normally it is 1
+	outputs: &Option<HashSet<String>>, // outputs to include into the transaction
+	routputs: usize,                   // Number of resulting outputs. Normally it is 1
 	exclude_change_outputs: bool,
 	change_output_minimum_confirmations: u64,
 	message: Option<String>,
@@ -65,10 +67,10 @@ where
 {
 	let (elems, inputs, change_amounts_derivations, fee) = select_send_tx(
 		wallet,
-		keychain_mask,
 		slate.amount,
 		amount_includes_fee,
 		min_fee,
+		fixed_fee,
 		slate.height,
 		minimum_confirmations,
 		max_outputs,
@@ -334,7 +336,7 @@ where
 		for oaui in output_amounts_unwrapped {
 			sum = sum + oaui;
 			key_vec_amounts.push((
-				keys::next_available_key(wallet, keychain_mask, Some(&parent_key_id))?,
+				keys::next_available_key(wallet, Some(&parent_key_id))?,
 				oaui,
 			));
 			i = i + 1;
@@ -359,7 +361,7 @@ where
 				let key_str = key_id_opt.unwrap();
 				Identifier::from_hex(key_str)?
 			} else {
-				keys::next_available_key(wallet, keychain_mask, Some(&parent_key_id))?
+				keys::next_available_key(wallet, Some(&parent_key_id))?
 			};
 
 			let output_amount: u64 = if i == num_outputs - 1 {
@@ -493,23 +495,42 @@ where
 	Ok((key_vec_amounts.last().unwrap().0.clone(), context, t))
 }
 
+fn calc_fees(
+	input_num: usize,
+	output_num: usize,
+	min_fee: &Option<u64>,
+	fixed_fee: &Option<u64>, // Max fee to limit fee for late_lock case
+) -> Result<u64, Error> {
+	let mut fee = tx_fee(input_num, output_num, 1);
+	if let Some(min_fee) = min_fee {
+		fee = std::cmp::max(*min_fee, fee);
+	}
+	if let Some(fixed_fee) = fixed_fee {
+		if fee > *fixed_fee {
+			return Err(Error::Fee(format!("Unable to finalize transaction with already locked fee {}. Please cancel transaction and retry, or use more outputs to reduce the fee.", fixed_fee)));
+		}
+		fee = *fixed_fee;
+	}
+	Ok(fee)
+}
+
 /// Builds a transaction to send to someone from the HD seed associated with the
 /// wallet and the amount to send. Handles reading through the wallet data file,
 /// selecting outputs to spend and building the change.
 pub fn select_send_tx<'a, T: ?Sized, C, K, B>(
 	wallet: &mut T,
-	keychain_mask: Option<&SecretKey>,
 	amount: u64,
 	amount_includes_fee: bool,
 	min_fee: &Option<u64>,
+	fixed_fee: Option<u64>, // Max fee to limit fee for late_lock case
 	current_height: u64,
 	minimum_confirmations: u64,
 	max_outputs: usize,
 	change_outputs: usize,
 	selection_strategy_is_use_all: bool,
 	parent_key_id: &Identifier,
-	outputs: &Option<Vec<String>>, // outputs to include into the transaction
-	routputs: usize,               // Number of resulting outputs. Normally it is 1
+	outputs: &Option<HashSet<String>>, // outputs to include into the transaction
+	routputs: usize,                   // Number of resulting outputs. Normally it is 1
 	exclude_change_outputs: bool,
 	change_output_minimum_confirmations: u64,
 	include_inputs_in_sum: bool, // Legacy workflow value is true
@@ -533,6 +554,7 @@ where
 		amount,
 		amount_includes_fee,
 		min_fee,
+		fixed_fee,
 		current_height,
 		minimum_confirmations,
 		max_outputs,
@@ -549,7 +571,6 @@ where
 	let (parts, change_amounts_derivations) = inputs_and_change(
 		&coins,
 		wallet,
-		keychain_mask,
 		amount,
 		fee,
 		change_outputs,
@@ -560,6 +581,20 @@ where
 	Ok((parts, coins, change_amounts_derivations, fee))
 }
 
+// return:  (optimal_outputs_num, min_outputs_num)
+fn calculate_optimal_min_optputs(
+	fixed_fee: &Option<u64>,
+	outputs_num: usize,
+) -> (usize, Option<usize>) {
+	match fixed_fee {
+		Some(fixed_fee) => {
+			let need_inputs_min = inputs_for_fee_points(*fixed_fee, outputs_num, 1);
+			(need_inputs_min, Some(need_inputs_min))
+		}
+		None => (inputs_for_minimal_fee(outputs_num, 1), None),
+	}
+}
+
 /// Select outputs and calculating fee.
 /// fee - can be larger that standard fee, but never smaller.
 pub fn select_coins_and_fee<'a, T: ?Sized, C, K>(
@@ -567,14 +602,15 @@ pub fn select_coins_and_fee<'a, T: ?Sized, C, K>(
 	amount: u64,
 	amount_includes_fee: bool,
 	min_fee: &Option<u64>,
+	fixed_fee: Option<u64>, // Max fee to limit fee for late_lock case
 	current_height: u64,
 	minimum_confirmations: u64,
 	max_outputs: usize,
 	change_outputs: usize,
 	selection_strategy_is_use_all: bool,
 	parent_key_id: &Identifier,
-	outputs: &Option<Vec<String>>, // outputs to include into the transaction
-	routputs: usize,               // Number of resulting outputs. Normally it is 1
+	outputs: &Option<HashSet<String>>, // outputs to include into the transaction
+	routputs: usize,                   // Number of resulting outputs. Normally it is 1
 	exclude_change_outputs: bool,
 	change_output_minimum_confirmations: u64,
 ) -> Result<
@@ -591,59 +627,55 @@ where
 	C: NodeClient + 'a,
 	K: Keychain + 'a,
 {
+	// First attempt to spend without change
+	let (optimal_outputs_num, min_outputs_num) =
+		calculate_optimal_min_optputs(&fixed_fee, routputs);
+
 	// select some spendable coins from the wallet
-	let (_, mut coins) = select_coins(
+	let mut coins = select_coins(
 		wallet,
 		amount,
 		current_height,
 		minimum_confirmations,
-		max_outputs.saturating_sub(routputs + change_outputs), // Exclude number sof outpus
+		max_outputs.saturating_sub(routputs), // Exclude number sof outpus
 		selection_strategy_is_use_all,
 		parent_key_id,
 		outputs, // outputs to include into the transaction
 		exclude_change_outputs,
 		change_output_minimum_confirmations,
+		optimal_outputs_num,
+		min_outputs_num,
 	);
 
-	if coins.len() + routputs + change_outputs > max_outputs {
+	if coins.len() + routputs > max_outputs {
 		return Err(Error::TooLargeSlate(max_outputs))?;
 	}
 
-	// sender is responsible for setting the fee on the partial tx
-	// recipient should double check the fee calculation and not blindly trust the
-	// sender
-
-	// TODO - Is it safe to spend without a change output? (1 input -> 1 output)
-	// TODO - Does this not potentially reveal the senders private key?
-	//
 	// First attempt to spend without change
 	assert!(routputs >= 1); // Normally it is 1
 
-	let mut fee = tx_fee(coins.len(), routputs, 1);
-	if let Some(min_fee) = min_fee {
-		fee = std::cmp::max(*min_fee, fee);
-	}
-
+	let mut fee = calc_fees(coins.len(), routputs, min_fee, &fixed_fee)?;
 	let mut total: u64 = coins.iter().map(|c| c.value).sum();
 	let mut amount_with_fee = match amount_includes_fee {
 		true => amount,
 		false => amount + fee,
 	};
 
-	let num_outputs = change_outputs + routputs;
-
-	// We don't want to have large transactions because of storage
-
-	// We need to add a change address or amount with fee is more than total
+	// If change required...
 	if total != amount_with_fee {
-		fee = tx_fee(coins.len(), num_outputs, 1);
-		if let Some(min_fee) = min_fee {
-			fee = std::cmp::max(*min_fee, fee);
-		}
+		// reseting to trigger first retry cycle
+		total = 0;
+
+		let num_outputs = change_outputs + routputs;
+
+		// Here fixed fee ignored with purpose, it is not a case here, fixed can be broken
 		amount_with_fee = match amount_includes_fee {
 			true => amount,
-			false => amount + fee,
+			false => amount + calc_fees(coins.len(), num_outputs, min_fee, &None)?,
 		};
+
+		let (optimal_outputs_num, min_outputs_num) =
+			calculate_optimal_min_optputs(&fixed_fee, num_outputs);
 
 		// Here check if we have enough outputs for the amount including fee otherwise
 		// look for other outputs and check again
@@ -658,19 +690,24 @@ where
 				amount_with_fee,
 				current_height,
 				minimum_confirmations,
-				max_outputs,
+				max_outputs.saturating_sub(num_outputs),
 				selection_strategy_is_use_all,
 				parent_key_id,
 				outputs,
 				exclude_change_outputs,
 				change_output_minimum_confirmations,
-			)
-			.1;
-			fee = tx_fee(coins.len(), num_outputs, 1);
-			if let Some(min_fee) = min_fee {
-				fee = std::cmp::max(*min_fee, fee);
+				optimal_outputs_num,
+				min_outputs_num,
+			);
+
+			if coins.len() + num_outputs > max_outputs {
+				return Err(Error::TooLargeSlate(max_outputs))?;
 			}
+
+			fee = calc_fees(coins.len(), num_outputs, min_fee, &fixed_fee)?;
+
 			total = coins.iter().map(|c| c.value).sum();
+			let prev_amount_with_fee = amount_with_fee;
 			amount_with_fee = match amount_includes_fee {
 				true => amount,
 				false => amount + fee,
@@ -678,7 +715,7 @@ where
 
 			// Checking if new solution is better (has more outputs)
 			// Don't checking outputs limit because light overcounting is fine
-			if coins.len() <= coins_len {
+			if coins.len() <= coins_len && prev_amount_with_fee >= amount_with_fee {
 				break;
 			}
 		}
@@ -707,7 +744,6 @@ where
 pub fn inputs_and_change<'a, T: ?Sized, C, K, B>(
 	coins: &[OutputData],
 	wallet: &mut T,
-	keychain_mask: Option<&SecretKey>,
 	amount: u64,
 	fee: u64,
 	num_change_outputs: usize,
@@ -752,6 +788,18 @@ where
 	if change == 0 {
 		debug!("No change (sending exactly amount + fee), no change outputs to build");
 	} else {
+		// we don't want part_change to be zero. Also we really don't want many small change outputs
+		// If change less then 0.1 MWC, let's make it in one output.  1-in 2-out Tx fee will is: 4*2+1-1 = 0.008 MWC
+		// We don't want many small outputs like that
+		let num_change_outputs = if num_change_outputs > 1
+			&& change / (num_change_outputs as u64) < 100_000_000
+		{
+			warn!("Transaction requested has {} change outputs with change amount {}. We don't want create many small outputs, the number of change outputs is reduced to 1", num_change_outputs, change);
+			1
+		} else {
+			num_change_outputs
+		};
+
 		debug!(
 			"Building change outputs: total change: {} ({} outputs)",
 			change, num_change_outputs
@@ -768,7 +816,7 @@ where
 				part_change
 			};
 
-			let change_key = wallet.next_child(keychain_mask, None, Some(current_height))?;
+			let change_key = wallet.next_child(None, Some(current_height))?;
 
 			change_amounts_derivations.push((change_amount, change_key.clone(), None));
 			parts.push(build::output(change_amount, change_key));
@@ -793,17 +841,19 @@ pub fn select_coins<'a, T: ?Sized, C, K>(
 	max_outputs: usize,
 	select_all: bool,
 	parent_key_id: &Identifier,
-	outputs: &Option<Vec<String>>, // outputs to include into the transaction
+	outputs: &Option<HashSet<String>>, // outputs to include into the transaction
 	exclude_change_outputs: bool,
 	change_output_minimum_confirmations: u64,
-) -> (usize, Vec<OutputData>)
+	optimal_outputs_num: usize,
+	min_outputs_num: Option<usize>, // Minimal number of outputs. Needs to keep fee below some threshold (fee can be already fixed, so need it to be lower)
+) -> Vec<OutputData>
 //    max_outputs_available, Outputs
 where
 	T: WalletBackend<'a, C, K>,
 	C: NodeClient + 'a,
 	K: Keychain + 'a,
 {
-	let mut change_outputs: HashMap<String, u32> = HashMap::new();
+	let mut change_outputs: HashSet<String> = HashSet::new();
 	if exclude_change_outputs {
 		let txs: Vec<TxLogEntry> = wallet
 			.tx_log_iter()
@@ -813,7 +863,7 @@ where
 		for tx in &txs {
 			for o in &tx.output_commits {
 				let commit = format!("{}", util::to_hex(&o.0));
-				change_outputs.insert(commit, 1);
+				change_outputs.insert(commit);
 			}
 		}
 	}
@@ -825,103 +875,116 @@ where
 	let mut eligible = wallet
 		.iter()
 		.filter(|out| {
-			if out.commit.is_some() && change_outputs.contains_key(out.commit.as_ref().unwrap()) {
-				out.root_key_id == *parent_key_id
-					&& out.eligible_to_spend(current_height, change_output_minimum_confirmations)
-			} else {
-				out.root_key_id == *parent_key_id
-					&& out.eligible_to_spend(current_height, minimum_confirmations)
+			if out.root_key_id != *parent_key_id {
+				return false;
+			}
+			match outputs {
+				Some(outputs) => {
+					// selected outputs case
+					if let Some(commit) = out.commit.as_ref() {
+						return outputs.contains(commit);
+					} else {
+						return false;
+					}
+				}
+				None => {
+					// all outputs case exclude change
+					let is_change = if let Some(commit) = out.commit.as_ref() {
+						change_outputs.contains(commit)
+					} else {
+						false
+					};
+
+					let confirmations = if is_change {
+						change_output_minimum_confirmations
+					} else {
+						minimum_confirmations
+					};
+					return out.eligible_to_spend(current_height, confirmations);
+				}
 			}
 		})
 		.collect::<Vec<OutputData>>();
 
-	match outputs {
-		// User specify outputs to use. It is caller responsibility to make sure that amount is enough.
-		// we are not adding more outputs to satisfy amount.
-		Some(outputs) => {
-			eligible = eligible
-				.into_iter()
-				.filter(|out| {
-					if out.commit.is_some() {
-						let commit_str = out.commit.clone().unwrap();
-						outputs.contains(&commit_str)
-					} else {
-						false
-					}
-				})
-				.collect::<Vec<OutputData>>();
-		}
-		None => (),
-	}
-
-	let max_available = eligible.len();
-
 	// sort eligible outputs by increasing value
 	eligible.sort_by_key(|out| out.value);
 
-	// use a sliding window to identify potential sets of possible outputs to spend
-	// Case of amount > total amount of max_outputs(500):
-	// The limit exists because by default, we always select as many inputs as
-	// possible in a transaction, to reduce both the Output set and the fees.
-	// But that only makes sense up to a point, hence the limit to avoid being too
-	// greedy. But if max_outputs(500) is actually not enough to cover the whole
-	// amount, the wallet should allow going over it to satisfy what the user
-	// wants to send. So the wallet considers max_outputs more of a soft limit.
-	if eligible.len() > max_outputs {
-		if max_outputs > 0 {
-			for window in eligible.windows(max_outputs) {
-				let windowed_eligibles = window.to_vec();
-				if let Some(outputs) = select_from(amount, select_all, windowed_eligibles) {
-					return (max_available, outputs);
+	let total_eligible = eligible.len();
+
+	let mut optimal_outputs_num: i32 = optimal_outputs_num as i32;
+
+	let mut min_outputs_num = min_outputs_num.unwrap_or(0);
+	if select_all {
+		optimal_outputs_num = max_outputs as i32;
+		min_outputs_num = std::cmp::min(total_eligible, max_outputs);
+	}
+
+	// Implemention of real sliding window algo, 1 pass, no overhead for max_outputs 500 outputs.
+	let mut i1 = 0;
+	let mut amount_sum: u64 = 0;
+
+	while i1 < total_eligible {
+		amount_sum += eligible[i1].value;
+		i1 += 1;
+		if amount_sum >= amount && i1 >= min_outputs_num {
+			break;
+		}
+	}
+
+	let mut best_idx0 = 0;
+	let mut best_len = i1;
+	let mut best_amount: u64 = amount_sum;
+
+	for i0 in 0..total_eligible {
+		if amount_sum >= amount {
+			debug_assert!(i0 < i1);
+			// solution is found. checking if it is a best
+			let outputs_num: i32 = (i1 - i0) as i32;
+			if outputs_num as usize >= min_outputs_num {
+				let this_diff = outputs_num - optimal_outputs_num;
+				let best_diff = best_len as i32 - optimal_outputs_num;
+
+				let choose_new_solution = if best_len > max_outputs {
+					outputs_num < best_len as i32
+				} else if this_diff >= 0 {
+					// For positive (extra inputs) prefer solution with smaller difference. 0 is ideal number
+					this_diff < best_diff || best_diff < 0
+				} else {
+					// For negative, take existing positive, or bigger negative
+					best_diff < 0 && this_diff > best_diff
+				};
+
+				if choose_new_solution {
+					best_idx0 = i0;
+					best_len = outputs_num as usize;
+					best_amount = amount_sum;
+
+					if this_diff == 0 {
+						break; // it is possible best solution
+					}
 				}
 			}
-		}
-		// Not exist in any window of which total amount >= amount.
-		// Then take coins from the smallest one up to the total amount of selected
-		// coins = the amount.
-		if let Some(outputs) = select_from(amount, false, eligible.clone()) {
-			debug!(
-				"Extending maximum number of outputs. {} outputs selected.",
-				outputs.len()
-			);
-			return (max_available, outputs);
-		}
-	} else if let Some(outputs) = select_from(amount, select_all, eligible.clone()) {
-		return (max_available, outputs);
-	}
 
-	// we failed to find a suitable set of outputs to spend,
-	// so return the largest amount we can so we can provide guidance on what is
-	// possible
-	eligible.reverse();
-	(
-		max_available,
-		eligible.iter().take(max_outputs).cloned().collect(),
-	)
-}
+			amount_sum -= eligible[i0].value;
 
-fn select_from(amount: u64, select_all: bool, outputs: Vec<OutputData>) -> Option<Vec<OutputData>> {
-	let total = outputs.iter().fold(0, |acc, x| acc + x.value);
-	if total >= amount {
-		if select_all {
-			Some(outputs.to_vec())
+			while i1 < total_eligible && (amount_sum < amount || i1 - i0 < min_outputs_num as usize)
+			{
+				amount_sum += eligible[i1].value;
+				i1 += 1;
+			}
 		} else {
-			let mut selected_amount = 0;
-			Some(
-				outputs
-					.iter()
-					.take_while(|out| {
-						let res = selected_amount < amount;
-						selected_amount += out.value;
-						res
-					})
-					.cloned()
-					.collect(),
-			)
+			if amount_sum > best_amount {
+				best_idx0 = i0;
+				best_len = i1 - i0;
+				best_amount = amount_sum;
+			}
+			if i1 >= total_eligible {
+				break;
+			}
 		}
-	} else {
-		None
 	}
+
+	eligible[best_idx0..best_idx0 + best_len].to_vec()
 }
 
 /// Repopulates output in the slate's tranacstion
@@ -964,32 +1027,34 @@ where
 	)?;
 
 	let mut parts = vec![];
-	let inputs_data: HashMap<Identifier, u64> = context
-		.get_inputs()
-		.iter()
-		.map(|(id, _, value)| (id.clone(), value.clone()))
-		.collect();
 
-	wallet.iter().for_each(|out| {
-		if let Some(value) = inputs_data.get(&out.key_id) {
-			if out.is_coinbase {
-				parts.push(build::coinbase_input(*value, out.key_id.clone()));
-			} else {
-				parts.push(build::input(*value, out.key_id.clone()));
+	for (id, mmr, amount) in context.get_inputs() {
+		let out = wallet.get(&id, &mmr)?;
+		if amount != out.value {
+			return Err(Error::GenericError(format!(
+				"Internal error. Output value {} doesn't match expected {} for {} {:?}",
+				out.value, amount, id, mmr
+			)));
+		}
+		if out.is_coinbase {
+			parts.push(build::coinbase_input(out.value, out.key_id.clone()));
+		} else {
+			parts.push(build::input(out.value, out.key_id.clone()));
+		}
+	}
+
+	for (id, mmr, amount) in context.get_outputs() {
+		if let Ok(out) = wallet.get(&id, &mmr) {
+			if amount != out.value {
+				return Err(Error::GenericError(format!(
+					"Internal error. Output value {} doesn't match expected {} for {} {:?}",
+					out.value, amount, id, mmr
+				)));
 			}
+			parts.push(build::output(out.value, out.key_id.clone()));
 		}
-	});
+	}
 
-	let output_data: HashMap<Identifier, u64> = context
-		.get_outputs()
-		.iter()
-		.map(|(id, _, value)| (id.clone(), value.clone()))
-		.collect();
-	wallet.iter().for_each(|out| {
-		if let Some(value) = output_data.get(&out.key_id) {
-			parts.push(build::output(*value, out.key_id.clone()));
-		}
-	});
 	slate.add_transaction_elements(&keychain, &ProofBuilder::new(&keychain), parts)?;
 	// restore the original offset
 	slate.tx_or_err_mut()?.offset = slate.offset.clone();

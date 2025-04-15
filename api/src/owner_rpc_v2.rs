@@ -31,11 +31,13 @@ use crate::util;
 use crate::util::secp::pedersen;
 use crate::util::Mutex;
 use crate::{Owner, OwnerRpcV3};
-use easy_jsonrpc_mw;
+use easy_jsonrpc_mwc;
 use ed25519_dalek::PublicKey as DalekPublicKey;
+use libwallet::wallet_lock_test;
 use mwc_wallet_libwallet::proof::proofaddress::{self, ProvableAddress};
 use mwc_wallet_util::mwc_util::secp::Secp256k1;
 use std::convert::TryFrom;
+use std::ops::DerefMut;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -43,7 +45,7 @@ use std::time::Duration;
 /// * When running `mwc-wallet owner_api` with defaults, the V2 api is available at
 /// `localhost:3420/v2/owner`
 /// * The endpoint only supports POST operations, with the json-rpc request as the body
-#[easy_jsonrpc_mw::rpc]
+#[easy_jsonrpc_mwc::rpc]
 pub trait OwnerRpcV2: Sync + Send {
 	/**
 	Networked version of [Owner::accounts](struct.Owner.html#method.accounts).
@@ -181,7 +183,7 @@ pub trait OwnerRpcV2: Sync + Send {
 				"is_coinbase": true,
 				"key_id": "0300000000000000000000000000000000",
 				"lock_height": "4",
-				"mmr_index": null,
+				"mmr_index": "1",
 				"n_child": 0,
 				"root_key_id": "0200000000000000000000000000000000",
 				"status": "Unspent",
@@ -197,7 +199,64 @@ pub trait OwnerRpcV2: Sync + Send {
 				"is_coinbase": true,
 				"key_id": "0300000000000000000000000100000000",
 				"lock_height": "5",
-				"mmr_index": null,
+				"mmr_index": "2",
+				"n_child": 1,
+				"root_key_id": "0200000000000000000000000000000000",
+				"status": "Unspent",
+				"tx_log_entry": 1,
+				"value": "2380952380"
+			  }
+			}
+		  ]
+		]
+	  }
+	}
+	# "#
+	# , false, 2, false, false, false, false, true);
+	#
+	# mwc_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
+	# r#"
+	{
+		"jsonrpc": "2.0",
+		"method": "retrieve_outputs",
+		"params": {},
+		"id": 1
+	}
+	# "#
+	# ,
+	# r#"
+	{
+	  "id": 1,
+	  "jsonrpc": "2.0",
+	  "result": {
+		"Ok": [
+		  true,
+		  [
+			{
+			  "commit": "0910c1752100733bae49e877286835aab76d5856ef8139b6c6e3f51798aa461b03",
+			  "output": {
+				"commit": "0910c1752100733bae49e877286835aab76d5856ef8139b6c6e3f51798aa461b03",
+				"height": "1",
+				"is_coinbase": true,
+				"key_id": "0300000000000000000000000000000000",
+				"lock_height": "4",
+				"mmr_index": "1",
+				"n_child": 0,
+				"root_key_id": "0200000000000000000000000000000000",
+				"status": "Unspent",
+				"tx_log_entry": 0,
+				"value": "2380952380"
+			  }
+			},
+			{
+			  "commit": "098778ce2243fa34e5876c8cb7f6dbbbd6a5649c1561973a807a6811941c12363c",
+			  "output": {
+				"commit": "098778ce2243fa34e5876c8cb7f6dbbbd6a5649c1561973a807a6811941c12363c",
+				"height": "2",
+				"is_coinbase": true,
+				"key_id": "0300000000000000000000000100000000",
+				"lock_height": "5",
+				"mmr_index": "2",
 				"n_child": 1,
 				"root_key_id": "0200000000000000000000000000000000",
 				"status": "Unspent",
@@ -215,8 +274,8 @@ pub trait OwnerRpcV2: Sync + Send {
 	*/
 	fn retrieve_outputs(
 		&self,
-		include_spent: bool,
-		refresh_from_node: bool,
+		include_spent: Option<bool>,
+		refresh_from_node: Option<bool>,
 		tx_id: Option<u32>,
 	) -> Result<(bool, Vec<OutputCommitMapping>), Error>;
 
@@ -234,7 +293,8 @@ pub trait OwnerRpcV2: Sync + Send {
 			"params": {
 				"refresh_from_node": true,
 				"tx_id": null,
-				"tx_slate_id": null
+				"tx_slate_id": null,
+				"show_last_four_days": true
 			},
 			"id": 1
 		}
@@ -310,14 +370,96 @@ pub trait OwnerRpcV2: Sync + Send {
 		}
 	# "#
 	# , false, 2, false, false, false, false, true);
+	#
+	# mwc_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
+	# r#"
+		{
+			"jsonrpc": "2.0",
+			"method": "retrieve_txs",
+			"params": {},
+			"id": 1
+		}
+	# "#
+	# ,
+	# r#"
+		{
+		  "id": 1,
+		  "jsonrpc": "2.0",
+		  "result": {
+			"Ok": [
+			  true,
+			  [
+				{
+				  "address": null,
+				  "amount_credited": "2380952380",
+				  "amount_debited": "0",
+				  "confirmation_ts": "2019-01-15T16:01:26Z",
+				  "confirmed": true,
+				  "creation_ts": "2019-01-15T16:01:26Z",
+				  "fee": null,
+				  "id": 0,
+				  "input_commits": [],
+				  "kernel_excess": "099beea8f814120ac8c559027e55cb26986ae40e279e3093a7d4a52d827a23f0e7",
+				  "kernel_offset": null,
+				  "kernel_lookup_min_height": 1,
+				  "messages": null,
+				  "num_inputs": 0,
+				  "num_outputs": 1,
+				  "output_commits": [
+					"0910c1752100733bae49e877286835aab76d5856ef8139b6c6e3f51798aa461b03"
+				  ],
+				  "output_height": 1,
+				  "parent_key_id": "0200000000000000000000000000000000",
+				  "payment_proof": null,
+				  "reverted_after": null,
+				  "stored_tx": null,
+				  "ttl_cutoff_height": null,
+				  "tx_slate_id": null,
+				  "tx_type": "ConfirmedCoinbase"
+				},
+				{
+				  "address": null,
+				  "amount_credited": "2380952380",
+				  "amount_debited": "0",
+				  "confirmation_ts": "2019-01-15T16:01:26Z",
+				  "confirmed": true,
+				  "creation_ts": "2019-01-15T16:01:26Z",
+				  "fee": null,
+				  "id": 1,
+				  "input_commits": [],
+				  "kernel_excess": "09f7677adc7caf8bb44a4ee27d27dfe9ffa1010847a18b182bbb7100bb02f9259e",
+				  "kernel_offset": null,
+				  "kernel_lookup_min_height": 2,
+				  "messages": null,
+				  "num_inputs": 0,
+				  "num_outputs": 1,
+				  "output_commits": [
+					"098778ce2243fa34e5876c8cb7f6dbbbd6a5649c1561973a807a6811941c12363c"
+				  ],
+				  "output_height": 2,
+				  "parent_key_id": "0200000000000000000000000000000000",
+				  "payment_proof": null,
+				  "reverted_after": null,
+				  "stored_tx": null,
+				  "ttl_cutoff_height": null,
+				  "tx_slate_id": null,
+				  "tx_type": "ConfirmedCoinbase"
+				}
+			  ]
+			]
+		  }
+		}
+	# "#
+	# , false, 2, false, false, false, false, true);
 	```
 	*/
 
 	fn retrieve_txs(
 		&self,
-		refresh_from_node: bool,
+		refresh_from_node: Option<bool>,
 		tx_id: Option<u32>,
 		tx_slate_id: Option<Uuid>,
+		show_last_four_days: Option<bool>,
 	) -> Result<(bool, Vec<TxLogEntryAPI>), Error>;
 
 	/**
@@ -360,13 +502,47 @@ pub trait OwnerRpcV2: Sync + Send {
 	}
 	# "#
 	# ,false, 4, false, false, false, false, true);
+	#
+	# mwc_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
+	# r#"
+	{
+		"jsonrpc": "2.0",
+		"method": "retrieve_summary_info",
+		"params": {},
+		"id": 1
+	}
+	# "#
+	# ,
+	# r#"
+	{
+	  "id": 1,
+	  "jsonrpc": "2.0",
+	  "result": {
+		"Ok": [
+		  true,
+		  {
+			"amount_awaiting_confirmation": "0",
+			"amount_awaiting_finalization": "0",
+			"amount_currently_spendable": "2380952380",
+			"amount_immature": "7142857140",
+			"amount_locked": "0",
+			"amount_reverted": "0",
+			"last_confirmed_height": "4",
+			"minimum_confirmations": "1",
+			"total": "9523809520"
+		  }
+		]
+	  }
+	}
+	# "#
+	# ,false, 4, false, false, false, false, true);
 	```
 	 */
 
 	fn retrieve_summary_info(
 		&self,
-		refresh_from_node: bool,
-		minimum_confirmations: u64,
+		refresh_from_node: Option<bool>,
+		minimum_confirmations: Option<u64>,
 	) -> Result<(bool, WalletInfo), Error>;
 
 	// 	Case with Minimal and full number of arguments.
@@ -1878,10 +2054,68 @@ pub trait OwnerRpcV2: Sync + Send {
 	}
 	# "#
 	# , false, 5, true, true, true, false, true);
+	#
+	# mwc_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
+	# r#"
+	{
+		"jsonrpc": "2.0",
+		"id": 1,
+		"method": "post_tx",
+		"params": {
+		  "tx": {
+			"offset": "d202964900000000d302964900000000d402964900000000d502964900000000",
+			"body": {
+				"inputs": [
+					{
+					  "commit": "098778ce2243fa34e5876c8cb7f6dbbbd6a5649c1561973a807a6811941c12363c",
+					  "features": "Coinbase"
+					},
+					{
+					  "commit": "0910c1752100733bae49e877286835aab76d5856ef8139b6c6e3f51798aa461b03",
+					  "features": "Coinbase"
+					}
+				],
+				"outputs": [
+					{
+					  "commit": "082967b3fe580cd110355010ef45450314fb067720db01b0e6873bb083d76708c9",
+					  "features": "Plain",
+					  "proof": "828bb24121aa0332c872062a42a8333c3ef81f8ae37d24053d953217368b3cada90410a50509a0b9fcbb5aded41397fc00ca1ff5acdac20d48afb0a3281d21e7026d32fdc6c5157461a35f98a809ffa09187c1e170ea24652ad213b7e4c9878654ac3dd9a8915eaf742db53182fcb42d2d341fbdfe8bd31bd001f4ff2c1ca9f9b1531da29137214f211edb7a5eb8f494cb8945f8527dd25bf7e698515043db4249540720008a708db5342230d05b069c094688ccb7c07d4a4a2293ea76cf999c555dc0ddc757891c360db1901bbb4dc20cae997f875f8de482d8160e05d60f9b0135e0fc313d8f953db78f1ea252449dd81cfa22dd895512ed39d566f0924542b543d25fc9fc7a819d228f3b0ee5e381f088f54893e86437dafc49dd923b3e6dff956ca843f951910379531fac9bb5fd01a182dd32a4c597f92da3c01af37cb9b0ec984500884438e74e54d7e76fa1ae7241d5050b13376310b24761634a6f6eb7cf000082f50ed7c1899d7918023d4f877586f964932a7af72e7a4984ddecfdd1921a2e1b80b00d6bd2e64a3f4cb6915a27a8d17a69d163cf45220a13fcddd15dc2bb91ae4f1b6a67224ab3b23e8d7d785df178ec78a84cf42cea086426f563822c8a4271a0b89bb21f84b643dbf1de21b6395039d673a376492767199fa36ccd9a13628ce61695424091acc16059450d59bc59fa7879e7306f5727217211b0264a6a560f886d520e41406ef45b1668805b88d246c5b2ca5a1762042c85be34fcd420ac3843f32236d079b4bd57d6b8d8013d9d18f8efb55e8e443cd9e1af9b144e7a56c8c6be0138af3b4a6c99bee9109bed2bce2e5145e736b125a2ec19aaf3fff713f6897fdd4158ce2ab04706b062ca2847bf70259c0fc4b0d390dc7fdaf0362047f775a912bd22da9d40f04d9790bcd5ece4b36b74c6c340b48c2926b916e8a9"
+					},
+					{
+					  "commit": "096e1669267c22ecb38c466d73b8578261d8e91c14dd66702dd5bf34f4232e10db",
+					  "features": "Plain",
+					  "proof": "7d567b0895a1103d19446929da8b98f2086819507ddce4b9dbb5ce6327107744e74aba59ef1834937da1b86eb7c1c1b0bc11d1c5d5ec79d25bc1e52aed1656f60d46f6878ba5ca8639efdbb9203e378e91171c11527c4a34713f06dc22f58ca4a08e68d83ff897e61cfc145fe376fa428b55e25cf20d15f10b9054778229798b30fb4e45d817a5053b682dcf591481a3c8174cfbba81e31aa525d5b884ca7a016713178f26c0fe8ae1f88b5382f8e70c4d91fb3828c0f307d828aa028281d3551525e68d20827ab0e6785c6b5747e895dcd38429b44e62b7f6c1c921d87ae954a9dd6e967ac52e6cd13a1d4bb2f1434da25a0723ef9c869cc573019577552dd0e0f808f8cc57723b041320025f6433779fe907998a4ec7606bf884b2199253b502065bed8e0625c2df858d6508c1aa44deddc68d06d00d81e97720e23e15a3464ed4733fc547e9fb772e563a1dbcd27ac55e40f674f9006e7dd4465444f3eb7527cb01905dee69a51cf2fc1810c861dd0834e7649d594c3e1740d85343a6b63c8a9e0a0f63059031899b38dfd9a192034d54029bd35e683ccab46282519b26cae20d398b754357abe1cf0370890f2897b5d8ada4fb3da777a8f8f1daa4197a380e6734504117dd2a92ea1917f174c44c59e0b50c6b7a5f9eb14e6d96cb6b3e5dbcb3d0eaf0e4aac1b6616d674bb708b7559e37de608e8a828bee7f25f627e2f06d9a87e8d651ade39e1e65db7204b94abc0b7ca6fdd75aadeeac6a876b6297e38039734ebdfa9a555152b4293cb00e423a66d64f827afa4748dd6fdc1dc33332bffb820dacbf5a6d347042db985bbd9cf476dceb45d6978035ba03d25612243fc164c0a902017ce7ffd632d041fa3c56554739e78c6d725ecbfdaa0739d3649239fb53294b7a46ee6ed403bf3815f6c78f06a8ca4e3c9b066234f7574fb6ea8f17d199"
+					}
+				],
+				"kernels": [
+					{
+					  "excess": "08b3b8b83c622f630141a66c9cad96e19c78f745e4e2ddea85439f05d14a404640",
+					  "excess_sig": "66074d25a751c4743342c90ad8ead9454daa00d9b9aed29bca321036d16c4b4d1f1ac30ec6809c5e1a983a83af0deb0635b892e5e0ea3a3bd7f68be99f721348",
+					  "features": "Plain",
+					  "fee": "7000000",
+					  "lock_height": "0"
+					}
+				]
+			}
+		}
+	  }
+	}
+	# "#
+	# ,
+	# r#"
+	{
+		"id": 1,
+		"jsonrpc": "2.0",
+		"result": {
+			"Ok": null
+		}
+	}
+	# "#
+	# , false, 5, true, true, true, false, true);
 	```
 	 */
 
-	fn post_tx(&self, tx: TransactionV3, fluff: bool) -> Result<(), Error>;
+	fn post_tx(&self, tx: TransactionV3, fluff: Option<bool>) -> Result<(), Error>;
 
 	/**
 	Networked version of [Owner::cancel_tx](struct.Owner.html#method.cancel_tx).
@@ -1894,7 +2128,6 @@ pub trait OwnerRpcV2: Sync + Send {
 		"jsonrpc": "2.0",
 		"method": "cancel_tx",
 		"params": {
-			"tx_id": null,
 			"tx_slate_id": "0436430c-2b02-624c-2032-570501212b00"
 		},
 		"id": 1
@@ -1918,8 +2151,7 @@ pub trait OwnerRpcV2: Sync + Send {
 		"jsonrpc": "2.0",
 		"method": "cancel_tx",
 		"params": {
-			"tx_id": 5,
-			"tx_slate_id": null
+			"tx_id": 5
 		},
 		"id": 1
 	}
@@ -1931,6 +2163,29 @@ pub trait OwnerRpcV2: Sync + Send {
 		"jsonrpc": "2.0",
 		"result": {
 			"Ok": null
+		}
+	}
+	# "#
+	# , false, 5, true, true, false, false, true);
+	#
+	# mwc_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
+	# r#"
+	{
+		"jsonrpc": "2.0",
+		"method": "cancel_tx",
+		"params": {},
+		"id": 1
+	}
+	# "#
+	# ,
+	# r#"
+	{
+		"id": 1,
+		"jsonrpc": "2.0",
+		"result": {
+			"Err": {
+				 "TransactionCancellationError": "Transaction is not defined. Please specify tx_id or tx_slate_id fields."
+			   }
 		}
 	}
 	# "#
@@ -1953,8 +2208,7 @@ pub trait OwnerRpcV2: Sync + Send {
 		"params": [
 			{
 				"stored_tx": "0436430c-2b02-624c-2032-570501212b00.mwctx",
-				"tx_slate_id": "0436430c-2b02-624c-2032-570501212b00",
-				"tx_type": "TxSent"
+				"tx_slate_id": "0436430c-2b02-624c-2032-570501212b00"
 			}
 		]
 	}
@@ -2117,9 +2371,34 @@ pub trait OwnerRpcV2: Sync + Send {
 	}
 	# "#
 	# , false, 1, false, false, false, false, true);
+	#
+		# mwc_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
+	# r#"
+	{
+		"jsonrpc": "2.0",
+		"method": "scan",
+		"params": {},
+		"id": 1
+	}
+	# "#
+	# ,
+	# r#"
+	{
+		"id": 1,
+		"jsonrpc": "2.0",
+		"result": {
+			"Ok": null
+		}
+	}
+	# "#
+	# , false, 1, false, false, false, false, true);
 	```
 	 */
-	fn scan(&self, start_height: Option<u64>, delete_unconfirmed: bool) -> Result<(), Error>;
+	fn scan(
+		&self,
+		start_height: Option<u64>,
+		delete_unconfirmed: Option<bool>,
+	) -> Result<(), Error>;
 
 	/**
 	Networked version of [Owner::node_height](struct.Owner.html#method.node_height).
@@ -2236,10 +2515,31 @@ pub trait OwnerRpcV2: Sync + Send {
 	}
 	# "#
 	# , false, 0, false, false, false, false, true);
+	#
+	# mwc_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
+	# r#"
+	{
+		"jsonrpc": "2.0",
+		"method": "get_updater_messages",
+		"params": {},
+		"id": 1
+	}
+	# "#
+	# ,
+	# r#"
+	{
+		"id": 1,
+		"jsonrpc": "2.0",
+		"result": {
+			"Ok": []
+		}
+	}
+	# "#
+	# , false, 0, false, false, false, false, true);
 	```
 	*/
 
-	fn get_updater_messages(&self, count: u32) -> Result<Vec<StatusMessage>, Error>;
+	fn get_updater_messages(&self, count: Option<u32>) -> Result<Vec<StatusMessage>, Error>;
 
 	/**
 	Networked version of [Owner::get_mqs_address](struct.Owner.html#method.get_mqs_address).
@@ -2316,7 +2616,6 @@ pub trait OwnerRpcV2: Sync + Send {
 		"method": "retrieve_payment_proof",
 		"params": {
 			"refresh_from_node": true,
-			"tx_id": null,
 			"tx_slate_id": "0436430c-2b02-624c-2032-570501212b00"
 		},
 		"id": 1
@@ -2349,7 +2648,7 @@ pub trait OwnerRpcV2: Sync + Send {
 	# "#
 	# , false, 5, true, true, true, true, false);
 	#
-	# // Comapact slate case, kernel is different now.
+	# // Compact slate case, kernel is different now.
 	# mwc_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
 	# r#"
 	{
@@ -2357,7 +2656,6 @@ pub trait OwnerRpcV2: Sync + Send {
 		"method": "retrieve_payment_proof",
 		"params": {
 			"refresh_from_node": true,
-			"tx_id": null,
 			"tx_slate_id": "0436430c-2b02-624c-2032-570501212b01"
 		},
 		"id": 1
@@ -2389,12 +2687,37 @@ pub trait OwnerRpcV2: Sync + Send {
 	}
 	# "#
 	# , false, 5, true, true, true, true, true);
+	#
+	#
+	# // Compact slate case, kernel is different now.
+	# mwc_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
+	# r#"
+	{
+		"jsonrpc": "2.0",
+		"method": "retrieve_payment_proof",
+		"params": {},
+		"id": 1
+	}
+	# "#
+	# ,
+	# r#"
+	{
+	  "id": 1,
+	  "jsonrpc": "2.0",
+	  "result": {
+		 "Err": {
+			 "PaymentProofRetrieval": "Transaction ID or Slate UUID must be specified"
+		 }
+	  }
+	}
+	# "#
+	# , false, 5, true, true, true, true, true);
 	```
 	*/
 
 	fn retrieve_payment_proof(
 		&self,
-		refresh_from_node: bool,
+		refresh_from_node: Option<bool>,
 		tx_id: Option<u32>,
 		tx_slate_id: Option<Uuid>,
 	) -> Result<PaymentProof, Error>;
@@ -2505,7 +2828,6 @@ pub trait OwnerRpcV2: Sync + Send {
 					"port": null
 				},
 			"content" : "InvoiceInitial",
-			"address_index" : null,
 			"slate": {
 			  "amount": "2000000000",
 			  "coin_type": null,
@@ -2760,7 +3082,6 @@ pub trait OwnerRpcV2: Sync + Send {
 		"jsonrpc": "2.0",
 		"method": "decode_slatepack_message",
 		"params": {
-			"address_index": null,
 			"message": "BEGINSLATE_BIN. 9ahjQefP9gsCcVt 25Po4VP34y95yxE wMmTzzckUkh1tu3 y7WwT5j1ZTL7UyC 4byFhRQM4BmhM92 Y1ukWPJ8BVdpEGU MAJUrU2YbXFLAYT tdqamYotCv4Co3z keD8RdPpX4b. ENDSLATE_BIN."
 		},
 		"id": 1
@@ -2855,37 +3176,56 @@ where
 
 	fn retrieve_outputs(
 		&self,
-		include_spent: bool,
-		refresh_from_node: bool,
+		include_spent: Option<bool>,
+		refresh_from_node: Option<bool>,
 		tx_id: Option<u32>,
 	) -> Result<(bool, Vec<OutputCommitMapping>), Error> {
-		Owner::retrieve_outputs(self, None, include_spent, refresh_from_node, tx_id)
+		Owner::retrieve_outputs(
+			self,
+			None,
+			include_spent.unwrap_or(false),
+			refresh_from_node.unwrap_or(true),
+			tx_id,
+		)
 	}
 
 	fn retrieve_txs(
 		&self,
-		refresh_from_node: bool,
+		refresh_from_node: Option<bool>,
 		tx_id: Option<u32>,
 		tx_slate_id: Option<Uuid>,
+		show_last_four_days: Option<bool>,
 	) -> Result<(bool, Vec<TxLogEntryAPI>), Error> {
-		Owner::retrieve_txs(self, None, refresh_from_node, tx_id, tx_slate_id, None).map(
-			|(b, tx)| {
-				(
-					b,
-					tx.iter()
-						.map(|t| TxLogEntryAPI::from_txlogemtry(t))
-						.collect(),
-				)
-			},
+		Owner::retrieve_txs(
+			self,
+			None,
+			refresh_from_node.unwrap_or(true),
+			tx_id,
+			tx_slate_id,
+			None,
+			show_last_four_days,
 		)
+		.map(|(b, tx)| {
+			(
+				b,
+				tx.iter()
+					.map(|t| TxLogEntryAPI::from_txlogemtry(t))
+					.collect(),
+			)
+		})
 	}
 
 	fn retrieve_summary_info(
 		&self,
-		refresh_from_node: bool,
-		minimum_confirmations: u64,
+		refresh_from_node: Option<bool>,
+		minimum_confirmations: Option<u64>,
 	) -> Result<(bool, WalletInfo), Error> {
-		Owner::retrieve_summary_info(self, None, refresh_from_node, minimum_confirmations)
+		Owner::retrieve_summary_info(
+			self,
+			None,
+			refresh_from_node.unwrap_or(true),
+			minimum_confirmations.unwrap_or(1),
+		)
 	}
 
 	fn init_send_tx(&self, args: InitTxArgs) -> Result<VersionedSlate, Error> {
@@ -3033,14 +3373,14 @@ where
 		.map(|x| x.map(TransactionV3::from))
 	}
 
-	fn post_tx(&self, tx: TransactionV3, fluff: bool) -> Result<(), Error> {
+	fn post_tx(&self, tx: TransactionV3, fluff: Option<bool>) -> Result<(), Error> {
 		Owner::post_tx(
 			self,
 			None,
 			&Transaction::try_from(tx).map_err(|e| {
 				Error::GenericError(format!("Unable convert V3 transaction, {}", e))
 			})?,
-			fluff,
+			fluff.unwrap_or(false),
 		)
 	}
 
@@ -3057,8 +3397,17 @@ where
 		Owner::verify_slate_messages(self, None, &slate)
 	}
 
-	fn scan(&self, start_height: Option<u64>, delete_unconfirmed: bool) -> Result<(), Error> {
-		Owner::scan(self, None, start_height, delete_unconfirmed)
+	fn scan(
+		&self,
+		start_height: Option<u64>,
+		delete_unconfirmed: Option<bool>,
+	) -> Result<(), Error> {
+		Owner::scan(
+			self,
+			None,
+			start_height,
+			delete_unconfirmed.unwrap_or(false),
+		)
 	}
 
 	fn node_height(&self) -> Result<NodeHeightResult, Error> {
@@ -3073,8 +3422,8 @@ where
 		Owner::stop_updater(self)
 	}
 
-	fn get_updater_messages(&self, count: u32) -> Result<Vec<StatusMessage>, Error> {
-		Owner::get_updater_messages(self, count as usize)
+	fn get_updater_messages(&self, count: Option<u32>) -> Result<Vec<StatusMessage>, Error> {
+		Owner::get_updater_messages(self, count)
 	}
 
 	fn get_mqs_address(&self) -> Result<ProvableAddress, Error> {
@@ -3093,11 +3442,17 @@ where
 
 	fn retrieve_payment_proof(
 		&self,
-		refresh_from_node: bool,
+		refresh_from_node: Option<bool>,
 		tx_id: Option<u32>,
 		tx_slate_id: Option<Uuid>,
 	) -> Result<PaymentProof, Error> {
-		Owner::retrieve_payment_proof(self, None, refresh_from_node, tx_id, tx_slate_id)
+		Owner::retrieve_payment_proof(
+			self,
+			None,
+			refresh_from_node.unwrap_or(true),
+			tx_id,
+			tx_slate_id,
+		)
 	}
 
 	fn verify_payment_proof(&self, proof: PaymentProof) -> Result<(bool, bool), Error> {
@@ -3177,7 +3532,7 @@ pub fn run_doctest_owner(
 	payment_proof: bool,
 	compact_slate: bool,
 ) -> Result<Option<serde_json::Value>, String> {
-	use easy_jsonrpc_mw::Handler;
+	use easy_jsonrpc_mwc::Handler;
 	use mwc_wallet_impls::test_framework::{self, LocalWalletClient, WalletProxy};
 	use mwc_wallet_impls::{DefaultLCProvider, DefaultWalletImpl};
 	use mwc_wallet_libwallet::{api_impl, WalletInst};
@@ -3193,11 +3548,12 @@ pub fn run_doctest_owner(
 	let _ = fs::remove_dir_all(test_dir);
 	global::set_local_chain_type(ChainTypes::AutomatedTesting);
 
+	let tx_pool: Arc<Mutex<Vec<Transaction>>> = Arc::new(Mutex::new(Vec::new()));
 	let mut wallet_proxy: WalletProxy<
 		DefaultLCProvider<LocalWalletClient, ExtKeychain>,
 		LocalWalletClient,
 		ExtKeychain,
-	> = WalletProxy::new(test_dir);
+	> = WalletProxy::new(test_dir.into(), tx_pool.clone());
 	let chain = wallet_proxy.chain.clone();
 
 	let rec_phrase_1 = util::ZeroingString::from(
@@ -3304,6 +3660,7 @@ pub fn run_doctest_owner(
 			(&mask1).as_ref(),
 			1 as usize,
 			false,
+			tx_pool.lock().deref_mut(),
 		);
 		//update local outputs after each block, so transaction IDs stay consistent
 		let (wallet_refreshed, _) = api_impl::owner::retrieve_summary_info(
@@ -3344,7 +3701,10 @@ pub fn run_doctest_owner(
 	let w2_slatepack_address = ProvableAddress::from_tor_pub_key(&w2_tor_pubkey);
 
 	if perform_tx {
-		api_impl::owner::update_wallet_state(wallet1.clone(), (&mask1).as_ref(), &None).unwrap();
+		{
+			wallet_lock_test!(wallet1, w);
+			api_impl::owner::update_wallet_state(&mut **w, (&mask1).as_ref(), &None).unwrap();
+		}
 
 		let amount = 2_000_000_000;
 		let mut w_lock = wallet1.lock();
@@ -3490,6 +3850,7 @@ pub fn run_doctest_owner(
 			(&mask1).as_ref(),
 			3 as usize,
 			false,
+			tx_pool.lock().deref_mut(),
 		);
 	}
 

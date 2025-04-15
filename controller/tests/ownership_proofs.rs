@@ -19,6 +19,8 @@ extern crate mwc_wallet_controller as wallet;
 extern crate mwc_wallet_impls as impls;
 
 use mwc_wallet_util::mwc_core::global;
+use std::ops::DerefMut;
+use std::sync::Arc;
 
 use impls::test_framework::{self, LocalWalletClient};
 use std::sync::atomic::Ordering;
@@ -29,13 +31,15 @@ use std::time::Duration;
 mod common;
 use common::{clean_output_dir, create_wallet_proxy, setup};
 use mwc_wallet_libwallet::PubKeySignature;
-use mwc_wallet_util::mwc_util::ZeroingString;
+use mwc_wallet_util::mwc_core::core::Transaction;
+use mwc_wallet_util::mwc_util::{Mutex, ZeroingString};
 
 /// self send impl
-fn ownership_proof_impl(test_dir: &'static str) -> Result<(), wallet::Error> {
+fn ownership_proof_impl(test_dir: &str) -> Result<(), wallet::Error> {
 	// Create a new proxy to simulate server and wallet responses
 	global::set_local_chain_type(global::ChainTypes::AutomatedTesting);
-	let mut wallet_proxy = create_wallet_proxy(test_dir);
+	let tx_pool: Arc<Mutex<Vec<Transaction>>> = Arc::new(Mutex::new(Vec::new()));
+	let mut wallet_proxy = create_wallet_proxy(test_dir.into(), tx_pool.clone());
 	let chain = wallet_proxy.chain.clone();
 	let stopper = wallet_proxy.running.clone();
 
@@ -63,8 +67,14 @@ fn ownership_proof_impl(test_dir: &'static str) -> Result<(), wallet::Error> {
 		}
 	});
 
-	let _ =
-		test_framework::award_blocks_to_wallet(&chain, wallet1.clone(), mask1, 10 as usize, false);
+	let _ = test_framework::award_blocks_to_wallet(
+		&chain,
+		wallet1.clone(),
+		mask1,
+		10 as usize,
+		false,
+		tx_pool.lock().deref_mut(),
+	);
 
 	wallet::controller::owner_single_use(Some(wallet1.clone()), mask1, None, |api, m| {
 		let (wallet1_refreshed, wallet1_info) = api.retrieve_summary_info(m, true, 1)?;

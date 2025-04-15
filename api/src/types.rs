@@ -360,6 +360,7 @@ pub struct TxLogEntryAPI {
 	pub id: u32,
 	#[serde(default)]
 	pub tx_slate_id: Option<Uuid>,
+	#[serde(default = "TxLogEntryAPI::default_tx_type")]
 	pub tx_type: TxLogEntryType,
 	#[serde(default)]
 	pub address: Option<String>,
@@ -449,6 +450,10 @@ impl TxLogEntryAPI {
 	}
 	fn default_creation_ts() -> DateTime<Utc> {
 		Utc::now()
+	}
+
+	fn default_tx_type() -> TxLogEntryType {
+		TxLogEntryType::TxSent
 	}
 }
 

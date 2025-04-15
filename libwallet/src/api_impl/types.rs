@@ -23,6 +23,7 @@ use crate::proof::proofaddress;
 use crate::proof::proofaddress::ProvableAddress;
 use crate::slate_versions::SlateVersion;
 use crate::types::OutputData;
+use std::collections::HashSet;
 
 use chrono::prelude::*;
 
@@ -143,7 +144,7 @@ pub struct InitTxArgs {
 	#[serde(default)]
 	pub send_args: Option<InitTxSendArgs>,
 	/// Selected outputs. If none, will use all outputs
-	pub outputs: Option<Vec<String>>, // outputs to include into the transaction
+	pub outputs: Option<HashSet<String>>, // outputs to include into the transaction
 	/// Slatepack recipient. If defined will send as a slatepack. Otherwise as not encrypted. Will be ignored for MQS
 	/// ProvableAddress has to be tor (DalekPublicKey) address
 	pub slatepack_recipient: Option<ProvableAddress>,
@@ -259,6 +260,7 @@ pub struct IssueInvoiceTxArgs {
 	pub address: Option<String>,
 	/// Slatepack recipient. If defined will send as a slatepack. Otherwise as not encrypted. Will be ignored for MQS
 	/// ProvableAddress has to be tor (DalekPublicKey) address
+	#[serde(default)]
 	pub slatepack_recipient: Option<ProvableAddress>,
 }
 

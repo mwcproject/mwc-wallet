@@ -52,7 +52,7 @@ use crate::impls::tor::process as tor_process;
 use crate::impls::tor::{bridge as tor_bridge, proxy as tor_proxy};
 use crate::keychain::Keychain;
 use chrono::Utc;
-use easy_jsonrpc_mw::{Handler, MaybeReply};
+use easy_jsonrpc_mwc::{Handler, MaybeReply};
 use ed25519_dalek::PublicKey as DalekPublicKey;
 use log::Level;
 use mwc_wallet_impls::tor;

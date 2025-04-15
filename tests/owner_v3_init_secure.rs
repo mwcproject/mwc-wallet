@@ -22,6 +22,8 @@ extern crate mwc_wallet;
 
 use mwc_wallet_api::{ECDHPubkey, JsonId};
 use mwc_wallet_impls::test_framework::{self, LocalWalletClient, WalletProxy};
+use std::ops::DerefMut;
+use std::sync::Arc;
 
 use clap::App;
 use std::thread;
@@ -30,8 +32,8 @@ use std::time::Duration;
 use mwc_wallet_impls::DefaultLCProvider;
 use mwc_wallet_util::mwc_core::global;
 use mwc_wallet_util::mwc_keychain::ExtKeychain;
-use mwc_wallet_util::mwc_util::from_hex;
 use mwc_wallet_util::mwc_util::secp::key::SecretKey;
+use mwc_wallet_util::mwc_util::{from_hex, Mutex};
 use serde_json;
 
 #[macro_use]
@@ -40,6 +42,7 @@ use common::{
 	clean_output_dir, derive_ecdh_key, execute_command, initial_setup_wallet, instantiate_wallet,
 	send_request, send_request_enc, setup, setup_global_chain_type, RetrieveSummaryInfoResp,
 };
+use mwc_wallet_util::mwc_core::core::Transaction;
 use mwc_wallet_util::mwc_util::secp::Secp256k1;
 
 #[test]
@@ -56,12 +59,19 @@ fn owner_v3_init_secure() -> Result<(), mwc_wallet_controller::Error> {
 	setup(test_dir);
 
 	// Create a new proxy to simulate server and wallet responses
-	setup_proxy!(test_dir, chain, wallet1, client1, mask1, wallet2, client2, _mask2);
+	let tx_pool: Arc<Mutex<Vec<Transaction>>> = Arc::new(Mutex::new(Vec::new()));
+	setup_proxy!(test_dir, tx_pool, chain, wallet1, client1, mask1, wallet2, client2, _mask2);
 
 	// add some blocks manually
 	let bh = 2u64;
-	let _ =
-		test_framework::award_blocks_to_wallet(&chain, wallet1.clone(), mask1, bh as usize, false);
+	let _ = test_framework::award_blocks_to_wallet(
+		&chain,
+		wallet1.clone(),
+		mask1,
+		bh as usize,
+		false,
+		tx_pool.lock().deref_mut(),
+	);
 
 	// run a wallet owner listener
 	let arg_vec = vec!["mwc-wallet", "-p", "password", "owner_api", "-l", "33420"];

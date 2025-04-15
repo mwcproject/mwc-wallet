@@ -24,6 +24,7 @@ use crate::libwallet::{
 use crate::util::secp::key::SecretKey;
 use crate::util::Mutex;
 use ed25519_dalek::PublicKey as DalekPublicKey;
+use libwallet::wallet_lock;
 use std::sync::Arc;
 
 /// ForeignAPI Middleware Check callback
@@ -218,9 +219,7 @@ where
 	/// ```
 
 	pub fn get_proof_address(&self) -> Result<String, Error> {
-		let mut w_lock = self.wallet_inst.lock();
-		let w = w_lock.lc_provider()?.wallet_inst()?;
-
+		wallet_lock!(self.wallet_inst, w);
 		foreign::get_proof_address(&mut **w, (&self.keychain_mask).as_ref())
 	}
 
@@ -275,8 +274,7 @@ where
 	/// ```
 
 	pub fn build_coinbase(&self, block_fees: &BlockFees) -> Result<CbData, Error> {
-		let mut w_lock = self.wallet_inst.lock();
-		let w = w_lock.lc_provider()?.wallet_inst()?;
+		wallet_lock!(self.wallet_inst, w);
 		if let Some(m) = self.middleware.as_ref() {
 			m(
 				ForeignCheckMiddlewareFn::BuildCoinbase,
@@ -332,11 +330,13 @@ where
 
 	pub fn verify_slate_messages(&self, slate: &Slate) -> Result<(), Error> {
 		if let Some(m) = self.middleware.as_ref() {
-			let mut w_lock = self.wallet_inst.lock();
-			let w = w_lock.lc_provider()?.wallet_inst()?;
+			let version_info = {
+				wallet_lock!(self.wallet_inst, w);
+				w.w2n_client().get_version_info()
+			};
 			m(
 				ForeignCheckMiddlewareFn::VerifySlateMessages,
-				w.w2n_client().get_version_info(),
+				version_info,
 				Some(slate),
 			)?;
 		}
@@ -406,8 +406,7 @@ where
 		dest_acct_name: &Option<String>,
 		message: Option<String>,
 	) -> Result<Slate, Error> {
-		let mut w_lock = self.wallet_inst.lock();
-		let w = w_lock.lc_provider()?.wallet_inst()?;
+		wallet_lock!(self.wallet_inst, w);
 		if let Some(m) = self.middleware.as_ref() {
 			m(
 				ForeignCheckMiddlewareFn::ReceiveTx,
@@ -479,8 +478,7 @@ where
 	/// ```
 
 	pub fn finalize_invoice_tx(&self, slate: &Slate) -> Result<Slate, Error> {
-		let mut w_lock = self.wallet_inst.lock();
-		let w = w_lock.lc_provider()?.wallet_inst()?;
+		wallet_lock!(self.wallet_inst, w);
 		if let Some(m) = self.middleware.as_ref() {
 			m(
 				ForeignCheckMiddlewareFn::FinalizeInvoiceTx,
@@ -520,8 +518,7 @@ where
 		&self,
 		encrypted_slate: VersionedSlate,
 	) -> Result<(Slate, SlatePurpose, Option<DalekPublicKey>), Error> {
-		let mut w_lock = self.wallet_inst.lock();
-		let w = w_lock.lc_provider()?.wallet_inst()?;
+		wallet_lock!(self.wallet_inst, w);
 		let (slate, content, sender, _receiver) = foreign::decrypt_slate(
 			&mut **w,
 			(&self.keychain_mask).as_ref(),
@@ -541,8 +538,7 @@ where
 		address_index: Option<u32>,
 		use_test_rng: bool,
 	) -> Result<VersionedSlate, Error> {
-		let mut w_lock = self.wallet_inst.lock();
-		let w = w_lock.lc_provider()?.wallet_inst()?;
+		wallet_lock!(self.wallet_inst, w);
 		let vslate = foreign::encrypt_slate(
 			&mut **w,
 			(&self.keychain_mask).as_ref(),

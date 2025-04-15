@@ -49,7 +49,9 @@ use mwc_wallet_libwallet::swap::fsm::state::StateId;
 use mwc_wallet_libwallet::swap::trades;
 use mwc_wallet_libwallet::swap::types::Action;
 use mwc_wallet_libwallet::swap::{message, Swap};
-use mwc_wallet_libwallet::{OwnershipProof, Slate, StatusMessage, TxLogEntry, WalletInst};
+use mwc_wallet_libwallet::{
+	wallet_lock, OwnershipProof, Slate, StatusMessage, TxLogEntry, WalletInst,
+};
 use mwc_wallet_util::mwc_core::consensus::MWC_BASE;
 use mwc_wallet_util::mwc_core::core::{amount_to_hr_string, Transaction};
 use mwc_wallet_util::mwc_core::global::{FLOONET_DNS_SEEDS, MAINNET_DNS_SEEDS};
@@ -87,7 +89,6 @@ pub struct GlobalArgs {
 	pub account: Option<String>,
 	pub api_secret: Option<String>,
 	pub node_api_secret: Option<String>,
-	pub show_spent: bool,
 	pub password: Option<ZeroingString>,
 	pub tls_conf: Option<TLSConfig>,
 }
@@ -549,8 +550,8 @@ pub struct SendArgs {
 	pub ttl_blocks: Option<u64>,
 	pub exclude_change_outputs: bool,
 	pub minimum_confirmations_change_outputs: u64,
-	pub address: Option<String>,      //this is only for file proof.
-	pub outputs: Option<Vec<String>>, // Outputs to use. If None, all outputs can be used
+	pub address: Option<String>,          //this is only for file proof.
+	pub outputs: Option<HashSet<String>>, // Outputs to use. If None, all outputs can be used
 	pub slatepack_recipient: Option<ProvableAddress>, // Destination for slatepack. The address will be the same as for payment_proof_address. The role is different.
 	pub late_lock: bool,
 	pub min_fee: Option<u64>,
@@ -717,8 +718,7 @@ where
 			}
 
 			let (slatepack_secret, slatepack_sender, height, secp) = {
-				let mut w_lock = api.wallet_inst.lock();
-				let w = w_lock.lc_provider()?.wallet_inst()?;
+				wallet_lock!(api.wallet_inst, w);
 				let keychain = w.keychain(keychain_mask)?;
 				let slatepack_secret =
 					proofaddress::payment_proof_address_dalek_secret(&keychain, None)?;
@@ -757,7 +757,10 @@ where
 					.map_err(|e| {
 						Error::IO(format!("Unable to store the file at {}, {}", args.dest, e))
 					})?;
-					api.tx_lock_outputs(m, &slate, Some(String::from("file")), 0)?;
+					// Late lock expected to do the lock at finalize step. Don't do that now
+					if !init_args.late_lock.unwrap_or(false) {
+						api.tx_lock_outputs(m, &slate, Some(String::from("file")), 0)?;
+					}
 
 					if !args.dest.is_empty() {
 						println!(
@@ -782,6 +785,7 @@ where
 					return Ok(());
 				}
 				"self" => {
+					debug_assert!(!slate.compact_slate);
 					api.tx_lock_outputs(m, &slate, Some(String::from("self")), 0)?;
 					let km = match keychain_mask.as_ref() {
 						None => None,
@@ -824,7 +828,10 @@ where
 						error!("Error validating participant messages: {}", e);
 						e
 					})?;
-					api.tx_lock_outputs(m, &slate, Some(args.dest.clone()), 0)?; //this step needs to be done before finalizing the slate
+					// Late lock expected to do the lock at finalize step. Don't do that now
+					if !init_args.late_lock.unwrap_or(false) {
+						api.tx_lock_outputs(m, &slate, Some(args.dest.clone()), 0)?; //this step needs to be done before finalizing the slate
+					}
 				}
 			}
 
@@ -955,8 +962,7 @@ where
 	};
 	controller::foreign_single_use(owner_api.wallet_inst.clone(), km, |api| {
 		let (slatepack_secret, height, secp) = {
-			let mut w_lock = api.wallet_inst.lock();
-			let w = w_lock.lc_provider()?.wallet_inst()?;
+			wallet_lock!(api.wallet_inst, w);
 			let keychain = w.keychain(keychain_mask)?;
 			let slatepack_secret =
 				proofaddress::payment_proof_address_dalek_secret(&keychain, None)?;
@@ -1063,8 +1069,7 @@ where
 	};
 	controller::foreign_single_use(owner_api.wallet_inst.clone(), km, |api| {
 		let (slatepack_secret, height, secp) = {
-			let mut w_lock = api.wallet_inst.lock();
-			let w = w_lock.lc_provider()?.wallet_inst()?;
+			wallet_lock!(api.wallet_inst, w);
 			let keychain = w.keychain(keychain_mask)?;
 			let slatepack_secret =
 				proofaddress::payment_proof_address_dalek_secret(&keychain, None)?;
@@ -1173,8 +1178,7 @@ where
 
 	controller::owner_single_use(None, keychain_mask, Some(owner_api), |api, m| {
 		let (slatepack_secret, height, secp) = {
-			let mut w_lock = api.wallet_inst.lock();
-			let w = w_lock.lc_provider()?.wallet_inst()?;
+			wallet_lock!(api.wallet_inst, w);
 			let keychain = w.keychain(m)?;
 			let slatepack_secret = proofaddress::payment_proof_address_secret(&keychain, None)?;
 			let slatepack_secret = DalekSecretKey::from_bytes(&slatepack_secret.0)
@@ -1282,8 +1286,7 @@ where
 	if args.dest.is_some() || slatepack_format {
 		controller::owner_single_use(None, keychain_mask, Some(owner_api), |api, m| {
 			let (slatepack_secret, secp) = {
-				let mut w_lock = api.wallet_inst.lock();
-				let w = w_lock.lc_provider()?.wallet_inst()?;
+				wallet_lock!(api.wallet_inst, w);
 				let keychain = w.keychain(m)?;
 				let slatepack_secret = proofaddress::payment_proof_address_secret(&keychain, None)?;
 				let slatepack_secret = DalekSecretKey::from_bytes(&slatepack_secret.0)
@@ -1354,8 +1357,7 @@ where
 		let slate = api.issue_invoice_tx(m, &args.issue_args)?;
 
 		let (slatepack_secret, tor_address, secp) = {
-			let mut w_lock = api.wallet_inst.lock();
-			let w = w_lock.lc_provider()?.wallet_inst()?;
+			wallet_lock!(api.wallet_inst, w);
 			let keychain = w.keychain(keychain_mask)?;
 			let slatepack_secret =
 				proofaddress::payment_proof_address_dalek_secret(&keychain, None)?;
@@ -1420,8 +1422,7 @@ where
 	K: keychain::Keychain + 'static,
 {
 	let (slatepack_secret, tor_address, height, secp) = {
-		let mut w_lock = owner_api.wallet_inst.lock();
-		let w = w_lock.lc_provider()?.wallet_inst()?;
+		wallet_lock!(owner_api.wallet_inst, w);
 		let keychain = w.keychain(keychain_mask)?;
 		let slatepack_secret = proofaddress::payment_proof_address_dalek_secret(&keychain, None)?;
 		let slatepack_pk = DalekPublicKey::from(&slatepack_secret);
@@ -1631,10 +1632,15 @@ where
 	Ok(())
 }
 
+pub struct OutputsArgs {
+	pub show_spent: bool,
+}
+
 pub fn outputs<L, C, K>(
 	owner_api: &mut Owner<L, C, K>,
 	keychain_mask: Option<&SecretKey>,
 	g_args: &GlobalArgs,
+	args: OutputsArgs,
 	dark_scheme: bool,
 ) -> Result<(), Error>
 where
@@ -1645,7 +1651,7 @@ where
 	let updater_running = owner_api.updater_running.load(Ordering::Relaxed);
 	controller::owner_single_use(None, keychain_mask, Some(owner_api), |api, m| {
 		let res = api.node_height(m)?;
-		let (validated, outputs) = api.retrieve_outputs(m, g_args.show_spent, true, None)?;
+		let (validated, outputs) = api.retrieve_outputs(m, args.show_spent, true, None)?;
 		display::outputs(
 			&g_args.account,
 			res.height,
@@ -1663,6 +1669,7 @@ pub struct TxsArgs {
 	pub id: Option<u32>,
 	pub tx_slate_id: Option<Uuid>,
 	pub count: Option<u32>,
+	pub show_last_four_days: Option<bool>,
 }
 
 pub fn txs<L, C, K>(
@@ -1681,7 +1688,14 @@ where
 	controller::owner_single_use(None, keychain_mask, Some(owner_api), |api, m| {
 		let res = api.node_height(m)?;
 		// Note advanced query args not currently supported by command line client
-		let (validated, txs) = api.retrieve_txs(m, true, args.id, args.tx_slate_id, None)?;
+		let (validated, txs) = api.retrieve_txs(
+			m,
+			true,
+			args.id,
+			args.tx_slate_id,
+			None,
+			args.show_last_four_days,
+		)?;
 		let include_status = !args.id.is_some() && !args.tx_slate_id.is_some();
 		// If view count is specified, restrict the TX list to `txs.len() - count`
 		let first_tx = args
@@ -1769,8 +1783,7 @@ where
 
 	controller::owner_single_use(None, keychain_mask, Some(owner_api), |api, m| {
 		let (slatepack_secret, height, secp) = {
-			let mut w_lock = api.wallet_inst.lock();
-			let w = w_lock.lc_provider()?.wallet_inst()?;
+			wallet_lock!(api.wallet_inst, w);
 			let keychain = w.keychain(keychain_mask)?;
 			let slatepack_secret =
 				proofaddress::payment_proof_address_dalek_secret(&keychain, None)?;
@@ -1861,7 +1874,7 @@ where
 	K: keychain::Keychain + 'static,
 {
 	controller::owner_single_use(None, keychain_mask, Some(owner_api), |api, m| {
-		let (_, txs) = api.retrieve_txs(m, true, Some(args.id), None, None)?;
+		let (_, txs) = api.retrieve_txs(m, true, Some(args.id), None, None, None)?;
 		let stored_tx = api.get_stored_tx(m, &txs[0])?;
 		if stored_tx.is_none() {
 			error!(
@@ -3575,7 +3588,10 @@ where
 	K: keychain::Keychain + 'static,
 {
 	// Let's do refresh first
-	let _ = owner::perform_refresh_from_node(wallet_inst.clone(), keychain_mask, &None)?;
+	{
+		wallet_lock!(wallet_inst, w);
+		let _ = owner::perform_refresh_from_node(&mut **w, keychain_mask, &None)?;
+	}
 
 	let mut json_res = JsonMap::new();
 
@@ -3799,8 +3815,7 @@ where
 			}
 			if peers.len() == 0 {
 				// let's add peer is possible
-				let mut w_lock = wallet_inst.lock();
-				let w = w_lock.lc_provider()?.wallet_inst()?;
+				wallet_lock!(wallet_inst, w);
 				match w.w2n_client().get_libp2p_peers() {
 					Ok(libp2p_peers) => {
 						for addr in libp2p_peers.libp2p_peers {
@@ -3849,8 +3864,7 @@ where
 			}
 
 			if peers.len() < 5 {
-				let mut w_lock = wallet_inst.lock();
-				let w = w_lock.lc_provider()?.wallet_inst()?;
+				wallet_lock!(wallet_inst, w);
 				if let Ok(messages) = w.w2n_client().get_libp2p_messages() {
 					let mut inject_msgs: Vec<ReceivedMessage> = vec![];
 
@@ -4153,8 +4167,7 @@ where
 
 	if args.check_integrity_expiration {
 		let tip_height = {
-			let mut w_lock = wallet_inst.lock();
-			let w = w_lock.lc_provider()?.wallet_inst()?;
+			wallet_lock!(wallet_inst, w);
 			w.w2n_client().get_chain_tip()?.0
 		};
 

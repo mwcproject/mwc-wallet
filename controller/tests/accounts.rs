@@ -20,6 +20,8 @@ extern crate mwc_wallet_impls as impls;
 
 use mwc_wallet_util::mwc_core as core;
 use mwc_wallet_util::mwc_keychain as keychain;
+use std::ops::DerefMut;
+use std::sync::Arc;
 
 use self::core::global;
 use self::keychain::{ExtKeychain, Keychain};
@@ -33,12 +35,15 @@ use std::time::Duration;
 #[macro_use]
 mod common;
 use common::{clean_output_dir, create_wallet_proxy, setup};
+use mwc_wallet_util::mwc_core::core::Transaction;
+use mwc_wallet_util::mwc_util::Mutex;
 
 /// Various tests on accounts within the same wallet
-fn accounts_test_impl(test_dir: &'static str) -> Result<(), wallet::Error> {
+fn accounts_test_impl(test_dir: &str) -> Result<(), wallet::Error> {
 	global::set_local_chain_type(global::ChainTypes::AutomatedTesting);
 	// Create a new proxy to simulate server and wallet responses
-	let mut wallet_proxy = create_wallet_proxy(test_dir);
+	let tx_pool: Arc<Mutex<Vec<Transaction>>> = Arc::new(Mutex::new(Vec::new()));
+	let mut wallet_proxy = create_wallet_proxy(test_dir.into(), tx_pool.clone());
 	let chain = wallet_proxy.chain.clone();
 	let stopper = wallet_proxy.running.clone();
 
@@ -121,14 +126,28 @@ fn accounts_test_impl(test_dir: &'static str) -> Result<(), wallet::Error> {
 		w.set_parent_key_id_by_name("account1")?;
 		assert_eq!(w.parent_key_id(), ExtKeychain::derive_key_id(2, 1, 0, 0, 0));
 	}
-	let _ = test_framework::award_blocks_to_wallet(&chain, wallet1.clone(), mask1, 7, false);
+	let _ = test_framework::award_blocks_to_wallet(
+		&chain,
+		wallet1.clone(),
+		mask1,
+		7,
+		false,
+		tx_pool.lock().deref_mut(),
+	);
 
 	{
 		wallet_inst!(wallet1, w);
 		w.set_parent_key_id_by_name("account2")?;
 		assert_eq!(w.parent_key_id(), ExtKeychain::derive_key_id(2, 2, 0, 0, 0));
 	}
-	let _ = test_framework::award_blocks_to_wallet(&chain, wallet1.clone(), mask1, 5, false);
+	let _ = test_framework::award_blocks_to_wallet(
+		&chain,
+		wallet1.clone(),
+		mask1,
+		5,
+		false,
+		tx_pool.lock().deref_mut(),
+	);
 
 	// Should have 5 in account1 (5 spendable), 5 in account (2 spendable)
 	wallet::controller::owner_single_use(Some(wallet1.clone()), mask1, None, |api, m| {
@@ -140,7 +159,7 @@ fn accounts_test_impl(test_dir: &'static str) -> Result<(), wallet::Error> {
 		assert_eq!(wallet1_info.total, 5 * reward);
 		assert_eq!(wallet1_info.amount_currently_spendable, (5 - cm) * reward);
 		// check tx log as well
-		let (_, txs) = api.retrieve_txs(m, true, None, None, None)?;
+		let (_, txs) = api.retrieve_txs(m, true, None, None, None, None)?;
 		assert_eq!(txs.len(), 5);
 		Ok(())
 	})?;
@@ -164,7 +183,7 @@ fn accounts_test_impl(test_dir: &'static str) -> Result<(), wallet::Error> {
 		assert_eq!(wallet1_info.total, 7 * reward);
 		assert_eq!(wallet1_info.amount_currently_spendable, 7 * reward);
 		// check tx log as well
-		let (_, txs) = api.retrieve_txs(m, true, None, None, None)?;
+		let (_, txs) = api.retrieve_txs(m, true, None, None, None, None)?;
 		assert_eq!(txs.len(), 7);
 		Ok(())
 	})?;
@@ -183,7 +202,7 @@ fn accounts_test_impl(test_dir: &'static str) -> Result<(), wallet::Error> {
 		assert_eq!(wallet1_info.total, 0,);
 		assert_eq!(wallet1_info.amount_currently_spendable, 0,);
 		// check tx log as well
-		let (_, txs) = api.retrieve_txs(m, true, None, None, None)?;
+		let (_, txs) = api.retrieve_txs(m, true, None, None, None, None)?;
 		assert_eq!(txs.len(), 0);
 		Ok(())
 	})?;
@@ -211,13 +230,23 @@ fn accounts_test_impl(test_dir: &'static str) -> Result<(), wallet::Error> {
 		Ok(())
 	})?;
 
+	// apply post txs
+	let _ = test_framework::award_blocks_to_wallet(
+		&chain,
+		wallet1.clone(),
+		mask1,
+		1,
+		false,
+		tx_pool.lock().deref_mut(),
+	);
+
 	wallet::controller::owner_single_use(Some(wallet1.clone()), mask1, None, |api, m| {
 		let (_, wallet1_info) = api.retrieve_summary_info(m, false, 1)?;
 		assert_eq!(wallet1_info.last_confirmed_height, 12);
 		let (wallet1_refreshed, wallet1_info) = api.retrieve_summary_info(m, true, 1)?;
 		assert!(wallet1_refreshed);
 		assert_eq!(wallet1_info.last_confirmed_height, 13);
-		let (_, txs) = api.retrieve_txs(m, true, None, None, None)?;
+		let (_, txs) = api.retrieve_txs(m, true, None, None, None, None)?;
 		assert_eq!(txs.len(), 9);
 		Ok(())
 	})?;
@@ -232,7 +261,7 @@ fn accounts_test_impl(test_dir: &'static str) -> Result<(), wallet::Error> {
 		assert_eq!(wallet1_info.last_confirmed_height, 13); // mwc already updated that
 		let (_, wallet1_info) = api.retrieve_summary_info(m, true, 1)?;
 		assert_eq!(wallet1_info.last_confirmed_height, 13);
-		let (_, txs) = api.retrieve_txs(m, true, None, None, None)?;
+		let (_, txs) = api.retrieve_txs(m, true, None, None, None, None)?;
 		println!("{:?}", txs);
 		assert_eq!(txs.len(), 5);
 		Ok(())
@@ -243,7 +272,7 @@ fn accounts_test_impl(test_dir: &'static str) -> Result<(), wallet::Error> {
 		let (wallet2_refreshed, wallet2_info) = api.retrieve_summary_info(m, true, 1)?;
 		assert!(wallet2_refreshed);
 		assert_eq!(wallet2_info.last_confirmed_height, 13);
-		let (_, txs) = api.retrieve_txs(m, true, None, None, None)?;
+		let (_, txs) = api.retrieve_txs(m, true, None, None, None, None)?;
 		assert_eq!(txs.len(), 1);
 		Ok(())
 	})?;
@@ -261,7 +290,7 @@ fn accounts_test_impl(test_dir: &'static str) -> Result<(), wallet::Error> {
 		assert_eq!(wallet2_info.total, 0,);
 		assert_eq!(wallet2_info.amount_currently_spendable, 0,);
 		// check tx log as well
-		let (_, txs) = api.retrieve_txs(m, true, None, None, None)?;
+		let (_, txs) = api.retrieve_txs(m, true, None, None, None, None)?;
 		assert_eq!(txs.len(), 0);
 		Ok(())
 	})?;

@@ -22,6 +22,8 @@ extern crate log;
 extern crate mwc_wallet;
 
 use mwc_wallet_impls::test_framework::{self, LocalWalletClient, WalletProxy};
+use std::ops::DerefMut;
+use std::sync::Arc;
 
 use clap::App;
 use std::thread;
@@ -35,16 +37,19 @@ use common::{clean_output_dir, execute_command, initial_setup_wallet, instantiat
 use mwc_wallet_controller::controller;
 use mwc_wallet_libwallet::proof::proofaddress::ProvableAddress;
 use mwc_wallet_util::mwc_core::consensus::calc_mwc_block_reward;
+use mwc_wallet_util::mwc_core::core::Transaction;
+use mwc_wallet_util::mwc_util::Mutex;
 
 /// command line tests
 fn command_line_test_impl(test_dir: &str) -> Result<(), mwc_wallet_controller::Error> {
 	setup(test_dir);
 	// Create a new proxy to simulate server and wallet responses
+	let tx_pool: Arc<Mutex<Vec<Transaction>>> = Arc::new(Mutex::new(Vec::new()));
 	let mut wallet_proxy: WalletProxy<
 		DefaultLCProvider<LocalWalletClient, ExtKeychain>,
 		LocalWalletClient,
 		ExtKeychain,
-	> = WalletProxy::new(test_dir);
+	> = WalletProxy::new(test_dir.into(), tx_pool.clone());
 	let chain = wallet_proxy.chain.clone();
 
 	// load app yaml. If it don't exist, just say so and exit
@@ -167,8 +172,14 @@ fn command_line_test_impl(test_dir: &str) -> Result<(), mwc_wallet_controller::E
 	)?;
 
 	let mut bh = 10u64;
-	let _ =
-		test_framework::award_blocks_to_wallet(&chain, wallet1.clone(), mask1, bh as usize, false);
+	let _ = test_framework::award_blocks_to_wallet(
+		&chain,
+		wallet1.clone(),
+		mask1,
+		bh as usize,
+		false,
+		tx_pool.lock().deref_mut(),
+	);
 
 	let very_long_message = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef\
 	                         ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef\
@@ -185,11 +196,6 @@ fn command_line_test_impl(test_dir: &str) -> Result<(), mwc_wallet_controller::E
 	execute_command(&app, test_dir, "wallet1", &client1, arg_vec)?;
 
 	// try a file exchange
-	let file_name = format!(
-		"{}/wallet1/slatepack/0436430c-2b02-624c-2032-570501212b00.send_init.slatepack",
-		test_dir
-	);
-
 	let out_file_name = format!("{}/out_tx", test_dir);
 
 	let arg_vec = vec![
@@ -219,7 +225,7 @@ fn command_line_test_impl(test_dir: &str) -> Result<(), mwc_wallet_controller::E
 		"account_1",
 		"receive",
 		"-f",
-		&file_name,
+		&out_file_name,
 		"-g",
 		"Thanks, Yeast!",
 	];
@@ -227,12 +233,7 @@ fn command_line_test_impl(test_dir: &str) -> Result<(), mwc_wallet_controller::E
 
 	// shouldn't be allowed to receive twice
 	assert!(execute_command(&app, test_dir, "wallet2", &client2, arg_vec).is_err());
-
-	let file_name = format!(
-		"{}/wallet2/slatepack/0436430c-2b02-624c-2032-570501212b00.send_response.slatepack",
-		test_dir
-	);
-
+	let out_file_name = format!("{}.response", out_file_name);
 	let arg_vec = vec![
 		"mwc-wallet",
 		"-a",
@@ -241,9 +242,18 @@ fn command_line_test_impl(test_dir: &str) -> Result<(), mwc_wallet_controller::E
 		"password1",
 		"finalize",
 		"-f",
-		&file_name,
+		&out_file_name,
 	];
 	execute_command(&app, test_dir, "wallet1", &client1, arg_vec)?;
+	// apply posted tx
+	let _ = test_framework::award_blocks_to_wallet(
+		&chain,
+		wallet1.clone(),
+		mask1,
+		1,
+		false,
+		tx_pool.lock().deref_mut(),
+	);
 	bh += 1;
 
 	let wallet_config1 = config1.clone().members.unwrap().wallet;
@@ -262,9 +272,9 @@ fn command_line_test_impl(test_dir: &str) -> Result<(), mwc_wallet_controller::E
 		None,
 		|api, m| {
 			api.set_active_account(m, "mining")?;
-			let (refreshed, txs) = api.retrieve_txs(m, true, None, None, None)?;
+			let (refreshed, txs) = api.retrieve_txs(m, true, None, None, None, None)?;
 			assert!(refreshed);
-			assert_eq!(txs.len(), bh as usize);
+			assert_eq!(txs.len(), (bh + 1) as usize); // Txs are from coinbase + 1 send transaction
 			for t in txs {
 				assert!(t.kernel_excess.is_some());
 			}
@@ -272,7 +282,14 @@ fn command_line_test_impl(test_dir: &str) -> Result<(), mwc_wallet_controller::E
 		},
 	)?;
 
-	let _ = test_framework::award_blocks_to_wallet(&chain, wallet1.clone(), mask1, 10, false);
+	let _ = test_framework::award_blocks_to_wallet(
+		&chain,
+		wallet1.clone(),
+		mask1,
+		10,
+		false,
+		tx_pool.lock().deref_mut(),
+	);
 	bh += 10;
 
 	// update info for each
@@ -348,10 +365,6 @@ fn command_line_test_impl(test_dir: &str) -> Result<(), mwc_wallet_controller::E
 	];
 	execute_command(&app, test_dir, "wallet1", &client1, arg_vec)?;
 	// let's check if backup is there
-	let file_name = format!(
-		"{}/wallet1/slatepack/0436430c-2b02-624c-2032-570501212b01.send_init.slatepack",
-		test_dir
-	);
 	let arg_vec = vec![
 		"mwc-wallet",
 		"-p",
@@ -363,10 +376,7 @@ fn command_line_test_impl(test_dir: &str) -> Result<(), mwc_wallet_controller::E
 		&file_name,
 	];
 	execute_command(&app, test_dir, "wallet2", &client2, arg_vec.clone())?;
-	let file_name = format!(
-		"{}/wallet2/slatepack/0436430c-2b02-624c-2032-570501212b01.send_response.slatepack",
-		test_dir
-	);
+	let file_name = format!("{}.response", file_name);
 	let arg_vec = vec![
 		"mwc-wallet",
 		"-a",
@@ -378,10 +388,17 @@ fn command_line_test_impl(test_dir: &str) -> Result<(), mwc_wallet_controller::E
 		&file_name,
 	];
 	execute_command(&app, test_dir, "wallet1", &client1, arg_vec)?;
-	bh += 1;
+	// apply posted tx
 
 	// Mine some blocks to confirm the transaction
-	let _ = test_framework::award_blocks_to_wallet(&chain, wallet1.clone(), mask1, 10, false);
+	let _ = test_framework::award_blocks_to_wallet(
+		&chain,
+		wallet1.clone(),
+		mask1,
+		10,
+		false,
+		tx_pool.lock().deref_mut(),
+	);
 	bh += 10;
 
 	// Now let's check a balance at wallet2
@@ -405,9 +422,10 @@ fn command_line_test_impl(test_dir: &str) -> Result<(), mwc_wallet_controller::E
 			api.set_active_account(m, "mining")?;
 			let (_, wallet1_info) = api.retrieve_summary_info(m, true, 1)?;
 			// make sure the new balance is exactly equal to the old balance - the tx amount + the amount mined since then
+			// Problem that ffes are still collected back, that is why we have 8_000_000 difference here
 			let amt_mined = 10 * calc_mwc_block_reward(1);
 			assert_eq!(
-				wallet1_info.amount_currently_spendable + 250_000_000,
+				wallet1_info.amount_currently_spendable + (250_000_000 - 8_000_000),
 				old_balance + amt_mined
 			);
 			Ok(())
@@ -517,6 +535,14 @@ fn command_line_test_impl(test_dir: &str) -> Result<(), mwc_wallet_controller::E
 	];
 	execute_command(&app, test_dir, "wallet1", &client1, arg_vec)?;
 	bh += 1;
+	let _ = test_framework::award_blocks_to_wallet(
+		&chain,
+		wallet1.clone(),
+		mask1,
+		1,
+		false,
+		tx_pool.lock().deref_mut(),
+	);
 
 	// Check our transaction log, should have bh entries
 	let wallet_config1 = config1.clone().members.unwrap().wallet;
@@ -534,9 +560,9 @@ fn command_line_test_impl(test_dir: &str) -> Result<(), mwc_wallet_controller::E
 		None,
 		|api, m| {
 			api.set_active_account(m, "mining")?;
-			let (refreshed, txs) = api.retrieve_txs(m, true, None, None, None)?;
+			let (refreshed, txs) = api.retrieve_txs(m, true, None, None, None, None)?;
 			assert!(refreshed);
-			assert_eq!(txs.len(), bh as usize + 1);
+			assert_eq!(txs.len(), bh as usize + 1 + 3);
 			Ok(())
 		},
 	)?;
@@ -562,6 +588,14 @@ fn command_line_test_impl(test_dir: &str) -> Result<(), mwc_wallet_controller::E
 	// MWC send to self include recieve and finalize. So no more steps are required
 
 	bh += 1;
+	let _ = test_framework::award_blocks_to_wallet(
+		&chain,
+		wallet1.clone(),
+		mask1,
+		1,
+		false,
+		tx_pool.lock().deref_mut(),
+	);
 
 	// Check our transaction log, should have bh entries + 1 for self-seld
 	let wallet_config1 = config1.clone().members.unwrap().wallet;
@@ -579,9 +613,9 @@ fn command_line_test_impl(test_dir: &str) -> Result<(), mwc_wallet_controller::E
 		None,
 		|api, m| {
 			api.set_active_account(m, "mining")?;
-			let (refreshed, txs) = api.retrieve_txs(m, true, None, None, None)?;
+			let (refreshed, txs) = api.retrieve_txs(m, true, None, None, None, None)?;
 			assert!(refreshed);
-			assert_eq!(txs.len(), bh as usize + 1);
+			assert_eq!(txs.len(), bh as usize + 1 + 4); // +4 coinbase transactions adjustments
 			Ok(())
 		},
 	)?;
@@ -732,8 +766,16 @@ fn command_line_test_impl(test_dir: &str) -> Result<(), mwc_wallet_controller::E
 	execute_command(&app, test_dir, "wallet2", &client2, arg_vec)?;
 
 	// bit more mining
-	let _ = test_framework::award_blocks_to_wallet(&chain, wallet1.clone(), mask1, 5, false);
-	//bh += 5;
+	let _ = test_framework::award_blocks_to_wallet(
+		&chain,
+		wallet1.clone(),
+		mask1,
+		5,
+		false,
+		tx_pool.lock().deref_mut(),
+	);
+	bh += 5;
+	let _ = bh;
 
 	// txs and outputs (mostly spit out for a visual in test logs)
 	let arg_vec = vec!["mwc-wallet", "-p", "password1", "-a", "mining", "txs"];
@@ -777,7 +819,7 @@ fn command_line_test_impl(test_dir: &str) -> Result<(), mwc_wallet_controller::E
 		None,
 		|api, m| {
 			api.set_active_account(m, "account_1")?;
-			let (_, txs) = api.retrieve_txs(m, true, None, None, None)?;
+			let (_, txs) = api.retrieve_txs(m, true, None, None, None, None)?;
 			let some_tx_id = txs[0].tx_slate_id.clone();
 			assert!(some_tx_id.is_some());
 			tx_id = some_tx_id.unwrap().to_hyphenated().to_string().clone();
@@ -797,7 +839,14 @@ fn command_line_test_impl(test_dir: &str) -> Result<(), mwc_wallet_controller::E
 	execute_command(&app, test_dir, "wallet2", &client2, arg_vec)?;
 
 	// bit of mining
-	let _ = test_framework::award_blocks_to_wallet(&chain, wallet1.clone(), mask1, 10, false);
+	let _ = test_framework::award_blocks_to_wallet(
+		&chain,
+		wallet1.clone(),
+		mask1,
+		10,
+		false,
+		tx_pool.lock().deref_mut(),
+	);
 
 	// Now let's check a balance at wallet2
 	controller::owner_single_use(Some(wallet2.clone()), mask2, None, |api, m| {
@@ -857,7 +906,14 @@ fn command_line_test_impl(test_dir: &str) -> Result<(), mwc_wallet_controller::E
 	execute_command(&app, test_dir, "wallet1", &client1, arg_vec)?;
 
 	// Mine some blocks to confirm the transaction
-	let _ = test_framework::award_blocks_to_wallet(&chain, wallet1.clone(), mask1, 10, false);
+	let _ = test_framework::award_blocks_to_wallet(
+		&chain,
+		wallet1.clone(),
+		mask1,
+		10,
+		false,
+		tx_pool.lock().deref_mut(),
+	);
 
 	// Check wallet 1 is now empty, except for immature coinbase outputs from recent mining),
 	// and recently matured coinbase outputs, which were not mature at time of spending.
@@ -872,7 +928,7 @@ fn command_line_test_impl(test_dir: &str) -> Result<(), mwc_wallet_controller::E
 			// Entire 'spendable' wallet balance should have been swept, except the coinbase outputs
 			// which matured in the last batch of mining. Check that the new spendable balance is
 			// exactly equal to those matured coins.
-			let amt_mined = 10 * calc_mwc_block_reward(1);
+			let amt_mined = 10 * calc_mwc_block_reward(1) + 1_000_000; // plus fee that was mined
 			assert_eq!(wallet1_info.amount_currently_spendable, amt_mined);
 			Ok(())
 		},

@@ -23,6 +23,7 @@ extern crate mwc_wallet_libwallet as libwallet;
 use mwc_wallet_util::mwc_core as core;
 use mwc_wallet_util::mwc_keychain as keychain;
 use mwc_wallet_util::mwc_util as util;
+use std::ops::DerefMut;
 
 use self::libwallet::{InitTxArgs, Slate};
 use self::libwallet::{RetrieveTxQueryArgs, RetrieveTxQuerySortField};
@@ -39,6 +40,7 @@ use impls::DefaultLCProvider;
 
 mod common;
 use common::{clean_output_dir, create_wallet_proxy, setup};
+use mwc_wallet_util::mwc_core::core::Transaction;
 
 fn test_wallet_tx_filtering(
 	wallet: Arc<
@@ -61,7 +63,7 @@ fn test_wallet_tx_filtering(
 
 		// Min ID
 		let tx_results = api
-			.retrieve_txs(mask, true, None, None, Some(tx_query_args))?
+			.retrieve_txs(mask, true, None, None, Some(tx_query_args), None)?
 			.1;
 		assert_eq!(tx_results[0].id, 5);
 		assert_eq!(tx_results[tx_results.len() - 1].id, 33);
@@ -71,7 +73,7 @@ fn test_wallet_tx_filtering(
 		tx_query_args.min_id = Some(5);
 		tx_query_args.max_id = Some(20);
 		let tx_results = api
-			.retrieve_txs(mask, true, None, None, Some(tx_query_args))?
+			.retrieve_txs(mask, true, None, None, Some(tx_query_args), None)?
 			.1;
 		assert_eq!(tx_results[0].id, 5);
 		assert_eq!(tx_results[tx_results.len() - 1].id, 20);
@@ -82,7 +84,7 @@ fn test_wallet_tx_filtering(
 		tx_query_args.min_id = Some(5);
 		tx_query_args.max_id = Some(50);
 		let tx_results = api
-			.retrieve_txs(mask, true, None, None, Some(tx_query_args))?
+			.retrieve_txs(mask, true, None, None, Some(tx_query_args), None)?
 			.1;
 		assert_eq!(tx_results.len(), 28);
 
@@ -93,7 +95,7 @@ fn test_wallet_tx_filtering(
 		tx_query_args.min_id = Some(5);
 		tx_query_args.max_id = Some(50);
 		let tx_results = api
-			.retrieve_txs(mask, true, None, None, Some(tx_query_args))?
+			.retrieve_txs(mask, true, None, None, Some(tx_query_args), None)?
 			.1;
 		assert_eq!(tx_results.len(), 14);
 
@@ -104,7 +106,7 @@ fn test_wallet_tx_filtering(
 		tx_query_args.min_id = Some(5);
 		tx_query_args.max_id = Some(50);
 		let tx_results = api
-			.retrieve_txs(mask, true, None, None, Some(tx_query_args))?
+			.retrieve_txs(mask, true, None, None, Some(tx_query_args), None)?
 			.1;
 		assert_eq!(tx_results.len(), 15);
 
@@ -116,7 +118,7 @@ fn test_wallet_tx_filtering(
 		tx_query_args.min_id = Some(5);
 		tx_query_args.max_id = Some(50);
 		let tx_results = api
-			.retrieve_txs(mask, true, None, None, Some(tx_query_args))?
+			.retrieve_txs(mask, true, None, None, Some(tx_query_args), None)?
 			.1;
 		assert_eq!(tx_results.len(), 0);
 
@@ -124,7 +126,7 @@ fn test_wallet_tx_filtering(
 		let mut tx_query_args = RetrieveTxQueryArgs::default();
 		tx_query_args.include_sent_only = Some(true);
 		let tx_results = api
-			.retrieve_txs(mask, true, None, None, Some(tx_query_args))?
+			.retrieve_txs(mask, true, None, None, Some(tx_query_args), None)?
 			.1;
 		assert_eq!(tx_results.len(), 15);
 
@@ -132,7 +134,7 @@ fn test_wallet_tx_filtering(
 		let mut tx_query_args = RetrieveTxQueryArgs::default();
 		tx_query_args.include_received_only = Some(true);
 		let tx_results = api
-			.retrieve_txs(mask, true, None, None, Some(tx_query_args))?
+			.retrieve_txs(mask, true, None, None, Some(tx_query_args), None)?
 			.1;
 		assert_eq!(tx_results.len(), 0);
 
@@ -140,7 +142,7 @@ fn test_wallet_tx_filtering(
 		let mut tx_query_args = RetrieveTxQueryArgs::default();
 		tx_query_args.include_reverted_only = Some(true);
 		let tx_results = api
-			.retrieve_txs(mask, true, None, None, Some(tx_query_args))?
+			.retrieve_txs(mask, true, None, None, Some(tx_query_args), None)?
 			.1;
 		assert_eq!(tx_results.len(), 0);
 
@@ -148,7 +150,7 @@ fn test_wallet_tx_filtering(
 		let mut tx_query_args = RetrieveTxQueryArgs::default();
 		tx_query_args.include_coinbase_only = Some(true);
 		let tx_results = api
-			.retrieve_txs(mask, true, None, None, Some(tx_query_args))?
+			.retrieve_txs(mask, true, None, None, Some(tx_query_args), None)?
 			.1;
 		assert_eq!(tx_results.len(), 19);
 
@@ -156,7 +158,7 @@ fn test_wallet_tx_filtering(
 		let mut tx_query_args = RetrieveTxQueryArgs::default();
 		tx_query_args.min_amount = Some(14_000_000 + 8_000_000); // 8m are fees
 		let tx_results = api
-			.retrieve_txs(mask, true, None, None, Some(tx_query_args))?
+			.retrieve_txs(mask, true, None, None, Some(tx_query_args), None)?
 			.1;
 		assert_eq!(tx_results.len(), 19 + 8);
 
@@ -165,7 +167,7 @@ fn test_wallet_tx_filtering(
 		tx_query_args.min_amount = Some(14_000_000 + 8_000_000);
 		tx_query_args.max_amount = Some(2_380_952_380 - 1);
 		let tx_results = api
-			.retrieve_txs(mask, true, None, None, Some(tx_query_args))?
+			.retrieve_txs(mask, true, None, None, Some(tx_query_args), None)?
 			.1;
 		assert_eq!(tx_results.len(), 8);
 
@@ -173,7 +175,7 @@ fn test_wallet_tx_filtering(
 		let mut tx_query_args = RetrieveTxQueryArgs::default();
 		tx_query_args.min_amount = Some(2_380_952_380);
 		let tx_results = api
-			.retrieve_txs(mask, true, None, None, Some(tx_query_args))?
+			.retrieve_txs(mask, true, None, None, Some(tx_query_args), None)?
 			.1;
 		assert_eq!(tx_results.len(), 19);
 
@@ -181,7 +183,7 @@ fn test_wallet_tx_filtering(
 		let mut tx_query_args = RetrieveTxQueryArgs::default();
 		tx_query_args.sort_order = Some(libwallet::RetrieveTxQuerySortOrder::Desc);
 		let tx_results = api
-			.retrieve_txs(mask, true, None, None, Some(tx_query_args))?
+			.retrieve_txs(mask, true, None, None, Some(tx_query_args), None)?
 			.1;
 
 		assert_eq!(tx_results[0].id, 33);
@@ -192,7 +194,7 @@ fn test_wallet_tx_filtering(
 		tx_query_args.sort_order = Some(libwallet::RetrieveTxQuerySortOrder::Desc);
 		tx_query_args.sort_field = Some(RetrieveTxQuerySortField::TotalAmount);
 		let tx_results = api
-			.retrieve_txs(mask, true, None, None, Some(tx_query_args))?
+			.retrieve_txs(mask, true, None, None, Some(tx_query_args), None)?
 			.1;
 		assert_eq!(tx_results[0].amount_credited, 2_380_952_380);
 
@@ -208,11 +210,12 @@ fn test_wallet_tx_filtering(
 
 /// Builds a wallet + chain with a few transactions, and return wallet for further testing
 fn build_chain_for_tx_filtering(
-	test_dir: &'static str,
+	test_dir: &str,
 	block_height: usize,
 ) -> Result<(), libwallet::Error> {
 	// Create a new proxy to simulate server and wallet responses
-	let mut wallet_proxy = create_wallet_proxy(test_dir);
+	let tx_pool: Arc<Mutex<Vec<Transaction>>> = Arc::new(Mutex::new(Vec::new()));
+	let mut wallet_proxy = create_wallet_proxy(test_dir.into(), tx_pool.clone());
 	let chain = wallet_proxy.chain.clone();
 	let stopper = wallet_proxy.running.clone();
 
@@ -266,7 +269,14 @@ fn build_chain_for_tx_filtering(
 	let reward = core::consensus::calc_mwc_block_reward(1);
 
 	// Start off with a few blocks
-	let _ = test_framework::award_blocks_to_wallet(&chain, wallet1.clone(), mask1, 3, false);
+	let _ = test_framework::award_blocks_to_wallet(
+		&chain,
+		wallet1.clone(),
+		mask1,
+		3,
+		false,
+		tx_pool.lock().deref_mut(),
+	);
 
 	for i in 0..block_height {
 		let mut wallet_1_has_funds = false;
@@ -286,8 +296,14 @@ fn build_chain_for_tx_filtering(
 		.unwrap();
 
 		if !wallet_1_has_funds {
-			let _ =
-				test_framework::award_blocks_to_wallet(&chain, wallet1.clone(), mask1, 1, false);
+			let _ = test_framework::award_blocks_to_wallet(
+				&chain,
+				wallet1.clone(),
+				mask1,
+				1,
+				false,
+				tx_pool.lock().deref_mut(),
+			);
 			continue;
 		}
 

@@ -32,11 +32,6 @@ args:
       short: e
       long: external
       takes_value: false
-  - show_spent:
-      help: Show spent outputs on wallet output commands
-      short: s
-      long: show_spent
-      takes_value: false
   - api_server_address:
       help: Api address of running node on which to check inputs and post transactions
       short: r
@@ -420,6 +415,12 @@ subcommands:
             long: slatepack_qr
   - outputs:
       about: Raw wallet output info (list of outputs)
+      args:
+        - show_spent:
+            help: Show spent outputs on wallet output commands
+            short: s
+            long: show_spent
+            takes_value: false
   - txs:
       about: Display transaction information
       args:
@@ -438,6 +439,10 @@ subcommands:
             short: c
             long: count
             takes_value: true
+        - show_last_four_days:
+            help: Show transactions for last four days. Default is false. Intended for usage with a mining/exchange wallets that have huge number of transactions. This flag limits transaction output data.
+            long: show_last_four_days
+            takes_value: false
   - post:
       about: Posts a finalized transaction to the chain
       args:

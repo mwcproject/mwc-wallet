@@ -38,6 +38,8 @@ use crate::{
 	RetrieveTxQuerySortOrder,
 };
 
+use mwc_wallet_util::mwc_chain::Chain;
+use mwc_wallet_util::mwc_core::consensus::DAY_HEIGHT;
 use num_bigint::BigInt;
 
 /// Retrieve all of the outputs (doesn't attempt to update from node)
@@ -60,6 +62,24 @@ where
 		.iter()
 		.filter(|out| show_spent || out.status != OutputStatus::Spent)
 		.collect::<Vec<_>>();
+
+	let need_archived = match tx {
+		Some(tx) => {
+			let tip_height = wallet.w2n_client().get_chain_tip()?.0;
+			let archive_height =
+				Chain::height_2_archive_height(tip_height).saturating_sub(DAY_HEIGHT * 2);
+			tx.output_height < archive_height
+		}
+		None => false,
+	};
+
+	if show_spent || need_archived {
+		for out in wallet.archive_iter() {
+			if out.status == OutputStatus::Spent {
+				outputs.push(out);
+			}
+		}
+	}
 
 	// only include outputs with a given tx_id if provided
 	if let Some(tx) = tx {
@@ -144,187 +164,159 @@ where
 	}
 }
 
+fn filter_tx_entry(tx_entry: &TxLogEntry, query_args: &RetrieveTxQueryArgs) -> bool {
+	if query_args.exclude_cancelled.unwrap_or(false) {
+		if tx_entry.tx_type == TxLogEntryType::TxReceivedCancelled
+			|| tx_entry.tx_type == TxLogEntryType::TxSentCancelled
+		{
+			return false;
+		}
+	}
+
+	if query_args.include_outstanding_only.unwrap_or(false) {
+		if tx_entry.confirmed {
+			return false;
+		}
+	}
+
+	if query_args.include_confirmed_only.unwrap_or(false) {
+		if !tx_entry.confirmed {
+			return false;
+		}
+	}
+
+	if query_args.include_sent_only.unwrap_or(false) {
+		if !(tx_entry.tx_type == TxLogEntryType::TxSent
+			|| tx_entry.tx_type == TxLogEntryType::TxSentCancelled)
+		{
+			return false;
+		}
+	}
+
+	if query_args.include_received_only.unwrap_or(false) {
+		if !(tx_entry.tx_type == TxLogEntryType::TxReceived
+			|| tx_entry.tx_type == TxLogEntryType::TxReceivedCancelled)
+		{
+			return false;
+		}
+	}
+
+	if query_args.include_coinbase_only.unwrap_or(false) {
+		if tx_entry.tx_type != TxLogEntryType::ConfirmedCoinbase {
+			return false;
+		}
+	}
+
+	if query_args.include_reverted_only.unwrap_or(false) {
+		if tx_entry.tx_type != TxLogEntryType::TxReverted {
+			return false;
+		}
+	}
+
+	if tx_entry.id < query_args.min_id.unwrap_or(0) {
+		return false;
+	}
+	if tx_entry.id > query_args.max_id.unwrap_or(u32::MAX) {
+		return false;
+	}
+
+	if let Some(v) = query_args.min_amount {
+		if tx_entry.tx_type == TxLogEntryType::TxSent
+			|| tx_entry.tx_type == TxLogEntryType::TxSentCancelled
+		{
+			if BigInt::from(tx_entry.amount_debited) - BigInt::from(tx_entry.amount_credited)
+				< BigInt::from(v)
+			{
+				return false;
+			}
+		} else {
+			if BigInt::from(tx_entry.amount_credited) - BigInt::from(tx_entry.amount_debited)
+				< BigInt::from(v)
+			{
+				return false;
+			}
+		}
+	}
+
+	if let Some(v) = query_args.max_amount {
+		if tx_entry.tx_type == TxLogEntryType::TxSent
+			|| tx_entry.tx_type == TxLogEntryType::TxSentCancelled
+		{
+			if BigInt::from(tx_entry.amount_debited) - BigInt::from(tx_entry.amount_credited)
+				> BigInt::from(v)
+			{
+				return false;
+			}
+		} else {
+			if BigInt::from(tx_entry.amount_credited) - BigInt::from(tx_entry.amount_debited)
+				> BigInt::from(v)
+			{
+				return false;
+			}
+		}
+	}
+
+	if let Some(v) = query_args.min_creation_timestamp {
+		if tx_entry.creation_ts < v {
+			return false;
+		}
+	}
+
+	if let Some(v) = query_args.max_creation_timestamp {
+		if tx_entry.creation_ts > v {
+			return false;
+		}
+	}
+
+	if let Some(v) = query_args.min_confirmed_timestamp {
+		if let Some(t) = tx_entry.confirmation_ts {
+			if t < v {
+				return false;
+			}
+		}
+	}
+
+	if let Some(v) = query_args.max_confirmed_timestamp {
+		if let Some(t) = tx_entry.confirmation_ts {
+			if t > v {
+				return false;
+			}
+		}
+	}
+
+	true
+}
+
 /// Apply advanced filtering to resultset from retrieve_txs below
 pub fn apply_advanced_tx_list_filtering<'a, T: ?Sized, C, K>(
 	wallet: &mut T,
 	query_args: &RetrieveTxQueryArgs,
+	height_limit: u64,
 ) -> Vec<TxLogEntry>
 where
 	T: WalletBackend<'a, C, K>,
 	C: NodeClient + 'a,
 	K: Keychain + 'a,
 {
+	let mut return_txs: Vec<TxLogEntry> = Vec::new();
 	// Apply simple bool, GTE or LTE fields
-	let txs_iter: Box<dyn Iterator<Item = TxLogEntry>> = Box::new(
-		wallet
-			.tx_log_iter()
-			.filter(|tx_entry| {
-				if let Some(v) = query_args.exclude_cancelled {
-					if v {
-						tx_entry.tx_type != TxLogEntryType::TxReceivedCancelled
-							&& tx_entry.tx_type != TxLogEntryType::TxSentCancelled
-					} else {
-						true
-					}
-				} else {
-					true
-				}
-			})
-			.filter(|tx_entry| {
-				if let Some(v) = query_args.include_outstanding_only {
-					if v {
-						!tx_entry.confirmed
-					} else {
-						true
-					}
-				} else {
-					true
-				}
-			})
-			.filter(|tx_entry| {
-				if let Some(v) = query_args.include_confirmed_only {
-					if v {
-						tx_entry.confirmed
-					} else {
-						true
-					}
-				} else {
-					true
-				}
-			})
-			.filter(|tx_entry| {
-				if let Some(v) = query_args.include_sent_only {
-					if v {
-						tx_entry.tx_type == TxLogEntryType::TxSent
-							|| tx_entry.tx_type == TxLogEntryType::TxSentCancelled
-					} else {
-						true
-					}
-				} else {
-					true
-				}
-			})
-			.filter(|tx_entry| {
-				if let Some(v) = query_args.include_received_only {
-					if v {
-						tx_entry.tx_type == TxLogEntryType::TxReceived
-							|| tx_entry.tx_type == TxLogEntryType::TxReceivedCancelled
-					} else {
-						true
-					}
-				} else {
-					true
-				}
-			})
-			.filter(|tx_entry| {
-				if let Some(v) = query_args.include_coinbase_only {
-					if v {
-						tx_entry.tx_type == TxLogEntryType::ConfirmedCoinbase
-					} else {
-						true
-					}
-				} else {
-					true
-				}
-			})
-			.filter(|tx_entry| {
-				if let Some(v) = query_args.include_reverted_only {
-					if v {
-						tx_entry.tx_type == TxLogEntryType::TxReverted
-					} else {
-						true
-					}
-				} else {
-					true
-				}
-			})
-			.filter(|tx_entry| {
-				if let Some(v) = query_args.min_id {
-					tx_entry.id >= v
-				} else {
-					true
-				}
-			})
-			.filter(|tx_entry| {
-				if let Some(v) = query_args.max_id {
-					tx_entry.id <= v
-				} else {
-					true
-				}
-			})
-			.filter(|tx_entry| {
-				if let Some(v) = query_args.min_amount {
-					if tx_entry.tx_type == TxLogEntryType::TxSent
-						|| tx_entry.tx_type == TxLogEntryType::TxSentCancelled
-					{
-						BigInt::from(tx_entry.amount_debited)
-							- BigInt::from(tx_entry.amount_credited)
-							>= BigInt::from(v)
-					} else {
-						BigInt::from(tx_entry.amount_credited)
-							- BigInt::from(tx_entry.amount_debited)
-							>= BigInt::from(v)
-					}
-				} else {
-					true
-				}
-			})
-			.filter(|tx_entry| {
-				if let Some(v) = query_args.max_amount {
-					if tx_entry.tx_type == TxLogEntryType::TxSent
-						|| tx_entry.tx_type == TxLogEntryType::TxSentCancelled
-					{
-						BigInt::from(tx_entry.amount_debited)
-							- BigInt::from(tx_entry.amount_credited)
-							<= BigInt::from(v)
-					} else {
-						BigInt::from(tx_entry.amount_credited)
-							- BigInt::from(tx_entry.amount_debited)
-							<= BigInt::from(v)
-					}
-				} else {
-					true
-				}
-			})
-			.filter(|tx_entry| {
-				if let Some(v) = query_args.min_creation_timestamp {
-					tx_entry.creation_ts >= v
-				} else {
-					true
-				}
-			})
-			.filter(|tx_entry| {
-				if let Some(v) = query_args.min_confirmed_timestamp {
-					tx_entry.creation_ts <= v
-				} else {
-					true
-				}
-			})
-			.filter(|tx_entry| {
-				if let Some(v) = query_args.min_confirmed_timestamp {
-					if let Some(t) = tx_entry.confirmation_ts {
-						t >= v
-					} else {
-						true
-					}
-				} else {
-					true
-				}
-			})
-			.filter(|tx_entry| {
-				if let Some(v) = query_args.max_confirmed_timestamp {
-					if let Some(t) = tx_entry.confirmation_ts {
-						t <= v
-					} else {
-						true
-					}
-				} else {
-					true
-				}
-			}),
-	);
+	for tx in wallet.tx_log_iter() {
+		if filter_tx_entry(&tx, query_args) {
+			return_txs.push(tx);
+		}
+	}
 
-	let mut return_txs: Vec<TxLogEntry> = txs_iter.collect();
+	if height_limit == 0 {
+		for tx in wallet.tx_log_archive_iter() {
+			if filter_tx_entry(&tx, query_args) {
+				return_txs.push(tx);
+			}
+		}
+	} else {
+		return_txs.retain(|tx| {
+			tx.output_height >= height_limit || (!tx.confirmed && !tx.is_cancelled_reverted())
+		});
+	}
 
 	// Now apply requested sorting
 	if let Some(ref s) = query_args.sort_field {
@@ -375,6 +367,41 @@ where
 	return_txs
 }
 
+fn filter_tx_entry2(
+	tx_entry: &TxLogEntry,
+	parent_key_id: Option<&Identifier>,
+	tx_id: Option<u32>,
+	tx_slate_id: &Option<Uuid>,
+	outstanding_only: bool,
+) -> bool {
+	let f_pk = match parent_key_id {
+		Some(k) => tx_entry.parent_key_id == *k,
+		None => true,
+	};
+	let f_tx_id = match tx_id {
+		Some(i) => tx_entry.id == i,
+		None => true,
+	};
+	let f_txs = match tx_slate_id {
+		Some(t) => tx_entry.tx_slate_id == Some(*t),
+		None => true,
+	};
+	let f_outstanding = match outstanding_only {
+		true => {
+			!tx_entry.confirmed
+				&& (tx_entry.tx_type == TxLogEntryType::TxReceived
+					|| tx_entry.tx_type == TxLogEntryType::TxSent
+					|| tx_entry.tx_type == TxLogEntryType::TxReverted)
+		}
+		false => true,
+	};
+	// Miners doesn't like the fact that CoinBase tx can be unconfirmed. That is we are hiding them for Rest API and for UI
+	let non_confirmed_coinbase =
+		!tx_entry.confirmed && (tx_entry.tx_type == TxLogEntryType::ConfirmedCoinbase);
+
+	f_pk && f_tx_id && f_txs && f_outstanding && !non_confirmed_coinbase
+}
+
 /// Retrieve all of the transaction entries, or a particular entry
 /// if `parent_key_id` is set, only return entries from that key
 pub fn retrieve_txs<'a, T: ?Sized, C, K>(
@@ -387,6 +414,7 @@ pub fn retrieve_txs<'a, T: ?Sized, C, K>(
 	outstanding_only: bool,
 	pagination_start: Option<u32>,
 	pagination_len: Option<u32>,
+	show_last_four_days: Option<bool>,
 ) -> Result<Vec<TxLogEntry>, Error>
 where
 	T: WalletBackend<'a, C, K>,
@@ -394,42 +422,55 @@ where
 	K: Keychain + 'a,
 {
 	let mut txs;
+
+	let show_last_four_days = show_last_four_days.unwrap_or(false);
+	let height_limit = if show_last_four_days {
+		wallet
+			.w2n_client()
+			.get_chain_tip()?
+			.0
+			.saturating_sub(4 * DAY_HEIGHT)
+	} else {
+		0
+	};
+
 	// Adding in new transaction list query logic. If `tx_id` or `tx_slate_id`
 	// is provided, then `query_args` is ignored and old logic is followed.
 	if query_args.is_some() && tx_id.is_none() && tx_slate_id.is_none() {
-		txs = apply_advanced_tx_list_filtering(wallet, &query_args.unwrap())
+		txs = apply_advanced_tx_list_filtering(wallet, &query_args.unwrap(), height_limit)
 	} else {
 		txs = wallet
 			.tx_log_iter()
 			.filter(|tx_entry| {
-				let f_pk = match parent_key_id {
-					Some(k) => tx_entry.parent_key_id == *k,
-					None => true,
-				};
-				let f_tx_id = match tx_id {
-					Some(i) => tx_entry.id == i,
-					None => true,
-				};
-				let f_txs = match tx_slate_id {
-					Some(t) => tx_entry.tx_slate_id == Some(t),
-					None => true,
-				};
-				let f_outstanding = match outstanding_only {
-					true => {
-						!tx_entry.confirmed
-							&& (tx_entry.tx_type == TxLogEntryType::TxReceived
-								|| tx_entry.tx_type == TxLogEntryType::TxSent
-								|| tx_entry.tx_type == TxLogEntryType::TxReverted)
-					}
-					false => true,
-				};
-				// Miners doesn't like the fact that CoinBase tx can be unconfirmed. That is we are hiding them for Rest API and for UI
-				let non_confirmed_coinbase =
-					!tx_entry.confirmed && (tx_entry.tx_type == TxLogEntryType::ConfirmedCoinbase);
-
-				f_pk && f_tx_id && f_txs && f_outstanding && !non_confirmed_coinbase
+				filter_tx_entry2(
+					tx_entry,
+					parent_key_id,
+					tx_id,
+					&tx_slate_id,
+					outstanding_only,
+				)
 			})
 			.collect();
+
+		if !(((tx_id.is_some() || tx_slate_id.is_some()) && !txs.is_empty()) || height_limit > 0) {
+			for tx_entry in wallet.tx_log_archive_iter() {
+				if filter_tx_entry2(
+					&tx_entry,
+					parent_key_id,
+					tx_id,
+					&tx_slate_id,
+					outstanding_only,
+				) {
+					txs.push(tx_entry)
+				}
+			}
+		}
+
+		if height_limit > 0 {
+			txs.retain(|tx| {
+				tx.output_height >= height_limit || (!tx.confirmed && !tx.is_cancelled_reverted())
+			})
+		}
 
 		txs.sort_by_key(|tx| tx.creation_ts);
 	}
@@ -494,6 +535,20 @@ where
 		}
 		_ => {}
 	}
+
+	if let Some(slate_id) = &tx.tx_slate_id {
+		if let Err(e) = batch.delete_private_context(slate_id.as_bytes(), 0) {
+			if !e.to_string().contains("MDB_NOTFOUND") {
+				return Err(e);
+			}
+		}
+		if let Err(e) = batch.delete_private_context(slate_id.as_bytes(), 1) {
+			if !e.to_string().contains("MDB_NOTFOUND") {
+				return Err(e);
+			}
+		}
+	}
+
 	batch.save_tx_log_entry(tx, parent_key_id)?;
 	batch.commit()?;
 	Ok(())
@@ -622,9 +677,9 @@ where
 	let key_id = match key_id {
 		Some(key_id) => match keys::retrieve_existing_key(wallet, key_id, None) {
 			Ok(k) => k.0,
-			Err(_) => keys::next_available_key(wallet, keychain_mask, None)?,
+			Err(_) => keys::next_available_key(wallet, None)?,
 		},
-		None => keys::next_available_key(wallet, keychain_mask, None)?,
+		None => keys::next_available_key(wallet, None)?,
 	};
 
 	{

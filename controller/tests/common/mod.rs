@@ -26,6 +26,7 @@ use self::keychain::ExtKeychain;
 use self::libwallet::WalletInst;
 use impls::test_framework::{LocalWalletClient, WalletProxy};
 use impls::{DefaultLCProvider, DefaultWalletImpl};
+use mwc_wallet_util::mwc_core::core::Transaction;
 use std::sync::Arc;
 use util::secp::key::SecretKey;
 use util::{Mutex, ZeroingString};
@@ -36,6 +37,15 @@ macro_rules! wallet_inst {
 		let mut w_lock = $wallet.lock();
 		let lc = w_lock.lc_provider()?;
 		let $w = lc.wallet_inst()?;
+	};
+}
+
+#[macro_export]
+macro_rules! wallet_inst_test {
+	($wallet:ident, $w: ident) => {
+		let mut w_lock = $wallet.lock();
+		let lc = w_lock.lc_provider().unwrap();
+		let $w = lc.wallet_inst().unwrap();
 	};
 }
 
@@ -102,10 +112,15 @@ pub fn setup_global_chain_type() {
 }
 
 pub fn create_wallet_proxy(
-	test_dir: &str,
-) -> WalletProxy<DefaultLCProvider<LocalWalletClient, ExtKeychain>, LocalWalletClient, ExtKeychain>
-{
-	WalletProxy::new(test_dir)
+	test_dir: String,
+	tx_pool: Arc<Mutex<Vec<Transaction>>>,
+) -> WalletProxy<
+	'static,
+	DefaultLCProvider<'static, LocalWalletClient, ExtKeychain>,
+	LocalWalletClient,
+	ExtKeychain,
+> {
+	WalletProxy::new(test_dir, tx_pool)
 }
 
 pub fn create_local_wallet(

@@ -22,6 +22,7 @@ extern crate mwc_wallet;
 
 use mwc_wallet_api::{ECDHPubkey, JsonId};
 use mwc_wallet_impls::test_framework::{self, LocalWalletClient, WalletProxy};
+use std::ops::DerefMut;
 
 use clap::App;
 use std::thread;
@@ -44,6 +45,7 @@ use common::{
 	initial_setup_wallet, instantiate_wallet, send_request, send_request_enc, setup,
 	setup_global_chain_type, RetrieveSummaryInfoResp,
 };
+use mwc_wallet_util::mwc_core::core::Transaction;
 use mwc_wallet_util::mwc_util::secp::Secp256k1;
 
 #[test]
@@ -64,6 +66,7 @@ fn owner_v3_lifecycle() -> Result<(), mwc_wallet_controller::Error> {
 	let app = App::from_yaml(yml);
 
 	// Create a new proxy to simulate server and wallet responses
+	let tx_pool: Arc<Mutex<Vec<Transaction>>> = Arc::new(Mutex::new(Vec::new()));
 	let wallet_proxy_a: Arc<
 		Mutex<
 			WalletProxy<
@@ -72,7 +75,10 @@ fn owner_v3_lifecycle() -> Result<(), mwc_wallet_controller::Error> {
 				ExtKeychain,
 			>,
 		>,
-	> = Arc::new(Mutex::new(WalletProxy::new(test_dir)));
+	> = Arc::new(Mutex::new(WalletProxy::new(
+		test_dir.into(),
+		tx_pool.clone(),
+	)));
 	let (chain, wallet2, mask2_i) = {
 		let mut wallet_proxy = wallet_proxy_a.lock();
 		let chain = wallet_proxy.chain.clone();
@@ -146,8 +152,14 @@ fn owner_v3_lifecycle() -> Result<(), mwc_wallet_controller::Error> {
 
 	// mine into wallet 2 a bit
 	let bh = 10u64;
-	let _ =
-		test_framework::award_blocks_to_wallet(&chain, wallet2.clone(), mask2, bh as usize, false);
+	let _ = test_framework::award_blocks_to_wallet(
+		&chain,
+		wallet2.clone(),
+		mask2,
+		bh as usize,
+		false,
+		tx_pool.lock().deref_mut(),
+	);
 
 	// We have an owner API with no wallet initialized. Init the secure API
 	let sec_key_str = "e00dcc4a009e3427c6b1e1a550c538179d46f3827a13ed74c759c860761caf1e";

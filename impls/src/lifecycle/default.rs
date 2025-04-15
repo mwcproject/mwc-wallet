@@ -20,17 +20,22 @@ use crate::config::{
 	MWC_WALLET_DIR,
 };
 use crate::core::global;
-use crate::keychain::Keychain;
+use crate::keychain::{ChildNumber, Keychain};
 use crate::libwallet::swap::ethereum::generate_ethereum_wallet;
 use crate::libwallet::{Error, NodeClient, WalletBackend, WalletLCProvider};
 use crate::lifecycle::seed::WalletSeed;
 use crate::util::secp::key::SecretKey;
 use crate::util::ZeroingString;
 use crate::LMDBBackend;
-use mwc_wallet_libwallet::types::FLAG_NEW_WALLET;
+use mwc_wallet_libwallet::types::{
+	FLAG_CONTEXT_CLEARED, FLAG_NEW_WALLET, FLAG_OUTPUTS_ROOT_KEY_ID_CORRECTION,
+};
+use mwc_wallet_libwallet::{Context, OutputData, TxLogEntryType};
 use mwc_wallet_util::mwc_util::logger::LoggingConfig;
+use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
+use uuid::Uuid;
 
 pub struct DefaultLCProvider<'a, C, K>
 where
@@ -297,6 +302,65 @@ where
 			.map_err(|e| Error::Lifecycle(format!("Error deriving keychain, {}", e)))?;
 
 		let mask = wallet.set_keychain(Box::new(keychain), create_mask, use_test_rng)?;
+
+		{
+			// Cleaning dangling contexts.
+			let mut batch = wallet.batch(mask.as_ref())?;
+			if !batch.load_flag(FLAG_CONTEXT_CLEARED, false)? {
+				let mut contexts: HashMap<Uuid, Context> = batch
+					.private_context_iter()
+					.map(|(slate, context)| {
+						(
+							Uuid::from_slice(&slate)
+								.expect("Broken UUID data into the context data storage"),
+							context,
+						)
+					})
+					.collect();
+
+				for tx in batch.tx_log_iter() {
+					if tx.tx_type == TxLogEntryType::TxSent && !tx.confirmed {
+						// It is transactions for what we left the data from
+						if let Some(slate_id) = &tx.tx_slate_id {
+							contexts.remove(slate_id);
+						}
+					}
+				}
+
+				for (uuid, context) in contexts {
+					batch.delete_private_context(uuid.as_bytes(), context.participant_id)?;
+				}
+
+				batch.save_flag(FLAG_CONTEXT_CLEARED)?;
+			}
+			batch.commit()?;
+		}
+
+		{
+			// Cleaning broken root_key_id from outputs. It is old bug that was fixed on Sept 2024, but the data was never fixed.
+			let mut batch = wallet.batch(mask.as_ref())?;
+			if !batch.load_flag(FLAG_OUTPUTS_ROOT_KEY_ID_CORRECTION, false)? {
+				let broken_outputs: Vec<OutputData> = batch
+					.iter()
+					.filter(|o| {
+						// We need to fix last element of path if it is not 0
+						let path = o.root_key_id.to_path();
+						let last_id = u32::from(path.path[3]);
+						last_id != 0
+					})
+					.collect();
+
+				for mut out in broken_outputs {
+					let mut path = out.root_key_id.to_path();
+					path.path[3] = ChildNumber::from(0);
+					out.root_key_id = path.to_identifier();
+					batch.save(out)?;
+				}
+				batch.save_flag(FLAG_OUTPUTS_ROOT_KEY_ID_CORRECTION)?;
+			}
+			batch.commit()?;
+		}
+
 		self.backend = Some(Box::new(wallet));
 		Ok(mask)
 	}

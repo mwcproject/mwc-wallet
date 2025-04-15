@@ -155,17 +155,17 @@ where
 }
 
 /// Refresh outputs/tx states of the wallet. Resync with a blockchain data
-pub fn perform_refresh_from_node<'a, L, C, K>(
-	wallet_inst: Arc<Mutex<Box<dyn WalletInst<'a, L, C, K>>>>,
+pub fn perform_refresh_from_node<'a, T: ?Sized, C, K>(
+	wallet: &mut T,
 	keychain_mask: Option<&SecretKey>,
 	status_send_channel: &Option<Sender<StatusMessage>>,
 ) -> Result<bool, Error>
 where
-	L: WalletLCProvider<'a, C, K>,
+	T: WalletBackend<'a, C, K>,
 	C: NodeClient + 'a,
 	K: Keychain + 'a,
 {
-	let validated = update_wallet_state(wallet_inst.clone(), keychain_mask, status_send_channel)?;
+	let validated = update_wallet_state(wallet, keychain_mask, status_send_channel)?;
 
 	Ok(validated)
 }
@@ -184,13 +184,13 @@ where
 	C: NodeClient + 'a,
 	K: Keychain + 'a,
 {
+	wallet_lock!(wallet_inst, w);
+
 	let mut validated = false;
 	if refresh_from_node {
-		validated =
-			perform_refresh_from_node(wallet_inst.clone(), keychain_mask, status_send_channel)?;
+		validated = perform_refresh_from_node(&mut **w, keychain_mask, status_send_channel)?;
 	}
 
-	wallet_lock!(wallet_inst, w);
 	let parent_key_id = w.parent_key_id();
 
 	let mut tx: Option<TxLogEntry> = None;
@@ -203,6 +203,7 @@ where
 			None,
 			Some(&parent_key_id),
 			false,
+			None,
 			None,
 			None,
 		)?;
@@ -235,19 +236,20 @@ pub fn retrieve_txs<'a, L, C, K>(
 	tx_id: Option<u32>,
 	tx_slate_id: Option<Uuid>,
 	query_args: Option<RetrieveTxQueryArgs>,
+	show_last_four_days: Option<bool>,
 ) -> Result<(bool, Vec<TxLogEntry>), Error>
 where
 	L: WalletLCProvider<'a, C, K>,
 	C: NodeClient + 'a,
 	K: Keychain + 'a,
 {
+	wallet_lock!(wallet_inst, w);
+
 	let mut validated = false;
 	if refresh_from_node {
-		validated =
-			perform_refresh_from_node(wallet_inst.clone(), keychain_mask, status_send_channel)?;
+		validated = perform_refresh_from_node(&mut **w, keychain_mask, status_send_channel)?;
 	}
 
-	wallet_lock!(wallet_inst, w);
 	let parent_key_id = w.parent_key_id();
 	let txs = updater::retrieve_txs(
 		&mut **w,
@@ -259,6 +261,7 @@ where
 		false,
 		None,
 		None,
+		show_last_four_days,
 	)?;
 
 	Ok((validated, txs))
@@ -277,13 +280,13 @@ where
 	C: NodeClient + 'a,
 	K: Keychain + 'a,
 {
+	wallet_lock!(wallet_inst, w);
+
 	let mut validated = false;
 	if refresh_from_node {
-		validated =
-			perform_refresh_from_node(wallet_inst.clone(), keychain_mask, status_send_channel)?;
+		validated = perform_refresh_from_node(&mut **w, keychain_mask, status_send_channel)?;
 	}
 
-	wallet_lock!(wallet_inst, w);
 	let parent_key_id = w.parent_key_id();
 	let wallet_info = updater::retrieve_info(&mut **w, &parent_key_id, minimum_confirmations)?;
 	Ok((validated, wallet_info))
@@ -308,18 +311,14 @@ where
 			"Transaction ID or Slate UUID must be specified".to_owned(),
 		));
 	}
-	if refresh_from_node {
-		update_wallet_state(wallet_inst.clone(), keychain_mask, status_send_channel)?
-	} else {
-		false
-	};
 	let txs = retrieve_txs(
-		wallet_inst.clone(),
+		wallet_inst,
 		keychain_mask,
 		status_send_channel,
 		refresh_from_node,
 		tx_id,
 		tx_slate_id,
+		None,
 		None,
 	)?;
 	if txs.1.len() != 1 {
@@ -405,6 +404,7 @@ where
 		None,
 		Some(&parent_key_id),
 		false,
+		None,
 		None,
 		None,
 	)
@@ -529,6 +529,7 @@ where
 			keychain_mask,
 			&mut slate,
 			&args.min_fee,
+			None,
 			args.minimum_confirmations,
 			args.max_outputs as usize,
 			args.num_change_outputs as usize,
@@ -590,6 +591,35 @@ where
 	// recieve the transaction back
 	{
 		let mut batch = w.batch(keychain_mask)?;
+
+		// We need to create transaction now, so user can cancel transaction and delete the context that we are saving below
+		// If it is late lock - it is needed for sure.
+		// If not late lock - still better to create because we don't want to have stale context in any case
+
+		// Note, this transaction will be overwritten with more details at lock_tx_content.
+		// This record for cancellation
+
+		let log_id = batch.next_tx_log_id(&parent_key_id)?;
+		let mut t = TxLogEntry::new(parent_key_id.clone(), TxLogEntryType::TxSent, log_id);
+		t.tx_slate_id = Some(slate.id);
+		t.fee = Some(context.fee);
+		t.ttl_cutoff_height = slate.ttl_cutoff_height.clone();
+		if t.ttl_cutoff_height == Some(0) {
+			t.ttl_cutoff_height = None;
+		}
+		t.address = args.address.clone();
+		t.kernel_lookup_min_height = Some(slate.height);
+
+		t.num_inputs = 0;
+		t.input_commits = vec![];
+		t.amount_debited = slate.amount;
+
+		// write the output representing our change
+		t.num_outputs = 0;
+		t.output_commits = vec![];
+		t.amount_credited = 0;
+		batch.save_tx_log_entry(t, &parent_key_id)?;
+
 		batch.save_private_context(slate.id.as_bytes(), 0, &context)?;
 		batch.commit()?;
 	}
@@ -700,6 +730,7 @@ where
 		use_test_rng,
 		None,
 		None,
+		None,
 	)?;
 	for t in &tx {
 		if t.tx_type == TxLogEntryType::TxSent {
@@ -736,6 +767,7 @@ where
 		keychain_mask,
 		&mut ret_slate,
 		&args.min_fee,
+		None,
 		args.minimum_confirmations,
 		args.max_outputs as usize,
 		args.num_change_outputs as usize,
@@ -822,7 +854,9 @@ where
 	C: NodeClient + 'a,
 	K: Keychain + 'a,
 {
-	let context = w.get_private_context(keychain_mask, slate.id.as_bytes(), participant_id)?;
+	let context = w
+		.get_private_context(keychain_mask, slate.id.as_bytes(), participant_id)
+		.map_err(|_| Error::TransactionWasFinalizedOrCancelled(format!("{}", slate.id)))?;
 	let mut excess_override = None;
 
 	let mut sl = slate.clone();
@@ -872,7 +906,9 @@ where
 	let mut sl = slate.clone();
 	sl.height = w.w2n_client().get_chain_tip()?.0;
 	check_ttl(w, &sl, refresh_from_node)?;
-	let mut context = w.get_private_context(keychain_mask, sl.id.as_bytes(), 0)?;
+	let mut context = w
+		.get_private_context(keychain_mask, sl.id.as_bytes(), 0)
+		.map_err(|_| Error::TransactionWasFinalizedOrCancelled(format!("{}", sl.id)))?;
 	let keychain = w.keychain(keychain_mask)?;
 	let parent_key_id = context.parent_key_id.clone();
 
@@ -895,6 +931,7 @@ where
 			keychain_mask,
 			&mut temp_sl,
 			&args.min_fee,
+			Some(context.fee),
 			args.minimum_confirmations,
 			args.max_outputs as usize,
 			args.num_change_outputs as usize,
@@ -980,12 +1017,12 @@ where
 	C: NodeClient + 'a,
 	K: Keychain + 'a,
 {
-	if !perform_refresh_from_node(wallet_inst.clone(), keychain_mask, status_send_channel)? {
+	wallet_lock!(wallet_inst, w);
+	if !perform_refresh_from_node(&mut **w, keychain_mask, status_send_channel)? {
 		return Err(Error::TransactionCancellationError(
 			"Can't contact running MWC node. Not Cancelling.",
 		))?;
 	}
-	wallet_lock!(wallet_inst, w);
 	let parent_key_id = w.parent_key_id();
 	tx::cancel_tx(&mut **w, keychain_mask, &parent_key_id, tx_id, tx_slate_id)
 }
@@ -1058,10 +1095,9 @@ where
 		return Err(Error::RewindHash(msg));
 	}
 
-	let tip = {
-		wallet_lock!(wallet_inst, w);
-		w.w2n_client().get_chain_tip()?
-	};
+	wallet_lock!(wallet_inst, w);
+
+	let tip = w.w2n_client().get_chain_tip()?;
 
 	let start_height = match start_height {
 		Some(h) => h,
@@ -1069,7 +1105,7 @@ where
 	};
 
 	let info = scan::scan_rewind_hash(
-		wallet_inst,
+		&mut **w,
 		rewind_hash,
 		start_height,
 		tip.0,
@@ -1094,17 +1130,13 @@ where
 	C: NodeClient + 'a,
 	K: Keychain + 'a,
 {
-	{
-		wallet_lock!(wallet_inst, w);
-		w.w2n_client().reset_cache();
-	}
+	wallet_lock!(wallet_inst, w);
+
+	w.w2n_client().reset_cache();
 
 	// Checking from what point we should start scanning
-	let (tip_height, tip_hash, last_scanned_block, has_reorg) = get_last_detect_last_scanned_block(
-		wallet_inst.clone(),
-		keychain_mask,
-		status_send_channel,
-	)?;
+	let (tip_height, tip_hash, last_scanned_block, has_reorg) =
+		get_last_detect_last_scanned_block(&mut **w, keychain_mask, status_send_channel)?;
 
 	if tip_height == 0 {
 		return Err(Error::NodeNotReady)?;
@@ -1130,8 +1162,6 @@ where
 	let mut blocks: Vec<ScannedBlockInfo> =
 		vec![ScannedBlockInfo::new(tip_height, tip_hash.clone())];
 	{
-		wallet_lock!(wallet_inst, w);
-
 		let mut step = 4;
 		while blocks.last().unwrap().height.saturating_sub(step) > start_height {
 			let h = blocks.last().unwrap().height.saturating_sub(step);
@@ -1143,7 +1173,7 @@ where
 	}
 
 	scan::scan(
-		wallet_inst.clone(),
+		&mut **w,
 		keychain_mask,
 		delete_unconfirmed,
 		start_height,
@@ -1153,7 +1183,6 @@ where
 		do_full_outputs_refresh,
 	)?;
 
-	wallet_lock!(wallet_inst, w);
 	let mut batch = w.batch(keychain_mask)?;
 	batch.save_last_scanned_blocks(start_height, &blocks)?;
 	batch.commit()?;
@@ -1240,6 +1269,13 @@ where
 	for output in w.iter() {
 		write_info(format!("{:?}", output), file.as_mut(), status_send_channel);
 	}
+	for output in w.archive_iter() {
+		write_info(
+			format!("Archived  {:?}", output),
+			file.as_mut(),
+			status_send_channel,
+		);
+	}
 
 	write_info(
 		String::from("Wallet Transactions:"),
@@ -1251,20 +1287,53 @@ where
 		// Checking if Slate is available
 		if let Some(uuid) = tx_log.tx_slate_id {
 			let uuid_str = uuid.to_string();
-			match w.get_stored_tx_by_uuid(&uuid_str) {
+			match w.get_stored_tx_by_uuid(&uuid_str, false) {
 				Ok(t) => {
 					write_info(
-						format!("   Slate for {}: {:?}", uuid_str, t),
+						format!("tx for {}: {:?}   Transaction: {:?}", uuid_str, tx_log, t),
 						file.as_mut(),
 						status_send_channel,
 					);
 				}
 				Err(_) => write_info(
-					format!("   Slate for {} not found", uuid_str),
+					format!("tx for {}: {:?}    Slate not found", uuid_str, tx_log),
 					file.as_mut(),
 					status_send_channel,
 				),
 			}
+		}
+	}
+
+	for tx_log in w.tx_log_archive_iter() {
+		// Checking if Slate is available
+		if let Some(uuid) = tx_log.tx_slate_id {
+			let uuid_str = uuid.to_string();
+			match w.get_stored_tx_by_uuid(&uuid_str, true) {
+				Ok(t) => {
+					write_info(
+						format!(
+							"Archived tx for {}: {:?}   Transaction: {:?}",
+							uuid_str, tx_log, t
+						),
+						file.as_mut(),
+						status_send_channel,
+					);
+				}
+				Err(_) => write_info(
+					format!(
+						"Archived tx for {}: {:?}    Slate not found",
+						uuid_str, tx_log
+					),
+					file.as_mut(),
+					status_send_channel,
+				),
+			}
+		} else {
+			write_info(
+				format!("Archived tx {:?}", tx_log),
+				file.as_mut(),
+				status_send_channel,
+			);
 		}
 	}
 
@@ -1282,21 +1351,19 @@ where
 // Result: (tip_height: u64, tip_hash:String, first_block_to_scan_from: ScannedBlockInfo, is_reorg: bool)
 // is_reorg true if new need go back by the chain to perform scanning
 // Note: In case of error return tip 0!!!
-fn get_last_detect_last_scanned_block<'a, L, C, K>(
-	wallet_inst: Arc<Mutex<Box<dyn WalletInst<'a, L, C, K>>>>,
+fn get_last_detect_last_scanned_block<'a, T: ?Sized, C, K>(
+	wallet: &mut T,
 	keychain_mask: Option<&SecretKey>,
 	status_send_channel: &Option<Sender<StatusMessage>>,
 ) -> Result<(u64, String, ScannedBlockInfo, bool), Error>
 where
-	L: WalletLCProvider<'a, C, K>,
+	T: WalletBackend<'a, C, K>,
 	C: NodeClient + 'a,
 	K: Keychain + 'a,
 {
-	wallet_lock!(wallet_inst, w);
-
 	// Wallet update logic doesn't handle truncating of the blockchain. That happen when node in sync or in reorg-sync
 	// In this case better to inform user and do nothing. Sync is useless in any case.
-	let (tip_height, tip_hash, _) = match w.w2n_client().get_chain_tip() {
+	let (tip_height, tip_hash, _) = match wallet.w2n_client().get_chain_tip() {
 		Ok(t) => t,
 		Err(_) => {
 			if let Some(ref s) = status_send_channel {
@@ -1311,7 +1378,7 @@ where
 	let mut neeed_init_last_scaned = false;
 	{
 		// Checking if keychain mask correct. Issue that sometimes update_wallet_state doesn't need it and it is a security problem
-		let mut batch = w.batch(keychain_mask)?;
+		let mut batch = wallet.batch(keychain_mask)?;
 		if batch.load_flag(FLAG_NEW_WALLET, true)? {
 			neeed_init_last_scaned = true;
 		}
@@ -1321,17 +1388,26 @@ where
 	if neeed_init_last_scaned {
 		// Let's still scan for last 100 blocks. That might be a mining wallet like tests has.
 		if tip_height > 100 {
-			let header = w.w2n_client().get_header_info(tip_height - 100)?;
+			// let's find commit's/txs min heights
+			let mut max_height = tip_height - 100;
+			for output in wallet.iter() {
+				let h = output.height.saturating_sub(100);
+				if h < max_height {
+					max_height = h;
+				}
+			}
+
+			let header = wallet.w2n_client().get_header_info(max_height)?;
 			let blocks: Vec<ScannedBlockInfo> =
 				vec![ScannedBlockInfo::new(header.height, header.hash)];
 
-			let mut batch = w.batch(keychain_mask)?;
+			let mut batch = wallet.batch(keychain_mask)?;
 			batch.save_last_scanned_blocks(header.height, &blocks)?;
 			batch.commit()?;
 		}
 	}
 
-	let blocks = w.last_scanned_blocks()?;
+	let blocks = wallet.last_scanned_blocks()?;
 
 	// If the server height is less than our confirmed height, don't apply
 	// these changes as the chain is syncing, incorrect or forking
@@ -1355,7 +1431,7 @@ where
 		if bl.height > tip_height {
 			continue; // Possible because of the parch (switch from branches)
 		}
-		if let Ok(hdr_info) = w.w2n_client().get_header_info(bl.height) {
+		if let Ok(hdr_info) = wallet.w2n_client().get_header_info(bl.height) {
 			if hdr_info.hash == bl.hash {
 				last_scanned_block = bl;
 				break;
@@ -1369,30 +1445,26 @@ where
 }
 
 /// Experimental, wrap the entire definition of how a wallet's state is updated
-pub fn update_wallet_state<'a, L, C, K>(
-	wallet_inst: Arc<Mutex<Box<dyn WalletInst<'a, L, C, K>>>>,
+pub fn update_wallet_state<'a, T: ?Sized, C, K>(
+	wallet: &mut T,
 	keychain_mask: Option<&SecretKey>,
 	status_send_channel: &Option<Sender<StatusMessage>>,
 ) -> Result<bool, Error>
 where
-	L: WalletLCProvider<'a, C, K>,
+	T: WalletBackend<'a, C, K>,
 	C: NodeClient + 'a,
 	K: Keychain + 'a,
 {
 	// Checking from what point we should start scanning
-	let (tip_height, tip_hash, last_scanned_block, has_reorg) = get_last_detect_last_scanned_block(
-		wallet_inst.clone(),
-		keychain_mask,
-		status_send_channel,
-	)?;
+	let (tip_height, tip_hash, last_scanned_block, has_reorg) =
+		get_last_detect_last_scanned_block(wallet, keychain_mask, status_send_channel)?;
 
 	if tip_height == 0 {
 		return Ok(false);
 	}
 
 	if has_reorg {
-		wallet_lock!(wallet_inst, w);
-		w.w2n_client().reset_cache(); // let's reset cach to be safe
+		wallet.w2n_client().reset_cache(); // let's reset cach to be safe
 
 		info!(
 			"Wallet update will do full outputs checking because since last update reorg happend"
@@ -1423,13 +1495,11 @@ where
 	let mut blocks: Vec<ScannedBlockInfo> =
 		vec![ScannedBlockInfo::new(tip_height, tip_hash.clone())];
 	{
-		wallet_lock!(wallet_inst, w);
-
 		let mut step = 4;
 
 		while blocks.last().unwrap().height.saturating_sub(step) > last_scanned_block.height {
 			let h = blocks.last().unwrap().height.saturating_sub(step);
-			let hdr = w.w2n_client().get_header_info(h)?;
+			let hdr = wallet.w2n_client().get_header_info(h)?;
 			blocks.push(ScannedBlockInfo::new(h, hdr.hash));
 			step *= 2;
 		}
@@ -1437,7 +1507,7 @@ where
 	}
 
 	scan::scan(
-		wallet_inst.clone(),
+		wallet,
 		keychain_mask,
 		false,
 		last_scanned_block.height,
@@ -1450,13 +1520,11 @@ where
 	// Note: retry logic, if tip was changed, is not needed, Problem that for busy wallet, like miner it could take a while.
 	// Try to make optional, goes through the code and found that for all branches it is not critical.
 	{
-		wallet_lock!(wallet_inst, w);
-
 		// checking if node is online
-		if w.w2n_client().get_chain_tip().is_ok() {
+		if wallet.w2n_client().get_chain_tip().is_ok() {
 			// Since we are still online, we can save the scan status
 			{
-				let mut batch = w.batch(keychain_mask)?;
+				let mut batch = wallet.batch(keychain_mask)?;
 				batch.save_last_scanned_blocks(last_scanned_block.height, &blocks)?;
 				batch.commit()?;
 			}
@@ -1830,8 +1898,10 @@ where
 	C: NodeClient + 'a,
 	K: Keychain + 'a,
 {
+	wallet_lock!(wallet_inst, w);
+
 	scan::self_spend_particular_output(
-		wallet_inst,
+		&mut **w,
 		keychain_mask,
 		output.value,
 		output.commit.unwrap(),
@@ -1856,7 +1926,7 @@ where
 {
 	let k = w.keychain(keychain_mask)?;
 
-	let key_id = keys::next_available_key(&mut *w, keychain_mask, None)?;
+	let key_id = keys::next_available_key(&mut *w, None)?;
 
 	let blind = k.derive_key(amount, &key_id, SwitchCommitmentType::Regular)?;
 	let commit = k.secp().commit(amount, blind.clone())?;

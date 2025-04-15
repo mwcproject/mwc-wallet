@@ -22,6 +22,8 @@ extern crate mwc_wallet_impls as impls;
 extern crate mwc_wallet_libwallet as libwallet;
 
 use mwc_wallet_util::mwc_core as core;
+use std::ops::DerefMut;
+use std::sync::Arc;
 
 use self::libwallet::{InitTxArgs, Slate};
 use impls::test_framework::{self, LocalWalletClient};
@@ -32,11 +34,14 @@ use std::time::Duration;
 
 mod common;
 use common::{clean_output_dir, create_wallet_proxy, setup};
+use mwc_wallet_util::mwc_core::core::Transaction;
+use mwc_wallet_util::mwc_util::Mutex;
 
 /// Builds a chain with real transactions up to the given height
-fn build_chain(test_dir: &'static str, block_height: usize) -> Result<(), libwallet::Error> {
+fn build_chain(test_dir: &str, block_height: usize) -> Result<(), libwallet::Error> {
 	// Create a new proxy to simulate server and wallet responses
-	let mut wallet_proxy = create_wallet_proxy(test_dir);
+	let tx_pool: Arc<Mutex<Vec<Transaction>>> = Arc::new(Mutex::new(Vec::new()));
+	let mut wallet_proxy = create_wallet_proxy(test_dir.into(), tx_pool.clone());
 	let chain = wallet_proxy.chain.clone();
 	let stopper = wallet_proxy.running.clone();
 
@@ -90,7 +95,14 @@ fn build_chain(test_dir: &'static str, block_height: usize) -> Result<(), libwal
 	let mut rng = rand::thread_rng();
 
 	// Start off with a few blocks
-	let _ = test_framework::award_blocks_to_wallet(&chain, wallet1.clone(), mask1, 3, false);
+	let _ = test_framework::award_blocks_to_wallet(
+		&chain,
+		wallet1.clone(),
+		mask1,
+		3,
+		false,
+		tx_pool.lock().deref_mut(),
+	);
 
 	for height in 0..block_height {
 		let mut wallet_1_has_funds = false;
@@ -114,8 +126,14 @@ fn build_chain(test_dir: &'static str, block_height: usize) -> Result<(), libwal
 		// let's say 1 in every 3 blocks has a transaction (i.e. random 0 here and wallet1 has funds)
 		let transact = rng.gen_range(0, 2) == 0;
 		if !transact || !wallet_1_has_funds {
-			let _ =
-				test_framework::award_blocks_to_wallet(&chain, wallet1.clone(), mask1, 1, false);
+			let _ = test_framework::award_blocks_to_wallet(
+				&chain,
+				wallet1.clone(),
+				mask1,
+				1,
+				false,
+				tx_pool.lock().deref_mut(),
+			);
 			continue;
 		}
 
@@ -157,7 +175,7 @@ fn build_chain(test_dir: &'static str, block_height: usize) -> Result<(), libwal
 }
 
 #[test]
-#[ignore]
+//#[ignore]
 fn build_chain_to_height() {
 	// ******************
 	// If letting this run for a while to build a chain, recommend also tweaking scan threshold around 1112 of owner.rs:
@@ -170,7 +188,8 @@ fn build_chain_to_height() {
 	let test_dir = "test_output/build_chain";
 	clean_output_dir(test_dir);
 	setup(test_dir);
-	if let Err(e) = build_chain(test_dir, 2048) {
+	// Originall had 2048 blocks and disabled test.  Let's have small number of blocks but robust test
+	if let Err(e) = build_chain(test_dir, 100) {
 		panic!("Libwallet Error: {}", e);
 	}
 	// don't clean to get the result for testing

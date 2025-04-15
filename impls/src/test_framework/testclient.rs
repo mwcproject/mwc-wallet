@@ -87,6 +87,9 @@ where
 	pub rx: Receiver<WalletProxyMessage>,
 	/// queue control
 	pub running: Arc<AtomicBool>,
+
+	// transaction pool
+	tx_pool: Arc<Mutex<Vec<Transaction>>>,
 }
 
 impl<'a, L, C, K> WalletProxy<'a, L, C, K>
@@ -96,7 +99,7 @@ where
 	K: Keychain + 'a,
 {
 	/// Create a new client that will communicate with the given mwc node
-	pub fn new(chain_dir: &str) -> Self {
+	pub fn new(chain_dir: String, tx_pool: Arc<Mutex<Vec<Transaction>>>) -> Self {
 		set_local_chain_type(ChainTypes::AutomatedTesting);
 		let genesis_block = pow::mine_genesis_block().unwrap();
 		let dir_name = format!("{}/.mwc", chain_dir);
@@ -110,12 +113,13 @@ where
 		.unwrap();
 		let (tx, rx) = channel();
 		WalletProxy {
-			chain_dir: chain_dir.to_owned(),
+			chain_dir: chain_dir,
 			chain: Arc::new(c),
 			tx: tx,
 			rx: rx,
 			wallets: HashMap::new(),
 			running: Arc::new(AtomicBool::new(false)),
+			tx_pool,
 		}
 	}
 
@@ -186,18 +190,11 @@ where
 
 	/// post transaction to the chain (and mine it, taking the reward)
 	fn post_tx(&mut self, m: WalletProxyMessage) -> Result<WalletProxyMessage, libwallet::Error> {
-		let dest_wallet = self.wallets.get_mut(&m.sender_id).unwrap().1.clone();
-		let dest_wallet_mask = self.wallets.get_mut(&m.sender_id).unwrap().2.clone();
 		let tx: Transaction = serde_json::from_str(&m.body).map_err(|e| {
 			libwallet::Error::ClientCallback(format!("Error parsing Transaction, {}", e))
 		})?;
 
-		super::award_block_to_wallet(
-			&self.chain,
-			&[tx],
-			dest_wallet,
-			(&dest_wallet_mask).as_ref(),
-		)?;
+		self.tx_pool.lock().push(tx);
 
 		Ok(WalletProxyMessage {
 			sender_id: "node".to_owned(),

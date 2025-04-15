@@ -56,8 +56,10 @@ pub struct ProvableAddress {
 	/// Public key that is an address
 	pub public_key: String,
 	/// Place holder for mwc713 backcompability. Value is empty string
+	#[serde(default = "ProvableAddress::default_domain")]
 	pub domain: String,
 	/// Place holder for mwc713 backcompability. Value is None
+	#[serde(default = "ProvableAddress::default_port")]
 	pub port: Option<u16>,
 }
 
@@ -118,6 +120,14 @@ impl ProvableAddress {
 	pub fn tor_public_key(&self) -> Result<DalekPublicKey, Error> {
 		let addr = OnionV3Address::try_from(self.public_key.as_str())?;
 		Ok(addr.to_ed25519()?)
+	}
+
+	fn default_domain() -> String {
+		String::new()
+	}
+
+	fn default_port() -> Option<u16> {
+		None
 	}
 }
 

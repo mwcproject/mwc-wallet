@@ -34,7 +34,7 @@ use crate::util::secp::key::{PublicKey, SecretKey};
 use crate::util::secp::pedersen;
 use crate::util::{static_secp_instance, ZeroingString};
 use crate::{ECDHPubkey, Owner, Token};
-use easy_jsonrpc_mw;
+use easy_jsonrpc_mwc;
 use ed25519_dalek::PublicKey as DalekPublicKey;
 use libwallet::RetrieveTxQueryArgs;
 use mwc_wallet_libwallet::proof::proofaddress::ProvableAddress;
@@ -47,7 +47,7 @@ use std::time::Duration;
 /// See [`init_secure_api`](#tymethod.init_secure_api) for details of secret derivation
 /// and encryption.
 
-#[easy_jsonrpc_mw::rpc]
+#[easy_jsonrpc_mwc::rpc]
 pub trait OwnerRpcV3 {
 	/**
 	Networked version of [Owner::accounts](struct.Owner.html#method.accounts).
@@ -189,7 +189,7 @@ pub trait OwnerRpcV3 {
 				"is_coinbase": true,
 				"key_id": "0300000000000000000000000000000000",
 				"lock_height": "4",
-				"mmr_index": null,
+				"mmr_index": "1",
 				"n_child": 0,
 				"root_key_id": "0200000000000000000000000000000000",
 				"status": "Unspent",
@@ -205,7 +205,66 @@ pub trait OwnerRpcV3 {
 				"is_coinbase": true,
 				"key_id": "0300000000000000000000000100000000",
 				"lock_height": "5",
-				"mmr_index": null,
+				"mmr_index": "2",
+				"n_child": 1,
+				"root_key_id": "0200000000000000000000000000000000",
+				"status": "Unspent",
+				"tx_log_entry": 1,
+				"value": "2380952380"
+			  }
+			}
+		  ]
+		]
+	  }
+	}
+	# "#
+	# , true, 2, false, false, false, false, true);
+	#
+	# mwc_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
+	# r#"
+	{
+		"jsonrpc": "2.0",
+		"method": "retrieve_outputs",
+		"params": {
+			"token": "d202964900000000d302964900000000d402964900000000d502964900000000"
+		},
+		"id": 1
+	}
+	# "#
+	# ,
+	# r#"
+	{
+	  "id": 1,
+	  "jsonrpc": "2.0",
+	  "result": {
+		"Ok": [
+		  true,
+		  [
+			{
+			  "commit": "0910c1752100733bae49e877286835aab76d5856ef8139b6c6e3f51798aa461b03",
+			  "output": {
+				"commit": "0910c1752100733bae49e877286835aab76d5856ef8139b6c6e3f51798aa461b03",
+				"height": "1",
+				"is_coinbase": true,
+				"key_id": "0300000000000000000000000000000000",
+				"lock_height": "4",
+				"mmr_index": "1",
+				"n_child": 0,
+				"root_key_id": "0200000000000000000000000000000000",
+				"status": "Unspent",
+				"tx_log_entry": 0,
+				"value": "2380952380"
+			  }
+			},
+			{
+			  "commit": "098778ce2243fa34e5876c8cb7f6dbbbd6a5649c1561973a807a6811941c12363c",
+			  "output": {
+				"commit": "098778ce2243fa34e5876c8cb7f6dbbbd6a5649c1561973a807a6811941c12363c",
+				"height": "2",
+				"is_coinbase": true,
+				"key_id": "0300000000000000000000000100000000",
+				"lock_height": "5",
+				"mmr_index": "2",
 				"n_child": 1,
 				"root_key_id": "0200000000000000000000000000000000",
 				"status": "Unspent",
@@ -225,8 +284,8 @@ pub trait OwnerRpcV3 {
 	fn retrieve_outputs(
 		&self,
 		token: Token,
-		include_spent: bool,
-		refresh_from_node: bool,
+		include_spent: Option<bool>,
+		refresh_from_node: Option<bool>,
 		tx_id: Option<u32>,
 	) -> Result<(bool, Vec<OutputCommitMapping>), Error>;
 
@@ -245,13 +304,99 @@ pub trait OwnerRpcV3 {
 				"token": "d202964900000000d302964900000000d402964900000000d502964900000000",
 				"refresh_from_node": true,
 				"tx_id": null,
-				"tx_slate_id": null
+				"tx_slate_id": null,
+				"show_last_four_days": true
 			},
 			"id": 1
 		}
 		# "#
 		# ,
 		# r#"
+		{
+		  "id": 1,
+		  "jsonrpc": "2.0",
+		  "result": {
+			"Ok": [
+			  true,
+			  [
+				{
+				  "address": null,
+				  "amount_credited": "2380952380",
+				  "amount_debited": "0",
+				  "confirmation_ts": "2019-01-15T16:01:26Z",
+				  "confirmed": true,
+				  "creation_ts": "2019-01-15T16:01:26Z",
+				  "fee": null,
+				  "id": 0,
+				  "input_commits": [],
+				  "kernel_excess": "099beea8f814120ac8c559027e55cb26986ae40e279e3093a7d4a52d827a23f0e7",
+				  "kernel_offset": null,
+				  "kernel_lookup_min_height": 1,
+				  "messages": null,
+				  "num_inputs": 0,
+				  "num_outputs": 1,
+				  "output_commits": [
+					"0910c1752100733bae49e877286835aab76d5856ef8139b6c6e3f51798aa461b03"
+				  ],
+				  "output_height": 1,
+				  "parent_key_id": "0200000000000000000000000000000000",
+				  "payment_proof": null,
+				  "reverted_after": null,
+				  "stored_tx": null,
+				  "ttl_cutoff_height": null,
+				  "tx_slate_id": null,
+				  "reverted_after": null,
+				  "tx_type": "ConfirmedCoinbase"
+				},
+				{
+				  "address": null,
+				  "amount_credited": "2380952380",
+				  "amount_debited": "0",
+				  "confirmation_ts": "2019-01-15T16:01:26Z",
+				  "confirmed": true,
+				  "creation_ts": "2019-01-15T16:01:26Z",
+				  "fee": null,
+				  "id": 1,
+				  "input_commits": [],
+				  "kernel_excess": "09f7677adc7caf8bb44a4ee27d27dfe9ffa1010847a18b182bbb7100bb02f9259e",
+				  "kernel_offset": null,
+				  "kernel_lookup_min_height": 2,
+				  "messages": null,
+				  "num_inputs": 0,
+				  "num_outputs": 1,
+				  "output_commits": [
+					"098778ce2243fa34e5876c8cb7f6dbbbd6a5649c1561973a807a6811941c12363c"
+				  ],
+				  "output_height": 2,
+				  "parent_key_id": "0200000000000000000000000000000000",
+				  "payment_proof": null,
+				  "reverted_after": null,
+				  "stored_tx": null,
+				  "ttl_cutoff_height": null,
+				  "reverted_after": null,
+				  "tx_slate_id": null,
+				  "tx_type": "ConfirmedCoinbase"
+				}
+			  ]
+			]
+		  }
+		}
+	# "#
+	# , true, 2, false, false, false, false, true);
+	#
+	# mwc_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
+	# r#"
+		{
+			"jsonrpc": "2.0",
+			"method": "retrieve_txs",
+			"params": {
+				"token": "d202964900000000d302964900000000d402964900000000d502964900000000"
+			},
+			"id": 1
+		}
+	# "#
+	# ,
+	# r#"
 		{
 		  "id": 1,
 		  "jsonrpc": "2.0",
@@ -330,9 +475,10 @@ pub trait OwnerRpcV3 {
 	fn retrieve_txs(
 		&self,
 		token: Token,
-		refresh_from_node: bool,
+		refresh_from_node: Option<bool>,
 		tx_id: Option<u32>,
 		tx_slate_id: Option<Uuid>,
+		show_last_four_days: Option<bool>,
 	) -> Result<(bool, Vec<TxLogEntryAPI>), Error>;
 
 	/**
@@ -348,6 +494,7 @@ pub trait OwnerRpcV3 {
 			"params": {
 				"token": "d202964900000000d302964900000000d402964900000000d502964900000000",
 				"refresh_from_node": true,
+				"show_last_four_days": true,
 				"query": {
 					"min_id": 0,
 					"max_id": 100,
@@ -431,6 +578,97 @@ pub trait OwnerRpcV3 {
 		}
 	# "#
 	# , true, 2, false, false, false, false, true);
+	#
+	# mwc_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
+	# r#"
+		{
+			"jsonrpc": "2.0",
+			"method": "query_txs",
+			"params": {
+				"token": "d202964900000000d302964900000000d402964900000000d502964900000000",
+				"query": {
+					"min_id": 0,
+					"max_id": 100,
+					"min_amount": "0",
+					"max_amount": "60000000000",
+					"sort_field": "Id",
+					"sort_order": "Asc"
+				}
+			},
+			"id": 1
+		}
+	# "#
+	# ,
+	# r#"
+		{
+		  "id": 1,
+		  "jsonrpc": "2.0",
+		  "result": {
+			"Ok": [
+			  true,
+			  [
+				{
+				  "address": null,
+				  "amount_credited": "2380952380",
+				  "amount_debited": "0",
+				  "confirmation_ts": "2019-01-15T16:01:26Z",
+				  "confirmed": true,
+				  "creation_ts": "2019-01-15T16:01:26Z",
+				  "fee": null,
+				  "id": 0,
+				  "input_commits": [],
+				  "kernel_excess": "099beea8f814120ac8c559027e55cb26986ae40e279e3093a7d4a52d827a23f0e7",
+				  "kernel_lookup_min_height": 1,
+				  "kernel_offset": null,
+				  "messages": null,
+				  "num_inputs": 0,
+				  "num_outputs": 1,
+				  "output_commits": [
+					"0910c1752100733bae49e877286835aab76d5856ef8139b6c6e3f51798aa461b03"
+				  ],
+				  "output_height": 1,
+				  "parent_key_id": "0200000000000000000000000000000000",
+				  "payment_proof": null,
+				  "reverted_after": null,
+				  "stored_tx": null,
+				  "ttl_cutoff_height": null,
+				  "tx_slate_id": null,
+				  "tx_type": "ConfirmedCoinbase"
+				},
+				{
+				  "address": null,
+				  "amount_credited": "2380952380",
+				  "amount_debited": "0",
+				  "confirmation_ts": "2019-01-15T16:01:26Z",
+				  "confirmed": true,
+				  "creation_ts": "2019-01-15T16:01:26Z",
+				  "fee": null,
+				  "id": 1,
+				  "input_commits": [],
+				  "kernel_excess": "09f7677adc7caf8bb44a4ee27d27dfe9ffa1010847a18b182bbb7100bb02f9259e",
+				  "kernel_lookup_min_height": 2,
+				  "kernel_offset": null,
+				  "messages": null,
+				  "num_inputs": 0,
+				  "num_outputs": 1,
+				  "output_commits": [
+					"098778ce2243fa34e5876c8cb7f6dbbbd6a5649c1561973a807a6811941c12363c"
+				  ],
+				  "output_height": 2,
+				  "parent_key_id": "0200000000000000000000000000000000",
+				  "payment_proof": null,
+				  "reverted_after": null,
+				  "stored_tx": null,
+				  "ttl_cutoff_height": null,
+				  "tx_slate_id": null,
+				  "tx_type": "ConfirmedCoinbase"
+				}
+			  ]
+			]
+		  }
+		}
+	# "#
+	# , true, 2, false, false, false, false, true);
 	```
 
 	*/
@@ -438,8 +676,9 @@ pub trait OwnerRpcV3 {
 	fn query_txs(
 		&self,
 		token: Token,
-		refresh_from_node: bool,
+		refresh_from_node: Option<bool>,
 		query: RetrieveTxQueryArgs,
+		show_last_four_days: Option<bool>,
 	) -> Result<(bool, Vec<TxLogEntryAPI>), Error>;
 
 	/**
@@ -483,14 +722,50 @@ pub trait OwnerRpcV3 {
 	}
 	# "#
 	# ,true, 4, false, false, false, false, true);
+	#
+	# mwc_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
+	# r#"
+	{
+		"jsonrpc": "2.0",
+		"method": "retrieve_summary_info",
+		"params": {
+			"token": "d202964900000000d302964900000000d402964900000000d502964900000000"
+		},
+		"id": 1
+	}
+	# "#
+	# ,
+	# r#"
+	{
+	  "id": 1,
+	  "jsonrpc": "2.0",
+	  "result": {
+		"Ok": [
+		  true,
+		  {
+			"amount_awaiting_confirmation": "0",
+			"amount_awaiting_finalization": "0",
+			"amount_currently_spendable": "2380952380",
+			"amount_immature": "7142857140",
+			"amount_locked": "0",
+			"amount_reverted": "0",
+			"last_confirmed_height": "4",
+			"minimum_confirmations": "1",
+			"total": "9523809520"
+		  }
+		]
+	  }
+	}
+	# "#
+	# ,true, 4, false, false, false, false, true);
 	```
 	 */
 
 	fn retrieve_summary_info(
 		&self,
 		token: Token,
-		refresh_from_node: bool,
-		minimum_confirmations: u64,
+		refresh_from_node: Option<bool>,
+		minimum_confirmations: Option<u64>,
 	) -> Result<(bool, WalletInfo), Error>;
 
 	/**
@@ -1081,6 +1356,75 @@ pub trait OwnerRpcV3 {
 		"params": {
 			"rewind_hash": "c820c52a492b7db511c752035483d0e50e8fd3ec62544f1b99638e220a4682de",
 			"start_height": 1
+		},
+		"id": 1
+	}
+	# "#
+	# ,
+	# r#"
+	{
+		"id":1,
+		"jsonrpc":"2.0",
+		"result":{
+			"Ok":{
+				"last_pmmr_index":8,
+				"output_result": [
+				  {
+					"commit": "0910c1752100733bae49e877286835aab76d5856ef8139b6c6e3f51798aa461b03",
+					"height": 1,
+					"is_coinbase": true,
+					"lock_height": 4,
+					"mmr_index": 1,
+					"value": 2380952380
+				 },
+			   {
+				 "commit": "098778ce2243fa34e5876c8cb7f6dbbbd6a5649c1561973a807a6811941c12363c",
+				 "height": 2,
+				 "is_coinbase": true,
+				 "lock_height": 5,
+				 "mmr_index": 2,
+				 "value": 2380952380
+			   },
+			   {
+				 "commit": "09c22771c700c9ccc1feea8fb151b4e496607bb442f1e1e7bb93992f6422886954",
+				 "height": 3,
+				 "is_coinbase": true,
+				 "lock_height": 6,
+				 "mmr_index": 4,
+				 "value": 2380952380
+			   },
+			   {
+				 "commit": "0834ced7ae2dbf08f2008ff99fe0f447863405c0622233ece68d39e2ae02f7bf0c",
+				 "height": 4,
+				 "is_coinbase": true,
+				 "lock_height": 7,
+				 "mmr_index": 5,
+				 "value": 2380952380
+			   },
+			   {
+				 "commit": "08e0404fe044830d8f5be9953be5c70b5b7d525e4ecd3973437d9d6005ea5cd2bc",
+				 "height": 5,
+				 "is_coinbase": true,
+				 "lock_height": 8,
+				 "mmr_index": 8,
+				 "value": 2380952380
+			   }
+			 ],
+			 "rewind_hash": "c820c52a492b7db511c752035483d0e50e8fd3ec62544f1b99638e220a4682de",
+			 "total_balance": 11904761900
+			}
+		}
+	 }
+	# "#
+	# ,true, 5, false, false, false, false, false);
+	#
+	# mwc_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
+	# r#"
+	{
+		"jsonrpc": "2.0",
+		"method": "scan_rewind_hash",
+		"params": {
+			"rewind_hash": "c820c52a492b7db511c752035483d0e50e8fd3ec62544f1b99638e220a4682de"
 		},
 		"id": 1
 	}
@@ -2102,10 +2446,69 @@ pub trait OwnerRpcV3 {
 	}
 	# "#
 	# , true, 5, true, true, true, false, true);
+	#
+	# mwc_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
+	# r#"
+	{
+		"jsonrpc": "2.0",
+		"id": 1,
+		"method": "post_tx",
+		"params": {
+			"token": "d202964900000000d302964900000000d402964900000000d502964900000000",
+			"tx": {
+				"offset": "d202964900000000d302964900000000d402964900000000d502964900000000",
+				"body": {
+					"inputs": [
+						{
+						  "commit": "098778ce2243fa34e5876c8cb7f6dbbbd6a5649c1561973a807a6811941c12363c",
+						  "features": "Coinbase"
+						},
+						{
+						  "commit": "0910c1752100733bae49e877286835aab76d5856ef8139b6c6e3f51798aa461b03",
+						  "features": "Coinbase"
+						}
+					],
+					"outputs": [
+						{
+						  "commit": "082967b3fe580cd110355010ef45450314fb067720db01b0e6873bb083d76708c9",
+						  "features": "Plain",
+						  "proof": "828bb24121aa0332c872062a42a8333c3ef81f8ae37d24053d953217368b3cada90410a50509a0b9fcbb5aded41397fc00ca1ff5acdac20d48afb0a3281d21e7026d32fdc6c5157461a35f98a809ffa09187c1e170ea24652ad213b7e4c9878654ac3dd9a8915eaf742db53182fcb42d2d341fbdfe8bd31bd001f4ff2c1ca9f9b1531da29137214f211edb7a5eb8f494cb8945f8527dd25bf7e698515043db4249540720008a708db5342230d05b069c094688ccb7c07d4a4a2293ea76cf999c555dc0ddc757891c360db1901bbb4dc20cae997f875f8de482d8160e05d60f9b0135e0fc313d8f953db78f1ea252449dd81cfa22dd895512ed39d566f0924542b543d25fc9fc7a819d228f3b0ee5e381f088f54893e86437dafc49dd923b3e6dff956ca843f951910379531fac9bb5fd01a182dd32a4c597f92da3c01af37cb9b0ec984500884438e74e54d7e76fa1ae7241d5050b13376310b24761634a6f6eb7cf000082f50ed7c1899d7918023d4f877586f964932a7af72e7a4984ddecfdd1921a2e1b80b00d6bd2e64a3f4cb6915a27a8d17a69d163cf45220a13fcddd15dc2bb91ae4f1b6a67224ab3b23e8d7d785df178ec78a84cf42cea086426f563822c8a4271a0b89bb21f84b643dbf1de21b6395039d673a376492767199fa36ccd9a13628ce61695424091acc16059450d59bc59fa7879e7306f5727217211b0264a6a560f886d520e41406ef45b1668805b88d246c5b2ca5a1762042c85be34fcd420ac3843f32236d079b4bd57d6b8d8013d9d18f8efb55e8e443cd9e1af9b144e7a56c8c6be0138af3b4a6c99bee9109bed2bce2e5145e736b125a2ec19aaf3fff713f6897fdd4158ce2ab04706b062ca2847bf70259c0fc4b0d390dc7fdaf0362047f775a912bd22da9d40f04d9790bcd5ece4b36b74c6c340b48c2926b916e8a9"
+						},
+						{
+						  "commit": "096e1669267c22ecb38c466d73b8578261d8e91c14dd66702dd5bf34f4232e10db",
+						  "features": "Plain",
+						  "proof": "7d567b0895a1103d19446929da8b98f2086819507ddce4b9dbb5ce6327107744e74aba59ef1834937da1b86eb7c1c1b0bc11d1c5d5ec79d25bc1e52aed1656f60d46f6878ba5ca8639efdbb9203e378e91171c11527c4a34713f06dc22f58ca4a08e68d83ff897e61cfc145fe376fa428b55e25cf20d15f10b9054778229798b30fb4e45d817a5053b682dcf591481a3c8174cfbba81e31aa525d5b884ca7a016713178f26c0fe8ae1f88b5382f8e70c4d91fb3828c0f307d828aa028281d3551525e68d20827ab0e6785c6b5747e895dcd38429b44e62b7f6c1c921d87ae954a9dd6e967ac52e6cd13a1d4bb2f1434da25a0723ef9c869cc573019577552dd0e0f808f8cc57723b041320025f6433779fe907998a4ec7606bf884b2199253b502065bed8e0625c2df858d6508c1aa44deddc68d06d00d81e97720e23e15a3464ed4733fc547e9fb772e563a1dbcd27ac55e40f674f9006e7dd4465444f3eb7527cb01905dee69a51cf2fc1810c861dd0834e7649d594c3e1740d85343a6b63c8a9e0a0f63059031899b38dfd9a192034d54029bd35e683ccab46282519b26cae20d398b754357abe1cf0370890f2897b5d8ada4fb3da777a8f8f1daa4197a380e6734504117dd2a92ea1917f174c44c59e0b50c6b7a5f9eb14e6d96cb6b3e5dbcb3d0eaf0e4aac1b6616d674bb708b7559e37de608e8a828bee7f25f627e2f06d9a87e8d651ade39e1e65db7204b94abc0b7ca6fdd75aadeeac6a876b6297e38039734ebdfa9a555152b4293cb00e423a66d64f827afa4748dd6fdc1dc33332bffb820dacbf5a6d347042db985bbd9cf476dceb45d6978035ba03d25612243fc164c0a902017ce7ffd632d041fa3c56554739e78c6d725ecbfdaa0739d3649239fb53294b7a46ee6ed403bf3815f6c78f06a8ca4e3c9b066234f7574fb6ea8f17d199"
+						}
+					],
+					"kernels": [
+						{
+						  "excess": "08b3b8b83c622f630141a66c9cad96e19c78f745e4e2ddea85439f05d14a404640",
+						  "excess_sig": "66074d25a751c4743342c90ad8ead9454daa00d9b9aed29bca321036d16c4b4d1f1ac30ec6809c5e1a983a83af0deb0635b892e5e0ea3a3bd7f68be99f721348",
+						  "features": "Plain",
+						  "fee": "7000000",
+						  "lock_height": "0"
+						}
+					]
+				}
+			}
+		}
+	}
+	# "#
+	# ,
+	# r#"
+	{
+		"id": 1,
+		"jsonrpc": "2.0",
+		"result": {
+			"Ok": null
+		}
+	}
+	# "#
+	# , true, 5, true, true, true, false, true);
 	```
 	 */
 
-	fn post_tx(&self, token: Token, tx: TransactionV3, fluff: bool) -> Result<(), Error>;
+	fn post_tx(&self, token: Token, tx: TransactionV3, fluff: Option<bool>) -> Result<(), Error>;
 
 	/**
 	Networked version of [Owner::cancel_tx](struct.Owner.html#method.cancel_tx).
@@ -2119,7 +2522,6 @@ pub trait OwnerRpcV3 {
 		"method": "cancel_tx",
 		"params": {
 			"token": "d202964900000000d302964900000000d402964900000000d502964900000000",
-			"tx_id": null,
 			"tx_slate_id": "0436430c-2b02-624c-2032-570501212b00"
 		},
 		"id": 1
@@ -2144,8 +2546,7 @@ pub trait OwnerRpcV3 {
 		"method": "cancel_tx",
 		"params": {
 			"token": "d202964900000000d302964900000000d402964900000000d502964900000000",
-			"tx_id": 5,
-			"tx_slate_id": null
+			"tx_id": 5
 		},
 		"id": 1
 	}
@@ -2184,8 +2585,131 @@ pub trait OwnerRpcV3 {
 			"token": "d202964900000000d302964900000000d402964900000000d502964900000000",
 			"tx": {
 				"stored_tx": "0436430c-2b02-624c-2032-570501212b00.mwctx",
-				"tx_slate_id": "0436430c-2b02-624c-2032-570501212b00",
-				"tx_type": "TxSent"
+				"tx_slate_id": "0436430c-2b02-624c-2032-570501212b00"
+			}
+		}
+	}
+	# "#
+	# ,
+	# r#"
+	{
+	  "id": 1,
+	  "jsonrpc": "2.0",
+	  "result": {
+		"Ok": {
+		  "body": {
+			"inputs": [
+			  {
+				"commit": "098778ce2243fa34e5876c8cb7f6dbbbd6a5649c1561973a807a6811941c12363c",
+				"features": "Coinbase"
+			  },
+			  {
+				"commit": "0910c1752100733bae49e877286835aab76d5856ef8139b6c6e3f51798aa461b03",
+				"features": "Coinbase"
+			  }
+			],
+			"kernels": [
+			  {
+				"excess": "000000000000000000000000000000000000000000000000000000000000000000",
+				"excess_sig": "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+				"features": "Plain",
+				"fee": "7000000",
+				"lock_height": "0"
+			  }
+			],
+			"outputs": [
+			  {
+				"commit": "082967b3fe580cd110355010ef45450314fb067720db01b0e6873bb083d76708c9",
+				"features": "Plain",
+				"proof": "828bb24121aa0332c872062a42a8333c3ef81f8ae37d24053d953217368b3cada90410a50509a0b9fcbb5aded41397fc00ca1ff5acdac20d48afb0a3281d21e7026d32fdc6c5157461a35f98a809ffa09187c1e170ea24652ad213b7e4c9878654ac3dd9a8915eaf742db53182fcb42d2d341fbdfe8bd31bd001f4ff2c1ca9f9b1531da29137214f211edb7a5eb8f494cb8945f8527dd25bf7e698515043db4249540720008a708db5342230d05b069c094688ccb7c07d4a4a2293ea76cf999c555dc0ddc757891c360db1901bbb4dc20cae997f875f8de482d8160e05d60f9b0135e0fc313d8f953db78f1ea252449dd81cfa22dd895512ed39d566f0924542b543d25fc9fc7a819d228f3b0ee5e381f088f54893e86437dafc49dd923b3e6dff956ca843f951910379531fac9bb5fd01a182dd32a4c597f92da3c01af37cb9b0ec984500884438e74e54d7e76fa1ae7241d5050b13376310b24761634a6f6eb7cf000082f50ed7c1899d7918023d4f877586f964932a7af72e7a4984ddecfdd1921a2e1b80b00d6bd2e64a3f4cb6915a27a8d17a69d163cf45220a13fcddd15dc2bb91ae4f1b6a67224ab3b23e8d7d785df178ec78a84cf42cea086426f563822c8a4271a0b89bb21f84b643dbf1de21b6395039d673a376492767199fa36ccd9a13628ce61695424091acc16059450d59bc59fa7879e7306f5727217211b0264a6a560f886d520e41406ef45b1668805b88d246c5b2ca5a1762042c85be34fcd420ac3843f32236d079b4bd57d6b8d8013d9d18f8efb55e8e443cd9e1af9b144e7a56c8c6be0138af3b4a6c99bee9109bed2bce2e5145e736b125a2ec19aaf3fff713f6897fdd4158ce2ab04706b062ca2847bf70259c0fc4b0d390dc7fdaf0362047f775a912bd22da9d40f04d9790bcd5ece4b36b74c6c340b48c2926b916e8a9"
+			  },
+			  {
+				"commit": "096e1669267c22ecb38c466d73b8578261d8e91c14dd66702dd5bf34f4232e10db",
+				"features": "Plain",
+				"proof": "bdb629cdbaa68943426d977eb6fa804de99b3962ab4e1055aa49607ee2b2a08b69713b915b803812587de635002354fa96884f8bb0732b4fd7e700b4b132f0080d1890f042091247c09d7becd1ac8f0e0bae3b5efebdfd4c3e4ce1249da42d246f8e68d83ff897e61cfc145fe376fa428b55e25cf20d15f10b9054778229798b301d4436c39a07d65fb2adfb8095d804a062bdcd10b769abb7ce9f4cbb9d9fbcbe08b56264fc295c3facb6dfa4dfac41a6ee056b29b1af9bf3ce6223f125a274b563c0b2599214208d6b4f109158eb11b06875a8fcbb3ed95fd8fb23e23186cd0353498436a940bd0acec8c5b93c45a299771e0b3f5cc7e8af034d3717700cc05e73932287f1bf2c1dc71abe5f0a6c6e84839c3cd18e77b8dc93c40f6b86b42808d5eaf98cc4597cfc8f4b56aae06cf2478bce60119556d0e0900b43e02426c8b9b0b5a6fd739a30deb2f67563512ad95e82ec88e18d303cbbc39dd1455b4dbb9b010174bfd7db92c8f56f3286f97e18601eb922e268822de30332d6fcf614a1c9012c317bcbf808ef836377b21437f9023a646cd4696a0ab7a544ee8e9692df50288e4765fff311543070d6623b4c5508d10f25ddbd130f56bbb5458ab8a6af519ec2c9d24b19c9b55e8024abb8193e4e3bf455986c38cca230ac0a6d05543a870a7fccd6a4fa507516f2fe344f1343e2a5dbdd5962121dd69106d80283f704c9a2211b6cbbe547075ab23d2c7962443a0749635505fcedd9740b7eaee7ae9c653fb0b55167eec7570ad27d7a0e5df21ccea82f986aa6650adc0659d5a1b9fc6131248ebfc08edcbd4a7fd88c8a882d6f8bf4fb59be82aec2740afdae5c424c83238a146cbf9210fafcf7b4eaecfb5cef3087a1710cc47a1ca703aaa811a90bbab9281ada7b27e9d5b67452bb2f9e9351ae63a4ccff826545382e7398dcf7743e0525"
+				}
+			]
+		  },
+		  "offset": "d202964900000000d302964900000000d402964900000000d502964900000000"
+		}
+	  }
+	}
+	# "#
+	# , true, 5, true, true, false, false, false);
+	```
+	```
+	# mwc_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
+	# r#"
+	{
+		"jsonrpc": "2.0",
+		"method": "get_stored_tx",
+		"id": 1,
+		"params": {
+			"token": "d202964900000000d302964900000000d402964900000000d502964900000000",
+			"tx": {
+				"tx_slate_id": "0436430c-2b02-624c-2032-570501212b00"
+			}
+		}
+	}
+	# "#
+	# ,
+	# r#"
+	{
+	  "id": 1,
+	  "jsonrpc": "2.0",
+	  "result": {
+		"Ok": {
+		  "body": {
+			"inputs": [
+			  {
+				"commit": "098778ce2243fa34e5876c8cb7f6dbbbd6a5649c1561973a807a6811941c12363c",
+				"features": "Coinbase"
+			  },
+			  {
+				"commit": "0910c1752100733bae49e877286835aab76d5856ef8139b6c6e3f51798aa461b03",
+				"features": "Coinbase"
+			  }
+			],
+			"kernels": [
+			  {
+				"excess": "000000000000000000000000000000000000000000000000000000000000000000",
+				"excess_sig": "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+				"features": "Plain",
+				"fee": "7000000",
+				"lock_height": "0"
+			  }
+			],
+			"outputs": [
+			  {
+				"commit": "082967b3fe580cd110355010ef45450314fb067720db01b0e6873bb083d76708c9",
+				"features": "Plain",
+				"proof": "828bb24121aa0332c872062a42a8333c3ef81f8ae37d24053d953217368b3cada90410a50509a0b9fcbb5aded41397fc00ca1ff5acdac20d48afb0a3281d21e7026d32fdc6c5157461a35f98a809ffa09187c1e170ea24652ad213b7e4c9878654ac3dd9a8915eaf742db53182fcb42d2d341fbdfe8bd31bd001f4ff2c1ca9f9b1531da29137214f211edb7a5eb8f494cb8945f8527dd25bf7e698515043db4249540720008a708db5342230d05b069c094688ccb7c07d4a4a2293ea76cf999c555dc0ddc757891c360db1901bbb4dc20cae997f875f8de482d8160e05d60f9b0135e0fc313d8f953db78f1ea252449dd81cfa22dd895512ed39d566f0924542b543d25fc9fc7a819d228f3b0ee5e381f088f54893e86437dafc49dd923b3e6dff956ca843f951910379531fac9bb5fd01a182dd32a4c597f92da3c01af37cb9b0ec984500884438e74e54d7e76fa1ae7241d5050b13376310b24761634a6f6eb7cf000082f50ed7c1899d7918023d4f877586f964932a7af72e7a4984ddecfdd1921a2e1b80b00d6bd2e64a3f4cb6915a27a8d17a69d163cf45220a13fcddd15dc2bb91ae4f1b6a67224ab3b23e8d7d785df178ec78a84cf42cea086426f563822c8a4271a0b89bb21f84b643dbf1de21b6395039d673a376492767199fa36ccd9a13628ce61695424091acc16059450d59bc59fa7879e7306f5727217211b0264a6a560f886d520e41406ef45b1668805b88d246c5b2ca5a1762042c85be34fcd420ac3843f32236d079b4bd57d6b8d8013d9d18f8efb55e8e443cd9e1af9b144e7a56c8c6be0138af3b4a6c99bee9109bed2bce2e5145e736b125a2ec19aaf3fff713f6897fdd4158ce2ab04706b062ca2847bf70259c0fc4b0d390dc7fdaf0362047f775a912bd22da9d40f04d9790bcd5ece4b36b74c6c340b48c2926b916e8a9"
+			  },
+			  {
+				"commit": "096e1669267c22ecb38c466d73b8578261d8e91c14dd66702dd5bf34f4232e10db",
+				"features": "Plain",
+				"proof": "bdb629cdbaa68943426d977eb6fa804de99b3962ab4e1055aa49607ee2b2a08b69713b915b803812587de635002354fa96884f8bb0732b4fd7e700b4b132f0080d1890f042091247c09d7becd1ac8f0e0bae3b5efebdfd4c3e4ce1249da42d246f8e68d83ff897e61cfc145fe376fa428b55e25cf20d15f10b9054778229798b301d4436c39a07d65fb2adfb8095d804a062bdcd10b769abb7ce9f4cbb9d9fbcbe08b56264fc295c3facb6dfa4dfac41a6ee056b29b1af9bf3ce6223f125a274b563c0b2599214208d6b4f109158eb11b06875a8fcbb3ed95fd8fb23e23186cd0353498436a940bd0acec8c5b93c45a299771e0b3f5cc7e8af034d3717700cc05e73932287f1bf2c1dc71abe5f0a6c6e84839c3cd18e77b8dc93c40f6b86b42808d5eaf98cc4597cfc8f4b56aae06cf2478bce60119556d0e0900b43e02426c8b9b0b5a6fd739a30deb2f67563512ad95e82ec88e18d303cbbc39dd1455b4dbb9b010174bfd7db92c8f56f3286f97e18601eb922e268822de30332d6fcf614a1c9012c317bcbf808ef836377b21437f9023a646cd4696a0ab7a544ee8e9692df50288e4765fff311543070d6623b4c5508d10f25ddbd130f56bbb5458ab8a6af519ec2c9d24b19c9b55e8024abb8193e4e3bf455986c38cca230ac0a6d05543a870a7fccd6a4fa507516f2fe344f1343e2a5dbdd5962121dd69106d80283f704c9a2211b6cbbe547075ab23d2c7962443a0749635505fcedd9740b7eaee7ae9c653fb0b55167eec7570ad27d7a0e5df21ccea82f986aa6650adc0659d5a1b9fc6131248ebfc08edcbd4a7fd88c8a882d6f8bf4fb59be82aec2740afdae5c424c83238a146cbf9210fafcf7b4eaecfb5cef3087a1710cc47a1ca703aaa811a90bbab9281ada7b27e9d5b67452bb2f9e9351ae63a4ccff826545382e7398dcf7743e0525"
+				}
+			]
+		  },
+		  "offset": "d202964900000000d302964900000000d402964900000000d502964900000000"
+		}
+	  }
+	}
+	# "#
+	# , true, 5, true, true, false, false, false);
+	```
+	```
+	# mwc_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
+	# r#"
+	{
+		"jsonrpc": "2.0",
+		"method": "get_stored_tx",
+		"id": 1,
+		"params": {
+			"token": "d202964900000000d302964900000000d402964900000000d502964900000000",
+			"tx": {
+				"stored_tx": "0436430c-2b02-624c-2032-570501212b00.mwctx"
 			}
 		}
 	}
@@ -2355,13 +2879,36 @@ pub trait OwnerRpcV3 {
 	}
 	# "#
 	# , true, 1, false, false, false, false, true);
+	#
+	# mwc_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
+	# r#"
+	{
+		"jsonrpc": "2.0",
+		"method": "scan",
+		"params": {
+			"token": "d202964900000000d302964900000000d402964900000000d502964900000000"
+		},
+		"id": 1
+	}
+	# "#
+	# ,
+	# r#"
+	{
+		"id": 1,
+		"jsonrpc": "2.0",
+		"result": {
+			"Ok": null
+		}
+	}
+	# "#
+	# , true, 1, false, false, false, false, true);
 	```
 	 */
 	fn scan(
 		&self,
 		token: Token,
 		start_height: Option<u64>,
-		delete_unconfirmed: bool,
+		delete_unconfirmed: Option<bool>,
 	) -> Result<(), Error>;
 
 	/**
@@ -2684,6 +3231,27 @@ pub trait OwnerRpcV3 {
 	}
 	# "#
 	# , true, 0, false, false, false, false, true);
+	#
+	# mwc_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
+	# r#"
+	{
+		"jsonrpc": "2.0",
+		"method": "close_wallet",
+		"params": {},
+		"id": 1
+	}
+	# "#
+	# ,
+	# r#"
+	{
+		"id": 1,
+		"jsonrpc": "2.0",
+		"result": {
+			"Ok": null
+		}
+	}
+	# "#
+	# , true, 0, false, false, false, false, true);
 	```
 	*/
 
@@ -2699,6 +3267,29 @@ pub trait OwnerRpcV3 {
 		"method": "get_mnemonic",
 		"params": {
 			"name": null,
+			"password": ""
+		},
+		"id": 1
+	}
+	# "#
+	# ,
+	# r#"
+	{
+		"id": 1,
+		"jsonrpc": "2.0",
+		"result": {
+			"Ok": "fat twenty mean degree forget shell check candy immense awful flame next during february bulb bike sun wink theory day kiwi embrace peace lunch"
+		}
+	}
+	# "#
+	# , true, 0, false, false, false, false, true);
+	#
+	# mwc_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
+	# r#"
+	{
+		"jsonrpc": "2.0",
+		"method": "get_mnemonic",
+		"params": {
 			"password": ""
 		},
 		"id": 1
@@ -2747,6 +3338,30 @@ pub trait OwnerRpcV3 {
 	}
 	# "#
 	# , true, 0, false, false, false, false, true);
+	#
+	# mwc_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
+	# r#"
+	{
+		"jsonrpc": "2.0",
+		"method": "change_password",
+		"params": {
+			"old": "",
+			"new": "new_password"
+		},
+		"id": 1
+	}
+	# "#
+	# ,
+	# r#"
+	{
+		"id": 1,
+		"jsonrpc": "2.0",
+		"result": {
+			"Ok": null
+		}
+	}
+	# "#
+	# , true, 0, false, false, false, false, true);
 	```
 	*/
 	fn change_password(&self, name: Option<String>, old: String, new: String) -> Result<(), Error>;
@@ -2762,6 +3377,27 @@ pub trait OwnerRpcV3 {
 		"params": {
 			"name": null
 		},
+		"id": 1
+	}
+	# "#
+	# ,
+	# r#"
+	{
+		"id": 1,
+		"jsonrpc": "2.0",
+		"result": {
+			"Ok": null
+		}
+	}
+	# "#
+	# , true, 0, false, false, false, false, true);
+	#
+		# mwc_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
+	# r#"
+	{
+		"jsonrpc": "2.0",
+		"method": "delete_wallet",
+		"params": {},
 		"id": 1
 	}
 	# "#
@@ -2863,10 +3499,31 @@ pub trait OwnerRpcV3 {
 	}
 	# "#
 	# , true, 0, false, false, false, false, true);
+	#
+	# mwc_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
+	# r#"
+	{
+		"jsonrpc": "2.0",
+		"method": "get_updater_messages",
+		"params": {},
+		"id": 1
+	}
+	# "#
+	# ,
+	# r#"
+	{
+		"id": 1,
+		"jsonrpc": "2.0",
+		"result": {
+			"Ok": []
+		}
+	}
+	# "#
+	# , true, 0, false, false, false, false, true);
 	```
 	*/
 
-	fn get_updater_messages(&self, count: u32) -> Result<Vec<StatusMessage>, Error>;
+	fn get_updater_messages(&self, count: Option<u32>) -> Result<Vec<StatusMessage>, Error>;
 
 	/**
 	Networked version of [Owner::get_mqs_address](struct.Owner.html#method.get_mqs_address).
@@ -2948,7 +3605,6 @@ pub trait OwnerRpcV3 {
 		"params": {
 			"token": "d202964900000000d302964900000000d402964900000000d502964900000000",
 			"refresh_from_node": true,
-			"tx_id": null,
 			"tx_slate_id": "0436430c-2b02-624c-2032-570501212b00"
 		},
 		"id": 1
@@ -2981,7 +3637,7 @@ pub trait OwnerRpcV3 {
 	# "#
 	# , true, 5, true, true, true, true, false);
 	#
-	# // Comapact slate case, kernel is different now.
+	# // Compact slate case, kernel is different now.
 	# mwc_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
 	# r#"
 	{
@@ -3023,12 +3679,53 @@ pub trait OwnerRpcV3 {
 	# "#
 	# , true, 5, true, true, true, true, true);
 	```
+	```
+	# // Compact slate case, kernel is different now.
+	# mwc_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
+	# r#"
+	{
+		"jsonrpc": "2.0",
+		"method": "retrieve_payment_proof",
+		"params": {
+			"token": "d202964900000000d302964900000000d402964900000000d502964900000000",
+			"tx_slate_id": "0436430c-2b02-624c-2032-570501212b00"
+		},
+		"id": 1
+	}
+	# "#
+	# ,
+	# r#"
+	{
+	  "id": 1,
+	  "jsonrpc": "2.0",
+	  "result": {
+		"Ok": {
+		  "amount": "2000000000",
+		  "excess": "09eac5f5872fa5e08e0c29fd900f1b8f77ff3ad1d0d1c46aeb202cbf92363fe0af",
+		  "recipient_address": {
+			"public_key": "xmgceW7Z2phenRwaBeKvTRZkPMJarwLFa8h5LW5bdHKucaKTeuE2",
+			"domain": "",
+			"port": null
+		  },
+		  "recipient_sig": "304402204417c3b64709c7e38197103b6979dacee4e41c3ee44d89ea75191f553e2bbcc2022044c52df100fffd080c95575c92329b6ddbd0c77545e31ee439112655918fe0ee",
+		  "sender_address": {
+			"public_key": "xmgwbyjMEMBojnVadEkwVi1GyL1WPiVE5dziQf3TLedHdrVBPGw5",
+			"domain": "",
+			"port": null
+		  },
+		  "sender_sig": "3044022001d10e4e1fd303748120a45cfcdedcd8b1abc1ffe8ff59d35ddb2ec5b7c2e1a902207dab490bd26d16784933724c559e5a1e4dc56a6c0941f4dd70a22b0c4cfbcc40"
+		}
+	  }
+	}
+	# "#
+	# , true, 5, true, true, true, true, true);
+	```
 	*/
 
 	fn retrieve_payment_proof(
 		&self,
 		token: Token,
-		refresh_from_node: bool,
+		refresh_from_node: Option<bool>,
 		tx_id: Option<u32>,
 		tx_slate_id: Option<Uuid>,
 	) -> Result<PaymentProof, Error>;
@@ -3050,13 +3747,10 @@ pub trait OwnerRpcV3 {
 				"domain": "",
 				"port": null,
 				"public_key": "xmgceW7Z2phenRwaBeKvTRZkPMJarwLFa8h5LW5bdHKucaKTeuE2"
-
 			  },
 			  "recipient_sig": "30440220050ccd7244a8e1bcad8724a26bef6e0bc3df85f09dfc41870635711627955c4c02202b3d3599a7371bcc685315876c54cdf956a8c990ce6526f6be8e50591bde3be2",
 			  "sender_address": {
-				"public_key": "xmgwbyjMEMBojnVadEkwVi1GyL1WPiVE5dziQf3TLedHdrVBPGw5",
-				"domain": "",
-				"port": null
+				"public_key": "xmgwbyjMEMBojnVadEkwVi1GyL1WPiVE5dziQf3TLedHdrVBPGw5"
 			  },
 			 "sender_sig": "3045022100945b57de1e8b9f7863c4f4c5698d5617ffa55748c80a8324729f98ce5ef86509022063f6bc511d80046f6f21c9476344ed8d948234cc32a0b022d720161798e09861"
 			}
@@ -3091,15 +3785,11 @@ pub trait OwnerRpcV3 {
 				  "amount": "2000000000",
 				  "excess": "09eac5f5872fa5e08e0c29fd900f1b8f77ff3ad1d0d1c46aeb202cbf92363fe0af",
 				  "recipient_address": {
-					"public_key": "xmgceW7Z2phenRwaBeKvTRZkPMJarwLFa8h5LW5bdHKucaKTeuE2",
-					"domain": "",
-					"port": null
+					"public_key": "xmgceW7Z2phenRwaBeKvTRZkPMJarwLFa8h5LW5bdHKucaKTeuE2"
 				  },
 				  "recipient_sig": "304402204417c3b64709c7e38197103b6979dacee4e41c3ee44d89ea75191f553e2bbcc2022044c52df100fffd080c95575c92329b6ddbd0c77545e31ee439112655918fe0ee",
 				  "sender_address": {
-					"public_key": "xmgwbyjMEMBojnVadEkwVi1GyL1WPiVE5dziQf3TLedHdrVBPGw5",
-					"domain": "",
-					"port": null
+					"public_key": "xmgwbyjMEMBojnVadEkwVi1GyL1WPiVE5dziQf3TLedHdrVBPGw5"
 				  },
 				  "sender_sig": "3044022001d10e4e1fd303748120a45cfcdedcd8b1abc1ffe8ff59d35ddb2ec5b7c2e1a902207dab490bd26d16784933724c559e5a1e4dc56a6c0941f4dd70a22b0c4cfbcc40"
 				}
@@ -3483,7 +4173,6 @@ pub trait OwnerRpcV3 {
 		"method": "decode_slatepack_message",
 		"params": {
 			"token": "d202964900000000d302964900000000d402964900000000d502964900000000",
-			"address_index": null,
 			"message": "BEGINSLATE_BIN. 9ahjQefP9gsCcVt 25Po4VP34y95yxE wMmTzzckUkh1tu3 y7WwT5j1ZTL7UyC 4byFhRQM4BmhM92 Y1ukWPJ8BVdpEGU MAJUrU2YbXFLAYT tdqamYotCv4Co3z keD8RdPpX4b. ENDSLATE_BIN."
 		},
 		"id": 1
@@ -3580,15 +4269,15 @@ where
 	fn retrieve_outputs(
 		&self,
 		token: Token,
-		include_spent: bool,
-		refresh_from_node: bool,
+		include_spent: Option<bool>,
+		refresh_from_node: Option<bool>,
 		tx_id: Option<u32>,
 	) -> Result<(bool, Vec<OutputCommitMapping>), Error> {
 		Owner::retrieve_outputs(
 			self,
 			(&token.keychain_mask).as_ref(),
-			include_spent,
-			refresh_from_node,
+			include_spent.unwrap_or(false),
+			refresh_from_node.unwrap_or(true),
 			tx_id,
 		)
 	}
@@ -3596,17 +4285,19 @@ where
 	fn retrieve_txs(
 		&self,
 		token: Token,
-		refresh_from_node: bool,
+		refresh_from_node: Option<bool>,
 		tx_id: Option<u32>,
 		tx_slate_id: Option<Uuid>,
+		show_last_four_days: Option<bool>,
 	) -> Result<(bool, Vec<TxLogEntryAPI>), Error> {
 		Owner::retrieve_txs(
 			self,
 			(&token.keychain_mask).as_ref(),
-			refresh_from_node,
+			refresh_from_node.unwrap_or(true),
 			tx_id,
 			tx_slate_id,
 			None,
+			show_last_four_days,
 		)
 		.map(|(b, tx)| {
 			(
@@ -3621,16 +4312,18 @@ where
 	fn query_txs(
 		&self,
 		token: Token,
-		refresh_from_node: bool,
+		refresh_from_node: Option<bool>,
 		query: RetrieveTxQueryArgs,
+		show_last_four_days: Option<bool>,
 	) -> Result<(bool, Vec<TxLogEntryAPI>), Error> {
 		Owner::retrieve_txs(
 			self,
 			(&token.keychain_mask).as_ref(),
-			refresh_from_node,
+			refresh_from_node.unwrap_or(true),
 			None,
 			None,
 			Some(query),
+			show_last_four_days,
 		)
 		.map(|(b, tx)| {
 			(
@@ -3645,14 +4338,14 @@ where
 	fn retrieve_summary_info(
 		&self,
 		token: Token,
-		refresh_from_node: bool,
-		minimum_confirmations: u64,
+		refresh_from_node: Option<bool>,
+		minimum_confirmations: Option<u64>,
 	) -> Result<(bool, WalletInfo), Error> {
 		Owner::retrieve_summary_info(
 			self,
 			(&token.keychain_mask).as_ref(),
-			refresh_from_node,
-			minimum_confirmations,
+			refresh_from_node.unwrap_or(true),
+			minimum_confirmations.unwrap_or(1),
 		)
 	}
 
@@ -3833,14 +4526,14 @@ where
 		.map(|x| x.map(TransactionV3::from))
 	}
 
-	fn post_tx(&self, token: Token, tx: TransactionV3, fluff: bool) -> Result<(), Error> {
+	fn post_tx(&self, token: Token, tx: TransactionV3, fluff: Option<bool>) -> Result<(), Error> {
 		Owner::post_tx(
 			self,
 			(&token.keychain_mask).as_ref(),
 			&Transaction::try_from(tx).map_err(|e| {
 				Error::GenericError(format!("Unable convert V3 transaction, {}", e))
 			})?,
-			fluff,
+			fluff.unwrap_or(false),
 		)
 	}
 
@@ -3873,13 +4566,13 @@ where
 		&self,
 		token: Token,
 		start_height: Option<u64>,
-		delete_unconfirmed: bool,
+		delete_unconfirmed: Option<bool>,
 	) -> Result<(), Error> {
 		Owner::scan(
 			self,
 			(&token.keychain_mask).as_ref(),
 			start_height,
-			delete_unconfirmed,
+			delete_unconfirmed.unwrap_or(false),
 		)
 	}
 
@@ -4013,8 +4706,8 @@ where
 		Owner::stop_updater(self)
 	}
 
-	fn get_updater_messages(&self, count: u32) -> Result<Vec<StatusMessage>, Error> {
-		Owner::get_updater_messages(self, count as usize)
+	fn get_updater_messages(&self, count: Option<u32>) -> Result<Vec<StatusMessage>, Error> {
+		Owner::get_updater_messages(self, count)
 	}
 
 	fn get_mqs_address(&self, token: Token) -> Result<ProvableAddress, Error> {
@@ -4034,14 +4727,14 @@ where
 	fn retrieve_payment_proof(
 		&self,
 		token: Token,
-		refresh_from_node: bool,
+		refresh_from_node: Option<bool>,
 		tx_id: Option<u32>,
 		tx_slate_id: Option<Uuid>,
 	) -> Result<PaymentProof, Error> {
 		Owner::retrieve_payment_proof(
 			self,
 			(&token.keychain_mask).as_ref(),
-			refresh_from_node,
+			refresh_from_node.unwrap_or(true),
 			tx_id,
 			tx_slate_id,
 		)
@@ -4139,5 +4832,49 @@ where
 // Keeping as a placeholder for doc tests
 #[test]
 fn owner_api_v3_test() {
-	// use crate as mwc_wallet_api;
+	use crate as mwc_wallet_api;
+
+	mwc_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
+		r#"
+	{
+		"jsonrpc": "2.0",
+		"method": "verify_payment_proof",
+		"params": {
+			"token": "d202964900000000d302964900000000d402964900000000d502964900000000",
+			"proof": {
+				  "amount": "2000000000",
+				  "excess": "09eac5f5872fa5e08e0c29fd900f1b8f77ff3ad1d0d1c46aeb202cbf92363fe0af",
+				  "recipient_address": {
+					"public_key": "xmgceW7Z2phenRwaBeKvTRZkPMJarwLFa8h5LW5bdHKucaKTeuE2"
+				  },
+				  "recipient_sig": "304402204417c3b64709c7e38197103b6979dacee4e41c3ee44d89ea75191f553e2bbcc2022044c52df100fffd080c95575c92329b6ddbd0c77545e31ee439112655918fe0ee",
+				  "sender_address": {
+					"public_key": "xmgwbyjMEMBojnVadEkwVi1GyL1WPiVE5dziQf3TLedHdrVBPGw5"
+				  },
+				  "sender_sig": "3044022001d10e4e1fd303748120a45cfcdedcd8b1abc1ffe8ff59d35ddb2ec5b7c2e1a902207dab490bd26d16784933724c559e5a1e4dc56a6c0941f4dd70a22b0c4cfbcc40"
+				}
+		},
+		"id": 1
+	}
+	"#,
+		r#"
+	{
+		"id": 1,
+		"jsonrpc": "2.0",
+		"result": {
+			"Ok": [
+				true,
+				false
+			]
+		}
+	}
+	"#,
+		true,
+		5,
+		true,
+		true,
+		true,
+		true,
+		true
+	);
 }

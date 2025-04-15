@@ -112,3 +112,14 @@ macro_rules! wallet_lock {
 		let $wallet = w_provider.wallet_inst()?;
 	};
 }
+
+/// Helper for taking a lock on the wallet instance for tests. Using unwrap instead of error reporting
+#[macro_export]
+macro_rules! wallet_lock_test {
+	($wallet_inst: expr, $wallet: ident) => {
+		let inst = $wallet_inst.clone();
+		let mut w_lock = inst.lock();
+		let w_provider = w_lock.lc_provider().unwrap();
+		let $wallet = w_provider.wallet_inst().unwrap();
+	};
+}

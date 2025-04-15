@@ -21,6 +21,8 @@ extern crate mwc_wallet_impls as impls;
 
 use mwc_wallet_util::mwc_core as core;
 use mwc_wallet_util::mwc_core::global;
+use std::ops::DerefMut;
+use std::sync::Arc;
 
 use self::libwallet::OutputStatus;
 use impls::test_framework::{self, LocalWalletClient};
@@ -31,12 +33,15 @@ use std::time::Duration;
 #[macro_use]
 mod common;
 use common::{clean_output_dir, create_wallet_proxy, setup};
+use mwc_wallet_util::mwc_core::core::Transaction;
+use mwc_wallet_util::mwc_util::Mutex;
 
 /// self send impl
-fn self_spend_impl(test_dir: &'static str) -> Result<(), wallet::Error> {
+fn self_spend_impl(test_dir: &str) -> Result<(), wallet::Error> {
 	// Create a new proxy to simulate server and wallet responses
 	global::set_local_chain_type(global::ChainTypes::AutomatedTesting);
-	let mut wallet_proxy = create_wallet_proxy(test_dir);
+	let tx_pool: Arc<Mutex<Vec<Transaction>>> = Arc::new(Mutex::new(Vec::new()));
+	let mut wallet_proxy = create_wallet_proxy(test_dir.into(), tx_pool.clone());
 	let chain = wallet_proxy.chain.clone();
 
 	// Create a new wallet test client, and set its queues to communicate with the
@@ -76,8 +81,14 @@ fn self_spend_impl(test_dir: &'static str) -> Result<(), wallet::Error> {
 		w.set_parent_key_id_by_name("mining1")?;
 	}
 	let mut bh = 4u64;
-	let _ =
-		test_framework::award_blocks_to_wallet(&chain, wallet1.clone(), mask1, bh as usize, false);
+	let _ = test_framework::award_blocks_to_wallet(
+		&chain,
+		wallet1.clone(),
+		mask1,
+		bh as usize,
+		false,
+		tx_pool.lock().deref_mut(),
+	);
 
 	// Check wallet 1 contents are as expected
 	wallet::controller::owner_single_use(Some(wallet1.clone()), mask1, None, |api, m| {
@@ -125,6 +136,16 @@ fn self_spend_impl(test_dir: &'static str) -> Result<(), wallet::Error> {
 		1,
 		true,
 	)?;
+
+	// Apply transactions
+	let _ = test_framework::award_blocks_to_wallet(
+		&chain,
+		wallet1.clone(),
+		mask1,
+		2,
+		false,
+		tx_pool.lock().deref_mut(),
+	);
 
 	let _fee = core::libtx::tx_fee(1, 1, 1); //there is only one input and one output and one kernel
 
