@@ -814,18 +814,34 @@ where
 				// Checking is sender didn't do any harm to slate
 				Slate::compare_slates_send(&original_slate, &slate)?;
 
-				self.verify_slate_messages(keychain_mask, &slate)
-					.map_err(|e| {
-						error!(
-							"Unable to validate participant messages at slate {}: {}",
-							slate.id, e
-						);
-						e
-					})?;
+				owner::verify_slate_messages(&slate).map_err(|e| {
+					error!(
+						"Unable to validate participant messages at slate {}: {}",
+						slate.id, e
+					);
+					e
+				})?;
 
-				self.tx_lock_outputs(keychain_mask, &slate, address, 0)?;
+				owner::tx_lock_outputs(
+					&mut **w,
+					keychain_mask,
+					&slate,
+					address,
+					0,
+					self.doctest_mode,
+				)?;
+
 				slate = match sa.finalize {
-					true => self.finalize_tx(keychain_mask, &slate)?,
+					true => {
+						let (slate_res, _context) = owner::finalize_tx(
+							&mut **w,
+							keychain_mask,
+							&slate,
+							true,
+							self.doctest_mode,
+						)?;
+						slate_res
+					}
 					false => slate,
 				};
 				println!(
@@ -834,7 +850,7 @@ where
 				);
 
 				if sa.post_tx {
-					self.post_tx(keychain_mask, slate.tx_or_err()?, sa.fluff)?;
+					owner::post_tx(w.w2n_client(), slate.tx_or_err()?, sa.fluff)?;
 				}
 				println!(
 					"slate [{}] posted successfully in owner_api",
