@@ -3754,9 +3754,9 @@ version = "5.3.6"
 dependencies = [
  "base64 0.12.3",
  "chrono",
- "colored",
  "easy-jsonrpc-mwc",
  "ed25519-dalek",
+ "lazy_static",
  "log",
  "mwc_wallet_config",
  "mwc_wallet_impls",
@@ -3769,7 +3769,6 @@ dependencies = [
  "serde_json",
  "tempfile",
  "uuid",
- "x25519-dalek 0.6.0",
 ]
 
 [[package]]

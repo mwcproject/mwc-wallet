@@ -52,6 +52,15 @@ use std::thread;
 use std::thread::JoinHandle;
 use std::time::Duration;
 
+lazy_static! {
+	// Flag that send call is in the progress. init_send_tx is not atomic because we don't want
+	// wallet to be blocked during send attempt that can take up to 2 minutes is we are using mwcmqs and other wallet is offline.
+	// Also we don't wantot to lock outputs before send and cancel on failure.
+	// That is we are introducing a simple flag for the send. Only one instance will be ready to go through
+	// send workflow with owner API. Ownser API ans command can act together, in worst case it will throw lock error
+	pub static ref INIT_SEND_TX_LOCK: Arc<Mutex<u32>> = Arc::new(Mutex::new(0));
+}
+
 /// Main interface into all wallet API functions.
 /// Wallet APIs are split into two seperate blocks of functionality
 /// called the ['Owner'](struct.Owner.html) and ['Foreign'](struct.Foreign.html) APIs
@@ -705,8 +714,6 @@ where
 	) -> Result<Slate, Error> {
 		let address = args.address.clone();
 
-		wallet_lock!(self.wallet_inst, w);
-		owner::update_wallet_state(&mut **w, keychain_mask, &None)?;
 		let send_args = args.send_args.clone();
 		//minimum_confirmations cannot be zero.
 		let minimum_confirmations = args.minimum_confirmations.clone();
@@ -766,23 +773,32 @@ where
 			None
 		};
 
-		let mut slate =
-			{ owner::init_send_tx(&mut **w, keychain_mask, &args, self.doctest_mode, routputs)? };
+		// Using it as a global lock for the API
+		// Without usage it still works until the end of the block
+		let mut _send_lock = INIT_SEND_TX_LOCK.lock();
 
-		match send_args {
+		let (mut slate, slatepack_secret, height, secp) = {
+			wallet_lock!(self.wallet_inst, w);
+			owner::update_wallet_state(&mut **w, keychain_mask, &None)?;
+
+			let slate = {
+				owner::init_send_tx(&mut **w, keychain_mask, &args, self.doctest_mode, routputs)?
+			};
+
+			let keychain = w.keychain(keychain_mask)?;
+			let (height, _, _) = w.w2n_client().get_chain_tip()?;
+			let slatepack_secret =
+				proofaddress::payment_proof_address_dalek_secret(&keychain, None)?;
+
+			(slate, slatepack_secret, height, keychain.secp().clone())
+		};
+
+		let res = match send_args {
 			Some(sa) => {
 				let original_slate = slate.clone();
 
 				match sender_info {
 					Some((sender, other_wallet_info)) => {
-						let (slatepack_secret, height, secp) = {
-							let keychain = w.keychain(keychain_mask)?;
-							let (height, _, _) = w.w2n_client().get_chain_tip()?;
-							let slatepack_secret =
-								proofaddress::payment_proof_address_dalek_secret(&keychain, None)?;
-							(slatepack_secret, height, keychain.secp().clone())
-						};
-
 						slate = sender
 							.send_tx(
 								true,
@@ -822,35 +838,41 @@ where
 					e
 				})?;
 
-				owner::tx_lock_outputs(
-					&mut **w,
-					keychain_mask,
-					&slate,
-					address,
-					0,
-					self.doctest_mode,
-				)?;
+				let w2n_client = {
+					wallet_lock!(self.wallet_inst, w);
 
-				slate = match sa.finalize {
-					true => {
-						let (slate_res, _context) = owner::finalize_tx(
-							&mut **w,
-							keychain_mask,
-							&slate,
-							true,
-							self.doctest_mode,
-						)?;
-						slate_res
-					}
-					false => slate,
+					owner::tx_lock_outputs(
+						&mut **w,
+						keychain_mask,
+						&slate,
+						address,
+						0,
+						self.doctest_mode,
+					)?;
+
+					slate = match sa.finalize {
+						true => {
+							let (slate_res, _context) = owner::finalize_tx(
+								&mut **w,
+								keychain_mask,
+								&slate,
+								true,
+								self.doctest_mode,
+							)?;
+							slate_res
+						}
+						false => slate,
+					};
+					println!(
+						"slate [{}] finalized successfully in owner_api",
+						slate.id.to_string()
+					);
+
+					w.w2n_client().clone()
 				};
-				println!(
-					"slate [{}] finalized successfully in owner_api",
-					slate.id.to_string()
-				);
 
 				if sa.post_tx {
-					owner::post_tx(w.w2n_client(), slate.tx_or_err()?, sa.fluff)?;
+					owner::post_tx(&w2n_client, slate.tx_or_err()?, sa.fluff)?;
 				}
 				println!(
 					"slate [{}] posted successfully in owner_api",
@@ -859,7 +881,9 @@ where
 				Ok(slate)
 			}
 			None => Ok(slate),
-		}
+		};
+
+		res
 	}
 
 	/// Issues a new invoice transaction slate, essentially a `request for payment`.
