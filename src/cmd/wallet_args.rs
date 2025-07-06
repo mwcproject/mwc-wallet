@@ -687,6 +687,30 @@ pub fn parse_send_args(args: &ArgMatches) -> Result<command::SendArgs, ParseErro
 	}
 }
 
+pub fn parse_faucet_request_args(args: &ArgMatches) -> Result<u64, ParseError> {
+	let amount = parse_optional(args, "amount")?.unwrap_or("3.0".into());
+	let amount = core::core::amount_from_hr_string(&amount);
+	let amount = match amount {
+		Ok(a) => {
+			if a > 5000000000 {
+				return Err(ParseError::ArgumentError(
+					"Faucet single request amount is limited by 5 MWC".into(),
+				));
+			}
+			a
+		}
+		Err(e) => {
+			let msg = format!(
+				"Could not parse amount as a number with optional decimal point. e={}",
+				e
+			);
+			return Err(ParseError::ArgumentError(msg));
+		}
+	};
+
+	Ok(amount)
+}
+
 pub fn parse_receive_unpack_args(args: &ArgMatches) -> Result<command::ReceiveArgs, ParseError> {
 	// input file
 	let input_file = match args.is_present("file") {
@@ -1938,6 +1962,10 @@ where
 		("validate_ownership_proof", Some(args)) => {
 			let proof = arg_parse!(parse_required(args, "proof"));
 			command::validate_ownership_proof(owner_api, km, proof)
+		}
+		("faucet_request", Some(args)) => {
+			let amount = arg_parse!(parse_faucet_request_args(&args));
+			command::fauset_request(owner_api, km, amount, Some(mqs_config.clone()))
 		}
 		(cmd, _) => {
 			return Err(Error::ArgumentError(format!(

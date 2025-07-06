@@ -691,6 +691,44 @@ where
 	Ok(slate)
 }
 
+/// Generate Floonet fouset Invoce slate
+pub fn generate_invoice_slate<'a, T: ?Sized, C, K>(
+	w: &mut T,
+	keychain_mask: Option<&SecretKey>,
+	amount: u64,
+) -> Result<(Slate, Context), Error>
+where
+	T: WalletBackend<'a, C, K>,
+	C: NodeClient + 'a,
+	K: Keychain + 'a,
+{
+	if global::is_mainnet() {
+		return Err(Error::FaucetRequestInvalidNetwork);
+	}
+
+	let parent_key_id = w.parent_key_id();
+
+	let mut slate = tx::new_tx_slate(&mut *w, amount, 2, false, None, false)?;
+	let chain_tip = slate.height; // it is fresh slate, height is a tip
+	let context = tx::add_output_to_slate(
+		&mut *w,
+		keychain_mask,
+		&mut slate,
+		chain_tip,
+		None,
+		None,
+		None,
+		&parent_key_id,
+		0,
+		None,
+		true,
+		false,
+		1,
+	)?;
+
+	Ok((slate, context))
+}
+
 /// Receive an invoice tx, essentially adding inputs to whatever
 /// output was specified
 /// Caller is responsible for wallet refresh

@@ -855,6 +855,119 @@ where
 	Ok(())
 }
 
+pub fn fauset_request<L, C, K>(
+	owner_api: &mut Owner<L, C, K>,
+	keychain_mask: Option<&SecretKey>,
+	amount: u64,
+	mqs_config: Option<MQSConfig>,
+) -> Result<(), Error>
+where
+	L: WalletLCProvider<'static, C, K> + 'static,
+	C: NodeClient + 'static,
+	K: keychain::Keychain + 'static,
+{
+	let wallet_inst = owner_api.wallet_inst.clone();
+	let mut res_slate = Slate::blank(2, false);
+	controller::owner_single_use(None, keychain_mask, Some(owner_api), |api, m| {
+		let (slate, context) = api.generate_invoice_slate(m, amount)?;
+
+		if mwc_wallet_impls::adapters::get_mwcmqs_brocker().is_none() {
+			//check to see if mqs_config is there, if not, return error
+			let mqs_config_unwrapped;
+			match mqs_config {
+				Some(s) => {
+					mqs_config_unwrapped = s;
+				}
+				None => {
+					return Err(Error::MQSConfig(format!("NO MQS config!")));
+				}
+			}
+
+			let km = keychain_mask.map(|k| k.clone());
+
+			//start the listener finalize tx
+			let _ = controller::init_start_mwcmqs_listener(
+				wallet_inst.clone(),
+				mqs_config_unwrapped,
+				Arc::new(Mutex::new(km)),
+				false,
+				//None,
+			)?;
+			thread::sleep(Duration::from_millis(2000));
+		}
+
+		let sender = create_sender(
+			"mwcmqs",
+			"xmgEvZ4MCCGMJnRnNXKHBbHmSGWQchNr9uZpY5J1XXnsCFS45fsU",
+			&None,
+			None,
+		)?;
+
+		let (slatepack_secret, secp) = {
+			wallet_lock!(api.wallet_inst, w);
+			let keychain = w.keychain(keychain_mask)?;
+			let slatepack_secret =
+				proofaddress::payment_proof_address_dalek_secret(&keychain, None)?;
+			(slatepack_secret, keychain.secp().clone())
+		};
+
+		res_slate = sender.send_tx(
+			false,
+			&slate,
+			SlatePurpose::InvoiceInitial,
+			&slatepack_secret,
+			None,
+			None,
+			slate.height,
+			&secp,
+		)?;
+
+		{
+			wallet_lock!(api.wallet_inst, w);
+			let mut batch = w.batch(keychain_mask)?;
+			// Participant id is 0 for mwc713 compatibility
+			batch.save_private_context(slate.id.as_bytes(), 0, &context)?;
+			batch.commit()?;
+		}
+
+		Ok(())
+	})?;
+
+	let km = match keychain_mask.as_ref() {
+		None => None,
+		Some(&m) => Some(m.to_owned()),
+	};
+
+	controller::foreign_single_use(owner_api.wallet_inst.clone(), km, |api| {
+		if let Err(e) = api.verify_slate_messages(&res_slate) {
+			error!("Error validating participant messages: {}", e);
+			return Err(Error::LibWallet(format!(
+				"Unable to validate slate messages, {}",
+				e
+			)));
+		}
+		res_slate = api.finalize_invoice_tx(&res_slate)?;
+		Ok(())
+	})?;
+
+	// Posting
+	controller::owner_single_use(None, keychain_mask, Some(owner_api), |api, m| {
+		let result = api.post_tx(m, res_slate.tx_or_err()?, true);
+		match result {
+			Ok(_) => {
+				info!("Transaction finished successfully.");
+				Ok(())
+			}
+			Err(e) => {
+				error!("Tx post error: {}", e);
+				return Err(Error::LibWallet(format!("Unable to post slate, {}", e)));
+			}
+		}
+	})?;
+
+	Ok(())
+}
+
 /// Show slate pack and save it into the backup for historical purpose
 pub fn show_slatepack<L, C, K>(
 	api: &mut Owner<L, C, K>,

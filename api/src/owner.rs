@@ -42,7 +42,9 @@ use crate::libwallet::{
 use crate::util::logger::LoggingConfig;
 use crate::util::secp::key::SecretKey;
 use crate::util::{from_hex, Mutex, ZeroingString};
-use libwallet::{wallet_lock, OwnershipProof, OwnershipProofValidation, RetrieveTxQueryArgs};
+use libwallet::{
+	wallet_lock, Context, OwnershipProof, OwnershipProofValidation, RetrieveTxQueryArgs,
+};
 use mwc_wallet_util::mwc_util::secp::key::PublicKey;
 use mwc_wallet_util::mwc_util::static_secp_instance;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -928,6 +930,15 @@ where
 	) -> Result<Slate, Error> {
 		wallet_lock!(self.wallet_inst, w);
 		owner::issue_invoice_tx(&mut **w, keychain_mask, args, self.doctest_mode, 1)
+	}
+
+	pub fn generate_invoice_slate(
+		&self,
+		keychain_mask: Option<&SecretKey>,
+		amount: u64,
+	) -> Result<(Slate, Context), Error> {
+		wallet_lock!(self.wallet_inst, w);
+		owner::generate_invoice_slate(&mut **w, keychain_mask, amount)
 	}
 
 	/// Processes an invoice tranaction created by another party, essentially

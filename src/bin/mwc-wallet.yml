@@ -1054,3 +1054,11 @@ subcommands:
             short: p
             long: proof
             takes_value: true
+  - faucet_request:
+     about: Request some coins from Floonet fauset
+     args:
+       - amount:
+           help: "Number of Floonet MWC coins to request. Maximum allowed number is 5 MWC, default: 3"
+           short: a
+           long: amount
+           takes_value: true

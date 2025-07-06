@@ -366,6 +366,10 @@ pub enum Error {
 	/// Invalid ownership proof
 	#[error("Invalid ownership proof: {0}")]
 	InvalidOwnershipProof(String),
+
+	/// Invalid network
+	#[error("command 'faucet_request' works only with a floonet. Please restart your wallet with --floonet parameter.")]
+	FaucetRequestInvalidNetwork,
 }
 
 impl From<io::Error> for Error {
