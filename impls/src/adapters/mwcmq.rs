@@ -31,6 +31,7 @@ use mwc_wallet_libwallet::slatepack::SlatePurpose;
 use mwc_wallet_libwallet::swap::message::Message;
 use mwc_wallet_libwallet::swap::message::SwapMessage;
 use mwc_wallet_libwallet::{Slate, SlateVersion, VersionedSlate};
+use mwc_wallet_util::mwc_core::global;
 use mwc_wallet_util::mwc_util::secp::key::SecretKey;
 use mwc_wallet_util::mwc_util::secp::Secp256k1;
 use regex::Regex;
@@ -157,9 +158,11 @@ impl SlateSender for MwcMqsChannel {
 		secp: &Secp256k1,
 	) -> Result<Slate, Error> {
 		if !send_tx {
-			return Err(Error::MqsGenericError(
-				"MWCMQS doesn't support invoice transactions".into(),
-			));
+			if global::is_mainnet() {
+				return Err(Error::MqsGenericError(
+					"MWCMQS doesn't support invoice transactions".into(),
+				));
+			}
 		}
 
 		if let Some((mwcmqs_publisher, mwcmqs_subscriber)) = get_mwcmqs_brocker() {
