@@ -15,6 +15,8 @@
 
 mod file;
 pub mod http;
+
+#[cfg(feature = "libp2p")]
 pub mod libp2p_messaging;
 mod mwcmq;
 mod types;

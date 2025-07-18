@@ -47,6 +47,7 @@ pub mod node_clients;
 pub mod test_framework;
 pub mod tor;
 
+#[cfg(feature = "libp2p")]
 pub use crate::adapters::libp2p_messaging;
 pub use crate::adapters::{
 	create_sender, get_mwcmqs_brocker, init_mwcmqs_access_data, Address, AddressType, CloseReason,

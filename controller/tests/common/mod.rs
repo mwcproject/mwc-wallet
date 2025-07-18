@@ -26,6 +26,7 @@ use self::keychain::ExtKeychain;
 use self::libwallet::WalletInst;
 use impls::test_framework::{LocalWalletClient, WalletProxy};
 use impls::{DefaultLCProvider, DefaultWalletImpl};
+use mwc_wallet_util::mwc_core::consensus;
 use mwc_wallet_util::mwc_core::core::Transaction;
 use std::sync::Arc;
 use util::secp::key::SecretKey;
@@ -83,6 +84,7 @@ macro_rules! open_wallet_and_add {
 		);
 	};
 }
+#[allow(dead_code)]
 pub fn clean_output_dir(test_dir: &str) {
 	let path = std::path::Path::new(test_dir);
 	if path.is_dir() {
@@ -97,10 +99,12 @@ pub fn clean_output_dir(test_dir: &str) {
 	}
 }
 
+#[allow(dead_code)]
 pub fn setup(test_dir: &str) {
 	util::init_test_logger();
 	clean_output_dir(test_dir);
 	global::set_local_chain_type(global::ChainTypes::AutomatedTesting);
+	global::set_local_accept_fee_base(consensus::MILLI_MWC / 100);
 }
 
 /// Some tests require the global chain_type to be configured due to threads being spawned internally.
@@ -111,6 +115,7 @@ pub fn setup_global_chain_type() {
 	global::init_global_chain_type(global::ChainTypes::AutomatedTesting);
 }
 
+#[allow(dead_code)]
 pub fn create_wallet_proxy(
 	test_dir: String,
 	tx_pool: Arc<Mutex<Vec<Transaction>>>,
@@ -123,6 +128,7 @@ pub fn create_wallet_proxy(
 	WalletProxy::new(test_dir, tx_pool)
 }
 
+#[allow(dead_code)]
 pub fn create_local_wallet(
 	test_dir: &str,
 	name: &str,

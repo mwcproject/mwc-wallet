@@ -79,6 +79,7 @@ pub use crate::slate_versions::{
 pub use api_impl::foreign;
 pub use api_impl::owner;
 pub use api_impl::owner_eth;
+#[cfg(feature = "libp2p")]
 pub use api_impl::owner_libp2p;
 pub use api_impl::owner_swap;
 pub use api_impl::owner_updater::StatusMessage;
@@ -100,6 +101,7 @@ pub use types::{
 
 pub use api_impl::foreign::{get_receive_account, set_receive_account};
 
+#[cfg(feature = "libp2p")]
 pub use api_impl::owner_libp2p::IntegrityContext;
 
 /// Helper for taking a lock on the wallet instance

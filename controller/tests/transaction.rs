@@ -149,7 +149,7 @@ fn basic_transaction_api(test_dir: &str) -> Result<(), wallet::Error> {
 				.map(|k| k.features)
 				.unwrap(),
 			transaction::KernelFeatures::Plain {
-				fee: (2000000 as u64).try_into().unwrap()
+				fee: (2000000 / 100 as u64).try_into().unwrap()
 			}
 		);
 
@@ -303,7 +303,7 @@ fn basic_transaction_api(test_dir: &str) -> Result<(), wallet::Error> {
 		let est = sender_api.init_send_tx(m, &init_args, 1)?;
 		assert_eq!(est.amount, 10 * core::consensus::MWC_FIRST_GROUP_REWARD);
 		// fees for 5 inputs, 2 outputs, 1 kernel   2*4 + 1 - 5 = 4m
-		assert_eq!(est.fee, 4_000_000);
+		assert_eq!(est.fee, 4_000_000 / 100);
 
 		let init_args = InitTxArgs {
 			src_acct_name: None,
@@ -318,7 +318,7 @@ fn basic_transaction_api(test_dir: &str) -> Result<(), wallet::Error> {
 		let est = sender_api.init_send_tx(m, &init_args, 1)?;
 		assert_eq!(est.amount, core::consensus::MWC_FIRST_GROUP_REWARD * 3);
 		// fees for 3 inputs, 2 outputs, 1 kernel    2*4+1-3 = 6m
-		assert_eq!(est.fee, 6_000_000);
+		assert_eq!(est.fee, 6_000_000 / 100);
 
 		Ok(())
 	})?;

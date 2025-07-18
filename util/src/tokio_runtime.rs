@@ -26,8 +26,7 @@ lazy_static! {
 	/// updates before we can upgrade.
 	/// See: https://github.com/seanmonstar/reqwest/pull/1076
 	pub static ref RUNTIME: Arc<Mutex<Runtime>> = Arc::new(Mutex::new(
-		Builder::new()
-			.threaded_scheduler()
+		Builder::new_multi_thread()
 			.enable_all()
 			.build()
 			.unwrap()

@@ -105,9 +105,9 @@ impl InfuraNodeClient {
 
 		let res = scope(|s| {
 			let handle = s.spawn(|_| {
-				let rt = Builder::new().basic_scheduler().enable_all().build();
+				let rt = Builder::new_current_thread().enable_all().build();
 				match rt {
-					Ok(mut rt) => rt.block_on(task),
+					Ok(rt) => rt.block_on(task),
 					_ => Err(mwc_web3::Error::Internal),
 				}
 			});
@@ -172,9 +172,9 @@ impl InfuraNodeClient {
 
 		let res = scope(|s| {
 			let handle = s.spawn(|_| {
-				let rt = Builder::new().basic_scheduler().enable_all().build();
+				let rt = Builder::new_current_thread().enable_all().build();
 				match rt {
-					Ok(mut rt) => rt.block_on(task),
+					Ok(rt) => rt.block_on(task),
 					_ => Err(mwc_web3::contract::Error::InvalidOutputType(
 						"erc20_balance error".to_string(),
 					)),
@@ -255,9 +255,9 @@ impl InfuraNodeClient {
 
 		let res = scope(|s| {
 			let handle = s.spawn(|_| {
-				let rt = Builder::new().basic_scheduler().enable_all().build();
+				let rt = Builder::new_current_thread().enable_all().build();
 				match rt {
-					Ok(mut rt) => Ok(rt.block_on(task)),
+					Ok(rt) => Ok(rt.block_on(task)),
 					_ => Err(Box::new("ether_transfer -- failed")),
 				}
 			});
@@ -341,9 +341,9 @@ impl InfuraNodeClient {
 
 		let res = scope(|s| {
 			let handle = s.spawn(|_| {
-				let rt = Builder::new().basic_scheduler().enable_all().build();
+				let rt = Builder::new_current_thread().enable_all().build();
 				match rt {
-					Ok(mut rt) => rt.block_on(task),
+					Ok(rt) => rt.block_on(task),
 					_ => Err(mwc_web3::Error::Internal),
 				}
 			});
@@ -429,9 +429,9 @@ impl InfuraNodeClient {
 
 		let res = scope(|s| {
 			let handle = s.spawn(|_| {
-				let rt = Builder::new().basic_scheduler().enable_all().build();
+				let rt = Builder::new_current_thread().enable_all().build();
 				match rt {
-					Ok(mut rt) => rt.block_on(task),
+					Ok(rt) => rt.block_on(task),
 					_ => Err(mwc_web3::Error::Internal),
 				}
 			});
@@ -525,9 +525,9 @@ impl InfuraNodeClient {
 
 		let res = scope(|s| {
 			let handle = s.spawn(|_| {
-				let rt = Builder::new().basic_scheduler().enable_all().build();
+				let rt = Builder::new_current_thread().enable_all().build();
 				match rt {
-					Ok(mut rt) => rt.block_on(task),
+					Ok(rt) => rt.block_on(task),
 					_ => Err(mwc_web3::Error::Internal),
 				}
 			});
@@ -668,9 +668,9 @@ impl InfuraNodeClient {
 
 		let res = scope(|s| {
 			let handle = s.spawn(|_| {
-				let rt = Builder::new().basic_scheduler().enable_all().build();
+				let rt = Builder::new_current_thread().enable_all().build();
 				match rt {
-					Ok(mut rt) => rt.block_on(task),
+					Ok(rt) => rt.block_on(task),
 					_ => Err(mwc_web3::Error::Internal),
 				}
 			});
@@ -809,9 +809,9 @@ impl InfuraNodeClient {
 
 		let res = scope(|s| {
 			let handle = s.spawn(|_| {
-				let rt = Builder::new().basic_scheduler().enable_all().build();
+				let rt = Builder::new_current_thread().enable_all().build();
 				match rt {
-					Ok(mut rt) => rt.block_on(task),
+					Ok(rt) => rt.block_on(task),
 					_ => Err(mwc_web3::Error::Internal),
 				}
 			});
@@ -862,9 +862,9 @@ impl EthNodeClient for InfuraNodeClient {
 
 		let res = scope(|s| {
 			let handle = s.spawn(|_| {
-				let rt = Builder::new().basic_scheduler().enable_all().build();
+				let rt = Builder::new_current_thread().enable_all().build();
 				match rt {
-					Ok(mut rt) => rt.block_on(task),
+					Ok(rt) => rt.block_on(task),
 					_ => Err(mwc_web3::Error::Internal),
 				}
 			});
@@ -914,9 +914,9 @@ impl EthNodeClient for InfuraNodeClient {
 
 		let res = scope(|s| {
 			let handle = s.spawn(|_| {
-				let rt = Builder::new().basic_scheduler().enable_all().build();
+				let rt = Builder::new_current_thread().enable_all().build();
 				match rt {
-					Ok(mut rt) => Some(rt.block_on(task)),
+					Ok(rt) => Some(rt.block_on(task)),
 					_ => None,
 				}
 			});
@@ -1053,9 +1053,9 @@ impl EthNodeClient for InfuraNodeClient {
 
 		let res = scope(|s| {
 			let handle = s.spawn(|_| {
-				let rt = Builder::new().basic_scheduler().enable_all().build();
+				let rt = Builder::new_current_thread().enable_all().build();
 				match rt {
-					Ok(mut rt) => rt.block_on(task),
+					Ok(rt) => rt.block_on(task),
 					_ => Err(mwc_web3::Error::Internal),
 				}
 			});
@@ -1242,9 +1242,9 @@ impl EthNodeClient for InfuraNodeClient {
 
 		let res = scope(|s| {
 			let handle = s.spawn(|_| {
-				let rt = Builder::new().basic_scheduler().enable_all().build();
+				let rt = Builder::new_current_thread().enable_all().build();
 				match rt {
-					Ok(mut rt) => rt.block_on(task),
+					Ok(rt) => rt.block_on(task),
 					_ => Err(mwc_web3::Error::Internal),
 				}
 			});
@@ -1340,9 +1340,9 @@ impl EthNodeClient for InfuraNodeClient {
 
 		let res = scope(|s| {
 			let handle = s.spawn(|_| {
-				let rt = Builder::new().basic_scheduler().enable_all().build();
+				let rt = Builder::new_current_thread().enable_all().build();
 				match rt {
-					Ok(mut rt) => Ok(rt.block_on(task)),
+					Ok(rt) => Ok(rt.block_on(task)),
 					_ => Err(mwc_web3::Error::Internal),
 				}
 			});

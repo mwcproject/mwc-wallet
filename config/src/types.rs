@@ -22,6 +22,7 @@ use std::path::PathBuf;
 use crate::config::MWC_WALLET_DIR;
 use crate::core::global::ChainTypes;
 use crate::util::logger::LoggingConfig;
+use mwc_wallet_util::mwc_core::global;
 use std::collections::BTreeMap;
 
 /// Command-line wallet configuration
@@ -67,8 +68,8 @@ pub struct WalletConfig {
 	/// Wallet data directory. Default none is 'wallet_data'
 	pub wallet_data_dir: Option<String>,
 	/// Scaling factor from transaction weight to transaction fee
-	/// should match accept_fee_base parameter in mwc-server
-	pub accept_fee_base: Option<u64>,
+	/// should match tx_fee_base parameter in mwc-server
+	pub tx_fee_base: Option<u64>,
 	/// Ethereum Swap Contract Address
 	pub eth_swap_contract_address: Option<String>,
 	/// ERC20 Swap Contract Address
@@ -138,7 +139,7 @@ impl Default for WalletConfig {
 				.map(|i| (i.0.to_string(), i.1.to_string()))
 				.collect::<BTreeMap<String, String>>(),
 			),
-			accept_fee_base: Some(WalletConfig::default_accept_fee_base()),
+			tx_fee_base: None,
 		}
 	}
 }
@@ -152,11 +153,6 @@ impl WalletConfig {
 	/// Default listener port
 	pub fn default_owner_api_listen_port() -> u16 {
 		3420
-	}
-
-	/// Default TX base fee, same that we have now (1 milli MWC)
-	pub fn default_accept_fee_base() -> u64 {
-		1_000_000
 	}
 
 	/// Use value from config file, defaulting to sensible value if missing.
@@ -178,9 +174,9 @@ impl WalletConfig {
 	}
 
 	/// Accept fee base
-	pub fn accept_fee_base(&self) -> u64 {
-		self.accept_fee_base
-			.unwrap_or_else(|| WalletConfig::default_accept_fee_base())
+	pub fn tx_fee_base(&self) -> u64 {
+		self.tx_fee_base
+			.unwrap_or_else(|| global::get_accept_fee_base())
 	}
 }
 

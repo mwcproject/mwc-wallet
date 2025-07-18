@@ -51,6 +51,7 @@ use crate::impls::tor::config as tor_config;
 use crate::impls::tor::process as tor_process;
 use crate::impls::tor::{bridge as tor_bridge, proxy as tor_proxy};
 use crate::keychain::Keychain;
+#[cfg(feature = "libp2p")]
 use chrono::Utc;
 use easy_jsonrpc_mwc::{Handler, MaybeReply};
 use ed25519_dalek::PublicKey as DalekPublicKey;
@@ -59,18 +60,26 @@ use mwc_wallet_impls::tor;
 use mwc_wallet_libwallet::proof::crypto;
 use mwc_wallet_libwallet::proof::proofaddress;
 use mwc_wallet_libwallet::proof::proofaddress::ProvableAddress;
+#[cfg(feature = "libp2p")]
 use mwc_wallet_util::mwc_core::core::TxKernel;
+#[cfg(feature = "libp2p")]
 use mwc_wallet_util::mwc_p2p;
+#[cfg(feature = "libp2p")]
 use mwc_wallet_util::mwc_p2p::libp2p_connection;
+#[cfg(feature = "libp2p")]
 use mwc_wallet_util::mwc_util::secp::pedersen::Commitment;
 use mwc_wallet_util::mwc_util::secp::{ContextFlag, Secp256k1};
 use mwc_wallet_util::mwc_util::static_secp_instance;
 use std::collections::HashMap;
 use std::convert::TryFrom;
-use std::net::{SocketAddr, SocketAddrV4};
+use std::net::SocketAddr;
+#[cfg(feature = "libp2p")]
+use std::net::SocketAddrV4;
 use std::pin::Pin;
 use std::sync::mpsc::Sender;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
+#[cfg(feature = "libp2p")]
+use std::sync::RwLock;
 use std::thread;
 use std::thread::JoinHandle;
 use std::time::{Duration, SystemTime};
@@ -889,6 +898,7 @@ where
 
 /// Start libp2p listener thread.
 /// stop_mutex allows to stop the thread when value will be 0
+#[cfg(feature = "libp2p")]
 pub fn start_libp2p_listener<L, C, K>(
 	wallet: Arc<Mutex<Box<dyn WalletInst<'static, L, C, K> + 'static>>>,
 	tor_secret: [u8; 32],
@@ -1128,9 +1138,11 @@ where
 
 		let check_tor_connection = tor_info.is_some();
 
+		#[cfg(feature = "libp2p")]
 		let libp2p_stop = Arc::new(std::sync::Mutex::new(1));
 
 		// Starting libp2p listener
+		#[cfg(feature = "libp2p")]
 		let tor_process = if tor_info.is_some() && libp2p_listen_port.is_some() {
 			let tor_info = tor_info.unwrap();
 			let libp2p_listen_port = libp2p_listen_port.unwrap();
@@ -1146,6 +1158,14 @@ where
 		} else if tor_info.is_some() {
 			let tor_info = tor_info.unwrap();
 			Some((tor_info.0, None))
+		} else {
+			None
+		};
+
+		#[cfg(not(feature = "libp2p"))]
+		let tor_process = if tor_info.is_some() {
+			let tor_info = tor_info.unwrap();
+			Some(tor_info.0)
 		} else {
 			None
 		};
@@ -1229,6 +1249,7 @@ where
 		tor::status::set_tor_address(None);
 
 		// Stopping tor, we failed to start in any case
+		#[cfg(feature = "libp2p")]
 		if let Some((mut tor_process, libp2p_handle)) = tor_process {
 			let _ = tor_process.kill();
 			// stopping libp2p listener first
@@ -1236,6 +1257,11 @@ where
 				*libp2p_stop.lock().unwrap() = 0;
 				let _ = libp2p_handle.join();
 			}
+		}
+
+		#[cfg(not(feature = "libp2p"))]
+		if let Some(mut tor_process) = tor_process {
+			let _ = tor_process.kill();
 		}
 
 		if res.is_err() {

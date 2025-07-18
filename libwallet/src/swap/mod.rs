@@ -130,6 +130,7 @@ mod tests {
 	use bitcoin_lib::secp256k1::ContextFlag;
 	use bitcoin_lib::util::key::PublicKey as BtcPublicKey;
 	use bitcoin_lib::{Address, AddressType, Transaction as BtcTransaction, TxOut};
+	use mwc_wallet_util::mwc_core::consensus;
 	use mwc_wallet_util::mwc_util::secp::Secp256k1;
 	use std::collections::HashMap;
 	use std::convert::TryInto;
@@ -137,6 +138,7 @@ mod tests {
 	use std::fs::{read_to_string, write};
 	use std::mem;
 	use std::sync::Arc;
+
 	extern crate mwc_web3;
 
 	const MWC_UNIT: u64 = 1_000_000_000;
@@ -504,6 +506,7 @@ mod tests {
 		fn get_libp2p_messages(&self) -> Result<Libp2pMessages, crate::Error> {
 			Ok(Libp2pMessages {
 				current_time: chrono::Utc::now().timestamp(),
+				#[cfg(feature = "libp2p")]
 				libp2p_messages: vec![],
 			})
 		}
@@ -597,6 +600,8 @@ mod tests {
 		set_test_mode(true);
 		swap::set_testing_cur_time(1567632152);
 		global::set_local_chain_type(ChainTypes::Floonet);
+		global::set_local_accept_fee_base(consensus::MILLI_MWC / 100);
+
 		let write_json = false;
 
 		let kc_sell = keychain(1);

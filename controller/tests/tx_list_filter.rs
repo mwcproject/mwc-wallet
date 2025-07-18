@@ -156,7 +156,7 @@ fn test_wallet_tx_filtering(
 
 		// Amounts
 		let mut tx_query_args = RetrieveTxQueryArgs::default();
-		tx_query_args.min_amount = Some(14_000_000 + 8_000_000); // 8m are fees
+		tx_query_args.min_amount = Some(14_000_000 + 8_000_000 / 100); // 8m are fees
 		let tx_results = api
 			.retrieve_txs(mask, true, None, None, Some(tx_query_args), None)?
 			.1;
@@ -164,7 +164,7 @@ fn test_wallet_tx_filtering(
 
 		// amount, should see as above with coinbases excluded
 		let mut tx_query_args = RetrieveTxQueryArgs::default();
-		tx_query_args.min_amount = Some(14_000_000 + 8_000_000);
+		tx_query_args.min_amount = Some(14_000_000 + 8_000_000 / 100);
 		tx_query_args.max_amount = Some(2_380_952_380 - 1);
 		let tx_results = api
 			.retrieve_txs(mask, true, None, None, Some(tx_query_args), None)?

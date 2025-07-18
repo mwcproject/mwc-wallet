@@ -37,6 +37,7 @@ use util::secp::key::{PublicKey, SecretKey};
 use mwc_wallet::cmd::wallet_args;
 use mwc_wallet_util::mwc_api as api;
 
+use mwc_wallet_util::mwc_core::consensus;
 use mwc_wallet_util::mwc_util::secp::Secp256k1;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -137,6 +138,7 @@ pub fn setup(test_dir: &str) {
 	util::init_test_logger();
 	clean_output_dir(test_dir);
 	global::set_local_chain_type(global::ChainTypes::AutomatedTesting);
+	global::set_local_accept_fee_base(consensus::MILLI_MWC / 100);
 }
 
 /// Some tests require the global chain_type to be configured.

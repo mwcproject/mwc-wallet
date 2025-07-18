@@ -786,6 +786,7 @@ impl NodeClient for LocalWalletClient {
 	fn get_libp2p_messages(&self) -> Result<Libp2pMessages, libwallet::Error> {
 		Ok(Libp2pMessages {
 			current_time: chrono::Utc::now().timestamp(),
+			#[cfg(feature = "libp2p")]
 			libp2p_messages: vec![],
 		})
 	}

@@ -1,6 +1,6 @@
 [package]
 name = "mwc_wallet_libwallet"
-version = "5.3.7"
+version = "5.3.8"
 authors = ["Mwc Developers <info@mwc.mw>"]
 description = "Simple, private and scalable cryptocurrency implementation based on the MimbleWimble chain format."
 license = "Apache-2.0"
@@ -51,7 +51,7 @@ num-bigint = "0.2"
 crossbeam-utils = "0.7"
 
 
-tokio = { version = "0.2.1", features = ["full"] }
+tokio = { version = "1", features = ["full"] }
 futures-timer = "3.0.2"
 
 
@@ -61,8 +61,8 @@ secp256k1 = { version = "0.20.1", features = ["rand"]}
 bigdecimal = "0.4.2"
 
 
-#libp2p = { path = "../../rust-libp2p", default-features = false, features = [ "noise", "yamux", "mplex", "dns", "tcp-tokio", "ping", "gossipsub"] }
-mwc-libp2p = { git = "https://github.com/mwcproject/rust-libp2p", version="0.35.3", branch = "master", default-features = false, features = [ "noise", "yamux", "mplex", "dns", "tcp-tokio", "ping", "gossipsub"] }
+#mwc-libp2p = { path = "../../rust-libp2p", default-features = false, features = [ "noise", "yamux", "mplex", "dns", "tcp-tokio", "ping", "gossipsub"] }
+#mwc-libp2p = { git = "https://github.com/mwcproject/rust-libp2p", version="0.35.3", branch = "master", default-features = false, features = [ "noise", "yamux", "mplex", "dns", "tcp-tokio", "ping", "gossipsub"] }
 #bitcoin = { version = "0.27", path = "../../rust-bitcoin", features = ["bitcoinconsensus"] }
 mwc-bitcoin = { git = "https://github.com/mwcproject/rust-bitcoin",  version = "0.27.1", branch = "zkp", features = ["bitcoinconsensus"] }
 #bch = { path = "../../rust-bch" }
@@ -76,8 +76,12 @@ mwc-zcash_primitives = { git = "https://github.com/mwcproject/librustzcash", ver
 #zcash_primitives = { path = "../../librustzcash/zcash_primitives", features = ["transparent-inputs"] }
 
 
-mwc_wallet_util = { path = "../util", version = "5.3.7" }
-mwc_wallet_config = { path = "../config", version = "5.3.7" }
+mwc_wallet_util = { path = "../util", version = "5.3.8" }
+mwc_wallet_config = { path = "../config", version = "5.3.8" }
 
 [target.'cfg(any(target_os = "android", target_os = "linux"))'.dependencies]
 libc = { version = "0.2.69", default-features = false }
+
+[features]
+# real dependency: libp2p = ["dep:mwc-libp2p"]
+libp2p = []

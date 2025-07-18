@@ -37,6 +37,7 @@ use crate::util::secp::constants::SECRET_KEY_SIZE;
 use crate::util::secp::key::SecretKey;
 use crate::util::{self, ToHex};
 
+#[cfg(feature = "libp2p")]
 use mwc_wallet_libwallet::IntegrityContext;
 use mwc_wallet_util::mwc_core::ser::{DeserializationMode, Readable};
 use rand::rngs::mock::StepRng;
@@ -57,6 +58,7 @@ const TX_LOG_ID_PREFIX: u8 = b'i';
 const ACCOUNT_PATH_MAPPING_PREFIX: u8 = b'a';
 const LAST_SCANNED_BLOCK: u8 = b'm'; // pre v3.0 was l
 const LAST_WORKING_NODE_INDEX: u8 = b'n';
+#[cfg(feature = "libp2p")]
 const INTEGRITY_CONTEXT_PREFIX: u8 = b'g';
 const FLAGS: u8 = b'f'; // pre v3.0 was l
 
@@ -1096,6 +1098,7 @@ where
 		Ok(())
 	}
 
+	#[cfg(feature = "libp2p")]
 	fn save_integrity_context(
 		&mut self,
 		slate_id: &[u8],
@@ -1117,6 +1120,7 @@ where
 		Ok(())
 	}
 
+	#[cfg(feature = "libp2p")]
 	fn load_integrity_context(&mut self, slate_id: &[u8]) -> Result<IntegrityContext, Error> {
 		let ctx_key = to_key(INTEGRITY_CONTEXT_PREFIX, &mut slate_id.to_vec());
 		let (blind_xor_key, _nonce_xor_key) = private_ctx_xor_keys(self.keychain(), slate_id)?;

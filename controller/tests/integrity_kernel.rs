@@ -14,41 +14,66 @@
 //! Test an integrity output creation. Check if we can sing this commit.
 //! At mwc-walllet there is a test for validation. It will use printed results form this test
 //!
+#[cfg(feature = "libp2p")]
 #[macro_use]
 extern crate log;
 extern crate mwc_wallet_controller as wallet;
 extern crate mwc_wallet_impls as impls;
 
+#[cfg(feature = "libp2p")]
 use mwc_wallet_util::mwc_core as core;
+#[cfg(feature = "libp2p")]
 use mwc_wallet_util::mwc_core::global;
 
+#[cfg(feature = "libp2p")]
 use impls::test_framework::{self, LocalWalletClient};
+#[cfg(feature = "libp2p")]
 use mwc_wallet_libwallet as libwallet;
+#[cfg(feature = "libp2p")]
 use std::thread;
+#[cfg(feature = "libp2p")]
 use std::time::Duration;
 
+#[cfg(feature = "libp2p")]
 use mwc_libp2p::PeerId;
+#[cfg(feature = "libp2p")]
 use mwc_wallet_util::mwc_util as util;
 
 #[macro_use]
 mod common;
+#[cfg(feature = "libp2p")]
 use common::{clean_output_dir, create_wallet_proxy, setup};
+#[cfg(feature = "libp2p")]
 use mwc_libp2p::identity::Keypair;
+#[cfg(feature = "libp2p")]
 use mwc_wallet_libwallet::internal::updater;
+#[cfg(feature = "libp2p")]
 use mwc_wallet_libwallet::{owner, wallet_lock_test, TxLogEntryType};
+#[cfg(feature = "libp2p")]
 use mwc_wallet_util::mwc_core::core::hash::Hash;
+#[cfg(feature = "libp2p")]
 use mwc_wallet_util::mwc_core::core::{KernelFeatures, Transaction, TxKernel};
+#[cfg(feature = "libp2p")]
 use mwc_wallet_util::mwc_core::libtx::aggsig;
+#[cfg(feature = "libp2p")]
 use mwc_wallet_util::mwc_p2p::libp2p_connection;
+#[cfg(feature = "libp2p")]
 use mwc_wallet_util::mwc_util::secp::pedersen::Commitment;
+#[cfg(feature = "libp2p")]
 use mwc_wallet_util::mwc_util::secp::Message;
+#[cfg(feature = "libp2p")]
 use mwc_wallet_util::mwc_util::{secp, Mutex};
+#[cfg(feature = "libp2p")]
 use std::collections::HashMap;
+#[cfg(feature = "libp2p")]
 use std::convert::TryInto;
+#[cfg(feature = "libp2p")]
 use std::ops::DerefMut;
+#[cfg(feature = "libp2p")]
 use std::sync::Arc;
 
 /// self send impl
+#[cfg(feature = "libp2p")]
 fn integrity_kernel_impl(test_dir: &str) -> Result<(), wallet::Error> {
 	// Create a new proxy to simulate server and wallet responses
 	global::set_local_chain_type(global::ChainTypes::AutomatedTesting);
@@ -399,6 +424,7 @@ fn integrity_kernel_impl(test_dir: &str) -> Result<(), wallet::Error> {
 }
 
 #[test]
+#[cfg(feature = "libp2p")]
 fn wallet_integrity_kernel() {
 	let test_dir = "test_output/integrity_kernel";
 	setup(test_dir);

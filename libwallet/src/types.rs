@@ -33,8 +33,10 @@ use crate::mwc_util::secp::{self, pedersen, Secp256k1};
 use crate::mwc_util::{ToHex, ZeroingString};
 use crate::proof::proofaddress::ProvableAddress;
 use crate::slate::ParticipantMessages;
+use crate::InitTxArgs;
+#[cfg(feature = "libp2p")]
+use crate::IntegrityContext;
 use crate::Slate;
-use crate::{InitTxArgs, IntegrityContext};
 use chrono::prelude::*;
 use rand::rngs::mock::StepRng;
 use rand::thread_rng;
@@ -393,6 +395,7 @@ where
 	fn commit(&self) -> Result<(), Error>;
 
 	/// Save integrity transaction private context.
+	#[cfg(feature = "libp2p")]
 	fn save_integrity_context(
 		&mut self,
 		slate_id: &[u8],
@@ -400,6 +403,7 @@ where
 	) -> Result<(), Error>;
 
 	/// Read integrity transaction private context.
+	#[cfg(feature = "libp2p")]
 	fn load_integrity_context(&mut self, slate_id: &[u8]) -> Result<IntegrityContext, Error>;
 }
 
