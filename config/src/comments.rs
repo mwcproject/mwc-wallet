@@ -131,18 +131,13 @@ fn comments() -> HashMap<String, String> {
 	);
 
 	retval.insert(
-		"accept_fee_base".to_string(),
+		"eth_swap_contract_address".to_string(),
 		"
 # Minimum acceptable fee per unit of transaction weight. Please note that fee can't be lower than
 # network has, otherwise your transactions will be rejected.
 # If you are running fresh wallet, there is no needs to adjust this value.
-"
-		.to_string(),
-	);
+# tx_fee_base = 1000
 
-	retval.insert(
-		"eth_swap_contract_address".to_string(),
-		"
 #ethereum atomic swap contract address
 "
 		.to_string(),

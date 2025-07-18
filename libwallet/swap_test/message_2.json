@@ -13,7 +13,7 @@
         "id": "1",
         "public_blind_excess": "0329fbb62bc719998c1146fc78955ed210bb5bf474f968cbce230175e2585fb71c",
         "public_nonce": "025095c06816053b34317505e03ec069483ea0c17a865851560c06ce1a7c01b23b",
-        "part_sig": "3bb2017c1ace060c565158867ac1a03e4869c03ee0057531343b051668c095508dbef5d8c85ffa7138968c04f8e9939bea2b696a0f40f884ec0f5b05e78e9c10",
+        "part_sig": "3bb2017c1ace060c565158867ac1a03e4869c03ee0057531343b051668c09550c2f14afdbdc99f87509e82ae591d5ab9c322b4e28c5c824fdea02e13be5c9728",
         "message": null,
         "message_sig": null
       },
@@ -21,7 +21,7 @@
         "id": "1",
         "public_blind_excess": "0229fbb62bc719998c1146fc78955ed210bb5bf474f968cbce230175e2585fb71c",
         "public_nonce": "02c5feea3b4566008a8075f9d16b9259853d7575719d5608a7160f8361a52efa96",
-        "part_sig": "96fa2ea561830f16a708569d7175753d8559926bd1f975808a0066453beafec5ad56547ae452ba0abcec4f1d41d21e695dc4b08a984928ca68b7026362a7c9ee",
+        "part_sig": "96fa2ea561830f16a708569d7175753d8559926bd1f975808a0066453beafec58aa7eb223a1b3cf5789b4e2dec0c1f82e60ab1e008310d80aadadd5e8de4c75a",
         "message": null,
         "message_sig": null
       }

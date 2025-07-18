@@ -26,6 +26,7 @@ use ed25519_dalek::PublicKey as DalekPublicKey;
 use libwallet::slatepack::SlatePurpose;
 use libwallet::wallet_lock_test;
 use mwc_wallet_libwallet::proof::proofaddress::{self, ProvableAddress};
+use mwc_wallet_util::mwc_core::consensus;
 use mwc_wallet_util::mwc_core::core::Transaction;
 use mwc_wallet_util::mwc_util::secp::Secp256k1;
 use std::ops::DerefMut;
@@ -1073,6 +1074,7 @@ pub fn run_doctest_foreign(
 	util::init_test_logger();
 	let _ = fs::remove_dir_all(test_dir);
 	global::set_local_chain_type(ChainTypes::AutomatedTesting);
+	global::set_local_accept_fee_base(consensus::MILLI_MWC / 100);
 
 	let tx_pool: Arc<Mutex<Vec<Transaction>>> = Arc::new(Mutex::new(Vec::new()));
 	let mut wallet_proxy: WalletProxy<

@@ -616,11 +616,7 @@ impl NodeClient for HTTPNodeClient {
 		assert!(start_height <= end_height);
 
 		let mut result_blocks: Vec<api::BlockPrintable> = Vec::new();
-		let mut rt = Builder::new()
-			.basic_scheduler()
-			.enable_all()
-			.build()
-			.unwrap();
+		let rt = Builder::new_current_thread().enable_all().build().unwrap();
 		let mut height = start_height;
 
 		while height <= end_height {

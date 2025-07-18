@@ -185,7 +185,7 @@ fn real_main() -> i32 {
 			.clone(),
 	);
 
-	global::init_global_accept_fee_base(config.members.as_ref().unwrap().wallet.accept_fee_base());
+	global::init_global_accept_fee_base(config.members.as_ref().unwrap().wallet.tx_fee_base());
 
 	let wallet_config = config.clone().members.unwrap().wallet;
 

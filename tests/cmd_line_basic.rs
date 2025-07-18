@@ -407,7 +407,7 @@ fn command_line_test_impl(test_dir: &str) -> Result<(), mwc_wallet_controller::E
 		let (_, wallet1_info) = api.retrieve_summary_info(m, true, 1)?;
 		assert_eq!(
 			wallet1_info.amount_currently_spendable,
-			300_000_000 + 250_000_000 - 8_000_000
+			300_000_000 + 250_000_000 - 8_000_000 / 100
 		); // mwc: 10_000_000_000,  mwc 0.3 to nano
 		Ok(())
 	})?;
@@ -425,7 +425,7 @@ fn command_line_test_impl(test_dir: &str) -> Result<(), mwc_wallet_controller::E
 			// Problem that ffes are still collected back, that is why we have 8_000_000 difference here
 			let amt_mined = 10 * calc_mwc_block_reward(1);
 			assert_eq!(
-				wallet1_info.amount_currently_spendable + (250_000_000 - 8_000_000),
+				wallet1_info.amount_currently_spendable + (250_000_000 - 8_000_000 / 100),
 				old_balance + amt_mined
 			);
 			Ok(())
@@ -854,7 +854,7 @@ fn command_line_test_impl(test_dir: &str) -> Result<(), mwc_wallet_controller::E
 		let (_, wallet1_info) = api.retrieve_summary_info(m, true, 1)?;
 		assert_eq!(
 			wallet1_info.amount_currently_spendable,
-			300_000_000 + 250_000_000 - 8_000_000 + 1_100_000_000 + 450_000_000
+			300_000_000 + 250_000_000 - 8_000_000 / 100 + 1_100_000_000 + 450_000_000
 		); // mwc: 10_000_000_000,  mwc 0.3 to nano
 		Ok(())
 	})?;
@@ -928,7 +928,7 @@ fn command_line_test_impl(test_dir: &str) -> Result<(), mwc_wallet_controller::E
 			// Entire 'spendable' wallet balance should have been swept, except the coinbase outputs
 			// which matured in the last batch of mining. Check that the new spendable balance is
 			// exactly equal to those matured coins.
-			let amt_mined = 10 * calc_mwc_block_reward(1) + 1_000_000; // plus fee that was mined
+			let amt_mined = 10 * calc_mwc_block_reward(1) + 1_000_000 / 100; // plus fee that was mined
 			assert_eq!(wallet1_info.amount_currently_spendable, amt_mined);
 			Ok(())
 		},

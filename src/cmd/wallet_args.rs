@@ -1937,12 +1937,22 @@ where
 			)
 		}
 		("integrity", Some(args)) => {
+			#[allow(unused_variables)]
 			let a = arg_parse!(parse_integrity_args(&args));
-			command::integrity(owner_api.wallet_inst.clone(), km, a)
+			#[cfg(feature = "libp2p")]
+			return command::integrity(owner_api.wallet_inst.clone(), km, a);
+			#[cfg(not(feature = "libp2p"))]
+			println!("integrity feature is not included in this release");
+			Ok(())
 		}
 		("messaging", Some(args)) => {
+			#[allow(unused_variables)]
 			let a = arg_parse!(parse_messaging_args(&args));
-			command::messaging(owner_api.wallet_inst.clone(), km, a)
+			#[cfg(feature = "libp2p")]
+			return command::messaging(owner_api.wallet_inst.clone(), km, a);
+			#[cfg(not(feature = "libp2p"))]
+			println!("messaging feature is not included in this release");
+			Ok(())
 		}
 		("send_marketplace_message", Some(args)) => {
 			let a = arg_parse!(parse_send_marketplace_message(&args));

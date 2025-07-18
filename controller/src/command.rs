@@ -36,10 +36,15 @@ use ed25519_dalek::{PublicKey as DalekPublicKey, SecretKey as DalekSecretKey};
 use mwc_wallet_impls::adapters::{
 	create_swap_message_sender, validate_tor_address, MarketplaceMessageSender,
 };
+#[cfg(feature = "libp2p")]
+use mwc_wallet_impls::libp2p_messaging;
 use mwc_wallet_impls::tor;
-use mwc_wallet_impls::{libp2p_messaging, HttpDataSender};
+use mwc_wallet_impls::HttpDataSender;
 use mwc_wallet_impls::{Address, MWCMQSAddress, Publisher};
-use mwc_wallet_libwallet::api_impl::{owner, owner_eth, owner_libp2p, owner_swap};
+#[cfg(feature = "libp2p")]
+use mwc_wallet_libwallet::api_impl::owner_libp2p;
+use mwc_wallet_libwallet::api_impl::{owner, owner_eth, owner_swap};
+
 use mwc_wallet_libwallet::proof::proofaddress::{self, ProvableAddress};
 use mwc_wallet_libwallet::proof::tx_proof::TxProof;
 use mwc_wallet_libwallet::slate_versions::v2::TransactionV2;
@@ -52,16 +57,25 @@ use mwc_wallet_libwallet::swap::{message, Swap};
 use mwc_wallet_libwallet::{
 	wallet_lock, OwnershipProof, Slate, StatusMessage, TxLogEntry, WalletInst,
 };
+#[cfg(feature = "libp2p")]
 use mwc_wallet_util::mwc_core::consensus::MWC_BASE;
-use mwc_wallet_util::mwc_core::core::{amount_to_hr_string, Transaction};
+#[cfg(feature = "libp2p")]
+use mwc_wallet_util::mwc_core::core::amount_to_hr_string;
+use mwc_wallet_util::mwc_core::core::Transaction;
+#[cfg(feature = "libp2p")]
 use mwc_wallet_util::mwc_core::global::{FLOONET_DNS_SEEDS, MAINNET_DNS_SEEDS};
+#[cfg(feature = "libp2p")]
+use mwc_wallet_util::mwc_p2p::libp2p_connection;
+#[cfg(feature = "libp2p")]
 use mwc_wallet_util::mwc_p2p::libp2p_connection::ReceivedMessage;
-use mwc_wallet_util::mwc_p2p::{libp2p_connection, PeerAddr};
+#[cfg(feature = "libp2p")]
+use mwc_wallet_util::mwc_p2p::PeerAddr;
 use mwc_wallet_util::mwc_util::secp::{ContextFlag, Secp256k1};
 use mwc_wallet_util::mwc_util::static_secp_instance;
 use qr_code::{EcLevel, QrCode};
 use serde_json as json;
 use serde_json::json;
+#[cfg(feature = "libp2p")]
 use serde_json::{Map as JsonMap, Value as JsonValue};
 use std::collections::HashSet;
 use std::convert::TryFrom;
@@ -3690,6 +3704,7 @@ where
 }
 
 /// integrity fee related operations
+#[cfg(feature = "libp2p")]
 pub fn integrity<L, C, K>(
 	wallet_inst: Arc<Mutex<Box<dyn WalletInst<'static, L, C, K>>>>,
 	keychain_mask: Option<&SecretKey>,
@@ -3884,6 +3899,7 @@ where
 }
 
 /// integrity fee related operations
+#[cfg(feature = "libp2p")]
 pub fn messaging<L, C, K>(
 	wallet_inst: Arc<Mutex<Box<dyn WalletInst<'static, L, C, K>>>>,
 	keychain_mask: Option<&SecretKey>,
