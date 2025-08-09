@@ -123,7 +123,6 @@ fn slatepack_io_test() {
 	use crate::mwc_core::core::{Input, Output, OutputFeatures, Transaction, TxKernel};
 	use crate::mwc_core::global;
 	use crate::mwc_keychain::BlindingFactor;
-	use crate::mwc_keychain::ExtKeychain;
 	use crate::mwc_util as util;
 	use crate::mwc_util::secp::pedersen::{Commitment, RangeProof};
 	use crate::mwc_util::secp::Signature;
@@ -232,9 +231,8 @@ fn slatepack_io_test() {
 	let height = 67;
 
 	// updating kernel excess
-	slate_enc.tx_or_err_mut().unwrap().body.kernels[0].excess = slate_enc
-		.calc_excess::<ExtKeychain>(&secp, None, height)
-		.unwrap();
+	slate_enc.tx_or_err_mut().unwrap().body.kernels[0].excess =
+		slate_enc.calc_excess(&secp, height).unwrap();
 
 	let slate_enc_str = format!("{:?}", slate_enc);
 	println!("start encrypted slate = {}", slate_enc_str);

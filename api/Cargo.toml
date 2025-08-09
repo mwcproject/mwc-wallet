@@ -31,3 +31,6 @@ mwc_wallet_util = { path = "../util", version = "5.3.8" }
 [dev-dependencies]
 serde_json = "1"
 tempfile = "3.1"
+
+[features]
+grin_proof = ["mwc_wallet_libwallet/grin_proof"]

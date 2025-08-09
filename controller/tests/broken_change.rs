@@ -179,5 +179,5 @@ fn broken_change() {
 	run_broken_change_test("test_output/broken_change3", 7, 2, true);
 	run_broken_change_test("test_output/broken_change4", 100, 2, false);
 	run_broken_change_test("test_output/broken_change5", 500_000_000, 6, true); // 0.5 MWC for 1 outputs is good
-	run_broken_change_test("test_output/broken_change6", 499_999_999, 2, false); // 0.4999999 MWC for 5 outputs is below the threshold, expected to use 1 output instead of 5.
+	run_broken_change_test("test_output/broken_change6", 499_999_999, 5, false); // 0.4999999 MWC for 5 outputs is below the threshold, expected to use 4 output instead of 5.
 }

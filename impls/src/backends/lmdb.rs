@@ -40,6 +40,7 @@ use crate::util::{self, ToHex};
 #[cfg(feature = "libp2p")]
 use mwc_wallet_libwallet::IntegrityContext;
 use mwc_wallet_util::mwc_core::ser::{DeserializationMode, Readable};
+use mwc_wallet_util::mwc_util::secp::pedersen::Commitment;
 use rand::rngs::mock::StepRng;
 use rand::thread_rng;
 
@@ -311,24 +312,15 @@ where
 	}
 
 	/// return the version of the commit for caching
-	fn calc_commit_for_cache(
-		&mut self,
+	fn calc_commit(
+		&self,
 		keychain_mask: Option<&SecretKey>,
 		amount: u64,
 		id: &Identifier,
-	) -> Result<Option<String>, Error> {
-		//TODO: Check if this is really necessary, it's the only thing
-		//preventing removing the need for config in the wallet backend
-		/*if self.config.no_commit_cache == Some(true) {
-			Ok(None)
-		} else {*/
-		Ok(Some(
-			self.keychain(keychain_mask)?
-				.commit(amount, &id, SwitchCommitmentType::Regular)?
-				.0
-				.to_hex(), // TODO: proper support for different switch commitment schemes
-		))
-		/*}*/
+	) -> Result<Commitment, Error> {
+		Ok(self
+			.keychain(keychain_mask)?
+			.commit(amount, &id, SwitchCommitmentType::Regular)?)
 	}
 
 	/// Set parent path by account name

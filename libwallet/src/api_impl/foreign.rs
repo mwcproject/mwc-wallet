@@ -237,7 +237,7 @@ where
 
 	tx::update_message(&mut *w, keychain_mask, &ret_slate)?;
 
-	let excess = ret_slate.calc_excess(keychain.secp(), Some(&keychain), height)?;
+	let excess = ret_slate.calc_excess(keychain.secp(), height)?;
 
 	if let Some(ref mut p) = ret_slate.payment_proof {
 		if p.sender_address
@@ -335,7 +335,14 @@ where
 
 	// Participant id 0 for mwc713 compatibility
 	tx::complete_tx(&mut *w, keychain_mask, &mut sl, 0, &context)?;
-	tx::update_stored_tx(&mut *w, keychain_mask, &context, &mut sl, true)?;
+	tx::update_stored_tx(
+		&mut *w,
+		keychain_mask,
+		#[cfg(feature = "grin_proof")]
+		&context,
+		&mut sl,
+		true,
+	)?;
 	tx::update_message(&mut *w, keychain_mask, &sl)?;
 	{
 		let mut batch = w.batch(keychain_mask)?;

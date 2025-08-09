@@ -51,7 +51,6 @@ use crate::slate_versions::v3::{
 
 // use crate::slate_versions::{CURRENT_SLATE_VERSION, MWC_BLOCK_HEADER_VERSION};
 use crate::mwc_core::core::{Inputs, NRDRelativeHeight, OutputIdentifier};
-use crate::proof::proofaddress;
 use crate::proof::proofaddress::ProvableAddress;
 use crate::types::CbData;
 use crate::{SlateVersion, Slatepacker, CURRENT_SLATE_VERSION};
@@ -64,15 +63,9 @@ use rand::thread_rng;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct PaymentInfo {
-	#[serde(
-		serialize_with = "proofaddress::as_string",
-		deserialize_with = "proofaddress::proof_address_from_string"
-	)]
+	#[serde(serialize_with = "ProvableAddress::serialize_as_string")]
 	pub sender_address: ProvableAddress,
-	#[serde(
-		serialize_with = "proofaddress::as_string",
-		deserialize_with = "proofaddress::proof_address_from_string"
-	)]
+	#[serde(serialize_with = "ProvableAddress::serialize_as_string")]
 	pub receiver_address: ProvableAddress,
 	pub receiver_signature: Option<String>,
 }
@@ -1082,15 +1075,7 @@ impl Slate {
 	}
 
 	/// return the final excess
-	pub fn calc_excess<K>(
-		&self,
-		secp: &Secp256k1,
-		keychain: Option<&K>,
-		height: u64,
-	) -> Result<Commitment, Error>
-	where
-		K: Keychain,
-	{
+	pub fn calc_excess(&self, secp: &Secp256k1, height: u64) -> Result<Commitment, Error> {
 		if self.compact_slate {
 			let sum = self.pub_blind_sum(secp)?;
 			Ok(Commitment::from_pubkey(secp, &sum)?)
@@ -1099,7 +1084,6 @@ impl Slate {
 			let tx = self.tx_or_err()?.clone();
 			let kernel_offset = tx.offset.clone();
 			let overage = tx.fee(height) as i64;
-			let secp = keychain.unwrap().secp();
 			let tx_excess = tx.sum_commitments(overage, secp)?;
 
 			// subtract the kernel_excess (built from kernel_offset)
@@ -1121,7 +1105,7 @@ impl Slate {
 		self.check_fees(height)?;
 		// build the final excess based on final tx and offset
 		let secp = keychain.secp();
-		let final_excess = self.calc_excess(secp, Some(keychain), height)?;
+		let final_excess = self.calc_excess(secp, height)?;
 
 		debug!("Final Tx excess: {:?}", final_excess);
 

@@ -324,7 +324,7 @@ where
 			};
 
 			let output_info = ViewWalletOutputResult {
-				commit: commit.to_hex(),
+				commit: ToHex::to_hex(&commit),
 				value: info.value,
 				height: *height,
 				mmr_index: *mmr_index,
@@ -420,7 +420,7 @@ where
 	K: Keychain + 'a,
 {
 	let node_client = wallet.w2n_client().clone();
-	let commit = wallet.calc_commit_for_cache(keychain_mask, output.value, &output.key_id)?;
+	let commit = wallet.calc_commit(keychain_mask, output.value, &output.key_id)?;
 	let mut batch = wallet.batch(keychain_mask)?;
 
 	let parent_key_id = output.key_id.parent_path();
@@ -434,9 +434,7 @@ where
 	}
 
 	let log_id = {
-		if let Some(uuid) =
-			commit2transactionuuid.get(&commit.clone().unwrap_or("None".to_string()))
-		{
+		if let Some(uuid) = commit2transactionuuid.get(&ToHex::to_hex(&commit)) {
 			// Transaction already exist. using it...
 			transaction.get(uuid).unwrap().tx_log.id
 		} else {
@@ -465,7 +463,7 @@ where
 		key_id: output.key_id,
 		n_child: output.n_child,
 		mmr_index: Some(output.mmr_index),
-		commit: commit,
+		commit: Some(ToHex::to_hex(&commit)),
 		value: output.value,
 		status: OutputStatus::Unspent,
 		height: output.height,
@@ -1128,13 +1126,12 @@ where
 
 		for output in self_spend_candidate_list {
 			let commit = wallet
-				.calc_commit_for_cache(keychain_mask, output.value, &output.key_id)
-				.unwrap()
+				.calc_commit(keychain_mask, output.value, &output.key_id)
 				.unwrap();
 			self_spend_candidate_light_list.push(OutputResultLight {
 				key_id: output.key_id,
 				value: output.value.clone(),
-				commit: commit,
+				commit: ToHex::to_hex(&commit),
 			});
 		}
 	}

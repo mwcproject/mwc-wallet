@@ -49,3 +49,4 @@ remove_dir_all = "0.7"
 [features]
 # real dependency: libp2p = ["dep:mwc-libp2p"]
 libp2p = []
+grin_proof = ["mwc_wallet_libwallet/grin_proof"]

@@ -51,7 +51,7 @@ pub fn get_address_index() -> u32 {
 
 /// Address that can have a proof. Such address need to be able to convertable to
 /// the public key
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Debug, Clone)]
 pub struct ProvableAddress {
 	/// Public key that is an address
 	pub public_key: String,
@@ -128,6 +128,69 @@ impl ProvableAddress {
 
 	fn default_port() -> Option<u16> {
 		None
+	}
+
+	/// Seralizes option provableAddress as a string.
+	pub fn serialize_option_as_string<S>(
+		address: &Option<ProvableAddress>,
+		serializer: S,
+	) -> Result<S::Ok, S::Error>
+	where
+		S: Serializer,
+	{
+		match address {
+			Some(address) => serializer.serialize_str(&address.public_key),
+			None => serializer.serialize_none(),
+		}
+	}
+
+	/// Seralizes a provableAddress as a string.
+	pub fn serialize_as_string<S>(
+		address: &ProvableAddress,
+		serializer: S,
+	) -> Result<S::Ok, S::Error>
+	where
+		S: Serializer,
+	{
+		serializer.serialize_str(&address.public_key)
+	}
+}
+
+/// Deserializer from the string and the full data struct...
+impl<'de> Deserialize<'de> for ProvableAddress {
+	fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+	where
+		D: Deserializer<'de>,
+	{
+		#[derive(Deserialize)]
+		#[serde(untagged)]
+		enum Helper {
+			String(String),
+			Struct {
+				public_key: String,
+				#[serde(default = "ProvableAddress::default_domain")]
+				domain: String,
+				#[serde(default = "ProvableAddress::default_port")]
+				port: Option<u16>,
+			},
+		}
+
+		Ok(match Helper::deserialize(deserializer)? {
+			Helper::String(pk) => ProvableAddress {
+				public_key: pk,
+				domain: ProvableAddress::default_domain(),
+				port: ProvableAddress::default_port(),
+			},
+			Helper::Struct {
+				public_key,
+				domain,
+				port,
+			} => ProvableAddress {
+				public_key,
+				domain,
+				port,
+			},
+		})
 	}
 }
 
@@ -282,67 +345,4 @@ pub fn tor_pub_2_slatepack_pub(tor_pub_key: &DalekPublicKey) -> Result<xDalekPub
 	};
 	let res = xDalekPublicKey::from(ep.to_montgomery().to_bytes());
 	Ok(res)
-}
-
-/// ProvableAddress
-pub fn proof_address_from_string<'de, D>(deserializer: D) -> Result<ProvableAddress, D::Error>
-where
-	D: Deserializer<'de>,
-{
-	use serde::de::Error;
-
-	String::deserialize(deserializer).and_then(|string| {
-		ProvableAddress::from_str(&string).map_err(|err| {
-			Error::custom(format!(
-				"Fail to parse provable address {}, {}",
-				string, err
-			))
-		})
-	})
-}
-
-/// Seralizes a provableAddress.
-pub fn as_string<S>(address: &ProvableAddress, serializer: S) -> Result<S::Ok, S::Error>
-where
-	S: Serializer,
-{
-	serializer.serialize_str(&address.public_key)
-}
-
-/// ProvableAddress
-pub fn option_proof_address_from_string<'de, D>(
-	deserializer: D,
-) -> Result<Option<ProvableAddress>, D::Error>
-where
-	D: Deserializer<'de>,
-{
-	use serde::de::Error;
-
-	Option::<String>::deserialize(deserializer).and_then(|res| match res {
-		Some(string) => ProvableAddress::from_str(&string)
-			.map_err(|err| {
-				Error::custom(format!(
-					"Fail to parse provable address {}, {}",
-					string, err
-				))
-			})
-			.and_then(|address: ProvableAddress| {
-				return Ok(Some(address));
-			}),
-		None => Ok(None),
-	})
-}
-
-/// Seralizes a provableAddress.
-pub fn option_as_string<S>(
-	address: &Option<ProvableAddress>,
-	serializer: S,
-) -> Result<S::Ok, S::Error>
-where
-	S: Serializer,
-{
-	match address {
-		Some(address) => serializer.serialize_str(&address.public_key),
-		None => serializer.serialize_none(),
-	}
 }

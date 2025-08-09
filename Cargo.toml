@@ -59,3 +59,4 @@ mwc_secp256k1zkp = { git = "https://github.com/mwcproject/rust-secp256k1-zkp", t
 
 [features]
 libp2p = ["mwc_wallet_impls/libp2p", "mwc_wallet_libwallet/libp2p", "mwc_wallet_controller/libp2p"]
+grin_proof = ["mwc_wallet_libwallet/grin_proof", "mwc_wallet_api/grin_proof", "mwc_wallet_controller/grin_proof", "mwc_wallet_impls/grin_proof"]

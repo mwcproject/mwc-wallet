@@ -1828,6 +1828,12 @@ where
 		let first_tx = args
 			.count
 			.map_or(0, |c| txs.len().saturating_sub(c as usize));
+
+		let data_file_dir = {
+			wallet_lock!(api.wallet_inst.clone(), w);
+			w.get_data_file_dir().to_string()
+		};
+
 		display::txs(
 			&g_args.account,
 			res.height,
@@ -1836,7 +1842,12 @@ where
 			include_status,
 			dark_scheme,
 			true, // mwc-wallet alwways show the full info because it is advanced tool
-			|tx: &TxLogEntry| tx.payment_proof.is_some(), // it is how mwc-wallet address proofs feature
+			|tx: &TxLogEntry| match &tx.tx_slate_id {
+				Some(slate_id) => {
+					TxProof::get_stored_tx_proof(&data_file_dir, &slate_id.to_string()).is_ok()
+				}
+				None => false,
+			},
 		)?;
 
 		// if given a particular transaction id or uuid, also get and display associated
@@ -1869,6 +1880,7 @@ where
 			// should only be one here, but just in case
 			for tx in txs {
 				display::tx_messages(&tx, dark_scheme, &secp)?;
+				#[cfg(feature = "grin_proof")]
 				display::payment_proof(&tx)?;
 			}
 		}
@@ -2254,10 +2266,8 @@ where
 	};
 
 	match mwc_wallet_libwallet::proof::tx_proof::verify_tx_proof_wrapper(&tx_pf, &secp) {
-		Ok((sender, receiver, amount, outputs, kernel)) => {
-			mwc_wallet_libwallet::proof::tx_proof::proof_ok(
-				sender, receiver, amount, outputs, kernel,
-			);
+		Ok(proof_result) => {
+			mwc_wallet_libwallet::proof::tx_proof::proof_ok(&proof_result);
 			Ok(())
 		}
 		Err(e) => {

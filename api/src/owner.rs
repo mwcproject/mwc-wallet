@@ -33,19 +33,24 @@ use crate::libwallet::proof::tx_proof::TxProof;
 use crate::libwallet::swap::fsm::state::{StateEtaInfo, StateId, StateProcessRespond};
 use crate::libwallet::swap::types::{Action, Currency, SwapTransactionsConfirmations};
 use crate::libwallet::swap::{message::Message, swap::Swap, swap::SwapJournalRecord};
+#[cfg(feature = "grin_proof")]
+use crate::libwallet::PaymentProof;
 use crate::libwallet::{
 	AcctPathMapping, BuiltOutput, Error, InitTxArgs, IssueInvoiceTxArgs, NodeClient,
-	NodeHeightResult, OutputCommitMapping, PaymentProof, Slate, SlatePurpose, SlateVersion,
-	SwapStartArgs, TxLogEntry, VersionedSlate, ViewWallet, WalletInfo, WalletInst,
-	WalletLCProvider,
+	NodeHeightResult, OutputCommitMapping, Slate, SlatePurpose, SlateVersion, SwapStartArgs,
+	TxLogEntry, VersionedSlate, ViewWallet, WalletInfo, WalletInst, WalletLCProvider,
 };
+
 use crate::util::logger::LoggingConfig;
 use crate::util::secp::key::SecretKey;
 use crate::util::{from_hex, Mutex, ZeroingString};
+use libwallet::proof::tx_proof;
+use libwallet::proof::tx_proof::VerifyProofResult;
 use libwallet::{
 	wallet_lock, Context, OwnershipProof, OwnershipProofValidation, RetrieveTxQueryArgs,
 };
 use mwc_wallet_util::mwc_util::secp::key::PublicKey;
+use mwc_wallet_util::mwc_util::secp::{ContextFlag, Secp256k1};
 use mwc_wallet_util::mwc_util::static_secp_instance;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, Sender};
@@ -2379,13 +2384,15 @@ where
 	/// let tx_slate_id = Some(Uuid::parse_str("0436430c-2b02-624c-2032-570501212b00").unwrap());
 	///
 	/// // Return all TxLogEntries
+	/// #[cfg(feature = "grin_proof")]
 	/// let result = api_owner.retrieve_payment_proof(None, update_from_node, tx_id, tx_slate_id);
-	///
+	/// #[cfg(feature = "grin_proof")]
 	/// if let Ok(p) = result {
 	///     //...
 	/// }
 	/// ```
 
+	#[cfg(feature = "grin_proof")]
 	pub fn retrieve_payment_proof(
 		&self,
 		keychain_mask: Option<&SecretKey>,
@@ -2411,6 +2418,20 @@ where
 		)
 	}
 
+	/// ```
+	/// # mwc_wallet_api::doctest_helper_setup_doc_env!(wallet, wallet_config);
+	///
+	/// let api_owner = Owner::new(wallet.clone(), None, None);
+	/// let update_from_node = true;
+	/// let tx_id = None;
+	/// let tx_slate_id = Some(Uuid::parse_str("0436430c-2b02-624c-2032-570501212b00").unwrap());
+	///
+	/// // Return all TxLogEntries
+	/// let result = api_owner.get_stored_tx_proof(None, tx_id, tx_slate_id);
+	/// if let Ok(p) = result {
+	///     //...
+	/// }
+	/// ```
 	pub fn get_stored_tx_proof(
 		&self,
 		_keychain_mask: Option<&SecretKey>,
@@ -2457,10 +2478,11 @@ where
 	/// let tx_slate_id = Some(Uuid::parse_str("0436430c-2b02-624c-2032-570501212b00").unwrap());
 	///
 	/// // Return all TxLogEntries
+	/// #[cfg(feature = "grin_proof")]
 	/// let result = api_owner.retrieve_payment_proof(None, update_from_node, tx_id, tx_slate_id);
 	///
 	/// // The proof will likely be exported as JSON to be provided to another party
-	///
+	/// #[cfg(feature = "grin_proof")]
 	/// if let Ok(p) = result {
 	///     let valid = api_owner.verify_payment_proof(None, &p);
 	///     if let Ok(_) = valid {
@@ -2469,12 +2491,18 @@ where
 	/// }
 	/// ```
 
+	#[cfg(feature = "grin_proof")]
 	pub fn verify_payment_proof(
 		&self,
 		keychain_mask: Option<&SecretKey>,
 		proof: &PaymentProof,
 	) -> Result<(bool, bool), Error> {
 		owner::verify_payment_proof(self.wallet_inst.clone(), keychain_mask, proof)
+	}
+
+	pub fn verify_tx_proof(&self, proof: &TxProof) -> Result<VerifyProofResult, Error> {
+		let secp = Secp256k1::with_caps(ContextFlag::Commit);
+		tx_proof::verify_tx_proof_wrapper(&proof, &secp)
 	}
 
 	pub fn retrieve_ownership_proof(

@@ -413,7 +413,7 @@ impl MWCMQSBroker {
 		let serde_json = serde_json::to_string(&slate)
 			.map_err(|e| Error::MqsGenericError(format!("Unable convert Slate to Json, {}", e)))?;
 
-		let message = EncryptedMessage::new(serde_json, &to.address, &pkey, &skey, secp)
+		let message = EncryptedMessage::new(serde_json, &to.address, &pkey, &skey, secp, false)
 			.map_err(|e| Error::GenericError(format!("Unable encrypt slate, {}", e)))?;
 
 		let message_ser = &serde_json::to_string(&message).map_err(|e| {
@@ -472,6 +472,7 @@ impl MWCMQSBroker {
 			&pkey,
 			&skey,
 			secp,
+			false,
 		)
 		.map_err(|e| Error::GenericError(format!("Unable encrypt slate, {}", e)))?;
 
@@ -570,6 +571,7 @@ impl MWCMQSBroker {
 			&pkey,
 			&skey,
 			secp,
+			false,
 		)
 		.map_err(|e| Error::GenericError(format!("Unable encrypt slate, {}", e)))?;
 

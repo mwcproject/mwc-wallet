@@ -38,9 +38,11 @@ use crate::types::{
 	FLAG_NEW_WALLET,
 };
 use crate::Error;
+#[cfg(feature = "grin_proof")]
+use crate::PaymentProof;
 use crate::{
 	wallet_lock, BuiltOutput, InitTxArgs, IssueInvoiceTxArgs, NodeHeightResult,
-	OutputCommitMapping, OwnershipProof, OwnershipProofValidation, PaymentProof, PubKeySignature,
+	OutputCommitMapping, OwnershipProof, OwnershipProofValidation, PubKeySignature,
 	RetrieveTxQueryArgs, ScannedBlockInfo, TxLogEntryType, ViewWallet, WalletInst,
 	WalletLCProvider,
 };
@@ -61,7 +63,6 @@ use std::sync::mpsc::Sender;
 use std::sync::Arc;
 
 const USER_MESSAGE_MAX_LEN: usize = 1000; // We can keep messages as long as we need unless the slate will be too large to operate. 1000 symbols should be enough to keep everybody happy
-use crate::proof::crypto;
 use crate::proof::proofaddress;
 use crate::proof::proofaddress::ProvableAddress;
 use mwc_wallet_util::mwc_core::core::Committed;
@@ -293,6 +294,7 @@ where
 }
 
 /// Retrieve payment proof
+#[cfg(feature = "grin_proof")]
 pub fn retrieve_payment_proof<'a, L, C, K>(
 	wallet_inst: Arc<Mutex<Box<dyn WalletInst<'a, L, C, K>>>>,
 	keychain_mask: Option<&SecretKey>,
@@ -391,7 +393,7 @@ where
 {
 	if id.is_none() && tx_slate_id.is_none() {
 		return Err(Error::PaymentProofRetrieval(
-			"Transaction ID must be specified".into(),
+			"Transaction ID or Slate UUID must be specified".into(),
 		));
 	}
 	wallet_lock!(wallet_inst, w);
@@ -839,8 +841,7 @@ where
 
 		// needs to be stored as we're removing sig data for return trip. this needs to be present
 		// when locking transaction context and updating tx log with excess later
-		context.calculated_excess =
-			Some(ret_slate.calc_excess(keychain.secp(), Some(&keychain), height)?);
+		context.calculated_excess = Some(ret_slate.calc_excess(keychain.secp(), height)?);
 
 		// if self-sending, merge contexts
 		if let Ok(c) = context_res {
@@ -966,7 +967,6 @@ where
 		let temp_context = selection::build_send_tx(
 			w,
 			&keychain,
-			keychain_mask,
 			&mut temp_sl,
 			&args.min_fee,
 			Some(context.fee),
@@ -1016,8 +1016,15 @@ where
 	}
 
 	tx::complete_tx(&mut *w, keychain_mask, &mut sl, 0, &context)?;
-	tx::verify_slate_payment_proof(&mut *w, keychain_mask, &context, &sl)?;
-	tx::update_stored_tx(&mut *w, keychain_mask, &context, &sl, false)?;
+	tx::verify_slate_payment_proof(&mut *w, keychain_mask, &context, &sl, use_test_rng)?;
+	tx::update_stored_tx(
+		&mut *w,
+		keychain_mask,
+		#[cfg(feature = "grin_proof")]
+		&context,
+		&sl,
+		false,
+	)?;
 	tx::update_message(&mut *w, keychain_mask, &sl)?;
 	{
 		let mut batch = w.batch(keychain_mask)?;
@@ -1601,6 +1608,7 @@ where
 
 /// Verify/validate arbitrary payment proof
 /// Returns (whether this wallet is the sender, whether this wallet is the recipient)
+#[cfg(feature = "grin_proof")]
 pub fn verify_payment_proof<'a, L, C, K>(
 	wallet_inst: Arc<Mutex<Box<dyn WalletInst<'a, L, C, K>>>>,
 	keychain_mask: Option<&SecretKey>,

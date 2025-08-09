@@ -16,9 +16,11 @@ use crate::core::libtx::secp_ser;
 use crate::keychain::Identifier;
 use crate::libwallet::dalek_ser;
 use crate::libwallet::Error;
-use crate::libwallet::{
-	ParticipantMessages, StoredProofInfo, TxLogEntry, TxLogEntryType, VersionedSlate,
-};
+use crate::libwallet::{ParticipantMessages, TxLogEntry, TxLogEntryType, VersionedSlate};
+
+#[cfg(feature = "grin_proof")]
+use crate::libwallet::StoredProofInfo;
+
 use crate::util::secp::key::{PublicKey, SecretKey};
 use crate::util::secp::pedersen;
 use crate::util::{from_hex, ToHex};
@@ -403,6 +405,7 @@ pub struct TxLogEntryAPI {
 	pub kernel_offset: Option<pedersen::Commitment>,
 	#[serde(default)]
 	pub kernel_lookup_min_height: Option<u64>,
+	#[cfg(feature = "grin_proof")]
 	#[serde(default)]
 	pub payment_proof: Option<StoredProofInfo>,
 	#[serde(default)]
@@ -438,6 +441,7 @@ impl TxLogEntryAPI {
 			kernel_excess: tle.kernel_excess.clone(),
 			kernel_offset: tle.kernel_offset.clone(),
 			kernel_lookup_min_height: tle.kernel_lookup_min_height.clone(),
+			#[cfg(feature = "grin_proof")]
 			payment_proof: tle.payment_proof.clone(),
 			input_commits: tle.input_commits.iter().map(|c| c.0.to_hex()).collect(),
 			output_commits: tle.output_commits.iter().map(|c| c.0.to_hex()).collect(),

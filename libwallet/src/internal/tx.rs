@@ -29,10 +29,14 @@ use crate::mwc_util::Mutex;
 use crate::proof::crypto;
 use crate::proof::crypto::Hex;
 use crate::proof::proofaddress;
-use crate::proof::proofaddress::{get_address_index, ProvableAddress};
+#[cfg(feature = "grin_proof")]
+use crate::proof::proofaddress::get_address_index;
+use crate::proof::proofaddress::ProvableAddress;
 use crate::proof::tx_proof::{push_proof_for_slate, TxProof};
 use crate::slate::Slate;
-use crate::types::{Context, NodeClient, StoredProofInfo, TxLogEntryType, WalletBackend};
+#[cfg(feature = "grin_proof")]
+use crate::types::StoredProofInfo;
+use crate::types::{Context, NodeClient, TxLogEntryType, WalletBackend};
 use crate::Error;
 use crate::InitTxArgs;
 use ed25519_dalek::Keypair as DalekKeypair;
@@ -199,7 +203,6 @@ where
 	let mut context = selection::build_send_tx(
 		wallet,
 		&keychain,
-		keychain_mask,
 		slate,
 		min_fee,
 		fixed_fee,
@@ -310,8 +313,7 @@ where
 
 		// update excess in stored transaction
 		let mut batch = wallet.batch(keychain_mask)?;
-		tx.kernel_excess =
-			Some(slate.calc_excess(keychain.secp(), Some(&keychain), current_height)?);
+		tx.kernel_excess = Some(slate.calc_excess(keychain.secp(), current_height)?);
 		batch.save_tx_log_entry(tx.clone(), &parent_key_id)?;
 		batch.commit()?;
 	}
@@ -497,7 +499,7 @@ where
 pub fn update_stored_tx<'a, T: ?Sized, C, K>(
 	wallet: &mut T,
 	keychain_mask: Option<&SecretKey>,
-	context: &Context,
+	#[cfg(feature = "grin_proof")] context: &Context,
 	slate: &Slate,
 	is_invoiced: bool,
 ) -> Result<(), Error>
@@ -550,18 +552,18 @@ where
 	let (current_height, _, _) = wallet.w2n_client().get_chain_tip()?;
 
 	if slate.compact_slate {
-		tx.kernel_excess =
-			Some(slate.calc_excess(keychain.secp(), Some(&keychain), current_height)?);
+		tx.kernel_excess = Some(slate.calc_excess(keychain.secp(), current_height)?);
 	} else {
 		tx.kernel_excess = Some(slate.tx_or_err()?.body.kernels[0].excess);
 	}
 
+	#[cfg(feature = "grin_proof")]
 	if let Some(ref p) = slate.clone().payment_proof {
 		let derivation_index = match context.payment_proof_derivation_index {
 			Some(i) => i,
 			None => get_address_index(),
 		};
-		let excess = slate.calc_excess(keychain.secp(), Some(&keychain), current_height)?;
+		let excess = slate.calc_excess(keychain.secp(), current_height)?;
 		//sender address.
 		let sender_address_secret_key =
 			proofaddress::payment_proof_address_secret(&keychain, Some(derivation_index))?;
@@ -715,6 +717,7 @@ pub fn verify_slate_payment_proof<'a, T: ?Sized, C, K>(
 	keychain_mask: Option<&SecretKey>,
 	context: &Context,
 	slate: &Slate,
+	use_test_rng: bool,
 ) -> Result<(), Error>
 where
 	T: WalletBackend<'a, C, K>,
@@ -740,8 +743,9 @@ where
 		));
 	}
 
+	#[cfg(feature = "grin_proof")]
 	let orig_proof_info = tx_vec[0].clone().payment_proof;
-
+	#[cfg(feature = "grin_proof")]
 	if orig_proof_info.is_some() && slate.payment_proof.is_none() {
 		return Err(Error::PaymentProof(
 			"Expected Payment Proof for this Transaction is not present".to_owned(),
@@ -749,6 +753,7 @@ where
 	}
 
 	if let Some(ref p) = slate.clone().payment_proof {
+		#[cfg(feature = "grin_proof")]
 		let orig_proof_info = match orig_proof_info {
 			Some(p) => p.clone(),
 			None => {
@@ -779,6 +784,7 @@ where
 			));
 		}
 
+		#[cfg(feature = "grin_proof")]
 		if orig_proof_info.receiver_address.public_key != p.receiver_address.public_key
 			&& orig_proof_info.receiver_address.public_key != p.sender_address.public_key
 		{
@@ -792,7 +798,7 @@ where
 		//build the message which was used to generated receiver signature.
 		let msg = payment_proof_message(
 			slate.amount,
-			&slate.calc_excess(keychain.secp(), Some(&keychain), current_height)?,
+			&slate.calc_excess(keychain.secp(), current_height)?,
 			orig_sender_a.public_key.clone(),
 		)?;
 		let sig = match p.clone().receiver_signature {
@@ -806,20 +812,19 @@ where
 		//verify the proof signature
 		if p.receiver_address.public_key.len() == 52 {
 			let signature_ser = util::from_hex(&sig).map_err(|e| {
-				Error::TxProofGenericError(format!(
+				Error::PaymentProof(format!(
 					"Unable to build signature from HEX {}, {}",
 					&sig, e
 				))
 			})?;
-			let signature = Signature::from_der(keychain.secp(), &signature_ser).map_err(|e| {
-				Error::TxProofGenericError(format!("Unable to build signature, {}", e))
-			})?;
+			let signature = Signature::from_der(keychain.secp(), &signature_ser)
+				.map_err(|e| Error::PaymentProof(format!("Unable to build signature, {}", e)))?;
 			debug!(
 				"the receiver pubkey is {}",
 				p.receiver_address.clone().public_key
 			);
 			let receiver_pubkey = p.receiver_address.public_key().map_err(|e| {
-				Error::TxProofGenericError(format!("Unable to get receiver address, {}", e))
+				Error::PaymentProof(format!("Unable to get receiver address, {}", e))
 			})?;
 			crypto::verify_signature(&msg, &signature, &receiver_pubkey, keychain.secp())
 				.map_err(|e| Error::TxProofVerifySignature(format!("{}", e)))?;
@@ -827,7 +832,7 @@ where
 			//the signature is generated using Dalek public key
 
 			let dalek_sig_vec = util::from_hex(&sig).map_err(|e| {
-				Error::TxProofGenericError(format!(
+				Error::PaymentProof(format!(
 					"Unable to deserialize tor payment proof signature, {}",
 					e
 				))
@@ -835,14 +840,14 @@ where
 
 			let dalek_sig_vec: &[u8] = &dalek_sig_vec;
 			let dalek_sig = DalekSignature::try_from(dalek_sig_vec).map_err(|e| {
-				Error::TxProofGenericError(format!(
+				Error::PaymentProof(format!(
 					"Unable to deserialize tor payment proof receiver signature, {}",
 					e
 				))
 			})?;
 
 			let receiver_dalek_pub_key = p.receiver_address.tor_public_key().map_err(|e| {
-				Error::TxProofGenericError(format!(
+				Error::PaymentProof(format!(
 					"Unable to deserialize tor payment proof receiver address, {}",
 					e
 				))
@@ -864,7 +869,7 @@ where
 			//this should be a tor sending
 			let onion_address = OnionV3Address::from_private(&sender_address_secret_key.0)
 				.map_err(|e| {
-					Error::TxProofGenericError(format!(
+					Error::PaymentProof(format!(
 						"Unable to generate onion address for sender address, {}",
 						e
 					))
@@ -878,6 +883,7 @@ where
 			&orig_sender_a,
 			onion_address_str,
 			keychain.secp(),
+			use_test_rng,
 		)
 		.map_err(|e| {
 			Error::TxProofVerifySignature(format!("Cannot create tx_proof using slate, {}", e))

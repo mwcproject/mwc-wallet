@@ -85,3 +85,4 @@ libc = { version = "0.2.69", default-features = false }
 [features]
 # real dependency: libp2p = ["dep:mwc-libp2p"]
 libp2p = []
+grin_proof = []

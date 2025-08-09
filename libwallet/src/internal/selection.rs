@@ -26,12 +26,14 @@ use crate::mwc_core::libtx::{
 use crate::mwc_keychain::{Identifier, Keychain};
 use crate::mwc_util::secp::key::SecretKey;
 use crate::mwc_util::secp::pedersen::Commitment;
+#[cfg(feature = "grin_proof")]
 use crate::proof::proofaddress;
 use crate::slate::Slate;
 use crate::types::*;
 use mwc_wallet_util::mwc_core::libtx::{inputs_for_fee_points, inputs_for_minimal_fee};
 use mwc_wallet_util::mwc_util as util;
-use std::collections::{HashMap, HashSet};
+use mwc_wallet_util::mwc_util::ToHex;
+use std::collections::HashSet;
 
 /// Initialize a transaction on the sender side, returns a corresponding
 /// libwallet transaction slate with the appropriate inputs selected,
@@ -41,7 +43,6 @@ use std::collections::{HashMap, HashSet};
 pub fn build_send_tx<'a, T: ?Sized, C, K>(
 	wallet: &mut T,
 	keychain: &K,
-	keychain_mask: Option<&SecretKey>,
 	slate: &mut Slate,
 	min_fee: &Option<u64>,
 	fixed_fee: Option<u64>, // Max fee to limit fee for late_lock case
@@ -126,15 +127,9 @@ where
 		context.add_input(&input.key_id, &input.mmr_index, input.value);
 	}
 
-	let mut commits: HashMap<Identifier, Option<String>> = HashMap::new();
-
 	// Store change output(s) and cached commits
 	for (change_amount, id, mmr_index) in &change_amounts_derivations {
 		context.add_output(&id, &mmr_index, *change_amount);
-		commits.insert(
-			id.clone(),
-			wallet.calc_commit_for_cache(keychain_mask, *change_amount, &id)?,
-		);
 	}
 
 	Ok(context)
@@ -156,26 +151,30 @@ where
 	C: NodeClient + 'a,
 	K: Keychain + 'a,
 {
-	let mut output_commits: HashMap<Identifier, (Option<String>, u64)> = HashMap::new();
+	let mut output_commits: Vec<(Identifier, Commitment, u64)> = Vec::new();
 	// Store cached commits before locking wallet
-	let mut total_change = 0;
-	for (id, _, change_amount) in &context.get_outputs() {
-		output_commits.insert(
+	for (id, _, change_amount) in context.get_outputs() {
+		output_commits.push((
 			id.clone(),
-			(
-				wallet.calc_commit_for_cache(keychain_mask, *change_amount, &id)?,
-				*change_amount,
-			),
-		);
-		total_change += change_amount;
+			wallet.calc_commit(keychain_mask, change_amount, &id)?,
+			change_amount,
+		));
 	}
 
-	debug!("Change amount is: {}", total_change);
+	let mut input_commits: Vec<(Identifier, Option<u64>, Commitment, u64)> = Vec::new();
+	// Store cached commits before locking wallet
+	for (id, mmr, amount) in context.get_inputs() {
+		input_commits.push((
+			id.clone(),
+			mmr,
+			wallet.calc_commit(keychain_mask, amount, &id)?,
+			amount,
+		));
+	}
 
 	let keychain = wallet.keychain(keychain_mask)?;
 
 	let tx_entry = {
-		let lock_inputs = context.get_inputs();
 		let messages = Some(slate.participant_messages());
 		let slate_id = slate.id;
 		let height = current_height;
@@ -216,7 +215,7 @@ where
 
 		t.address = address;
 
-		if let Ok(e) = slate.calc_excess(keychain.secp(), Some(&keychain), current_height) {
+		if let Ok(e) = slate.calc_excess(keychain.secp(), current_height) {
 			t.kernel_excess = Some(e)
 		}
 		if let Some(e) = excess_override {
@@ -225,18 +224,20 @@ where
 		}
 		t.kernel_lookup_min_height = Some(current_height);
 
-		let mut amount_debited = 0;
-		t.num_inputs = lock_inputs.len();
+		t.num_inputs = context.input_commits.len();
 		t.input_commits = context.input_commits.clone();
 
 		if context.late_lock_args.is_none() || !t.input_commits.is_empty() {
-			for id in lock_inputs {
-				let mut coin = batch.get(&id.0, &id.1)?;
+			t.num_inputs = input_commits.len();
+			t.input_commits.clear();
+			t.amount_debited = 0;
+			for (id, mmr, commit, amount) in input_commits {
+				let mut coin = batch.get(&id, &mmr)?;
 				coin.tx_log_entry = Some(t.id);
-				amount_debited += coin.value;
+				t.amount_debited += amount;
 				batch.lock_output(&mut coin)?;
+				t.input_commits.push(commit);
 			}
-			t.amount_debited = amount_debited;
 		} else {
 			// It is lock later case. No inputs does exist yet.
 			t.amount_debited = slate.amount;
@@ -245,6 +246,7 @@ where
 		t.messages = messages;
 
 		// store extra payment proof info, if required
+		#[cfg(feature = "grin_proof")]
 		if let Some(ref p) = slate.payment_proof {
 			let sender_address_path = match context.payment_proof_derivation_index {
 				Some(p) => p,
@@ -270,16 +272,17 @@ where
 		};
 
 		// write the output representing our change
-		t.num_outputs = context.output_commits.len();
-		t.output_commits = context.output_commits.clone();
-		for (id, _, _) in &context.get_outputs() {
-			let (commit, change_amount) = output_commits.get(&id).unwrap().clone();
+		t.num_outputs = 0;
+		t.output_commits.clear();
+		for (id, commit, change_amount) in output_commits {
 			t.amount_credited += change_amount;
+			t.num_outputs += 1;
+			t.output_commits.push(commit.clone());
 			batch.save(OutputData {
 				root_key_id: parent_key_id.clone(),
 				key_id: id.clone(),
 				n_child: id.to_path().last_path_index(),
-				commit: commit,
+				commit: Some(ToHex::to_hex(&commit)),
 				mmr_index: None,
 				value: change_amount,
 				status: OutputStatus::Unconfirmed,
@@ -436,13 +439,9 @@ where
 	let mut commit_vec = Vec::new();
 	let mut commit_ped = Vec::new();
 	for kva in &key_vec_amounts {
-		let commit = wallet.calc_commit_for_cache(keychain_mask, kva.1, &kva.0)?;
-		if let Some(cm) = commit.clone() {
-			commit_ped.push(Commitment::from_vec(util::from_hex(&cm).map_err(|e| {
-				Error::GenericError(format!("Output commit parse error, {}", e))
-			})?));
-		}
-		commit_vec.push(commit);
+		let commit = wallet.calc_commit(keychain_mask, kva.1, &kva.0)?;
+		commit_ped.push(commit);
+		commit_vec.push(Some(commit.to_hex()));
 	}
 
 	let mut batch = wallet.batch(keychain_mask)?;
@@ -465,7 +464,7 @@ where
 	}
 
 	// when invoicing, this will be invalid
-	if let Ok(e) = slate.calc_excess(keychain.secp(), Some(&keychain), current_height) {
+	if let Ok(e) = slate.calc_excess(keychain.secp(), current_height) {
 		t.kernel_excess = Some(e)
 	}
 	t.kernel_lookup_min_height = Some(current_height);
@@ -795,7 +794,7 @@ where
 			&& change / (num_change_outputs as u64) < 100_000_000
 		{
 			warn!("Transaction requested has {} change outputs with change amount {}. We don't want create many small outputs, the number of change outputs is reduced to 1", num_change_outputs, change);
-			1
+			std::cmp::max((change / 100_000_000) as usize, 1)
 		} else {
 			num_change_outputs
 		};

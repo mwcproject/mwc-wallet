@@ -19,7 +19,6 @@ use crate::mwc_core::core::Output;
 use crate::mwc_core::libtx::secp_ser;
 use crate::mwc_keychain::{BlindingFactor, Identifier};
 use crate::mwc_util::secp::pedersen;
-use crate::proof::proofaddress;
 use crate::proof::proofaddress::ProvableAddress;
 use crate::slate_versions::SlateVersion;
 use crate::types::OutputData;
@@ -114,10 +113,7 @@ pub struct InitTxArgs {
 	#[serde(default)]
 	pub ttl_blocks: Option<u64>,
 	/// If set, require a payment proof for the particular recipient
-	#[serde(
-		serialize_with = "proofaddress::option_as_string",
-		deserialize_with = "proofaddress::option_proof_address_from_string"
-	)]
+	#[serde(serialize_with = "ProvableAddress::serialize_option_as_string")]
 	#[serde(default)]
 	pub payment_proof_recipient_address: Option<ProvableAddress>,
 	/// address of another party to store in tx history.
@@ -147,6 +143,7 @@ pub struct InitTxArgs {
 	pub outputs: Option<HashSet<String>>, // outputs to include into the transaction
 	/// Slatepack recipient. If defined will send as a slatepack. Otherwise as not encrypted. Will be ignored for MQS
 	/// ProvableAddress has to be tor (DalekPublicKey) address
+	#[serde(serialize_with = "ProvableAddress::serialize_option_as_string")]
 	pub slatepack_recipient: Option<ProvableAddress>,
 	/// if flagged, create the transaction as late-locked, i.e. don't select actual
 	/// inputs until just before finalization. This feature make sense for files and slatepacks,
@@ -451,6 +448,7 @@ pub struct VersionInfo {
 }
 
 /// Packaged Payment Proof
+#[cfg(feature = "grin_proof")]
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct PaymentProof {
 	/// Amount

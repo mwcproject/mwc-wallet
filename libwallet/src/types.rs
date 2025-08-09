@@ -31,7 +31,6 @@ use crate::mwc_util::secp::key::{PublicKey, SecretKey, ZERO_KEY};
 use crate::mwc_util::secp::pedersen::Commitment;
 use crate::mwc_util::secp::{self, pedersen, Secp256k1};
 use crate::mwc_util::{ToHex, ZeroingString};
-use crate::proof::proofaddress::ProvableAddress;
 use crate::slate::ParticipantMessages;
 use crate::InitTxArgs;
 #[cfg(feature = "libp2p")]
@@ -184,12 +183,12 @@ where
 	fn w2n_client(&mut self) -> &mut C;
 
 	/// return the commit for caching if allowed, none otherwise
-	fn calc_commit_for_cache(
-		&mut self,
+	fn calc_commit(
+		&self,
 		keychain_mask: Option<&SecretKey>,
 		amount: u64,
 		id: &Identifier,
-	) -> Result<Option<String>, Error>;
+	) -> Result<Commitment, Error>;
 
 	/// Set parent key id by stored account name
 	fn set_parent_key_id_by_name(&mut self, label: &str) -> Result<(), Error>;
@@ -1084,6 +1083,7 @@ pub struct TxLogEntry {
 	#[serde(default)]
 	pub kernel_lookup_min_height: Option<u64>,
 	/// Additional info needed to stored payment proof
+	#[cfg(feature = "grin_proof")]
 	#[serde(default)]
 	pub payment_proof: Option<StoredProofInfo>,
 	/// Input commits as Strings, defined by send
@@ -1145,6 +1145,7 @@ impl TxLogEntry {
 			kernel_excess: None,
 			kernel_offset: None,
 			kernel_lookup_min_height: None,
+			#[cfg(feature = "grin_proof")]
 			payment_proof: None,
 			input_commits: vec![],
 			output_commits: vec![],
@@ -1174,7 +1175,7 @@ impl TxLogEntry {
 		kernel_excess: Option<pedersen::Commitment>,
 		kernel_offset: Option<pedersen::Commitment>,
 		kernel_lookup_min_height: Option<u64>,
-		payment_proof: Option<StoredProofInfo>,
+		#[cfg(feature = "grin_proof")] payment_proof: Option<StoredProofInfo>,
 		input_commits: Vec<pedersen::Commitment>,
 		output_commits: Vec<pedersen::Commitment>,
 	) -> Self {
@@ -1199,6 +1200,7 @@ impl TxLogEntry {
 			kernel_excess,
 			kernel_offset,
 			kernel_lookup_min_height,
+			#[cfg(feature = "grin_proof")]
 			payment_proof,
 			input_commits,
 			output_commits,
@@ -1268,6 +1270,7 @@ impl TxLogEntry {
 
 /// Payment proof information. Differs from what is sent via
 /// the slate
+#[cfg(feature = "grin_proof")]
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct StoredProofInfo {
 	/// receiver address
@@ -1282,6 +1285,7 @@ pub struct StoredProofInfo {
 	pub sender_signature: Option<String>,
 }
 
+#[cfg(feature = "grin_proof")]
 impl ser::Writeable for StoredProofInfo {
 	fn write<W: ser::Writer>(&self, writer: &mut W) -> Result<(), ser::Error> {
 		let data = serde_json::to_vec(self).map_err(|e| {
@@ -1297,6 +1301,7 @@ impl ser::Writeable for StoredProofInfo {
 	}
 }
 
+#[cfg(feature = "grin_proof")]
 impl ser::Readable for StoredProofInfo {
 	fn read<R: ser::Reader>(reader: &mut R) -> Result<StoredProofInfo, ser::Error> {
 		let data = reader.read_bytes_len_prefix()?;
