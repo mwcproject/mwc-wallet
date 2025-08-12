@@ -34,7 +34,6 @@ use mwc_wallet_libwallet::{Slate, SlateVersion, VersionedSlate};
 use mwc_wallet_util::mwc_core::global;
 use mwc_wallet_util::mwc_util::secp::key::SecretKey;
 use mwc_wallet_util::mwc_util::secp::Secp256k1;
-use regex::Regex;
 use std::collections::HashMap;
 use std::io::Read;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -44,8 +43,6 @@ use std::time::Duration;
 use std::{thread, time};
 
 extern crate nanoid;
-
-const TIMEOUT_ERROR_REGEX: &str = r"timed out";
 
 // MQS enforced to have a single instance. And different compoments migth manage
 // instances separatlly.
@@ -787,7 +784,7 @@ impl MWCMQSBroker {
 					break;
 				}
 
-				let secs = if !connected { 2 } else { 120 };
+				let secs = if !connected { 15 } else { 120 };
 				let cl = reqwest::blocking::Client::builder()
 					.timeout(Duration::from_secs(secs))
 					.build();
@@ -808,9 +805,7 @@ impl MWCMQSBroker {
 
 				if !resp_result.is_ok() {
 					let err_message = format!("{:?}", resp_result);
-					let re = Regex::new(TIMEOUT_ERROR_REGEX).unwrap();
-					let captures = re.captures(&err_message);
-					if captures.is_none() {
+					if !err_message.contains("source: TimedOut") {
 						// This was not a timeout. Sleep first.
 						if connected {
 							is_in_warning = true;
@@ -834,7 +829,7 @@ impl MWCMQSBroker {
 						delcount = 0;
 						if !connected {
 							if is_in_warning {
-								self.do_log_info(format!(
+								self.do_log_warn(format!(
 									"INFO: mwcmqs listener [{}] reestablished connection. tid=[{}]",
 									cloned_cloned_address.get_stripped(),
 									nanoid
@@ -852,9 +847,10 @@ impl MWCMQSBroker {
 							cloned_cloned_address.get_stripped(),
 							nanoid
 						));
+						connected = true;
 					} else if !connected && !isnginxerror {
 						if is_in_warning {
-							self.do_log_info(format!(
+							self.do_log_warn(format!(
 								"INFO: listener [{}] reestablished connection.",
 								cloned_cloned_address.get_stripped()
 							));
