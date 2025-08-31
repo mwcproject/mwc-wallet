@@ -28,7 +28,7 @@ use std::sync::atomic::Ordering;
 use std::thread;
 use std::time::Duration;
 
-use mwc_wallet_libwallet::{InitTxArgs, NodeClient};
+use mwc_wallet_libwallet::InitTxArgs;
 
 use mwc_wallet_util::mwc_core::global;
 
@@ -154,14 +154,8 @@ fn file_exchange_test_impl(test_dir: &str) -> Result<(), wallet::Error> {
 		w.set_parent_key_id_by_name("account1")?;
 	}
 
-	let height = {
-		wallet_inst!(wallet2, w);
-		let (height, _, _) = w.w2n_client().get_chain_tip().unwrap();
-		height
-	};
-
 	let mut slate = PathToSlateGetter::build_form_path((&send_file).into())
-		.get_tx(None, height, &secp)?
+		.get_tx(None, &secp)?
 		.to_slate()?
 		.0;
 	let mut naughty_slate = slate.clone();
@@ -187,7 +181,7 @@ fn file_exchange_test_impl(test_dir: &str) -> Result<(), wallet::Error> {
 	// wallet 1 finalises and posts
 	wallet::controller::owner_single_use(Some(wallet1.clone()), mask1, None, |api, m| {
 		let mut slate = PathToSlateGetter::build_form_path(receive_file.into())
-			.get_tx(None, height, &secp)?
+			.get_tx(None, &secp)?
 			.to_slate()?
 			.0;
 		api.verify_slate_messages(m, &slate)?;

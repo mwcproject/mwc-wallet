@@ -584,9 +584,8 @@ pub fn publish_transaction<C: NodeClient>(
 	tx: &tx::Transaction,
 	fluff: bool,
 ) -> Result<(), Error> {
-	let (height, _, _) = node_client.get_chain_tip()?;
 	let secp = Secp256k1::with_caps(ContextFlag::Commit);
-	tx.validate(Weighting::AsTransaction, height, &secp)
+	tx.validate(Weighting::AsTransaction, &secp)
 		.map_err(|e| Error::UnexpectedAction(format!("slate is not valid, {}", e)))?;
 
 	node_client.post_tx(tx, fluff)?;

@@ -2432,7 +2432,7 @@ where
 		)?
 		.0;
 		owner::tx_lock_outputs(wallet, keychain_mask, &slate, address, 0, false)?;
-		slate = owner::finalize_tx(wallet, keychain_mask, &slate, false, false)
+		slate = owner::finalize_tx(wallet, keychain_mask, &slate, false, false, false)
 			.unwrap()
 			.0;
 	}

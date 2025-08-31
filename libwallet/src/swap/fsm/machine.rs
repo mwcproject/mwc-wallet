@@ -69,7 +69,6 @@ impl<'a> StateMachine<'a> {
 		input: Input,
 		swap: &mut Swap,
 		context: &Context,
-		height: u64,
 		tx_conf: &SwapTransactionsConfirmations,
 		secp: &Secp256k1,
 	) -> Result<StateProcessRespond, Error> {
@@ -85,7 +84,7 @@ impl<'a> StateMachine<'a> {
 				"Unknown state {:?}",
 				swap.state
 			)))?;
-		let mut respond = state.process(input, swap, context, height, tx_conf, secp)?;
+		let mut respond = state.process(input, swap, context, tx_conf, secp)?;
 
 		while respond.next_state_id != swap.state {
 			debug!("New state: {:?}", swap.state);
@@ -97,7 +96,7 @@ impl<'a> StateMachine<'a> {
 					"Unknown state {:?}",
 					swap.state
 				)))?;
-			respond = state.process(Input::Check, swap, context, height, tx_conf, secp)?;
+			respond = state.process(Input::Check, swap, context, tx_conf, secp)?;
 		}
 		respond.journal = swap.journal.clone();
 

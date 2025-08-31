@@ -151,7 +151,6 @@ impl SlateSender for MwcMqsChannel {
 		_slatepack_secret: &DalekSecretKey,
 		_recipients: Option<DalekPublicKey>,
 		_other_wallet_version: Option<(SlateVersion, Option<String>)>,
-		_height: u64,
 		secp: &Secp256k1,
 	) -> Result<Slate, Error> {
 		if !send_tx {
@@ -764,7 +763,7 @@ impl MWCMQSBroker {
 		));
 
 		if is_error {
-			print!(
+			println!(
 				"ERROR: Failed to start mwcmqs subscriber. Error connecting to {}:{}",
 				self.mwcmqs_domain, self.mwcmqs_port
 			);
@@ -983,7 +982,7 @@ impl MWCMQSBroker {
 							|| msgvec[itt] == "closenewlogin"
 						{
 							if cloned_running.load(Ordering::SeqCst) {
-								print!("\nERROR: new login detected. mwcmqs listener will stop!",);
+								println!("\nERROR: new login detected. mwcmqs listener will stop!",);
 							}
 							break_out = true;
 							break; // stop listener

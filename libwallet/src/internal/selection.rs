@@ -215,7 +215,7 @@ where
 
 		t.address = address;
 
-		if let Ok(e) = slate.calc_excess(keychain.secp(), current_height) {
+		if let Ok(e) = slate.calc_excess(keychain.secp()) {
 			t.kernel_excess = Some(e)
 		}
 		if let Some(e) = excess_override {
@@ -464,7 +464,7 @@ where
 	}
 
 	// when invoicing, this will be invalid
-	if let Ok(e) = slate.calc_excess(keychain.secp(), current_height) {
+	if let Ok(e) = slate.calc_excess(keychain.secp()) {
 		t.kernel_excess = Some(e)
 	}
 	t.kernel_lookup_min_height = Some(current_height);

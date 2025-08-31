@@ -57,7 +57,6 @@ impl State for SellerOfferCreated {
 		input: Input,
 		swap: &mut Swap,
 		_context: &Context,
-		_height: u64,
 		_tx_conf: &SwapTransactionsConfirmations,
 		_secp: &Secp256k1,
 	) -> Result<StateProcessRespond, Error> {
@@ -128,7 +127,6 @@ where
 		input: Input,
 		swap: &mut Swap,
 		_context: &Context,
-		_height: u64,
 		_tx_conf: &SwapTransactionsConfirmations,
 		_secp: &Secp256k1,
 	) -> Result<StateProcessRespond, Error> {
@@ -226,7 +224,6 @@ impl<K: Keychain> State for SellerWaitingForAcceptanceMessage<K> {
 		input: Input,
 		swap: &mut Swap,
 		context: &Context,
-		height: u64,
 		_tx_conf: &SwapTransactionsConfirmations,
 		_secp: &Secp256k1,
 	) -> Result<StateProcessRespond, Error> {
@@ -268,26 +265,14 @@ impl<K: Keychain> State for SellerWaitingForAcceptanceMessage<K> {
 						true => {
 							let btc_update =
 								secondary_update.unwrap_btc()?.unwrap_accept_offer()?;
-							SellApi::accepted_offer(
-								&*self.keychain,
-								swap,
-								context,
-								accept_offer,
-								height,
-							)?;
+							SellApi::accepted_offer(&*self.keychain, swap, context, accept_offer)?;
 							let btc_data = swap.secondary_data.unwrap_btc_mut()?;
 							btc_data.accepted_offer(btc_update)?;
 						}
 						_ => {
 							let eth_update =
 								secondary_update.unwrap_eth()?.unwrap_accept_offer()?;
-							SellApi::accepted_offer(
-								&*self.keychain,
-								swap,
-								context,
-								accept_offer,
-								height,
-							)?;
+							SellApi::accepted_offer(&*self.keychain, swap, context, accept_offer)?;
 							let eth_data = swap.secondary_data.unwrap_eth_mut()?;
 							eth_data.accepted_offer(eth_update)?;
 						}
@@ -379,7 +364,6 @@ where
 		input: Input,
 		swap: &mut Swap,
 		_context: &Context,
-		_height: u64,
 		tx_conf: &SwapTransactionsConfirmations,
 		secp: &Secp256k1,
 	) -> Result<StateProcessRespond, Error> {
@@ -533,7 +517,6 @@ where
 		input: Input,
 		swap: &mut Swap,
 		_context: &Context,
-		_height: u64,
 		tx_conf: &SwapTransactionsConfirmations,
 		_secp: &Secp256k1,
 	) -> Result<StateProcessRespond, Error> {
@@ -652,7 +635,6 @@ impl<'a, K: Keychain> State for SellerWaitingForLockConfirmations<'a, K> {
 		input: Input,
 		swap: &mut Swap,
 		context: &Context,
-		height: u64,
 		tx_conf: &SwapTransactionsConfirmations,
 		secp: &Secp256k1,
 	) -> Result<StateProcessRespond, Error> {
@@ -782,7 +764,7 @@ impl<'a, K: Keychain> State for SellerWaitingForLockConfirmations<'a, K> {
 				// We can accept message durinf the wait. Byers can already get a confirmation and sending a message
 				if swap.adaptor_signature.is_none() {
 					let (_, init_redeem, _) = message.unwrap_init_redeem()?;
-					SellApi::init_redeem(&*self.keychain, swap, context, init_redeem, height)?;
+					SellApi::init_redeem(&*self.keychain, swap, context, init_redeem)?;
 				}
 				debug_assert!(swap.adaptor_signature.is_some());
 				swap.add_journal_message("Init Redeem message is accepted".to_string());
@@ -836,7 +818,6 @@ impl<K: Keychain> State for SellerWaitingForInitRedeemMessage<K> {
 		input: Input,
 		swap: &mut Swap,
 		context: &Context,
-		height: u64,
 		tx_conf: &SwapTransactionsConfirmations,
 		_secp: &Secp256k1,
 	) -> Result<StateProcessRespond, Error> {
@@ -888,7 +869,7 @@ impl<K: Keychain> State for SellerWaitingForInitRedeemMessage<K> {
 			Input::IncomeMessage(message) => {
 				if swap.adaptor_signature.is_none() {
 					let (_, init_redeem, _) = message.unwrap_init_redeem()?;
-					SellApi::init_redeem(&*self.keychain, swap, context, init_redeem, height)?;
+					SellApi::init_redeem(&*self.keychain, swap, context, init_redeem)?;
 				}
 				debug_assert!(swap.adaptor_signature.is_some());
 				swap.add_journal_message("Init Redeem message is accepted".to_string());
@@ -957,7 +938,6 @@ where
 		input: Input,
 		swap: &mut Swap,
 		_context: &Context,
-		_height: u64,
 		tx_conf: &SwapTransactionsConfirmations,
 		_secp: &Secp256k1,
 	) -> Result<StateProcessRespond, Error> {
@@ -1145,7 +1125,6 @@ where
 		input: Input,
 		swap: &mut Swap,
 		_context: &Context,
-		_height: u64,
 		_tx_conf: &SwapTransactionsConfirmations,
 		_secp: &Secp256k1,
 	) -> Result<StateProcessRespond, Error> {
@@ -1304,7 +1283,6 @@ where
 		input: Input,
 		swap: &mut Swap,
 		context: &Context,
-		_height: u64,
 		tx_conf: &SwapTransactionsConfirmations,
 		_secp: &Secp256k1,
 	) -> Result<StateProcessRespond, Error> {
@@ -1437,7 +1415,6 @@ where
 		input: Input,
 		swap: &mut Swap,
 		_context: &Context,
-		_height: u64,
 		tx_conf: &SwapTransactionsConfirmations,
 		_secp: &Secp256k1,
 	) -> Result<StateProcessRespond, Error> {
@@ -1568,7 +1545,6 @@ impl State for SellerSwapComplete {
 		input: Input,
 		_swap: &mut Swap,
 		_context: &Context,
-		_height: u64,
 		_tx_conf: &SwapTransactionsConfirmations,
 		_secp: &Secp256k1,
 	) -> Result<StateProcessRespond, Error> {
@@ -1618,7 +1594,6 @@ impl State for SellerCancelled {
 		input: Input,
 		_swap: &mut Swap,
 		_context: &Context,
-		_height: u64,
 		_tx_conf: &SwapTransactionsConfirmations,
 		_secp: &Secp256k1,
 	) -> Result<StateProcessRespond, Error> {
@@ -1692,7 +1667,6 @@ where
 		input: Input,
 		swap: &mut Swap,
 		_context: &Context,
-		_height: u64,
 		_tx_conf: &SwapTransactionsConfirmations,
 		_secp: &Secp256k1,
 	) -> Result<StateProcessRespond, Error> {
@@ -1782,7 +1756,6 @@ where
 		input: Input,
 		swap: &mut Swap,
 		_context: &Context,
-		_height: u64,
 		tx_conf: &SwapTransactionsConfirmations,
 		_secp: &Secp256k1,
 	) -> Result<StateProcessRespond, Error> {
@@ -1864,7 +1837,6 @@ impl State for SellerWaitingForRefundConfirmations {
 		input: Input,
 		swap: &mut Swap,
 		_context: &Context,
-		_height: u64,
 		tx_conf: &SwapTransactionsConfirmations,
 		_secp: &Secp256k1,
 	) -> Result<StateProcessRespond, Error> {
@@ -1948,7 +1920,6 @@ impl State for SellerCancelledRefunded {
 		input: Input,
 		_swap: &mut Swap,
 		_context: &Context,
-		_height: u64,
 		_tx_conf: &SwapTransactionsConfirmations,
 		_secp: &Secp256k1,
 	) -> Result<StateProcessRespond, Error> {

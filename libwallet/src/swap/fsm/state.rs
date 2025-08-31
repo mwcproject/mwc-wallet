@@ -440,7 +440,6 @@ pub trait State {
 		input: Input,
 		swap: &mut Swap,
 		context: &Context,
-		height: u64,
 		tx_conf: &SwapTransactionsConfirmations,
 		secp: &Secp256k1,
 	) -> Result<StateProcessRespond, Error>;

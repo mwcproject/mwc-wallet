@@ -1242,12 +1242,11 @@ dependencies = [
 ]
 
 [[package]]
-name = "easy-jsonrpc-mw"
-version = "0.5.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d3b1a91569d50e3bba3c9febb22ef54d78c6e8a8d8dd91ae859896c8ba05f4e3"
+name = "easy-jsonrpc-mwc"
+version = "0.5.5"
+source = "git+https://github.com/mwcproject/easy-jsonrpc-mwc?branch=master#7d6e0cdca9be27db769120b40f8b0b071dbed208"
 dependencies = [
- "easy-jsonrpc-proc-macro-mw 0.5.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "easy-jsonrpc-proc-macro-mw",
  "jsonrpc-core 10.1.0",
  "rand 0.6.5",
  "serde",
@@ -1256,10 +1255,11 @@ dependencies = [
 
 [[package]]
 name = "easy-jsonrpc-mwc"
-version = "0.5.5"
-source = "git+https://github.com/mwcproject/easy-jsonrpc-mwc?branch=master#7d6e0cdca9be27db769120b40f8b0b071dbed208"
+version = "0.5.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "aefafc1d1c7074788491cd40943b23a2eea03bff6e4a4389b20172420c88dda2"
 dependencies = [
- "easy-jsonrpc-proc-macro-mw 0.5.1 (git+https://github.com/mwcproject/easy-jsonrpc-mwc?branch=master)",
+ "easy-jsonrpc-proc-macro-mwc",
  "jsonrpc-core 10.1.0",
  "rand 0.6.5",
  "serde",
@@ -1269,8 +1269,7 @@ dependencies = [
 [[package]]
 name = "easy-jsonrpc-proc-macro-mw"
 version = "0.5.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a6368dbd2c6685fb84fc6e6a4749917ddc98905793fd06341c7e11a2504f2724"
+source = "git+https://github.com/mwcproject/easy-jsonrpc-mwc?branch=master#7d6e0cdca9be27db769120b40f8b0b071dbed208"
 dependencies = [
  "heck",
  "proc-macro2 0.4.30",
@@ -1279,9 +1278,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "easy-jsonrpc-proc-macro-mw"
-version = "0.5.1"
-source = "git+https://github.com/mwcproject/easy-jsonrpc-mwc?branch=master#7d6e0cdca9be27db769120b40f8b0b071dbed208"
+name = "easy-jsonrpc-proc-macro-mwc"
+version = "0.5.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bca1ffd9229d0579aa3a99e665bc26fcdef88799258c55e39c63087091870b8e"
 dependencies = [
  "heck",
  "proc-macro2 0.4.30",
@@ -2893,13 +2893,13 @@ dependencies = [
 
 [[package]]
 name = "mwc_api"
-version = "5.3.9"
-source = "git+https://github.com/mwcproject/mwc-node?tag=5.3.9#643435dabec4a004f1a51c6c6cfe93053d892e6b"
+version = "5.3.10"
+source = "git+https://github.com/mwcproject/mwc-node?tag=5.3.10#58dc03015888f8980f339633a7031596048700c7"
 dependencies = [
  "async-stream 0.3.6",
  "bytes 1.10.1",
  "chrono",
- "easy-jsonrpc-mw",
+ "easy-jsonrpc-mwc 0.5.6",
  "futures 0.3.31",
  "http 0.2.12",
  "hyper 0.14.32",
@@ -2928,8 +2928,8 @@ dependencies = [
 
 [[package]]
 name = "mwc_chain"
-version = "5.3.9"
-source = "git+https://github.com/mwcproject/mwc-node?tag=5.3.9#643435dabec4a004f1a51c6c6cfe93053d892e6b"
+version = "5.3.10"
+source = "git+https://github.com/mwcproject/mwc-node?tag=5.3.10#58dc03015888f8980f339633a7031596048700c7"
 dependencies = [
  "bit-vec",
  "bitflags 1.3.2",
@@ -2955,8 +2955,8 @@ dependencies = [
 
 [[package]]
 name = "mwc_core"
-version = "5.3.9"
-source = "git+https://github.com/mwcproject/mwc-node?tag=5.3.9#643435dabec4a004f1a51c6c6cfe93053d892e6b"
+version = "5.3.10"
+source = "git+https://github.com/mwcproject/mwc-node?tag=5.3.10#58dc03015888f8980f339633a7031596048700c7"
 dependencies = [
  "blake2-rfc",
  "byteorder",
@@ -2983,8 +2983,8 @@ dependencies = [
 
 [[package]]
 name = "mwc_keychain"
-version = "5.3.9"
-source = "git+https://github.com/mwcproject/mwc-node?tag=5.3.9#643435dabec4a004f1a51c6c6cfe93053d892e6b"
+version = "5.3.10"
+source = "git+https://github.com/mwcproject/mwc-node?tag=5.3.10#58dc03015888f8980f339633a7031596048700c7"
 dependencies = [
  "blake2-rfc",
  "byteorder",
@@ -3006,8 +3006,8 @@ dependencies = [
 
 [[package]]
 name = "mwc_p2p"
-version = "5.3.9"
-source = "git+https://github.com/mwcproject/mwc-node?tag=5.3.9#643435dabec4a004f1a51c6c6cfe93053d892e6b"
+version = "5.3.10"
+source = "git+https://github.com/mwcproject/mwc-node?tag=5.3.10#58dc03015888f8980f339633a7031596048700c7"
 dependencies = [
  "async-std",
  "bitflags 1.3.2",
@@ -3039,8 +3039,8 @@ dependencies = [
 
 [[package]]
 name = "mwc_pool"
-version = "5.3.9"
-source = "git+https://github.com/mwcproject/mwc-node?tag=5.3.9#643435dabec4a004f1a51c6c6cfe93053d892e6b"
+version = "5.3.10"
+source = "git+https://github.com/mwcproject/mwc-node?tag=5.3.10#58dc03015888f8980f339633a7031596048700c7"
 dependencies = [
  "blake2-rfc",
  "chrono",
@@ -3071,8 +3071,8 @@ dependencies = [
 
 [[package]]
 name = "mwc_store"
-version = "5.3.9"
-source = "git+https://github.com/mwcproject/mwc-node?tag=5.3.9#643435dabec4a004f1a51c6c6cfe93053d892e6b"
+version = "5.3.10"
+source = "git+https://github.com/mwcproject/mwc-node?tag=5.3.10#58dc03015888f8980f339633a7031596048700c7"
 dependencies = [
  "byteorder",
  "croaring",
@@ -3090,8 +3090,8 @@ dependencies = [
 
 [[package]]
 name = "mwc_util"
-version = "5.3.9"
-source = "git+https://github.com/mwcproject/mwc-node?tag=5.3.9#643435dabec4a004f1a51c6c6cfe93053d892e6b"
+version = "5.3.10"
+source = "git+https://github.com/mwcproject/mwc-node?tag=5.3.10#58dc03015888f8980f339633a7031596048700c7"
 dependencies = [
  "anyhow",
  "backtrace",
@@ -3120,7 +3120,7 @@ version = "5.3.8"
 dependencies = [
  "built",
  "clap",
- "easy-jsonrpc-mwc",
+ "easy-jsonrpc-mwc 0.5.5",
  "ed25519-dalek",
  "funty",
  "lazy_static",
@@ -3153,7 +3153,7 @@ version = "5.3.8"
 dependencies = [
  "base64 0.12.3",
  "chrono",
- "easy-jsonrpc-mwc",
+ "easy-jsonrpc-mwc 0.5.5",
  "ed25519-dalek",
  "lazy_static",
  "log",
@@ -3190,7 +3190,7 @@ version = "5.3.8"
 dependencies = [
  "chrono",
  "colored",
- "easy-jsonrpc-mwc",
+ "easy-jsonrpc-mwc 0.5.5",
  "ed25519-dalek",
  "futures 0.3.31",
  "hyper 0.14.32",

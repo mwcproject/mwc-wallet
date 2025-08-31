@@ -237,9 +237,9 @@ where
 		.map_err(|e| Error::TorConfig(format!("Unable to build onion address, {}", e)))?;
 
 	let mut hm_tor_bridge: HashMap<String, String> = HashMap::new();
-	let mut tor_timeout = 200;
+	let mut tor_timeout = 60;
 	if bridge.bridge_line.is_some() {
-		tor_timeout = 300;
+		tor_timeout = 120;
 		let bridge_config = tor_bridge::TorBridge::try_from(bridge.clone())
 			.map_err(|e| Error::TorConfig(format!("{}", e)))?;
 		hm_tor_bridge = bridge_config

@@ -34,7 +34,6 @@ use std::time::Duration;
 #[macro_use]
 mod common;
 use common::{clean_output_dir, create_wallet_proxy, setup};
-use libwallet::NodeClient;
 use mwc_wallet_util::mwc_core::core::Transaction;
 use mwc_wallet_util::mwc_util::secp::Secp256k1;
 use mwc_wallet_util::mwc_util::Mutex;
@@ -159,15 +158,9 @@ fn file_repost_test_impl(test_dir: &str) -> Result<(), wallet::Error> {
 		w.set_parent_key_id_by_name("listener")?;
 	}
 
-	let height = {
-		wallet_inst!(wallet1, w);
-		let (height, _, _) = w.w2n_client().get_chain_tip()?;
-		height
-	};
-
 	wallet::controller::foreign_single_use(wallet1.clone(), mask1_i.clone(), |api| {
 		slate = PathToSlateGetter::build_form_path((&send_file).into())
-			.get_tx(None, height, &secp)?
+			.get_tx(None, &secp)?
 			.to_slate()?
 			.0;
 		slate = api.receive_tx(&slate, None, &None, None)?;
@@ -185,7 +178,7 @@ fn file_repost_test_impl(test_dir: &str) -> Result<(), wallet::Error> {
 	// wallet 1 finalize
 	wallet::controller::owner_single_use(Some(wallet1.clone()), mask1, None, |api, m| {
 		slate = PathToSlateGetter::build_form_path((&receive_file).into())
-			.get_tx(None, height, &secp)?
+			.get_tx(None, &secp)?
 			.to_slate()?
 			.0;
 		slate = api.finalize_tx(m, &slate)?;

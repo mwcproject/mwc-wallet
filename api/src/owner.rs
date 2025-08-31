@@ -784,7 +784,7 @@ where
 		// Without usage it still works until the end of the block
 		let mut _send_lock = INIT_SEND_TX_LOCK.lock();
 
-		let (mut slate, slatepack_secret, height, secp) = {
+		let (mut slate, slatepack_secret, secp) = {
 			wallet_lock!(self.wallet_inst, w);
 			owner::update_wallet_state(&mut **w, keychain_mask, &None)?;
 
@@ -793,11 +793,10 @@ where
 			};
 
 			let keychain = w.keychain(keychain_mask)?;
-			let (height, _, _) = w.w2n_client().get_chain_tip()?;
 			let slatepack_secret =
 				proofaddress::payment_proof_address_dalek_secret(&keychain, None)?;
 
-			(slate, slatepack_secret, height, keychain.secp().clone())
+			(slate, slatepack_secret, keychain.secp().clone())
 		};
 
 		let res = match send_args {
@@ -814,7 +813,6 @@ where
 								&slatepack_secret,
 								recipient,
 								other_wallet_info,
-								height,
 								&secp,
 							)
 							.map_err(|e| {
@@ -865,6 +863,7 @@ where
 								&slate,
 								true,
 								self.doctest_mode,
+								args.payment_proof_recipient_address.is_some(),
 							)?;
 							slate_res
 						}
@@ -1168,8 +1167,14 @@ where
 		slate: &Slate,
 	) -> Result<Slate, Error> {
 		wallet_lock!(self.wallet_inst, w);
-		let (slate_res, _context) =
-			owner::finalize_tx(&mut **w, keychain_mask, slate, true, self.doctest_mode)?;
+		let (slate_res, _context) = owner::finalize_tx(
+			&mut **w,
+			keychain_mask,
+			slate,
+			true,
+			self.doctest_mode,
+			true,
+		)?;
 
 		Ok(slate_res)
 	}

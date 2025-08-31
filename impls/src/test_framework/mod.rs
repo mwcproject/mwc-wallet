@@ -183,7 +183,7 @@ where
 	K: keychain::Keychain + 'a,
 {
 	// build block fees
-	let fee_amt = txs.iter().map(|tx| tx.fee(prev.height + 1)).sum();
+	let fee_amt = txs.iter().map(|tx| tx.fee()).sum();
 	let block_fees = BlockFees {
 		fees: fee_amt,
 		key_id: None,
@@ -290,7 +290,8 @@ where
 				0,
 				true,
 			)?;
-			let (slate, _) = owner::finalize_tx(&mut **w, keychain_mask, &slate, false, true)?;
+			let (slate, _) =
+				owner::finalize_tx(&mut **w, keychain_mask, &slate, false, true, true)?;
 			slate
 		};
 		let client = { w.w2n_client().clone() };

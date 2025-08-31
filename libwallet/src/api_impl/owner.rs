@@ -841,7 +841,7 @@ where
 
 		// needs to be stored as we're removing sig data for return trip. this needs to be present
 		// when locking transaction context and updating tx log with excess later
-		context.calculated_excess = Some(ret_slate.calc_excess(keychain.secp(), height)?);
+		context.calculated_excess = Some(ret_slate.calc_excess(keychain.secp())?);
 
 		// if self-sending, merge contexts
 		if let Ok(c) = context_res {
@@ -930,12 +930,14 @@ where
 
 /// Finalize slate
 /// Context needed for mwc713 proof of sending funds through mwcmqs
+/// Note: do_proof will be used if proof data exist. It is needed to disable proof if it is not needed (MWCMQS case). Specify true if you don't know
 pub fn finalize_tx<'a, T: ?Sized, C, K>(
 	w: &mut T,
 	keychain_mask: Option<&SecretKey>,
 	slate: &Slate,
 	refresh_from_node: bool,
 	use_test_rng: bool,
+	do_proof: bool,
 ) -> Result<(Slate, Context), Error>
 where
 	T: WalletBackend<'a, C, K>,
@@ -1034,16 +1036,19 @@ where
 
 	// If Proof available, we can store it at that point
 	if let Some(mut proof) = pop_proof_for_slate(&slate.id) {
-		proof.amount = context.amount;
-		proof.fee = context.fee;
-		for input in &context.input_commits {
-			proof.inputs.push(input.clone());
-		}
-		for output in &context.output_commits {
-			proof.outputs.push(output.clone());
-		}
+		// Have special flag for proofs because of MQS. In MQS proof can be saved for any transaction. If we don't want the proof, we are not saving it
+		if do_proof {
+			proof.amount = context.amount;
+			proof.fee = context.fee;
+			for input in &context.input_commits {
+				proof.inputs.push(input.clone());
+			}
+			for output in &context.output_commits {
+				proof.outputs.push(output.clone());
+			}
 
-		proof.store_tx_proof(w.get_data_file_dir(), &slate.id.to_string())?;
+			proof.store_tx_proof(w.get_data_file_dir(), &slate.id.to_string())?;
+		}
 	};
 
 	Ok((sl, context))

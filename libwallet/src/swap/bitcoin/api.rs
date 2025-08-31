@@ -649,7 +649,7 @@ where
 	}
 
 	// Build state machine that match the swap data
-	fn get_fsm(&self, keychain: &K, swap: &Swap) -> StateMachine {
+	fn get_fsm(&self, keychain: &K, swap: &Swap) -> StateMachine<'_> {
 		let kc = Arc::new(keychain.clone());
 		let nc = self.node_client.clone();
 		let b: Box<dyn SwapApi<K> + 'a> = Box::new((*self).clone());

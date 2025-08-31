@@ -237,7 +237,7 @@ where
 
 	tx::update_message(&mut *w, keychain_mask, &ret_slate)?;
 
-	let excess = ret_slate.calc_excess(keychain.secp(), height)?;
+	let excess = ret_slate.calc_excess(keychain.secp())?;
 
 	if let Some(ref mut p) = ret_slate.payment_proof {
 		if p.sender_address
@@ -418,8 +418,7 @@ where
 		.map_err(|e| {
 			Error::SlatepackDecodeError(format!("Unable to build key to decrypt, {}", e))
 		})?;
-	let (current_height, _, _) = w.w2n_client().get_chain_tip()?;
-	let sp = encrypted_slate.into_slatepack(&sec_key, current_height, keychain.secp())?;
+	let sp = encrypted_slate.into_slatepack(&sec_key, keychain.secp())?;
 	let sender = sp.get_sender();
 	let recipient = sp.get_recipient();
 	let content = sp.get_content();

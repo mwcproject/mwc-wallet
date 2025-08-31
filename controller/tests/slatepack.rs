@@ -29,7 +29,7 @@ use std::sync::atomic::Ordering;
 use std::thread;
 use std::time::Duration;
 
-use mwc_wallet_libwallet::{InitTxArgs, IssueInvoiceTxArgs, NodeClient, Slate, Slatepacker};
+use mwc_wallet_libwallet::{InitTxArgs, IssueInvoiceTxArgs, Slate, Slatepacker};
 
 use ed25519_dalek::{PublicKey as DalekPublicKey, SecretKey as DalekSecretKey};
 use libwallet::proof::proofaddress;
@@ -62,11 +62,10 @@ fn output_slatepack(
 fn slate_from_packed(
 	file: &str,
 	dec_key: &DalekSecretKey,
-	height: u64,
 	secp: &Secp256k1,
 ) -> Result<Slatepacker, libwallet::Error> {
 	match PathToSlateGetter::build_form_path(file.into())
-		.get_tx(Some(dec_key), height, secp)
+		.get_tx(Some(dec_key), secp)
 		.map_err(|e| libwallet::Error::GenericError(format!("Unable to read the slate, {}", e)))?
 	{
 		// Plain slate, V2 or V3
@@ -239,13 +238,7 @@ fn slatepack_exchange_test_impl(test_dir: &str) -> Result<(), libwallet::Error> 
 		w.set_parent_key_id_by_name("account1")?;
 	}
 
-	let height = {
-		wallet_inst!(wallet2, w);
-		let (height, _, _) = w.w2n_client().get_chain_tip().unwrap();
-		height
-	};
-
-	let receive_sp = slate_from_packed(&send_file, &secret_2, height, &secp)?;
+	let receive_sp = slate_from_packed(&send_file, &secret_2, &secp)?;
 
 	let receive_sender = receive_sp.get_sender();
 	let receive_slate = receive_sp.to_result_slate();
@@ -273,7 +266,7 @@ fn slatepack_exchange_test_impl(test_dir: &str) -> Result<(), libwallet::Error> 
 
 	// wallet 1 finalises and posts
 	wallet::controller::owner_single_use(Some(wallet1.clone()), mask1, None, |api, m| {
-		let mut slate = slate_from_packed(&receive_file, &secret_1, height, &secp)
+		let mut slate = slate_from_packed(&receive_file, &secret_1, &secp)
 			.unwrap()
 			.to_result_slate();
 
@@ -367,7 +360,7 @@ fn slatepack_exchange_test_impl(test_dir: &str) -> Result<(), libwallet::Error> 
 	//    let mut tmp_slate = Slate::blank(2);
 
 	wallet::controller::owner_single_use(Some(wallet1.clone()), mask1, None, |api, m| {
-		let res = slate_from_packed(&send_file, &secret_1, height, &secp)?;
+		let res = slate_from_packed(&send_file, &secret_1, &secp)?;
 		let invoice_sender = res.get_sender();
 		assert!(invoice_sender.is_some());
 		let invoice_slate = res.to_result_slate();
@@ -405,7 +398,7 @@ fn slatepack_exchange_test_impl(test_dir: &str) -> Result<(), libwallet::Error> 
 	.unwrap();
 	wallet::controller::foreign_single_use(wallet2.clone(), mask2_i.clone(), |api| {
 		// Wallet 2 receives the invoice transaction
-		let slate = slate_from_packed(&receive_file, &secret_2, height, &secp)?.to_result_slate();
+		let slate = slate_from_packed(&receive_file, &secret_2, &secp)?.to_result_slate();
 
 		println!("process_invoice_tx read slate: {:?}", slate);
 		//let slate = tmp_slate.clone();
@@ -467,7 +460,7 @@ fn slatepack_exchange_test_impl(test_dir: &str) -> Result<(), libwallet::Error> 
 	.unwrap();
 
 	wallet::controller::foreign_single_use(wallet2.clone(), mask2_i.clone(), |api| {
-		let res = slate_from_packed(&send_file, &secret_2, height, &secp)?;
+		let res = slate_from_packed(&send_file, &secret_2, &secp)?;
 		let sender = res.get_sender();
 		assert!(sender.is_some());
 		let slate = res.to_result_slate();
@@ -487,7 +480,7 @@ fn slatepack_exchange_test_impl(test_dir: &str) -> Result<(), libwallet::Error> 
 
 	// wallet 1 finalises and posts
 	wallet::controller::owner_single_use(Some(wallet1.clone()), mask1, None, |api, m| {
-		let res = slate_from_packed(&receive_file, &secret_1, height, &secp)?;
+		let res = slate_from_packed(&receive_file, &secret_1, &secp)?;
 		let sender = res.get_sender();
 		assert!(sender.is_some());
 		let slate = res.to_result_slate();

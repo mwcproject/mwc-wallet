@@ -4041,9 +4041,10 @@ pub fn run_doctest_owner(
 
 		if finalize_tx {
 			// wallet1
-			slate = api_impl::owner::finalize_tx(&mut **w, (&mask1).as_ref(), &slate, true, true)
-				.unwrap()
-				.0;
+			slate =
+				api_impl::owner::finalize_tx(&mut **w, (&mask1).as_ref(), &slate, true, true, true)
+					.unwrap()
+					.0;
 			error!("FINALIZED TX SLATE");
 			println!("{}", serde_json::to_string_pretty(&slate).unwrap());
 

@@ -73,12 +73,11 @@ impl Slatepacker {
 	pub fn decrypt_slatepack(
 		data: &[u8],
 		dec_key: &DalekSecretKey,
-		height: u64,
 		secp: &Secp256k1,
 	) -> Result<Self, Error> {
 		let (slate_bytes, encrypted) = SlatepackArmor::decode(data)?;
 
-		let slatepack = Slatepack::from_binary(&slate_bytes, encrypted, dec_key, height, secp)?;
+		let slatepack = Slatepack::from_binary(&slate_bytes, encrypted, dec_key, secp)?;
 
 		let Slatepack {
 			sender,
@@ -228,11 +227,9 @@ fn slatepack_io_test() {
 		}),
 		BlindingFactor::from_slice(&bytes_32)).unwrap();
 
-	let height = 67;
-
 	// updating kernel excess
 	slate_enc.tx_or_err_mut().unwrap().body.kernels[0].excess =
-		slate_enc.calc_excess(&secp, height).unwrap();
+		slate_enc.calc_excess(&secp).unwrap();
 
 	let slate_enc_str = format!("{:?}", slate_enc);
 	println!("start encrypted slate = {}", slate_enc_str);
@@ -268,13 +265,9 @@ fn slatepack_io_test() {
 	assert!(slatepack_string_encrypted.len() > slatepack_string_binary.len());
 
 	// Testing if can open from a backup
-	let slatepack = Slatepacker::decrypt_slatepack(
-		slatepack_string_encrypted.as_bytes(),
-		&dalek_sk,
-		height,
-		&secp,
-	)
-	.unwrap();
+	let slatepack =
+		Slatepacker::decrypt_slatepack(slatepack_string_encrypted.as_bytes(), &dalek_sk, &secp)
+			.unwrap();
 	let res_slate = slatepack.to_result_slate();
 	let slate2_str = format!("{:?}", res_slate);
 	println!("res_slate = {:?}", slate2_str);
@@ -282,13 +275,9 @@ fn slatepack_io_test() {
 	assert_eq!(slate_enc_str, slate2_str);
 
 	// Testing if another party can open it
-	let slatepack = Slatepacker::decrypt_slatepack(
-		slatepack_string_encrypted.as_bytes(),
-		&dalek_sk2,
-		height,
-		&secp,
-	)
-	.unwrap();
+	let slatepack =
+		Slatepacker::decrypt_slatepack(slatepack_string_encrypted.as_bytes(), &dalek_sk2, &secp)
+			.unwrap();
 	let res_slate = slatepack.to_result_slate();
 	let slate2_str = format!("{:?}", res_slate);
 	println!("res_slate2 = {:?}", slate2_str);
@@ -299,7 +288,6 @@ fn slatepack_io_test() {
 	let slatepack = Slatepacker::decrypt_slatepack(
 		slatepack_string_binary.as_bytes(),
 		&DalekSecretKey::from_bytes(&[1; 32]).unwrap(),
-		height,
 		&secp,
 	)
 	.unwrap();
@@ -331,13 +319,9 @@ fn slatepack_io_test() {
 	)
 	.unwrap();
 
-	let slatepack = Slatepacker::decrypt_slatepack(
-		slatepack_string_encrypted.as_bytes(),
-		&dalek_sk,
-		height,
-		&secp,
-	)
-	.unwrap();
+	let slatepack =
+		Slatepacker::decrypt_slatepack(slatepack_string_encrypted.as_bytes(), &dalek_sk, &secp)
+			.unwrap();
 
 	assert_eq!(
 		slate_enc.get_lock_height(),
@@ -366,13 +350,9 @@ fn slatepack_io_test() {
 	)
 	.unwrap();
 
-	let slatepack = Slatepacker::decrypt_slatepack(
-		slatepack_string_encrypted.as_bytes(),
-		&dalek_sk,
-		height,
-		&secp,
-	)
-	.unwrap();
+	let slatepack =
+		Slatepacker::decrypt_slatepack(slatepack_string_encrypted.as_bytes(), &dalek_sk, &secp)
+			.unwrap();
 
 	assert_eq!(
 		slate_enc.get_lock_height(),
@@ -401,13 +381,9 @@ fn slatepack_io_test() {
 	)
 	.unwrap();
 
-	let slatepack = Slatepacker::decrypt_slatepack(
-		slatepack_string_encrypted.as_bytes(),
-		&dalek_sk,
-		height,
-		&secp,
-	)
-	.unwrap();
+	let slatepack =
+		Slatepacker::decrypt_slatepack(slatepack_string_encrypted.as_bytes(), &dalek_sk, &secp)
+			.unwrap();
 
 	assert_eq!(
 		slate_enc.get_lock_height(),

@@ -313,7 +313,7 @@ where
 
 		// update excess in stored transaction
 		let mut batch = wallet.batch(keychain_mask)?;
-		tx.kernel_excess = Some(slate.calc_excess(keychain.secp(), current_height)?);
+		tx.kernel_excess = Some(slate.calc_excess(keychain.secp())?);
 		batch.save_tx_log_entry(tx.clone(), &parent_key_id)?;
 		batch.commit()?;
 	}
@@ -423,11 +423,9 @@ where
 	let keychain = wallet.keychain(keychain_mask)?;
 	slate.fill_round_2(keychain.secp(), sec_key, sec_nonce, participant_id)?;
 
-	let (current_height, _, _) = wallet.w2n_client().get_chain_tip()?;
-
 	// Final transaction can be built by anyone at this stage
 	trace!("Slate to finalize is: {:?}", slate);
-	slate.finalize(&keychain, current_height)?;
+	slate.finalize(&keychain)?;
 	Ok(())
 }
 
@@ -549,10 +547,8 @@ where
 
 	let keychain = wallet.keychain(keychain_mask)?;
 
-	let (current_height, _, _) = wallet.w2n_client().get_chain_tip()?;
-
 	if slate.compact_slate {
-		tx.kernel_excess = Some(slate.calc_excess(keychain.secp(), current_height)?);
+		tx.kernel_excess = Some(slate.calc_excess(keychain.secp())?);
 	} else {
 		tx.kernel_excess = Some(slate.tx_or_err()?.body.kernels[0].excess);
 	}
@@ -563,6 +559,7 @@ where
 			Some(i) => i,
 			None => get_address_index(),
 		};
+		let (current_height, _, _) = wallet.w2n_client().get_chain_tip()?;
 		let excess = slate.calc_excess(keychain.secp(), current_height)?;
 		//sender address.
 		let sender_address_secret_key =
@@ -793,12 +790,10 @@ where
 			));
 		}
 
-		let (current_height, _, _) = wallet.w2n_client().get_chain_tip()?;
-
 		//build the message which was used to generated receiver signature.
 		let msg = payment_proof_message(
 			slate.amount,
-			&slate.calc_excess(keychain.secp(), current_height)?,
+			&slate.calc_excess(keychain.secp())?,
 			orig_sender_a.public_key.clone(),
 		)?;
 		let sig = match p.clone().receiver_signature {

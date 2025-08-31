@@ -731,19 +731,13 @@ where
 				recipient = Some(sp_address.tor_public_key()?);
 			}
 
-			let (slatepack_secret, slatepack_sender, height, secp) = {
+			let (slatepack_secret, slatepack_sender, secp) = {
 				wallet_lock!(api.wallet_inst, w);
 				let keychain = w.keychain(keychain_mask)?;
 				let slatepack_secret =
 					proofaddress::payment_proof_address_dalek_secret(&keychain, None)?;
 				let slate_pub_key = DalekPublicKey::from(&slatepack_secret);
-				let (height, _, _) = w.w2n_client().get_chain_tip()?;
-				(
-					slatepack_secret,
-					slate_pub_key,
-					height,
-					keychain.secp().clone(),
-				)
+				(slatepack_secret, slate_pub_key, keychain.secp().clone())
 			};
 
 			match args.method.as_str() {
@@ -831,7 +825,6 @@ where
 						&slatepack_secret,
 						recipient,
 						wallet_info,
-						height,
 						&secp,
 					)?;
 					// Restore back ttl, because it can be gone
@@ -932,7 +925,6 @@ where
 			&slatepack_secret,
 			None,
 			None,
-			slate.height,
 			&secp,
 		)?;
 
@@ -1088,27 +1080,20 @@ where
 		Some(&m) => Some(m.to_owned()),
 	};
 	controller::foreign_single_use(owner_api.wallet_inst.clone(), km, |api| {
-		let (slatepack_secret, height, secp) = {
+		let (slatepack_secret, secp) = {
 			wallet_lock!(api.wallet_inst, w);
 			let keychain = w.keychain(keychain_mask)?;
 			let slatepack_secret =
 				proofaddress::payment_proof_address_dalek_secret(&keychain, None)?;
-			let (height, _, _) = w.w2n_client().get_chain_tip()?;
-			(slatepack_secret, height, keychain.secp().clone())
+			(slatepack_secret, keychain.secp().clone())
 		};
 
 		let slate_pkg = match &args.input_file {
-			Some(file_name) => PathToSlateGetter::build_form_path(file_name.into()).get_tx(
-				Some(&slatepack_secret),
-				height,
-				&secp,
-			)?,
+			Some(file_name) => PathToSlateGetter::build_form_path(file_name.into())
+				.get_tx(Some(&slatepack_secret), &secp)?,
 			None => match &args.input_slatepack_message {
-				Some(message) => PathToSlateGetter::build_form_str(message.clone()).get_tx(
-					Some(&slatepack_secret),
-					height,
-					&secp,
-				)?,
+				Some(message) => PathToSlateGetter::build_form_str(message.clone())
+					.get_tx(Some(&slatepack_secret), &secp)?,
 				None => {
 					return Err(Error::ArgumentError(
 						"Please specify 'file' or 'content' argument".to_string(),
@@ -1195,27 +1180,20 @@ where
 		Some(&m) => Some(m.to_owned()),
 	};
 	controller::foreign_single_use(owner_api.wallet_inst.clone(), km, |api| {
-		let (slatepack_secret, height, secp) = {
+		let (slatepack_secret, secp) = {
 			wallet_lock!(api.wallet_inst, w);
 			let keychain = w.keychain(keychain_mask)?;
 			let slatepack_secret =
 				proofaddress::payment_proof_address_dalek_secret(&keychain, None)?;
-			let (height, _, _) = w.w2n_client().get_chain_tip()?;
-			(slatepack_secret, height, keychain.secp().clone())
+			(slatepack_secret, keychain.secp().clone())
 		};
 
 		let slate_pkg = match &args.input_file {
-			Some(file_name) => PathToSlateGetter::build_form_path(file_name.into()).get_tx(
-				Some(&slatepack_secret),
-				height,
-				&secp,
-			)?,
+			Some(file_name) => PathToSlateGetter::build_form_path(file_name.into())
+				.get_tx(Some(&slatepack_secret), &secp)?,
 			None => match &args.input_slatepack_message {
-				Some(message) => PathToSlateGetter::build_form_str(message.clone()).get_tx(
-					Some(&slatepack_secret),
-					height,
-					&secp,
-				)?,
+				Some(message) => PathToSlateGetter::build_form_str(message.clone())
+					.get_tx(Some(&slatepack_secret), &secp)?,
 				None => {
 					return Err(Error::ArgumentError(
 						"Please specify 'file' or 'content' argument".to_string(),
@@ -1304,28 +1282,21 @@ where
 	let mut slatepack_format = false;
 
 	controller::owner_single_use(None, keychain_mask, Some(owner_api), |api, m| {
-		let (slatepack_secret, height, secp) = {
+		let (slatepack_secret, secp) = {
 			wallet_lock!(api.wallet_inst, w);
 			let keychain = w.keychain(m)?;
 			let slatepack_secret = proofaddress::payment_proof_address_secret(&keychain, None)?;
 			let slatepack_secret = DalekSecretKey::from_bytes(&slatepack_secret.0)
 				.map_err(|e| Error::GenericError(format!("Unable to build secret, {}", e)))?;
-			let (height, _, _) = w.w2n_client().get_chain_tip()?;
-			(slatepack_secret, height, keychain.secp().clone())
+			(slatepack_secret, keychain.secp().clone())
 		};
 
 		let slate_pkg = match &args.input_file {
-			Some(file_name) => PathToSlateGetter::build_form_path(file_name.into()).get_tx(
-				Some(&slatepack_secret),
-				height,
-				&secp,
-			)?,
+			Some(file_name) => PathToSlateGetter::build_form_path(file_name.into())
+				.get_tx(Some(&slatepack_secret), &secp)?,
 			None => match &args.input_slatepack_message {
-				Some(message) => PathToSlateGetter::build_form_str(message.clone()).get_tx(
-					Some(&slatepack_secret),
-					height,
-					&secp,
-				)?,
+				Some(message) => PathToSlateGetter::build_form_str(message.clone())
+					.get_tx(Some(&slatepack_secret), &secp)?,
 				None => {
 					return Err(Error::ArgumentError(
 						"Please specify 'file' or 'content' argument".to_string(),
@@ -1548,32 +1519,20 @@ where
 	C: NodeClient + 'static,
 	K: keychain::Keychain + 'static,
 {
-	let (slatepack_secret, tor_address, height, secp) = {
+	let (slatepack_secret, tor_address, secp) = {
 		wallet_lock!(owner_api.wallet_inst, w);
 		let keychain = w.keychain(keychain_mask)?;
 		let slatepack_secret = proofaddress::payment_proof_address_dalek_secret(&keychain, None)?;
 		let slatepack_pk = DalekPublicKey::from(&slatepack_secret);
-		let (height, _, _) = w.w2n_client().get_chain_tip()?;
-		(
-			slatepack_secret,
-			slatepack_pk,
-			height,
-			keychain.secp().clone(),
-		)
+		(slatepack_secret, slatepack_pk, keychain.secp().clone())
 	};
 
 	let slate_pkg = match &args.input_file {
-		Some(file_name) => PathToSlateGetter::build_form_path(file_name.into()).get_tx(
-			Some(&slatepack_secret),
-			height,
-			&secp,
-		)?,
+		Some(file_name) => PathToSlateGetter::build_form_path(file_name.into())
+			.get_tx(Some(&slatepack_secret), &secp)?,
 		None => match &args.input_slatepack_message {
-			Some(message) => PathToSlateGetter::build_form_str(message.clone()).get_tx(
-				Some(&slatepack_secret),
-				height,
-				&secp,
-			)?,
+			Some(message) => PathToSlateGetter::build_form_str(message.clone())
+				.get_tx(Some(&slatepack_secret), &secp)?,
 			None => {
 				return Err(Error::ArgumentError(
 					"Please specify 'file' or 'content' argument".to_string(),
@@ -1696,7 +1655,6 @@ where
 						&slatepack_secret,
 						sender_pk,
 						sender.check_other_wallet_version(&args.dest, true)?,
-						height,
 						&secp,
 					)?;
 					api.tx_lock_outputs(m, &slate, Some(args.dest.clone()), 1)?;
@@ -1921,13 +1879,12 @@ where
 	}
 
 	controller::owner_single_use(None, keychain_mask, Some(owner_api), |api, m| {
-		let (slatepack_secret, height, secp) = {
+		let (slatepack_secret, secp) = {
 			wallet_lock!(api.wallet_inst, w);
 			let keychain = w.keychain(keychain_mask)?;
 			let slatepack_secret =
 				proofaddress::payment_proof_address_dalek_secret(&keychain, None)?;
-			let (height, _, _) = w.w2n_client().get_chain_tip()?;
-			(slatepack_secret, height, keychain.secp().clone())
+			(slatepack_secret, keychain.secp().clone())
 		};
 
 		let tx = match serde_json::from_str::<TransactionV3>(&content) {
@@ -1940,11 +1897,8 @@ where
 					}
 					Err(_) => {
 						// Let's try decode as a slate
-						let slate_pkg = PathToSlateGetter::build_form_str(content).get_tx(
-							Some(&slatepack_secret),
-							height,
-							&secp,
-						)?;
+						let slate_pkg = PathToSlateGetter::build_form_str(content)
+							.get_tx(Some(&slatepack_secret), &secp)?;
 						let (slate, _, _, content, _slatepack_format) = slate_pkg.to_slate()?;
 						if content != SlatePurpose::FullSlate {
 							return Err(Error::LibWallet(format!(

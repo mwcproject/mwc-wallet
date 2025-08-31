@@ -152,17 +152,12 @@ impl VersionedSlate {
 	pub fn into_slatepack(
 		&self,
 		dec_key: &DalekSecretKey,
-		height: u64,
 		secp: &Secp256k1,
 	) -> Result<Slatepacker, Error> {
 		match self {
 			VersionedSlate::SP(arm_slatepack) => {
-				let packer = Slatepacker::decrypt_slatepack(
-					arm_slatepack.as_bytes(),
-					dec_key,
-					height,
-					secp,
-				)?;
+				let packer =
+					Slatepacker::decrypt_slatepack(arm_slatepack.as_bytes(), dec_key, secp)?;
 				Ok(packer)
 			}
 			VersionedSlate::V3(s) => Ok(Slatepacker::wrap_slate(s.clone().to_slate(false)?)),

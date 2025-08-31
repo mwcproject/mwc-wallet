@@ -381,10 +381,9 @@ impl Slate {
 	pub fn deserialize_upgrade_slatepack(
 		slate_str: &str,
 		dec_key: &DalekSecretKey,
-		height: u64,
 		secp: &Secp256k1,
 	) -> Result<Slatepacker, Error> {
-		let sp = Slatepacker::decrypt_slatepack(slate_str.as_bytes(), dec_key, height, secp)?;
+		let sp = Slatepacker::decrypt_slatepack(slate_str.as_bytes(), dec_key, secp)?;
 		Ok(sp)
 	}
 
@@ -725,12 +724,12 @@ impl Slate {
 
 	/// Creates the final signature, callable by either the sender or recipient
 	/// (after phase 3: sender confirmation)
-	pub fn finalize<K>(&mut self, keychain: &K, height: u64) -> Result<(), Error>
+	pub fn finalize<K>(&mut self, keychain: &K) -> Result<(), Error>
 	where
 		K: Keychain,
 	{
 		let final_sig = self.finalize_signature(keychain.secp())?;
-		self.finalize_transaction(keychain, &final_sig, height)
+		self.finalize_transaction(keychain, &final_sig)
 	}
 
 	/// Return the participant with the given id
@@ -945,17 +944,17 @@ impl Slate {
 	}
 
 	/// Checks the fees in the transaction in the given slate are valid
-	fn check_fees(&self, height: u64) -> Result<(), Error> {
+	fn check_fees(&self) -> Result<(), Error> {
 		let tx = self.tx_or_err()?;
 		// double check the fee amount included in the partial tx
 		// we don't necessarily want to just trust the sender
 		// we could just overwrite the fee here (but we won't) due to the sig
 		let fee = tx_fee(tx.inputs().len(), tx.outputs().len(), tx.kernels().len());
 
-		if fee > tx.fee(height) {
+		if fee > tx.fee() {
 			return Err(Error::Fee(format!(
 				"Fee Dispute Error: {}, {}",
-				tx.fee(height),
+				tx.fee(),
 				fee,
 			)));
 		}
@@ -1075,7 +1074,7 @@ impl Slate {
 	}
 
 	/// return the final excess
-	pub fn calc_excess(&self, secp: &Secp256k1, height: u64) -> Result<Commitment, Error> {
+	pub fn calc_excess(&self, secp: &Secp256k1) -> Result<Commitment, Error> {
 		if self.compact_slate {
 			let sum = self.pub_blind_sum(secp)?;
 			Ok(Commitment::from_pubkey(secp, &sum)?)
@@ -1083,7 +1082,7 @@ impl Slate {
 			// Legacy method
 			let tx = self.tx_or_err()?.clone();
 			let kernel_offset = tx.offset.clone();
-			let overage = tx.fee(height) as i64;
+			let overage = tx.fee() as i64;
 			let tx_excess = tx.sum_commitments(overage, secp)?;
 
 			// subtract the kernel_excess (built from kernel_offset)
@@ -1097,15 +1096,14 @@ impl Slate {
 		&mut self,
 		keychain: &K,
 		final_sig: &secp::Signature,
-		height: u64,
 	) -> Result<(), Error>
 	where
 		K: Keychain,
 	{
-		self.check_fees(height)?;
+		self.check_fees()?;
 		// build the final excess based on final tx and offset
 		let secp = keychain.secp();
-		let final_excess = self.calc_excess(secp, height)?;
+		let final_excess = self.calc_excess(secp)?;
 
 		debug!("Final Tx excess: {:?}", final_excess);
 
@@ -1134,7 +1132,7 @@ impl Slate {
 
 		// confirm the overall transaction is valid (including the updated kernel)
 		// accounting for tx weight limits
-		final_tx.validate(Weighting::AsTransaction, height, secp)?;
+		final_tx.validate(Weighting::AsTransaction, secp)?;
 
 		// replace our slate tx with the new one with updated kernel
 		self.tx = Some(final_tx);
