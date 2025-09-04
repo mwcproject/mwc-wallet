@@ -15,6 +15,7 @@
 
 //! Transaction building functions
 
+use std::cell::RefCell;
 use std::collections::HashSet;
 use uuid::Uuid;
 
@@ -36,7 +37,7 @@ use crate::proof::tx_proof::{push_proof_for_slate, TxProof};
 use crate::slate::Slate;
 #[cfg(feature = "grin_proof")]
 use crate::types::StoredProofInfo;
-use crate::types::{Context, NodeClient, TxLogEntryType, WalletBackend};
+use crate::types::{Context, NodeClient, TxLogEntryType, TxSession, WalletBackend};
 use crate::Error;
 use crate::InitTxArgs;
 use ed25519_dalek::Keypair as DalekKeypair;
@@ -254,6 +255,7 @@ where
 pub fn add_output_to_slate<'a, T: ?Sized, C, K>(
 	wallet: &mut T,
 	keychain_mask: Option<&SecretKey>,
+	tx_session: &Option<RefCell<TxSession>>,
 	slate: &mut Slate,
 	current_height: u64,
 	address: Option<String>,
@@ -277,6 +279,7 @@ where
 	let (_, mut context, mut tx) = selection::build_recipient_output(
 		wallet,
 		keychain_mask,
+		tx_session,
 		slate,
 		current_height,
 		address,
@@ -312,10 +315,18 @@ where
 		)?;
 
 		// update excess in stored transaction
-		let mut batch = wallet.batch(keychain_mask)?;
 		tx.kernel_excess = Some(slate.calc_excess(keychain.secp())?);
-		batch.save_tx_log_entry(tx.clone(), &parent_key_id)?;
-		batch.commit()?;
+
+		match tx_session {
+			Some(tx_ses) => {
+				tx_ses.borrow_mut().set_tx_log_entry(tx);
+			}
+			None => {
+				let mut batch = wallet.batch(keychain_mask)?;
+				batch.save_tx_log_entry(tx.clone(), &parent_key_id)?;
+				batch.commit()?;
+			}
+		}
 	}
 
 	Ok(context)
@@ -337,7 +348,7 @@ where
 	C: NodeClient + 'a,
 	K: Keychain + 'a,
 {
-	// Expected to work for compact slate model only
+	// Expected to work for compact slate model only, that is used at Context::new below
 	debug_assert!(slate.compact_slate);
 
 	// we're just going to run a selection to get the potential fee,
@@ -374,6 +385,10 @@ where
 		slate.amount,
 		slate.fee,
 		init_tx_args.message.clone(),
+		0, // no lock_height, Plain Tx Kernel
+		0 as u8,
+		slate.ttl_cutoff_height.clone(),
+		true, // late lock works only for compact slate, so hardcoding as true
 	);
 	context.late_lock_args = Some(init_tx_args.clone());
 
@@ -497,6 +512,7 @@ where
 pub fn update_stored_tx<'a, T: ?Sized, C, K>(
 	wallet: &mut T,
 	keychain_mask: Option<&SecretKey>,
+	tx_session: &Option<RefCell<TxSession>>,
 	#[cfg(feature = "grin_proof")] context: &Context,
 	slate: &Slate,
 	is_invoiced: bool,
@@ -506,34 +522,43 @@ where
 	C: NodeClient + 'a,
 	K: Keychain + 'a,
 {
-	// finalize command
-	let tx_vec = updater::retrieve_txs(
-		wallet,
-		keychain_mask,
-		None,
-		Some(slate.id),
-		None,
-		None,
-		false,
-		None,
-		None,
-		None,
-	)?;
-	let mut tx = None;
-	// don't want to assume this is the right tx, in case of self-sending
-	for t in tx_vec {
-		if t.tx_type == TxLogEntryType::TxSent && !is_invoiced {
-			tx = Some(t);
-			break;
+	// Reading saved TxLogEntry
+	let mut tx = match tx_session {
+		Some(tx_ses) => tx_ses
+			.borrow()
+			.get_tx_log_entry()
+			.clone()
+			.ok_or(Error::TransactionDoesntExist(slate.id.to_string()))?,
+		None => {
+			let tx_vec = updater::retrieve_txs(
+				wallet,
+				keychain_mask,
+				None,
+				Some(slate.id),
+				None,
+				None,
+				false,
+				None,
+				None,
+				None,
+			)?;
+			let mut tx = None;
+			// don't want to assume this is the right tx, in case of self-sending
+			for t in tx_vec {
+				if t.tx_type == TxLogEntryType::TxSent && !is_invoiced {
+					tx = Some(t);
+					break;
+				}
+				if t.tx_type == TxLogEntryType::TxReceived && is_invoiced {
+					tx = Some(t);
+					break;
+				}
+			}
+			match tx {
+				Some(t) => t,
+				None => return Err(Error::TransactionDoesntExist(slate.id.to_string())),
+			}
 		}
-		if t.tx_type == TxLogEntryType::TxReceived && is_invoiced {
-			tx = Some(t);
-			break;
-		}
-	}
-	let mut tx = match tx {
-		Some(t) => t,
-		None => return Err(Error::TransactionDoesntExist(slate.id.to_string())),
 	};
 
 	if tx.tx_slate_id.is_none() {
@@ -541,9 +566,6 @@ where
 			"Transaction doesn't have stored tx slate id".to_string(),
 		));
 	}
-
-	wallet.store_tx(&format!("{}", tx.tx_slate_id.unwrap()), slate.tx_or_err()?)?;
-	let parent_key = tx.parent_key_id.clone();
 
 	let keychain = wallet.keychain(keychain_mask)?;
 
@@ -588,11 +610,21 @@ where
 		})
 	}
 
-	wallet.store_tx(&format!("{}", slate.id), slate.tx_or_err()?)?;
+	match tx_session {
+		Some(tx_ses) => {
+			let mut tx_ses = tx_ses.borrow_mut();
+			tx_ses.set_tx_log_entry(tx);
+			tx_ses.set_transaction(slate.tx_or_err()?.clone());
+		}
+		None => {
+			wallet.store_tx(&format!("{}", slate.id), slate.tx_or_err()?)?;
+			let mut batch = wallet.batch(keychain_mask)?;
+			let parent_key = tx.parent_key_id.clone();
+			batch.save_tx_log_entry(tx, &parent_key)?;
+			batch.commit()?;
+		}
+	}
 
-	let mut batch = wallet.batch(keychain_mask)?;
-	batch.save_tx_log_entry(tx, &parent_key)?;
-	batch.commit()?;
 	Ok(())
 }
 
@@ -600,6 +632,7 @@ where
 pub fn update_message<'a, T: ?Sized, C, K>(
 	wallet: &mut T,
 	keychain_mask: Option<&SecretKey>,
+	tx_session: &Option<RefCell<TxSession>>,
 	slate: &Slate,
 ) -> Result<(), Error>
 where
@@ -607,28 +640,40 @@ where
 	C: NodeClient + 'a,
 	K: Keychain + 'a,
 {
-	let tx_vec = updater::retrieve_txs(
-		wallet,
-		keychain_mask,
-		None,
-		Some(slate.id),
-		None,
-		None,
-		false,
-		None,
-		None,
-		None,
-	)?;
-	if tx_vec.is_empty() {
-		return Err(Error::TransactionDoesntExist(slate.id.to_string()));
+	match tx_session {
+		Some(tx_ses) => {
+			tx_ses
+				.borrow_mut()
+				.get_mut_tx_log_entry()
+				.as_mut()
+				.ok_or(Error::TransactionDoesntExist(slate.id.to_string()))?
+				.messages = Some(slate.participant_messages());
+		}
+		None => {
+			let tx_vec = updater::retrieve_txs(
+				wallet,
+				keychain_mask,
+				None,
+				Some(slate.id),
+				None,
+				None,
+				false,
+				None,
+				None,
+				None,
+			)?;
+			if tx_vec.is_empty() {
+				return Err(Error::TransactionDoesntExist(slate.id.to_string()));
+			}
+			let mut batch = wallet.batch(keychain_mask)?;
+			for mut tx in tx_vec.into_iter() {
+				tx.messages = Some(slate.participant_messages());
+				let parent_key = tx.parent_key_id.clone();
+				batch.save_tx_log_entry(tx, &parent_key)?;
+			}
+			batch.commit()?;
+		}
 	}
-	let mut batch = wallet.batch(keychain_mask)?;
-	for mut tx in tx_vec.into_iter() {
-		tx.messages = Some(slate.participant_messages());
-		let parent_key = tx.parent_key_id.clone();
-		batch.save_tx_log_entry(tx, &parent_key)?;
-	}
-	batch.commit()?;
 	Ok(())
 }
 
@@ -721,32 +766,35 @@ where
 	C: NodeClient + 'a,
 	K: Keychain + 'a,
 {
-	let tx_vec = updater::retrieve_txs(
-		wallet,
-		keychain_mask,
-		None,
-		Some(slate.id),
-		None,
-		None,
-		false,
-		None,
-		None,
-		None,
-	)?;
-
-	if tx_vec.is_empty() {
-		return Err(Error::PaymentProof(
-			"TxLogEntry with original proof info not found (is account correct?)".to_owned(),
-		));
-	}
-
 	#[cfg(feature = "grin_proof")]
-	let orig_proof_info = tx_vec[0].clone().payment_proof;
-	#[cfg(feature = "grin_proof")]
-	if orig_proof_info.is_some() && slate.payment_proof.is_none() {
-		return Err(Error::PaymentProof(
-			"Expected Payment Proof for this Transaction is not present".to_owned(),
-		));
+	{
+		// TODO need to pass tx_session: &Option<RefCell<TxSession>> and read TxLogEntry from there
+		debug_assert!(false);
+		let tx_vec = updater::retrieve_txs(
+			wallet,
+			keychain_mask,
+			None,
+			Some(slate.id),
+			None,
+			None,
+			false,
+			None,
+			None,
+			None,
+		)?;
+
+		if tx_vec.is_empty() {
+			return Err(Error::PaymentProof(
+				"TxLogEntry with original proof info not found (is account correct?)".to_owned(),
+			));
+		}
+
+		let orig_proof_info = tx_vec[0].clone().payment_proof;
+		if orig_proof_info.is_some() && slate.payment_proof.is_none() {
+			return Err(Error::PaymentProof(
+				"Expected Payment Proof for this Transaction is not present".to_owned(),
+			));
+		}
 	}
 
 	if let Some(ref p) = slate.clone().payment_proof {

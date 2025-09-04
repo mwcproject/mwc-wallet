@@ -1873,7 +1873,7 @@ where
 			let a = arg_parse!(parse_post_args(&args));
 			command::post(owner_api, km, a)
 		}
-		// Submit is a synonim for 'post'. Since MWC intoduce it ealier, let's keep it
+		// Submit is a synonim for 'post'. Since MWC introduce it earlier, let's keep it
 		("submit", Some(args)) => {
 			let a = arg_parse!(parse_submit_args(&args));
 			command::submit(owner_api, km, a)

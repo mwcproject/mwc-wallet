@@ -37,12 +37,15 @@ use crate::InitTxArgs;
 use crate::IntegrityContext;
 use crate::Slate;
 use chrono::prelude::*;
+use mwc_wallet_util::mwc_core::core::{CommitWrapper, KernelFeatures};
+use mwc_wallet_util::mwc_util::RwLock;
 use rand::rngs::mock::StepRng;
 use rand::thread_rng;
 use serde;
 use serde_json;
 use std::collections::HashMap;
 use std::fmt;
+use std::sync::{Arc, Weak};
 use std::time::Duration;
 use uuid::Uuid;
 
@@ -617,9 +620,18 @@ impl OutputData {
 		{
 			false
 		} else {
-			(self.status == OutputStatus::Unspent
+			if (self.status == OutputStatus::Unspent
 				&& self.num_confirmations(current_height) >= minimum_confirmations)
 				|| self.status == OutputStatus::Unconfirmed && minimum_confirmations == 0
+			{
+				// Eligible, but also let's check accross all TxSessions that can be alive
+				match &self.commit {
+					Some(commit) => input_is_free(commit),
+					None => true,
+				}
+			} else {
+				false
+			}
 		}
 	}
 
@@ -731,6 +743,25 @@ pub struct Context {
 	pub calculated_excess: Option<pedersen::Commitment>,
 	/// Slate message that was added from this participant.
 	pub message: Option<String>,
+	/// Kernel Lock height, used for response slate validation
+	#[serde(default)]
+	pub lock_height: u64,
+	/// kernel_features, used for response slate validation
+	#[serde(default)]
+	pub kernel_features: u8,
+	/// TTL, the block height at which wallets
+	/// should refuse to process the transaction and unlock all
+	/// associated outputs, used for response slate validation
+	#[serde(default)]
+	pub ttl_cutoff_height: Option<u64>,
+	/// Type of slate - compact or legacy. That affects the build Tx workflow. Let's keep it
+	/// Used for response slate validation
+	#[serde(default = "default_true")]
+	pub compact_slate: bool,
+}
+
+fn default_true() -> bool {
+	true
 }
 
 impl Context {
@@ -745,6 +776,10 @@ impl Context {
 		amount: u64,
 		fee: u64,
 		message: Option<String>,
+		lock_height: u64,
+		kernel_features: u8,
+		ttl_cutoff_height: Option<u64>,
+		compact_slate: bool,
 	) -> Context {
 		let sec_key = match use_test_rng {
 			false => SecretKey::new(secp, &mut thread_rng()),
@@ -767,6 +802,10 @@ impl Context {
 			amount,
 			fee,
 			message,
+			lock_height,
+			kernel_features,
+			ttl_cutoff_height,
+			compact_slate,
 		)
 	}
 
@@ -780,6 +819,10 @@ impl Context {
 		amount: u64,
 		fee: u64,
 		message: Option<String>,
+		lock_height: u64,
+		kernel_features: u8,
+		ttl_cutoff_height: Option<u64>,
+		compact_slate: bool,
 	) -> Context {
 		let sec_nonce = match use_test_rng {
 			false => aggsig::create_secnonce(secp).unwrap(),
@@ -802,6 +845,10 @@ impl Context {
 			late_lock_args: None,
 			calculated_excess: None,
 			message,
+			lock_height,
+			kernel_features,
+			ttl_cutoff_height,
+			compact_slate,
 		}
 	}
 
@@ -833,11 +880,107 @@ impl Context {
 			calculated_excess: None,
 			late_lock_args: None,
 			message: None,
+			lock_height: slate.get_lock_height(),
+			kernel_features: slate.get_kernel_features(),
+			ttl_cutoff_height: slate.ttl_cutoff_height,
+			compact_slate: slate.compact_slate,
 		})
 	}
 }
 
 impl Context {
+	/// Validate is Slate params a valid. It is not expected that other peer changing the slate params.
+	/// slate - response slate to process
+	pub fn validate_slate(&self, slate: &Slate) -> Result<(), Error> {
+		if slate.compact_slate != self.compact_slate {
+			return Err(Error::SlateValidation(
+				"compact_slate flag mismatch".to_string(),
+			));
+		}
+
+		if self.compact_slate {
+			if !(slate.amount == 0 || slate.amount == self.amount) {
+				return Err(Error::SlateValidation("amount mismatch".to_string()));
+			}
+			if !(slate.fee == 0 || slate.fee == self.fee) {
+				return Err(Error::SlateValidation("fee mismatch".to_string()));
+			}
+		} else {
+			if slate.amount != self.amount {
+				return Err(Error::SlateValidation("amount mismatch".to_string()));
+			}
+			if slate.fee != self.fee {
+				return Err(Error::SlateValidation("fee mismatch".to_string()));
+			}
+			// Checking transaction...
+			// Inputs must match exactly
+
+			// Checking transaction...
+			// Inputs must match exactly
+			let mut slate_inputs: Vec<CommitWrapper> =
+				slate.tx_or_err()?.body.inputs.clone().into();
+			slate_inputs.sort();
+			let mut context_inputs: Vec<CommitWrapper> = self
+				.input_commits
+				.clone()
+				.into_iter()
+				.map(|c| c.into())
+				.collect();
+			context_inputs.sort();
+
+			if slate_inputs != context_inputs {
+				return Err(Error::SlateValidation("inputs mismatch".to_string()));
+			}
+
+			// Respond outputs must include send_slate's change outputs. Expected that some was added
+			let slate_outputs: Vec<Commitment> = slate
+				.tx_or_err()?
+				.body
+				.outputs
+				.clone()
+				.into_iter()
+				.map(|o| o.identifier.commit)
+				.collect();
+
+			for output in &self.output_commits {
+				if !slate_outputs.contains(output) {
+					return Err(Error::SlateValidation("outputs mismatch".to_string()));
+				}
+			}
+
+			// Kernels must match exactly
+			let kernels = &slate.tx_or_err()?.body.kernels;
+			if kernels.len() != 1 {
+				return Err(Error::SlateValidation(
+					"kernels num mismatch, expecting one kernel".to_string(),
+				));
+			}
+
+			match kernels[0].features {
+				KernelFeatures::Plain { fee } => {
+					if fee.fee() != self.fee {
+						return Err(Error::SlateValidation("kernels fee mismatch".to_string()));
+					}
+				}
+				_ => return Err(Error::SlateValidation("kernels type mismatch".to_string())),
+			}
+		}
+
+		if slate.get_kernel_features() != self.kernel_features {
+			return Err(Error::SlateValidation(
+				"kernel_features mismatch".to_string(),
+			));
+		}
+		if slate.get_lock_height() != self.lock_height {
+			return Err(Error::SlateValidation("lock_height mismatch".to_string()));
+		}
+		if slate.ttl_cutoff_height != self.ttl_cutoff_height {
+			return Err(Error::SlateValidation("ttl_cutoff mismatch".to_string()));
+		}
+
+		Ok(())
+	}
+
 	/// Tracks an output contributing to my excess value (if it needs to
 	/// be kept between invocations
 	pub fn add_output(&mut self, output_id: &Identifier, mmr_index: &Option<u64>, amount: u64) {
@@ -1459,6 +1602,185 @@ impl ViewWalletOutputResult {
 		} else {
 			1 + (tip_height - self.height)
 		}
+	}
+}
+
+/// Transaction session. Used to handle online sinbge session transaction. Point for that
+/// we don't want Private concept be permanent and open the door for some manipulations
+pub struct TxSession {
+	// Context & participant Id. Note there is a single participant. For self transaciton create two sessions for both hands.
+	context: Option<(Context, usize)>,
+	// Log entry
+	tx_log_entry: Option<TxLogEntry>,
+	// Outputs to create in the storage
+	outputs: Vec<OutputData>,
+	// Input commits to lock and assign to this transaction (id, mmr, commit, amount)
+	input_commits: Vec<(Identifier, Option<u64>, Commitment, u64)>,
+	// Transacxtion to store in the wallet
+	transaction: Option<Transaction>,
+	// Just a mark, used to track if this TxSession is still exist. Note, object destruction is
+	// not atomic, existance of 'exist' doesn't tell is TxSession exist of not.
+	exist: Arc<u8>,
+}
+
+lazy_static::lazy_static! {
+	static ref TX_SESSIONS_USED_INPUTS: RwLock<HashMap<String, Weak<u8>>> = RwLock::new(HashMap::new());
+}
+
+/// Returns `true` if the given commitment is **not** taken
+/// (i.e. no live `TxSession` is using it).
+pub fn input_is_free(commit: &String) -> bool {
+	let mut map = TX_SESSIONS_USED_INPUTS.write();
+	// Look up the commitment.
+	match map.get(commit) {
+		Some(weak) => {
+			if weak.upgrade().is_some() {
+				false // still locked, can't be used
+			} else {
+				map.remove(commit);
+				true // prev allocator is dead, can be used
+			}
+		}
+		None => true, // not present, so can be used
+	}
+}
+
+impl TxSession {
+	/// Create new empty instance
+	pub fn new() -> Self {
+		TxSession {
+			context: None,
+			tx_log_entry: None,
+			outputs: Vec::new(),
+			input_commits: Vec::new(),
+			transaction: None,
+			exist: Arc::new(0),
+		}
+	}
+
+	/// Check if context is empty
+	pub fn is_empty(&self) -> bool {
+		self.context.is_none() && self.tx_log_entry.is_none() && self.transaction.is_none()
+	}
+
+	/// Get Context & participant Id. Note there is a single participant. For self transaciton create two sessions for both hands.
+	pub fn get_context_participant(&self) -> &Option<(Context, usize)> {
+		&self.context
+	}
+
+	/// Set Context & participant Id
+	pub fn set_context_participant(&mut self, context: Context, participant_id: usize) {
+		self.context = Some((context, participant_id));
+	}
+
+	/// Clean context data
+	pub fn clear_context_participant(&mut self) {
+		self.context = None;
+	}
+
+	/// Get Log entry
+	pub fn get_tx_log_entry(&self) -> &Option<TxLogEntry> {
+		&self.tx_log_entry
+	}
+
+	/// Get mutable log entry
+	pub fn get_mut_tx_log_entry(&mut self) -> &mut Option<TxLogEntry> {
+		&mut self.tx_log_entry
+	}
+
+	/// Set log entry data
+	pub fn set_tx_log_entry(&mut self, log_entry: TxLogEntry) {
+		self.tx_log_entry = Some(log_entry);
+	}
+
+	/// Get Outputs to create in the storage
+	pub fn get_outputs(&self) -> &Vec<OutputData> {
+		&self.outputs
+	}
+
+	/// Set transaction's outputs
+	pub fn set_outputs(&mut self, outputs: Vec<OutputData>) {
+		self.outputs = outputs;
+	}
+
+	/// Input commits to lock and assign to this transaction (id, mmr, commit, amount)
+	pub fn get_input_commits(&self) -> &Vec<(Identifier, Option<u64>, Commitment, u64)> {
+		&self.input_commits
+	}
+	/// Se locked inputs
+	pub fn set_input_commits(&mut self, inputs: Vec<(Identifier, Option<u64>, Commitment, u64)>) {
+		self.input_commits = inputs;
+		let mut used_inputs = TX_SESSIONS_USED_INPUTS.write();
+		for (_id, _mmr, inp, _amount) in &self.input_commits {
+			used_inputs.insert(inp.to_hex(), Arc::downgrade(&self.exist));
+		}
+	}
+
+	/// Get Transacxtion to store in the wallet
+	pub fn get_transaction(&self) -> &Option<Transaction> {
+		&self.transaction
+	}
+
+	/// Set transaction data
+	pub fn set_transaction(&mut self, transaction: Transaction) {
+		self.transaction = Some(transaction);
+	}
+
+	/// Save transaction session data. Expected that everything was finished sucessfully
+	pub fn save_tx_data<'a, T: ?Sized, C, K>(
+		&mut self,
+		wallet: &mut T,
+		keychain_mask: Option<&SecretKey>,
+		slate_id: &Uuid,
+	) -> Result<(), Error>
+	where
+		T: WalletBackend<'a, C, K>,
+		C: NodeClient + 'a,
+		K: Keychain + 'a,
+	{
+		// Context is expected to be deleted. It is mark of success. Nortmally provate contexts should never leak.
+		if let Some(tx_log_entry) = &mut self.tx_log_entry {
+			{
+				let mut batch = wallet.batch(keychain_mask)?;
+				let log_id = batch.next_tx_log_id(&tx_log_entry.parent_key_id)?;
+				tx_log_entry.id = log_id;
+
+				// Updating Log entry
+				batch.save_tx_log_entry(tx_log_entry.clone(), &tx_log_entry.parent_key_id)?;
+
+				// Creating new outputs records
+				for out in &mut self.outputs {
+					out.tx_log_entry = Some(log_id);
+					batch.save(out.clone())?;
+				}
+
+				// Locking inputs
+				for (id, mmr, _commit, _amount) in &self.input_commits {
+					if let Ok(mut coin) = batch.get(&id, &mmr) {
+						coin.tx_log_entry = Some(log_id);
+						batch.lock_output(&mut coin)?;
+					}
+				}
+
+				batch.commit()?;
+			}
+
+			// Store transaction body for repost & other info
+			if let Some(transaction) = &self.transaction {
+				wallet.store_tx(
+					&format!("{}", tx_log_entry.tx_slate_id.expect("Tx UUID is expected")),
+					transaction,
+				)?;
+			}
+		}
+
+		if let Some((context, participant_id)) = &self.context {
+			let mut batch = wallet.batch(keychain_mask)?;
+			batch.save_private_context(slate_id.as_bytes(), *participant_id, context)?;
+			batch.commit()?;
+		}
+
+		Ok(())
 	}
 }
 

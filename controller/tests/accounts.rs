@@ -222,10 +222,10 @@ fn accounts_test_impl(test_dir: &str) -> Result<(), wallet::Error> {
 			selection_strategy_is_use_all: true,
 			..Default::default()
 		};
-		let mut slate = api.init_send_tx(m, &args, 1)?;
+		let mut slate = api.init_send_tx(m, &None, &args, 1)?;
 		slate = client1.send_tx_slate_direct("wallet2", &slate)?;
-		api.tx_lock_outputs(m, &slate, None, 0)?;
-		slate = api.finalize_tx(m, &slate)?;
+		api.tx_lock_outputs(m, &None, &slate, None, 0)?;
+		slate = api.finalize_tx(m, &None, &slate)?;
 		api.post_tx(m, slate.tx_or_err()?, false)?;
 		Ok(())
 	})?;

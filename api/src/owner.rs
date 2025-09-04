@@ -17,6 +17,7 @@
 
 use chrono::prelude::*;
 use ed25519_dalek::PublicKey as DalekPublicKey;
+use std::cell::RefCell;
 use uuid::Uuid;
 
 use crate::config::{MQSConfig, TorConfig, WalletConfig};
@@ -46,6 +47,7 @@ use crate::util::secp::key::SecretKey;
 use crate::util::{from_hex, Mutex, ZeroingString};
 use libwallet::proof::tx_proof;
 use libwallet::proof::tx_proof::VerifyProofResult;
+use libwallet::types::TxSession;
 use libwallet::{
 	wallet_lock, Context, OwnershipProof, OwnershipProofValidation, RetrieveTxQueryArgs,
 };
@@ -62,10 +64,11 @@ use std::time::Duration;
 lazy_static! {
 	// Flag that send call is in the progress. init_send_tx is not atomic because we don't want
 	// wallet to be blocked during send attempt that can take up to 2 minutes is we are using mwcmqs and other wallet is offline.
-	// Also we don't wantot to lock outputs before send and cancel on failure.
+	// Also we don't want to lock outputs before send and cancel on failure.
 	// That is we are introducing a simple flag for the send. Only one instance will be ready to go through
 	// send workflow with owner API. Ownser API ans command can act together, in worst case it will throw lock error
-	pub static ref INIT_SEND_TX_LOCK: Arc<Mutex<u32>> = Arc::new(Mutex::new(0));
+	// Also Finalize need to use this lock as well, because if might use 'lock_later' that does the locking
+	pub static ref INIT_SEND_FINALIZE_TX_LOCK: Arc<Mutex<u32>> = Arc::new(Mutex::new(0));
 }
 
 /// Main interface into all wallet API functions.
@@ -701,6 +704,7 @@ where
 	/// };
 	/// let result = api_owner.init_send_tx(
 	/// 	None,
+	/// 	&None,
 	/// 	&args,
 	/// 	1,
 	/// );
@@ -709,13 +713,14 @@ where
 	/// 	// Send slate somehow
 	/// 	// ...
 	/// 	// Lock our outputs if we're happy the slate was (or is being) sent
-	/// 	api_owner.tx_lock_outputs(None, &slate, None, 0);
+	/// 	api_owner.tx_lock_outputs(None, &None, &slate, None, 0);
 	/// }
 	/// ```
 
 	pub fn init_send_tx(
 		&self,
 		keychain_mask: Option<&SecretKey>,
+		tx_session: &Option<RefCell<TxSession>>,
 		args: &InitTxArgs,
 		routputs: usize, // Number of resulting outputs. Normally it is 1
 	) -> Result<Slate, Error> {
@@ -782,14 +787,21 @@ where
 
 		// Using it as a global lock for the API
 		// Without usage it still works until the end of the block
-		let mut _send_lock = INIT_SEND_TX_LOCK.lock();
+		let mut _send_lock = INIT_SEND_FINALIZE_TX_LOCK.lock();
 
 		let (mut slate, slatepack_secret, secp) = {
 			wallet_lock!(self.wallet_inst, w);
 			owner::update_wallet_state(&mut **w, keychain_mask, &None)?;
 
 			let slate = {
-				owner::init_send_tx(&mut **w, keychain_mask, &args, self.doctest_mode, routputs)?
+				owner::init_send_tx(
+					&mut **w,
+					keychain_mask,
+					tx_session,
+					&args,
+					self.doctest_mode,
+					routputs,
+				)?
 			};
 
 			let keychain = w.keychain(keychain_mask)?;
@@ -832,8 +844,6 @@ where
 
 				// Restore back ttl, because it can be gone
 				slate.ttl_cutoff_height = original_slate.ttl_cutoff_height.clone();
-				// Checking is sender didn't do any harm to slate
-				Slate::compare_slates_send(&original_slate, &slate)?;
 
 				owner::verify_slate_messages(&slate).map_err(|e| {
 					error!(
@@ -849,6 +859,7 @@ where
 					owner::tx_lock_outputs(
 						&mut **w,
 						keychain_mask,
+						&tx_session,
 						&slate,
 						address,
 						0,
@@ -860,6 +871,7 @@ where
 							let (slate_res, _context) = owner::finalize_tx(
 								&mut **w,
 								keychain_mask,
+								&tx_session,
 								&slate,
 								true,
 								self.doctest_mode,
@@ -920,7 +932,7 @@ where
 	///     amount: 60_000_000_000,
 	///     ..Default::default()
 	/// };
-	/// let result = api_owner.issue_invoice_tx(None, &args);
+	/// let result = api_owner.issue_invoice_tx(None, &None, &args);
 	///
 	/// if let Ok(slate) = result {
 	///     // if okay, send to the payer to add their inputs
@@ -930,19 +942,36 @@ where
 	pub fn issue_invoice_tx(
 		&self,
 		keychain_mask: Option<&SecretKey>,
+		tx_session: &Option<RefCell<TxSession>>,
 		args: &IssueInvoiceTxArgs,
 	) -> Result<Slate, Error> {
+		// Using it as a global lock for the API
+		// Without usage it still works until the end of the block
+		let mut _send_lock = INIT_SEND_FINALIZE_TX_LOCK.lock();
+
 		wallet_lock!(self.wallet_inst, w);
-		owner::issue_invoice_tx(&mut **w, keychain_mask, args, self.doctest_mode, 1)
+		owner::issue_invoice_tx(
+			&mut **w,
+			keychain_mask,
+			tx_session,
+			args,
+			self.doctest_mode,
+			1,
+		)
 	}
 
 	pub fn generate_invoice_slate(
 		&self,
 		keychain_mask: Option<&SecretKey>,
 		amount: u64,
+		tx_session: &Option<RefCell<TxSession>>,
 	) -> Result<(Slate, Context), Error> {
+		// Using it as a global lock for the API
+		// Without usage it still works until the end of the block
+		let mut _send_lock = INIT_SEND_FINALIZE_TX_LOCK.lock();
+
 		wallet_lock!(self.wallet_inst, w);
-		owner::generate_invoice_slate(&mut **w, keychain_mask, amount)
+		owner::generate_invoice_slate(&mut **w, keychain_mask, amount, tx_session)
 	}
 
 	/// Processes an invoice tranaction created by another party, essentially
@@ -992,7 +1021,7 @@ where
 	///     ..Default::default()
 	/// };
 	///
-	/// let result = api_owner.process_invoice_tx(None, &slate, &args);
+	/// let result = api_owner.process_invoice_tx(None, &None, &slate, &args);
 	///
 	/// if let Ok(slate) = result {
 	/// // If result okay, send back to the invoicer
@@ -1003,9 +1032,14 @@ where
 	pub fn process_invoice_tx(
 		&self,
 		keychain_mask: Option<&SecretKey>,
+		tx_session: &Option<RefCell<TxSession>>,
 		slate: &Slate,
 		args: &InitTxArgs,
 	) -> Result<Slate, Error> {
+		// Using it as a global lock for the API
+		// Without usage it still works until the end of the block
+		let mut _send_lock = INIT_SEND_FINALIZE_TX_LOCK.lock();
+
 		wallet_lock!(self.wallet_inst, w);
 
 		owner::update_wallet_state(&mut **w, keychain_mask, &None)?;
@@ -1020,6 +1054,7 @@ where
 		owner::process_invoice_tx(
 			&mut **w,
 			keychain_mask,
+			tx_session,
 			slate,
 			args,
 			self.doctest_mode,
@@ -1071,6 +1106,7 @@ where
 	/// };
 	/// let result = api_owner.init_send_tx(
 	/// 	None,
+	/// 	&None,
 	/// 	&args,
 	/// 	1,
 	/// );
@@ -1079,13 +1115,14 @@ where
 	///		// Send slate somehow
 	///		// ...
 	///		// Lock our outputs if we're happy the slate was (or is being) sent
-	///		api_owner.tx_lock_outputs(None, &slate, None, 0);
+	///		api_owner.tx_lock_outputs(None, &None, &slate, None, 0);
 	/// }
 	/// ```
 
 	pub fn tx_lock_outputs(
 		&self,
 		keychain_mask: Option<&SecretKey>,
+		tx_session: &Option<RefCell<TxSession>>,
 		slate: &Slate,
 		address: Option<String>,
 		participant_id: usize,
@@ -1094,6 +1131,7 @@ where
 		owner::tx_lock_outputs(
 			&mut **w,
 			keychain_mask,
+			tx_session,
 			slate,
 			address,
 			participant_id,
@@ -1145,6 +1183,7 @@ where
 	/// };
 	/// let result = api_owner.init_send_tx(
 	/// 	None,
+	///     &None,
 	/// 	&args,
 	/// 	1,
 	/// );
@@ -1153,23 +1192,29 @@ where
 	///		// Send slate somehow
 	///		// ...
 	///		// Lock our outputs if we're happy the slate was (or is being) sent
-	///		let res = api_owner.tx_lock_outputs(None, &slate, None, 0);
+	///		let res = api_owner.tx_lock_outputs(None, &None, &slate, None, 0);
 	///		//
 	///		// Retrieve slate back from recipient
 	///		//
-	///		let res = api_owner.finalize_tx(None, &slate);
+	///		let res = api_owner.finalize_tx(None, &None, &slate);
 	/// }
 	/// ```
 
 	pub fn finalize_tx(
 		&self,
 		keychain_mask: Option<&SecretKey>,
+		tx_session: &Option<RefCell<TxSession>>,
 		slate: &Slate,
 	) -> Result<Slate, Error> {
+		// Using it as a global lock for the API
+		// Without usage it still works until the end of the block
+		let mut _send_lock = INIT_SEND_FINALIZE_TX_LOCK.lock();
+
 		wallet_lock!(self.wallet_inst, w);
 		let (slate_res, _context) = owner::finalize_tx(
 			&mut **w,
 			keychain_mask,
+			tx_session,
 			slate,
 			true,
 			self.doctest_mode,
@@ -1214,6 +1259,7 @@ where
 	/// };
 	/// let result = api_owner.init_send_tx(
 	/// 	None,
+	///     &None,
 	/// 	&args,
 	/// 	1,
 	/// );
@@ -1222,11 +1268,11 @@ where
 	///		// Send slate somehow
 	///		// ...
 	///		// Lock our outputs if we're happy the slate was (or is being) sent
-	///		let res = api_owner.tx_lock_outputs(None, &slate, None, 0);
+	///		let res = api_owner.tx_lock_outputs(None, &None, &slate, None, 0);
 	///		//
 	///		// Retrieve slate back from recipient
 	///		//
-	///		let res = api_owner.finalize_tx(None, &slate);
+	///		let res = api_owner.finalize_tx(None, &None, &slate);
 	///		let res = api_owner.post_tx(None, slate.tx_or_err().unwrap(), true);
 	/// }
 	/// ```
@@ -1286,6 +1332,7 @@ where
 	/// };
 	/// let result = api_owner.init_send_tx(
 	/// 	None,
+	///     &None,
 	/// 	&args,
 	/// 	1,
 	/// );
@@ -1294,7 +1341,7 @@ where
 	///		// Send slate somehow
 	///		// ...
 	///		// Lock our outputs if we're happy the slate was (or is being) sent
-	///		let res = api_owner.tx_lock_outputs(None, &slate, None, 0);
+	///		let res = api_owner.tx_lock_outputs(None, &None, &slate, None, 0);
 	///		//
 	///		// We didn't get the slate back, or something else went wrong
 	///		//
@@ -1408,6 +1455,7 @@ where
 	/// };
 	/// let result = api_owner.init_send_tx(
 	/// 	None,
+	/// 	&None,
 	/// 	&args,
 	/// 	1,
 	/// );
@@ -1416,7 +1464,7 @@ where
 	///		// Send slate somehow
 	///		// ...
 	///		// Lock our outputs if we're happy the slate was (or is being) sent
-	///		let res = api_owner.tx_lock_outputs(None, &slate, None, 0);
+	///		let res = api_owner.tx_lock_outputs(None, &None, &slate, None, 0);
 	///		//
 	///		// Retrieve slate back from recipient
 	///		//

@@ -135,10 +135,10 @@ fn file_repost_test_impl(test_dir: &str) -> Result<(), wallet::Error> {
 			..Default::default()
 		};
 
-		let slate = api.init_send_tx(m, &args, 1)?;
+		let slate = api.init_send_tx(m, &None, &args, 1)?;
 		PathToSlatePutter::build_plain(Some((&send_file).into()))
 			.put_tx(&slate, None, true, &secp)?;
-		api.tx_lock_outputs(m, &slate, None, 0)?;
+		api.tx_lock_outputs(m, &None, &slate, None, 0)?;
 		Ok(())
 	})?;
 
@@ -163,7 +163,7 @@ fn file_repost_test_impl(test_dir: &str) -> Result<(), wallet::Error> {
 			.get_tx(None, &secp)?
 			.to_slate()?
 			.0;
-		slate = api.receive_tx(&slate, None, &None, None)?;
+		slate = api.receive_tx(&None, &slate, None, &None, None)?;
 		PathToSlatePutter::build_plain(Some((&receive_file).into()))
 			.put_tx(&slate, None, true, &secp)?;
 		Ok(())
@@ -181,7 +181,7 @@ fn file_repost_test_impl(test_dir: &str) -> Result<(), wallet::Error> {
 			.get_tx(None, &secp)?
 			.to_slate()?
 			.0;
-		slate = api.finalize_tx(m, &slate)?;
+		slate = api.finalize_tx(m, &None, &slate)?;
 		Ok(())
 	})?;
 
@@ -249,10 +249,10 @@ fn file_repost_test_impl(test_dir: &str) -> Result<(), wallet::Error> {
 			selection_strategy_is_use_all: true,
 			..Default::default()
 		};
-		let slate_i = sender_api.init_send_tx(m, &args, 1)?;
+		let slate_i = sender_api.init_send_tx(m, &None, &args, 1)?;
 		slate = client1.send_tx_slate_direct("wallet2", &slate_i)?;
-		sender_api.tx_lock_outputs(m, &slate, None, 0)?;
-		slate = sender_api.finalize_tx(m, &slate)?;
+		sender_api.tx_lock_outputs(m, &None, &slate, None, 0)?;
+		slate = sender_api.finalize_tx(m, &None, &slate)?;
 		Ok(())
 	})?;
 

@@ -24,7 +24,9 @@ use crate::libwallet::{
 use crate::util::secp::key::SecretKey;
 use crate::util::Mutex;
 use ed25519_dalek::PublicKey as DalekPublicKey;
+use libwallet::types::TxSession;
 use libwallet::wallet_lock;
+use std::cell::RefCell;
 use std::sync::Arc;
 
 /// ForeignAPI Middleware Check callback
@@ -391,7 +393,7 @@ where
 	///
 	/// // . . .
 	/// // Obtain a sent slate somehow
-	/// let result = api_foreign.receive_tx(&slate, None, &None, None);
+	/// let result = api_foreign.receive_tx(&None, &slate, None, &None, None);
 	///
 	/// if let Ok(slate) = result {
 	///     // Send back to recipient somehow
@@ -401,6 +403,7 @@ where
 
 	pub fn receive_tx(
 		&self,
+		tx_session: &Option<RefCell<TxSession>>,
 		slate: &Slate,
 		address: Option<String>,
 		dest_acct_name: &Option<String>,
@@ -418,6 +421,7 @@ where
 		let (slate, _context) = foreign::receive_tx(
 			&mut **w,
 			(&self.keychain_mask).as_ref(),
+			tx_session,
 			slate,
 			address,
 			None,
@@ -466,18 +470,22 @@ where
 	///     amount: 10_000_000_000,
 	///     ..Default::default()
 	/// };
-	/// let result = api_owner.issue_invoice_tx(None, &args);
+	/// let result = api_owner.issue_invoice_tx(None, &None, &args);
 	///
 	/// // If result okay, send to payer, who will apply the transaction via their
 	/// // owner API, then send back the slate
 	/// // ...
 	/// # let slate = Slate::blank(2, false);
 	///
-	/// let slate = api_foreign.finalize_invoice_tx(&slate);
+	/// let slate = api_foreign.finalize_invoice_tx(&None, &slate);
 	/// // if okay, then post via the owner API
 	/// ```
 
-	pub fn finalize_invoice_tx(&self, slate: &Slate) -> Result<Slate, Error> {
+	pub fn finalize_invoice_tx(
+		&self,
+		tx_session: &Option<RefCell<TxSession>>,
+		slate: &Slate,
+	) -> Result<Slate, Error> {
 		wallet_lock!(self.wallet_inst, w);
 		if let Some(m) = self.middleware.as_ref() {
 			m(
@@ -489,6 +497,7 @@ where
 		foreign::finalize_invoice_tx(
 			&mut **w,
 			(&self.keychain_mask).as_ref(),
+			tx_session,
 			slate,
 			true,
 			self.doctest_mode,

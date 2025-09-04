@@ -115,7 +115,7 @@ fn payment_proofs_test_impl(test_dir: &str) -> Result<(), wallet::Error> {
 			payment_proof_recipient_address: Some(address.clone()),
 			..Default::default()
 		};
-		let slate_i = sender_api.init_send_tx(m, &args, 1)?;
+		let slate_i = sender_api.init_send_tx(m, &None, &args, 1)?;
 
 		assert_eq!(
 			slate_i
@@ -140,7 +140,7 @@ fn payment_proofs_test_impl(test_dir: &str) -> Result<(), wallet::Error> {
 		assert_eq!(0, slate_i.get_lock_height());
 
 		slate = client1.send_tx_slate_direct("wallet2", &slate_i)?;
-		sender_api.tx_lock_outputs(m, &slate, None, 0)?;
+		sender_api.tx_lock_outputs(m, &None, &slate, None, 0)?;
 
 		#[cfg(feature = "grin_proof")]
 		{
@@ -167,7 +167,7 @@ fn payment_proofs_test_impl(test_dir: &str) -> Result<(), wallet::Error> {
 			assert!(pp.is_err());
 		}
 
-		slate = sender_api.finalize_tx(m, &slate)?;
+		slate = sender_api.finalize_tx(m, &None, &slate)?;
 		sender_api.post_tx(m, slate.tx_or_err()?, true)?;
 		Ok(())
 	})?;

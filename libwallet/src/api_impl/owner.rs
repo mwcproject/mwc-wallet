@@ -14,6 +14,7 @@
 
 //! Generic implementation of owner API functions
 
+use std::cell::RefCell;
 use uuid::Uuid;
 
 use crate::mwc_core::core::hash::Hashed;
@@ -34,8 +35,8 @@ use crate::mwc_util::secp::Signature;
 use crate::internal::{keys, scan, selection, tx, updater};
 use crate::slate::{PaymentInfo, Slate};
 use crate::types::{
-	AcctPathMapping, Context, NodeClient, OutputData, TxLogEntry, WalletBackend, WalletInfo,
-	FLAG_NEW_WALLET,
+	AcctPathMapping, Context, NodeClient, OutputData, TxLogEntry, TxSession, WalletBackend,
+	WalletInfo, FLAG_NEW_WALLET,
 };
 use crate::Error;
 #[cfg(feature = "grin_proof")]
@@ -440,6 +441,7 @@ where
 pub fn init_send_tx<'a, T: ?Sized, C, K>(
 	w: &mut T,
 	keychain_mask: Option<&SecretKey>,
+	tx_session: &Option<RefCell<TxSession>>,
 	args: &InitTxArgs,
 	use_test_rng: bool,
 	routputs: usize, // Number of resulting outputs. Normally it is 1
@@ -584,46 +586,57 @@ where
 
 	// mwc713 payment proof support.
 	context.input_commits = slate.tx_or_err()?.inputs_committed();
-
-	for output in slate.tx_or_err()?.outputs() {
-		context.output_commits.push(output.commitment());
-	}
+	context.output_commits = slate
+		.tx_or_err()?
+		.outputs()
+		.iter()
+		.map(|o| o.commitment())
+		.collect();
 
 	// Save the aggsig context in our DB for when we
 	// recieve the transaction back
-	{
-		let mut batch = w.batch(keychain_mask)?;
+	let mut t = TxLogEntry::new(parent_key_id.clone(), TxLogEntryType::TxSent, 0);
+	t.tx_slate_id = Some(slate.id);
+	t.fee = Some(context.fee);
+	t.ttl_cutoff_height = slate.ttl_cutoff_height.clone();
+	if t.ttl_cutoff_height == Some(0) {
+		t.ttl_cutoff_height = None;
+	}
+	t.address = args.address.clone();
+	t.kernel_lookup_min_height = Some(slate.height);
 
-		// We need to create transaction now, so user can cancel transaction and delete the context that we are saving below
-		// If it is late lock - it is needed for sure.
-		// If not late lock - still better to create because we don't want to have stale context in any case
+	t.num_inputs = 0;
+	t.input_commits = vec![];
+	t.amount_debited = slate.amount;
 
-		// Note, this transaction will be overwritten with more details at lock_tx_content.
-		// This record for cancellation
+	// write the output representing our change
+	t.num_outputs = 0;
+	t.output_commits = vec![];
+	t.amount_credited = 0;
 
-		let log_id = batch.next_tx_log_id(&parent_key_id)?;
-		let mut t = TxLogEntry::new(parent_key_id.clone(), TxLogEntryType::TxSent, log_id);
-		t.tx_slate_id = Some(slate.id);
-		t.fee = Some(context.fee);
-		t.ttl_cutoff_height = slate.ttl_cutoff_height.clone();
-		if t.ttl_cutoff_height == Some(0) {
-			t.ttl_cutoff_height = None;
+	match tx_session {
+		Some(tx_ses) => {
+			let mut tx_ses = tx_ses.borrow_mut();
+			tx_ses.set_context_participant(context, 0);
+			tx_ses.set_tx_log_entry(t);
 		}
-		t.address = args.address.clone();
-		t.kernel_lookup_min_height = Some(slate.height);
+		None => {
+			let mut batch = w.batch(keychain_mask)?;
 
-		t.num_inputs = 0;
-		t.input_commits = vec![];
-		t.amount_debited = slate.amount;
+			// We need to create transaction now, so user can cancel transaction and delete the context that we are saving below
+			// If it is late lock - it is needed for sure.
+			// If not late lock - still better to create because we don't want to have stale context in any case
 
-		// write the output representing our change
-		t.num_outputs = 0;
-		t.output_commits = vec![];
-		t.amount_credited = 0;
-		batch.save_tx_log_entry(t, &parent_key_id)?;
+			// Note, this transaction will be overwritten with more details at lock_tx_content.
+			// This record for cancellation
 
-		batch.save_private_context(slate.id.as_bytes(), 0, &context)?;
-		batch.commit()?;
+			let log_id = batch.next_tx_log_id(&parent_key_id)?;
+			t.id = log_id;
+			batch.save_tx_log_entry(t, &parent_key_id)?;
+
+			batch.save_private_context(slate.id.as_bytes(), 0, &context)?;
+			batch.commit()?;
+		}
 	}
 
 	Ok(slate)
@@ -633,6 +646,7 @@ where
 pub fn issue_invoice_tx<'a, T: ?Sized, C, K>(
 	w: &mut T,
 	keychain_mask: Option<&SecretKey>,
+	tx_session: &Option<RefCell<TxSession>>,
 	args: &IssueInvoiceTxArgs,
 	use_test_rng: bool,
 	num_outputs: usize, // Number of outputs for this transaction. Normally it is 1
@@ -668,6 +682,7 @@ where
 	let context = tx::add_output_to_slate(
 		&mut *w,
 		keychain_mask,
+		tx_session,
 		&mut slate,
 		chain_tip,
 		args.address.clone(),
@@ -683,11 +698,16 @@ where
 
 	// Save the aggsig context in our DB for when we
 	// recieve the transaction back
-	{
-		let mut batch = w.batch(keychain_mask)?;
-		// Participant id is 0 for mwc713 compatibility
-		batch.save_private_context(slate.id.as_bytes(), 0, &context)?;
-		batch.commit()?;
+	match tx_session {
+		Some(tx_ses) => {
+			tx_ses.borrow_mut().set_context_participant(context, 0);
+		}
+		None => {
+			let mut batch = w.batch(keychain_mask)?;
+			// Participant id is 0 for mwc713 compatibility
+			batch.save_private_context(slate.id.as_bytes(), 0, &context)?;
+			batch.commit()?;
+		}
 	}
 
 	Ok(slate)
@@ -698,6 +718,7 @@ pub fn generate_invoice_slate<'a, T: ?Sized, C, K>(
 	w: &mut T,
 	keychain_mask: Option<&SecretKey>,
 	amount: u64,
+	tx_session: &Option<RefCell<TxSession>>,
 ) -> Result<(Slate, Context), Error>
 where
 	T: WalletBackend<'a, C, K>,
@@ -715,6 +736,7 @@ where
 	let context = tx::add_output_to_slate(
 		&mut *w,
 		keychain_mask,
+		tx_session,
 		&mut slate,
 		chain_tip,
 		None,
@@ -737,6 +759,7 @@ where
 pub fn process_invoice_tx<'a, T: ?Sized, C, K>(
 	w: &mut T,
 	keychain_mask: Option<&SecretKey>,
+	tx_session: &Option<RefCell<TxSession>>,
 	slate: &Slate,
 	args: &InitTxArgs,
 	use_test_rng: bool,
@@ -800,7 +823,15 @@ where
 	}
 
 	// if self sending, make sure to store 'initiator' keys
-	let context_res = w.get_private_context(keychain_mask, slate.id.as_bytes(), 0); // See issue_invoice_tx for sender (self)
+	let context_res = match tx_session {
+		Some(tx) => tx
+			.borrow()
+			.get_context_participant()
+			.clone()
+			.ok_or(Error::Backend("Context doesn't exist".into()))
+			.map(|(context, _id)| context),
+		None => w.get_private_context(keychain_mask, slate.id.as_bytes(), 0), // See issue_invoice_tx for sender (self)
+	};
 
 	let mut context = tx::add_inputs_to_slate(
 		&mut *w,
@@ -860,6 +891,7 @@ where
 		selection::repopulate_tx(
 			&mut *w,
 			keychain_mask,
+			tx_session,
 			&mut ret_slate,
 			&context,
 			false,
@@ -867,13 +899,27 @@ where
 		)?;
 	}
 
+	// Updating context with inputs/outputs  Will need that for slate validation
+	context.input_commits = ret_slate.tx_or_err()?.inputs_committed();
+	context.output_commits = ret_slate
+		.tx_or_err()?
+		.outputs()
+		.iter()
+		.map(|o| o.commitment())
+		.collect();
+
 	// Save the aggsig context in our DB for when we
 	// recieve the transaction back
-	{
-		let mut batch = w.batch(keychain_mask)?;
-		// Participant id 1 for mwc713 compatibility
-		batch.save_private_context(ret_slate.id.as_bytes(), 1, &context)?;
-		batch.commit()?;
+	match tx_session {
+		Some(tx) => {
+			tx.borrow_mut().set_context_participant(context, 1);
+		}
+		None => {
+			let mut batch = w.batch(keychain_mask)?;
+			// Participant id 1 for mwc713 compatibility
+			batch.save_private_context(ret_slate.id.as_bytes(), 1, &context)?;
+			batch.commit()?;
+		}
 	}
 
 	Ok(ret_slate)
@@ -883,6 +929,7 @@ where
 pub fn tx_lock_outputs<'a, T: ?Sized, C, K>(
 	w: &mut T,
 	keychain_mask: Option<&SecretKey>,
+	tx_session: &Option<RefCell<TxSession>>,
 	slate: &Slate,
 	address: Option<String>,
 	participant_id: usize,
@@ -893,9 +940,24 @@ where
 	C: NodeClient + 'a,
 	K: Keychain + 'a,
 {
-	let context = w
-		.get_private_context(keychain_mask, slate.id.as_bytes(), participant_id)
-		.map_err(|_| Error::TransactionWasFinalizedOrCancelled(format!("{}", slate.id)))?;
+	let context = match tx_session {
+		Some(tx) => {
+			tx.borrow()
+				.get_context_participant()
+				.clone()
+				.ok_or(Error::TransactionWasFinalizedOrCancelled(format!(
+					"{}",
+					slate.id
+				)))?
+				.0
+		}
+		None => w
+			.get_private_context(keychain_mask, slate.id.as_bytes(), participant_id)
+			.map_err(|_| Error::TransactionWasFinalizedOrCancelled(format!("{}", slate.id)))?,
+	};
+
+	context.validate_slate(slate)?;
+
 	let mut excess_override = None;
 
 	let mut sl = slate.clone();
@@ -904,6 +966,7 @@ where
 		selection::repopulate_tx(
 			&mut *w,
 			keychain_mask,
+			tx_session,
 			&mut sl,
 			&context,
 			true,
@@ -920,6 +983,7 @@ where
 	selection::lock_tx_context(
 		&mut *w,
 		keychain_mask,
+		tx_session,
 		&sl,
 		height,
 		&context,
@@ -934,6 +998,7 @@ where
 pub fn finalize_tx<'a, T: ?Sized, C, K>(
 	w: &mut T,
 	keychain_mask: Option<&SecretKey>,
+	tx_session: &Option<RefCell<TxSession>>,
 	slate: &Slate,
 	refresh_from_node: bool,
 	use_test_rng: bool,
@@ -947,9 +1012,24 @@ where
 	let mut sl = slate.clone();
 	sl.height = w.w2n_client().get_chain_tip()?.0;
 	check_ttl(w, &sl, refresh_from_node)?;
-	let mut context = w
-		.get_private_context(keychain_mask, sl.id.as_bytes(), 0)
-		.map_err(|_| Error::TransactionWasFinalizedOrCancelled(format!("{}", sl.id)))?;
+	let mut context = match tx_session {
+		Some(tx) => {
+			tx.borrow()
+				.get_context_participant()
+				.clone()
+				.ok_or(Error::TransactionWasFinalizedOrCancelled(format!(
+					"{}",
+					sl.id
+				)))?
+				.0
+		}
+		None => w
+			.get_private_context(keychain_mask, sl.id.as_bytes(), 0)
+			.map_err(|_| Error::TransactionWasFinalizedOrCancelled(format!("{}", sl.id)))?,
+	};
+
+	context.validate_slate(slate)?;
+
 	let keychain = w.keychain(keychain_mask)?;
 	let parent_key_id = context.parent_key_id.clone();
 
@@ -993,14 +1073,25 @@ where
 		context.output_ids = temp_context.output_ids;
 
 		// Store the updated context
-		{
-			let mut batch = w.batch(keychain_mask)?;
-			batch.save_private_context(sl.id.as_bytes(), 0, &context)?;
-			batch.commit()?;
+		match tx_session {
+			Some(tx) => tx.borrow_mut().set_context_participant(context.clone(), 0),
+			None => {
+				let mut batch = w.batch(keychain_mask)?;
+				batch.save_private_context(sl.id.as_bytes(), 0, &context)?;
+				batch.commit()?;
+			}
 		}
 
 		// Now do the actual locking
-		tx_lock_outputs(w, keychain_mask, &sl, args.address, 0, use_test_rng)?;
+		tx_lock_outputs(
+			w,
+			keychain_mask,
+			tx_session,
+			&sl,
+			args.address,
+			0,
+			use_test_rng,
+		)?;
 	}
 
 	if slate.compact_slate {
@@ -1010,6 +1101,7 @@ where
 		selection::repopulate_tx(
 			&mut *w,
 			keychain_mask,
+			tx_session,
 			&mut sl,
 			&context,
 			true,
@@ -1022,16 +1114,20 @@ where
 	tx::update_stored_tx(
 		&mut *w,
 		keychain_mask,
+		tx_session,
 		#[cfg(feature = "grin_proof")]
 		&context,
 		&sl,
 		false,
 	)?;
-	tx::update_message(&mut *w, keychain_mask, &sl)?;
-	{
-		let mut batch = w.batch(keychain_mask)?;
-		batch.delete_private_context(sl.id.as_bytes(), 0)?;
-		batch.commit()?;
+	tx::update_message(&mut *w, keychain_mask, tx_session, &sl)?;
+	match tx_session {
+		Some(tx) => tx.borrow_mut().clear_context_participant(),
+		None => {
+			let mut batch = w.batch(keychain_mask)?;
+			batch.delete_private_context(sl.id.as_bytes(), 0)?;
+			batch.commit()?;
+		}
 	}
 
 	// If Proof available, we can store it at that point

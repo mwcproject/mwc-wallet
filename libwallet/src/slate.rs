@@ -461,63 +461,6 @@ impl Slate {
 		slate
 	}
 
-	/// Compare two slates for send: sended and responded. Just want to check if sender didn't mess with slate
-	pub fn compare_slates_send(send_slate: &Self, respond_slate: &Self) -> Result<(), Error> {
-		if send_slate.id != respond_slate.id {
-			return Err(Error::SlateValidation("uuid mismatch".to_string()));
-		}
-		if !send_slate.compact_slate {
-			if send_slate.amount != respond_slate.amount {
-				return Err(Error::SlateValidation("amount mismatch".to_string()));
-			}
-			if send_slate.fee != respond_slate.fee {
-				return Err(Error::SlateValidation("fee mismatch".to_string()));
-			}
-			// Checking transaction...
-			// Inputs must match exactly
-			if send_slate.tx_or_err()?.body.inputs != respond_slate.tx_or_err()?.body.inputs {
-				return Err(Error::SlateValidation("inputs mismatch".to_string()));
-			}
-
-			// Checking if participant data match each other
-			for pat_data in &send_slate.participant_data {
-				if !respond_slate.participant_data.contains(&pat_data) {
-					return Err(Error::SlateValidation(
-						"participant data mismatch".to_string(),
-					));
-				}
-			}
-
-			// Respond outputs must include send_slate's. Expected that some was added
-			for output in &send_slate.tx_or_err()?.body.outputs {
-				if !respond_slate.tx_or_err()?.body.outputs.contains(&output) {
-					return Err(Error::SlateValidation("outputs mismatch".to_string()));
-				}
-			}
-
-			// Kernels must match exactly
-			if send_slate.tx_or_err()?.body.kernels != respond_slate.tx_or_err()?.body.kernels {
-				return Err(Error::SlateValidation("kernels mismatch".to_string()));
-			}
-		}
-		if send_slate.kernel_features != respond_slate.kernel_features {
-			return Err(Error::SlateValidation(
-				"kernel_features mismatch".to_string(),
-			));
-		}
-		if send_slate.lock_height != respond_slate.lock_height {
-			return Err(Error::SlateValidation("lock_height mismatch".to_string()));
-		}
-		if send_slate.height != respond_slate.height {
-			return Err(Error::SlateValidation("height mismatch".to_string()));
-		}
-		if send_slate.ttl_cutoff_height != respond_slate.ttl_cutoff_height {
-			return Err(Error::SlateValidation("ttl_cutoff mismatch".to_string()));
-		}
-
-		Ok(())
-	}
-
 	/// Compare two slates for invoice: sended and responded. Just want to check if sender didn't mess with slate
 	pub fn compare_slates_invoice(invoice_slate: &Self, respond_slate: &Self) -> Result<(), Error> {
 		if invoice_slate.id != respond_slate.id {

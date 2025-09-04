@@ -103,10 +103,10 @@ fn no_change_test_impl(test_dir: &str, inputs_num: usize) -> Result<(), wallet::
 			selection_strategy_is_use_all: false,
 			..Default::default()
 		};
-		slate = api.init_send_tx(m, &args, 1)?;
+		slate = api.init_send_tx(m, &None, &args, 1)?;
 		slate = client1.send_tx_slate_direct("wallet2", &slate)?;
-		api.tx_lock_outputs(m, &slate, None, 0)?;
-		slate = api.finalize_tx(m, &slate)?;
+		api.tx_lock_outputs(m, &None, &slate, None, 0)?;
+		slate = api.finalize_tx(m, &None, &slate)?;
 		assert!(slate.tx.clone().unwrap().body.inputs.len() == inputs_num);
 		assert!(slate.tx.clone().unwrap().body.outputs.len() == 1); // only destination output is expected, no change outputs
 		api.post_tx(m, slate.tx_or_err()?, false)?;
@@ -143,7 +143,7 @@ fn no_change_test_impl(test_dir: &str, inputs_num: usize) -> Result<(), wallet::
 			amount: reward * inputs_num as u64 - fee,
 			..Default::default()
 		};
-		slate = api.issue_invoice_tx(m, &args)?;
+		slate = api.issue_invoice_tx(m, &None, &args)?;
 		Ok(())
 	})?;
 
@@ -158,8 +158,8 @@ fn no_change_test_impl(test_dir: &str, inputs_num: usize) -> Result<(), wallet::
 			selection_strategy_is_use_all: false,
 			..Default::default()
 		};
-		slate = api.process_invoice_tx(m, &slate, &args)?;
-		api.tx_lock_outputs(m, &slate, None, 1)?;
+		slate = api.process_invoice_tx(m, &None, &slate, &args)?;
+		api.tx_lock_outputs(m, &None, &slate, None, 1)?;
 		assert!(slate.tx.clone().unwrap().body.inputs.len() == inputs_num);
 		assert!(slate.tx.clone().unwrap().body.outputs.len() == 1); // only destination output is expected, no change outputs
 		Ok(())
@@ -168,7 +168,7 @@ fn no_change_test_impl(test_dir: &str, inputs_num: usize) -> Result<(), wallet::
 	// wallet 2 finalizes and posts
 	wallet::controller::foreign_single_use(wallet2.clone(), mask2_i.clone(), |api| {
 		// Wallet 2 receives the invoice transaction
-		slate = api.finalize_invoice_tx(&slate)?;
+		slate = api.finalize_invoice_tx(&None, &slate)?;
 		Ok(())
 	})?;
 	wallet::controller::owner_single_use(Some(wallet2.clone()), mask1, None, |api, m| {

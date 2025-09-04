@@ -40,6 +40,7 @@ use blake2_rfc::blake2b::blake2b;
 use chrono::{Duration, Utc};
 use mwc_wallet_util::mwc_chain::Chain;
 use mwc_wallet_util::mwc_core::consensus::DAY_HEIGHT;
+use std::cell::RefCell;
 use std::cmp;
 use std::collections::{HashMap, HashSet};
 use std::sync::mpsc::Sender;
@@ -2407,10 +2408,13 @@ where
 		..Default::default()
 	};
 
+	let tx_session_send = Some(RefCell::new(TxSession::new()));
+	let tx_session_receive = Some(RefCell::new(TxSession::new()));
+
 	let mut slate;
 	{
 		//send
-		slate = owner::init_send_tx(wallet, keychain_mask, &args, false, 1)?;
+		slate = owner::init_send_tx(wallet, keychain_mask, &tx_session_send, &args, false, 1)?;
 		//receiver
 		let mut dest_account_name: Option<String> = None;
 		let address_string;
@@ -2421,6 +2425,7 @@ where
 		slate = foreign::receive_tx(
 			wallet,
 			keychain_mask,
+			&tx_session_receive,
 			&slate,
 			address.clone(),
 			None,
@@ -2431,10 +2436,26 @@ where
 			false,
 		)?
 		.0;
-		owner::tx_lock_outputs(wallet, keychain_mask, &slate, address, 0, false)?;
-		slate = owner::finalize_tx(wallet, keychain_mask, &slate, false, false, false)
-			.unwrap()
-			.0;
+		owner::tx_lock_outputs(
+			wallet,
+			keychain_mask,
+			&tx_session_send,
+			&slate,
+			address,
+			0,
+			false,
+		)?;
+		slate = owner::finalize_tx(
+			wallet,
+			keychain_mask,
+			&tx_session_send,
+			&slate,
+			false,
+			false,
+			false,
+		)
+		.unwrap()
+		.0;
 	}
 	let client = {
 		// Test keychain mask, to keep API consistent
@@ -2442,5 +2463,28 @@ where
 		wallet.w2n_client().clone()
 	};
 	owner::post_tx(&client, slate.tx_or_err()?, false)?;
+
+	debug_assert!(tx_session_send
+		.as_ref()
+		.unwrap()
+		.borrow()
+		.get_context_participant()
+		.is_none());
+	debug_assert!(tx_session_receive
+		.as_ref()
+		.unwrap()
+		.borrow()
+		.get_context_participant()
+		.is_none());
+
+	tx_session_send
+		.unwrap()
+		.borrow_mut()
+		.save_tx_data(wallet, keychain_mask, &slate.id)?;
+	tx_session_receive
+		.unwrap()
+		.borrow_mut()
+		.save_tx_data(wallet, keychain_mask, &slate.id)?;
+
 	Ok(())
 }

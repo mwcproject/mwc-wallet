@@ -1404,6 +1404,7 @@ where
 				selection::lock_tx_context(
 					&mut **w,
 					keychain_mask,
+					&None,
 					&swap.lock_slate,
 					tx_conf.mwc_tip,
 					&slate_context,
@@ -1436,7 +1437,7 @@ where
 			{
 				// Creating receive transaction from the slate
 				let buyer_context = context.unwrap_buyer()?;
-				create_receive_tx_record(
+				create_swap_receive_tx_record(
 					&mut **w,
 					keychain_mask,
 					&swap.redeem_slate,
@@ -1459,7 +1460,7 @@ where
 			{
 				// For MWC transaction we can create a record in the wallet.
 				let seller_context = context.unwrap_seller()?;
-				create_receive_tx_record(
+				create_swap_receive_tx_record(
 					&mut **w,
 					keychain_mask,
 					&swap.refund_slate,
@@ -1571,7 +1572,7 @@ where
 }
 
 // Creating Transaction and output for expected recieve slate
-fn create_receive_tx_record<'a, T: ?Sized, C, K>(
+fn create_swap_receive_tx_record<'a, T: ?Sized, C, K>(
 	wallet: &mut T,
 	keychain_mask: Option<&SecretKey>,
 	slate: &Slate,

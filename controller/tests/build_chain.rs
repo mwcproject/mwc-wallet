@@ -158,10 +158,12 @@ fn build_chain(test_dir: &str, block_height: usize) -> Result<(), libwallet::Err
 						selection_strategy_is_use_all: false,
 						..Default::default()
 					};
-					let slate_i = sender_api.init_send_tx(m, &args, 1)?;
+					let slate_i = sender_api.init_send_tx(m, &None, &args, 1)?;
 					slate = client1.send_tx_slate_direct("wallet2", &slate_i)?;
-					sender_api.tx_lock_outputs(m, &slate, None, 0).unwrap();
-					slate = sender_api.finalize_tx(m, &slate)?;
+					sender_api
+						.tx_lock_outputs(m, &None, &slate, None, 0)
+						.unwrap();
+					slate = sender_api.finalize_tx(m, &None, &slate)?;
 					Ok(())
 				},
 			)
