@@ -14,8 +14,6 @@
 // limitations under the License.
 
 //! JSON-RPC Stub generation for the Owner API
-// allow for json_rpc
-#![allow(deprecated)]
 
 use std::cell::RefCell;
 use uuid::Uuid;
