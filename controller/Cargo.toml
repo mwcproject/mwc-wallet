@@ -1,6 +1,6 @@
 [package]
 name = "mwc_wallet_controller"
-version = "5.3.8"
+version = "5.3.9"
 authors = ["Mwc Developers <info@mwc.mw>"]
 description = "Controllers for mwc wallet instantiation"
 license = "Apache-2.0"
@@ -37,11 +37,11 @@ mwc-wagyu-ethereum = { git = "https://github.com/mwcproject/wagyu-ethereum", ver
 #mwc-libp2p = { path = "../../rust-libp2p", default-features = false, features = [ "noise", "yamux", "mplex", "dns", "tcp-tokio", "ping", "gossipsub"] }
 easy-jsonrpc-mwc = { git = "https://github.com/mwcproject/easy-jsonrpc-mwc", version = "0.5.5", branch = "master" }
 
-mwc_wallet_util = { path = "../util", version = "5.3.8" }
-mwc_wallet_api = { path = "../api", version = "5.3.8" }
-mwc_wallet_impls = { path = "../impls", version = "5.3.8" }
-mwc_wallet_libwallet = { path = "../libwallet", version = "5.3.8" }
-mwc_wallet_config = { path = "../config", version = "5.3.8" }
+mwc_wallet_util = { path = "../util", version = "5.3.9" }
+mwc_wallet_api = { path = "../api", version = "5.3.9" }
+mwc_wallet_impls = { path = "../impls", version = "5.3.9" }
+mwc_wallet_libwallet = { path = "../libwallet", version = "5.3.9" }
+mwc_wallet_config = { path = "../config", version = "5.3.9" }
 
 [dev-dependencies]
 remove_dir_all = "0.7"
