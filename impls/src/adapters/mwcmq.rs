@@ -966,8 +966,9 @@ impl MWCMQSBroker {
 									// our connection message
 									continue;
 								} else {
-									self.print_error([].to_vec(), "message id expected", -102);
-									is_error = true;
+									// Might happen because of sleep
+									//self.print_error([].to_vec(), "message id expected", -102);
+									// is_error = true;
 									continue;
 								}
 							}
