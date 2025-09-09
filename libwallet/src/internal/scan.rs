@@ -2451,7 +2451,8 @@ where
 			false,
 			false,
 			false,
-		)?.0;
+		)?
+		.0;
 	}
 	let client = {
 		// Test keychain mask, to keep API consistent
