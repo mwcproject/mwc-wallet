@@ -1605,8 +1605,9 @@ impl ViewWalletOutputResult {
 	}
 }
 
-/// Transaction session. Used to handle online sinbge session transaction. Point for that
-/// we don't want Private concept be permanent and open the door for some manipulations
+/// Transaction session. Used to handle online single session transaction. Idea that
+/// we don't want Tx Private context be permanent and open the door for some manipulations.
+/// Thoretically if Tx Private context, transaction can be finished. If it is not sored, nothing can be done.
 pub struct TxSession {
 	// Context & participant Id. Note there is a single participant. For self transaciton create two sessions for both hands.
 	context: Option<(Context, usize)>,
