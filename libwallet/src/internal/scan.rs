@@ -1127,8 +1127,7 @@ where
 
 		for output in self_spend_candidate_list {
 			let commit = wallet
-				.calc_commit(keychain_mask, output.value, &output.key_id)
-				.unwrap();
+				.calc_commit(keychain_mask, output.value, &output.key_id)?;
 			self_spend_candidate_light_list.push(OutputResultLight {
 				key_id: output.key_id,
 				value: output.value.clone(),
