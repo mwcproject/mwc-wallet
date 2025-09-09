@@ -180,14 +180,14 @@ fn revert(
 			selection_strategy_is_use_all: false,
 			..Default::default()
 		};
-		let slate = api.init_send_tx(m, &args, 1)?;
+		let slate = api.init_send_tx(m, &None, &args, 1)?;
 		// output tx file
 		let send_file = format!("{}/part_tx_1.tx", test_dir);
 		PathToSlatePutter::build_plain(Some(PathBuf::from(send_file)))
 			.put_tx(&slate, None, false, &secp)?;
-		api.tx_lock_outputs(m, &slate, None, 0)?;
+		api.tx_lock_outputs(m, &None, &slate, None, 0)?;
 		let slate = client1.send_tx_slate_direct("wallet2", &slate)?;
-		let slate = api.finalize_tx(m, &slate)?;
+		let slate = api.finalize_tx(m, &None, &slate)?;
 		tx = slate.tx;
 
 		Ok(())

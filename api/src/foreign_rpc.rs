@@ -24,11 +24,13 @@ use crate::{Foreign, ForeignCheckMiddlewareFn};
 use easy_jsonrpc_mwc;
 use ed25519_dalek::PublicKey as DalekPublicKey;
 use libwallet::slatepack::SlatePurpose;
+use libwallet::types::TxSession;
 use libwallet::wallet_lock_test;
 use mwc_wallet_libwallet::proof::proofaddress::{self, ProvableAddress};
 use mwc_wallet_util::mwc_core::consensus;
 use mwc_wallet_util::mwc_core::core::Transaction;
 use mwc_wallet_util::mwc_util::secp::Secp256k1;
+use std::cell::RefCell;
 use std::ops::DerefMut;
 
 /// Public definition used to generate Foreign jsonrpc api.
@@ -973,6 +975,7 @@ where
 		};
 		let out_slate = Foreign::receive_tx(
 			self,
+			&None,
 			&slate_from,
 			sender.map(|p| ProvableAddress::from_tor_pub_key(&p).public_key), // We don't want to change RPC. New fields required new version
 			&dest_acct_name,
@@ -1010,7 +1013,7 @@ where
 			(slate_from, None)
 		};
 
-		let out_slate = Foreign::finalize_invoice_tx(self, &in_slate)?;
+		let out_slate = Foreign::finalize_invoice_tx(self, &None, &in_slate)?;
 
 		let res_slate = Foreign::encrypt_slate(
 			self,
@@ -1219,6 +1222,8 @@ pub fn run_doctest_foreign(
 
 	if init_invoice_tx {
 		let amount = 2_000_000_000;
+		let tx_session1 = Some(RefCell::new(TxSession::new()));
+		let tx_session2 = Some(RefCell::new(TxSession::new()));
 		let mut slate = {
 			let mut w_lock = wallet2.lock();
 			let w = w_lock.lc_provider().unwrap().wallet_inst().unwrap();
@@ -1232,7 +1237,22 @@ pub fn run_doctest_foreign(
 				args.slatepack_recipient = Some(w1_slatepack_address.clone());
 			}
 
-			api_impl::owner::issue_invoice_tx(&mut **w, (&mask2).as_ref(), &args, true, 1).unwrap()
+			let slate = api_impl::owner::issue_invoice_tx(
+				&mut **w,
+				(&mask2).as_ref(),
+				&tx_session1,
+				&args,
+				true,
+				1,
+			)
+			.unwrap();
+
+			tx_session1
+				.unwrap()
+				.borrow_mut()
+				.save_tx_data(&mut **w, (&mask1).as_ref(), &slate.id)
+				.unwrap();
+			slate
 		};
 		{
 			wallet_lock_test!(wallet1.clone(), w1);
@@ -1250,15 +1270,23 @@ pub fn run_doctest_foreign(
 				selection_strategy_is_use_all: true,
 				..Default::default()
 			};
-			api_impl::owner::process_invoice_tx(
+			let slate = api_impl::owner::process_invoice_tx(
 				&mut **w,
 				(&mask1).as_ref(),
+				&tx_session2,
 				&slate,
 				&args,
 				true,
 				true,
 			)
-			.unwrap()
+			.unwrap();
+			// participants ids are expected to be different
+			tx_session2
+				.unwrap()
+				.borrow_mut()
+				.save_tx_data(&mut **w, (&mask1).as_ref(), &slate.id)
+				.unwrap();
+			slate
 		};
 		println!("INIT INVOICE SLATE");
 		// Spit out slate for input to finalize_invoice_tx
@@ -1307,7 +1335,8 @@ pub fn run_doctest_foreign(
 		}
 
 		let slate =
-			api_impl::owner::init_send_tx(&mut **w, (&mask1).as_ref(), &args, true, 1).unwrap();
+			api_impl::owner::init_send_tx(&mut **w, (&mask1).as_ref(), &None, &args, true, 1)
+				.unwrap();
 		println!("INIT SLATE");
 		// Spit out slate for input to finalize_tx
 		println!("{}", serde_json::to_string_pretty(&slate).unwrap());

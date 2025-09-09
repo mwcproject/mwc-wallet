@@ -40,6 +40,7 @@ use crate::{
 
 use mwc_wallet_util::mwc_chain::Chain;
 use mwc_wallet_util::mwc_core::consensus::DAY_HEIGHT;
+use mwc_wallet_util::mwc_util::ToHex;
 use num_bigint::BigInt;
 
 /// Retrieve all of the outputs (doesn't attempt to update from node)
@@ -685,14 +686,14 @@ where
 	{
 		// Now acquire the wallet lock and write the new output.
 		let amount = reward(block_fees.fees, height);
-		let commit = wallet.calc_commit_for_cache(keychain_mask, amount, &key_id)?;
+		let commit = wallet.calc_commit(keychain_mask, amount, &key_id)?;
 		let mut batch = wallet.batch(keychain_mask)?;
 		batch.save(OutputData {
 			root_key_id: parent_key_id,
 			key_id: key_id.clone(),
 			n_child: key_id.to_path().last_path_index(),
 			mmr_index: None,
-			commit: commit,
+			commit: Some(commit.to_hex()),
 			value: amount,
 			status: OutputStatus::Unconfirmed,
 			height: height,

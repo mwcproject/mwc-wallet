@@ -328,10 +328,10 @@ fn build_chain_for_tx_filtering(
 						selection_strategy_is_use_all: false,
 						..Default::default()
 					};
-					let slate_i = sender_api.init_send_tx(m, &args, 1)?;
+					let slate_i = sender_api.init_send_tx(m, &None, &args, 1)?;
 					slate = client1.send_tx_slate_direct("wallet2", &slate_i)?;
-					sender_api.tx_lock_outputs(m, &slate, None, 0)?;
-					slate = sender_api.finalize_tx(m, &slate)?;
+					sender_api.tx_lock_outputs(m, &None, &slate, None, 0)?;
+					slate = sender_api.finalize_tx(m, &None, &slate)?;
 					Ok(())
 				},
 			)
@@ -354,9 +354,9 @@ fn build_chain_for_tx_filtering(
 			selection_strategy_is_use_all: false,
 			..Default::default()
 		};
-		let slate_i = sender_api.init_send_tx(m, &args, 1)?;
+		let slate_i = sender_api.init_send_tx(m, &None, &args, 1)?;
 		slate = client1.send_tx_slate_direct("wallet2", &slate_i)?;
-		sender_api.tx_lock_outputs(m, &slate, None, 0)?;
+		sender_api.tx_lock_outputs(m, &None, &slate, None, 0)?;
 		sender_api.cancel_tx(m, Some(33), None)?;
 		Ok(())
 	})

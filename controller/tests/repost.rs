@@ -34,7 +34,6 @@ use std::time::Duration;
 #[macro_use]
 mod common;
 use common::{clean_output_dir, create_wallet_proxy, setup};
-use libwallet::NodeClient;
 use mwc_wallet_util::mwc_core::core::Transaction;
 use mwc_wallet_util::mwc_util::secp::Secp256k1;
 use mwc_wallet_util::mwc_util::Mutex;
@@ -136,10 +135,10 @@ fn file_repost_test_impl(test_dir: &str) -> Result<(), wallet::Error> {
 			..Default::default()
 		};
 
-		let slate = api.init_send_tx(m, &args, 1)?;
+		let slate = api.init_send_tx(m, &None, &args, 1)?;
 		PathToSlatePutter::build_plain(Some((&send_file).into()))
 			.put_tx(&slate, None, true, &secp)?;
-		api.tx_lock_outputs(m, &slate, None, 0)?;
+		api.tx_lock_outputs(m, &None, &slate, None, 0)?;
 		Ok(())
 	})?;
 
@@ -159,18 +158,12 @@ fn file_repost_test_impl(test_dir: &str) -> Result<(), wallet::Error> {
 		w.set_parent_key_id_by_name("listener")?;
 	}
 
-	let height = {
-		wallet_inst!(wallet1, w);
-		let (height, _, _) = w.w2n_client().get_chain_tip()?;
-		height
-	};
-
 	wallet::controller::foreign_single_use(wallet1.clone(), mask1_i.clone(), |api| {
 		slate = PathToSlateGetter::build_form_path((&send_file).into())
-			.get_tx(None, height, &secp)?
+			.get_tx(None, &secp)?
 			.to_slate()?
 			.0;
-		slate = api.receive_tx(&slate, None, &None, None)?;
+		slate = api.receive_tx(&None, &slate, None, &None, None)?;
 		PathToSlatePutter::build_plain(Some((&receive_file).into()))
 			.put_tx(&slate, None, true, &secp)?;
 		Ok(())
@@ -185,10 +178,10 @@ fn file_repost_test_impl(test_dir: &str) -> Result<(), wallet::Error> {
 	// wallet 1 finalize
 	wallet::controller::owner_single_use(Some(wallet1.clone()), mask1, None, |api, m| {
 		slate = PathToSlateGetter::build_form_path((&receive_file).into())
-			.get_tx(None, height, &secp)?
+			.get_tx(None, &secp)?
 			.to_slate()?
 			.0;
-		slate = api.finalize_tx(m, &slate)?;
+		slate = api.finalize_tx(m, &None, &slate)?;
 		Ok(())
 	})?;
 
@@ -256,10 +249,10 @@ fn file_repost_test_impl(test_dir: &str) -> Result<(), wallet::Error> {
 			selection_strategy_is_use_all: true,
 			..Default::default()
 		};
-		let slate_i = sender_api.init_send_tx(m, &args, 1)?;
+		let slate_i = sender_api.init_send_tx(m, &None, &args, 1)?;
 		slate = client1.send_tx_slate_direct("wallet2", &slate_i)?;
-		sender_api.tx_lock_outputs(m, &slate, None, 0)?;
-		slate = sender_api.finalize_tx(m, &slate)?;
+		sender_api.tx_lock_outputs(m, &None, &slate, None, 0)?;
+		slate = sender_api.finalize_tx(m, &None, &slate)?;
 		Ok(())
 	})?;
 

@@ -29,7 +29,7 @@ use crate::mwc_core::core::{
 	Input, Inputs, KernelFeatures, Output, OutputFeatures, OutputIdentifier, TxKernel,
 };
 use crate::mwc_core::global;
-use crate::mwc_keychain::{BlindingFactor, ExtKeychain};
+use crate::mwc_keychain::BlindingFactor;
 use crate::mwc_util::secp::constants::{PEDERSEN_COMMITMENT_SIZE, SECRET_KEY_SIZE};
 use crate::mwc_util::secp::pedersen::{Commitment, RangeProof};
 use crate::mwc_util::secp::Signature;
@@ -127,7 +127,6 @@ impl Slatepack {
 		data: &Vec<u8>,
 		encrypted: bool,
 		secret: &DalekSecretKey,
-		height: u64,
 		secp: &Secp256k1,
 	) -> Result<Self, Error> {
 		if encrypted && data.len() < SLATE_PACK_PLAIN_DATA_SIZE {
@@ -230,7 +229,7 @@ impl Slatepack {
 			)?,
 		};
 
-		Self::update_tx_from_slate(&mut slate, height, secp)?;
+		Self::update_tx_from_slate(&mut slate, secp)?;
 
 		Ok(Slatepack {
 			sender,
@@ -1103,10 +1102,10 @@ impl Slatepack {
 	}
 
 	// Update a transaction form the slate data.
-	fn update_tx_from_slate(slate: &mut Slate, height: u64, secp: &Secp256k1) -> Result<(), Error> {
+	fn update_tx_from_slate(slate: &mut Slate, secp: &Secp256k1) -> Result<(), Error> {
 		debug_assert!(slate.compact_slate);
 		// Passing None to calc_excess because it is not needed for compact_slate.
-		let excess = match slate.calc_excess::<ExtKeychain>(secp, None, height) {
+		let excess = match slate.calc_excess(secp) {
 			Ok(e) => e,
 			Err(_) => Commitment::from_vec(vec![0]),
 		};

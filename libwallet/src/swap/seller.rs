@@ -243,7 +243,6 @@ impl SellApi {
 		swap: &mut Swap,
 		context: &Context,
 		accept_offer: AcceptOfferUpdate,
-		height: u64,
 	) -> Result<(), Error> {
 		assert!(swap.is_seller());
 
@@ -259,7 +258,6 @@ impl SellApi {
 			commit.clone(),
 			proof,
 			accept_offer.lock_participant,
-			height,
 		)?;
 		Self::finalize_refund_slate(
 			keychain,
@@ -267,7 +265,6 @@ impl SellApi {
 			context,
 			commit.clone(),
 			accept_offer.refund_participant,
-			height,
 		)?;
 
 		swap.redeem_public = Some(accept_offer.redeem_public);
@@ -285,7 +282,6 @@ impl SellApi {
 		swap: &mut Swap,
 		context: &Context,
 		init_redeem: InitRedeemUpdate,
-		height: u64,
 	) -> Result<(), Error> {
 		assert!(swap.is_seller());
 
@@ -303,7 +299,7 @@ impl SellApi {
 		// Calculate sum of blinding factors from in- and outputs so we know we can use this excess
 		// later to find the on-chain signature and calculate the redeem secret
 		let pub_blind_sum =
-			Self::redeem_excess(keychain, &mut redeem_slate, height)?.to_pubkey(keychain.secp())?;
+			Self::redeem_excess(keychain, &mut redeem_slate)?.to_pubkey(keychain.secp())?;
 		if !aggsig::verify_single(
 			keychain.secp(),
 			&init_redeem.adaptor_signature,
@@ -546,7 +542,6 @@ impl SellApi {
 		commit: Commitment,
 		proof: RangeProof,
 		part: TxParticipant,
-		height: u64,
 	) -> Result<(), Error> {
 		let sec_key = Self::lock_tx_secret(keychain, swap, context)?;
 
@@ -571,7 +566,7 @@ impl SellApi {
 			&context.lock_nonce,
 			swap.participant_id,
 		)?;
-		slate.finalize(keychain, height)?;
+		slate.finalize(keychain)?;
 
 		Ok(())
 	}
@@ -650,7 +645,6 @@ impl SellApi {
 		context: &Context,
 		commit: Commitment,
 		part: TxParticipant,
-		height: u64,
 	) -> Result<(), Error> {
 		let sec_key = Self::refund_tx_secret(keychain, swap, context)?;
 
@@ -675,7 +669,7 @@ impl SellApi {
 			&context.refund_nonce,
 			swap.participant_id,
 		)?;
-		slate.finalize(keychain, height)?;
+		slate.finalize(keychain)?;
 
 		Ok(())
 	}
@@ -728,9 +722,8 @@ impl SellApi {
 	fn redeem_excess<K: Keychain>(
 		keychain: &K,
 		redeem_slate: &mut Slate,
-		height: u64,
 	) -> Result<Commitment, Error> {
-		let excess = redeem_slate.calc_excess(keychain.secp(), Some(keychain), height)?;
+		let excess = redeem_slate.calc_excess(keychain.secp())?;
 		redeem_slate.tx_or_err_mut()?.body.kernels[0].excess = excess.clone();
 		Ok(excess)
 	}

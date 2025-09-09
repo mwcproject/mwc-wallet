@@ -14,6 +14,8 @@
 // limitations under the License.
 
 //! JSON-RPC Stub generation for the Owner API
+
+use std::cell::RefCell;
 use uuid::Uuid;
 
 use crate::config::{MQSConfig, TorConfig, WalletConfig};
@@ -24,9 +26,13 @@ use crate::keychain::{Identifier, Keychain};
 use crate::libwallet::slate_versions::v3::TransactionV3;
 use crate::libwallet::{
 	AcctPathMapping, Amount, BuiltOutput, Error, InitTxArgs, IssueInvoiceTxArgs, NodeClient,
-	NodeHeightResult, OutputCommitMapping, PaymentProof, Slate, SlatePurpose, SlateVersion,
-	StatusMessage, TxLogEntry, VersionedSlate, ViewWallet, WalletInfo, WalletLCProvider,
+	NodeHeightResult, OutputCommitMapping, Slate, SlatePurpose, SlateVersion, StatusMessage,
+	TxLogEntry, VersionedSlate, ViewWallet, WalletInfo, WalletLCProvider,
 };
+
+#[cfg(feature = "grin_proof")]
+use crate::libwallet::PaymentProof;
+
 use crate::types::{SlatepackInfo, TxLogEntryAPI};
 use crate::util;
 use crate::util::logger::LoggingConfig;
@@ -36,7 +42,9 @@ use crate::util::{static_secp_instance, ZeroingString};
 use crate::{ECDHPubkey, Owner, Token};
 use easy_jsonrpc_mwc;
 use ed25519_dalek::PublicKey as DalekPublicKey;
-use libwallet::RetrieveTxQueryArgs;
+use libwallet::proof::tx_proof::VerifyProofResult;
+use libwallet::types::TxSession;
+use libwallet::{wallet_lock, RetrieveTxQueryArgs, TxProof};
 use mwc_wallet_libwallet::proof::proofaddress::ProvableAddress;
 use rand::thread_rng;
 use std::convert::TryFrom;
@@ -295,177 +303,169 @@ pub trait OwnerRpcV3 {
 	# Json rpc example
 
 	```
-		# mwc_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
-		# r#"
-		{
-			"jsonrpc": "2.0",
-			"method": "retrieve_txs",
-			"params": {
-				"token": "d202964900000000d302964900000000d402964900000000d502964900000000",
-				"refresh_from_node": true,
-				"tx_id": null,
-				"tx_slate_id": null,
-				"show_last_four_days": true
+	# mwc_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
+	# r#"
+	{
+		"jsonrpc": "2.0",
+		"method": "retrieve_txs",
+		"params": {
+			"token": "d202964900000000d302964900000000d402964900000000d502964900000000",
+			"refresh_from_node": true,
+			"tx_id": null,
+			"tx_slate_id": null,
+			"show_last_four_days": true
+		},
+		"id": 1
+	}
+	# "#
+	# ,
+	# r#"
+	{
+	  "id": 1,
+	  "jsonrpc": "2.0",
+	  "result": {
+		"Ok": [
+		  true,
+		  [
+			{
+			  "address": null,
+			  "amount_credited": "2380952380",
+			  "amount_debited": "0",
+			  "confirmation_ts": "2019-01-15T16:01:26Z",
+			  "confirmed": true,
+			  "creation_ts": "2019-01-15T16:01:26Z",
+			  "fee": null,
+			  "id": 0,
+			  "input_commits": [],
+			  "kernel_excess": "099beea8f814120ac8c559027e55cb26986ae40e279e3093a7d4a52d827a23f0e7",
+			  "kernel_lookup_min_height": 1,
+			  "kernel_offset": null,
+			  "messages": null,
+			  "num_inputs": 0,
+			  "num_outputs": 1,
+			  "output_commits": [
+				"0910c1752100733bae49e877286835aab76d5856ef8139b6c6e3f51798aa461b03"
+			  ],
+			  "output_height": 1,
+			  "parent_key_id": "0200000000000000000000000000000000",
+			  "reverted_after": null,
+			  "stored_tx": null,
+			  "ttl_cutoff_height": null,
+			  "tx_slate_id": null,
+			  "tx_type": "ConfirmedCoinbase"
 			},
-			"id": 1
-		}
-		# "#
-		# ,
-		# r#"
-		{
-		  "id": 1,
-		  "jsonrpc": "2.0",
-		  "result": {
-			"Ok": [
-			  true,
-			  [
-				{
-				  "address": null,
-				  "amount_credited": "2380952380",
-				  "amount_debited": "0",
-				  "confirmation_ts": "2019-01-15T16:01:26Z",
-				  "confirmed": true,
-				  "creation_ts": "2019-01-15T16:01:26Z",
-				  "fee": null,
-				  "id": 0,
-				  "input_commits": [],
-				  "kernel_excess": "099beea8f814120ac8c559027e55cb26986ae40e279e3093a7d4a52d827a23f0e7",
-				  "kernel_offset": null,
-				  "kernel_lookup_min_height": 1,
-				  "messages": null,
-				  "num_inputs": 0,
-				  "num_outputs": 1,
-				  "output_commits": [
-					"0910c1752100733bae49e877286835aab76d5856ef8139b6c6e3f51798aa461b03"
-				  ],
-				  "output_height": 1,
-				  "parent_key_id": "0200000000000000000000000000000000",
-				  "payment_proof": null,
-				  "reverted_after": null,
-				  "stored_tx": null,
-				  "ttl_cutoff_height": null,
-				  "tx_slate_id": null,
-				  "reverted_after": null,
-				  "tx_type": "ConfirmedCoinbase"
-				},
-				{
-				  "address": null,
-				  "amount_credited": "2380952380",
-				  "amount_debited": "0",
-				  "confirmation_ts": "2019-01-15T16:01:26Z",
-				  "confirmed": true,
-				  "creation_ts": "2019-01-15T16:01:26Z",
-				  "fee": null,
-				  "id": 1,
-				  "input_commits": [],
-				  "kernel_excess": "09f7677adc7caf8bb44a4ee27d27dfe9ffa1010847a18b182bbb7100bb02f9259e",
-				  "kernel_offset": null,
-				  "kernel_lookup_min_height": 2,
-				  "messages": null,
-				  "num_inputs": 0,
-				  "num_outputs": 1,
-				  "output_commits": [
-					"098778ce2243fa34e5876c8cb7f6dbbbd6a5649c1561973a807a6811941c12363c"
-				  ],
-				  "output_height": 2,
-				  "parent_key_id": "0200000000000000000000000000000000",
-				  "payment_proof": null,
-				  "reverted_after": null,
-				  "stored_tx": null,
-				  "ttl_cutoff_height": null,
-				  "reverted_after": null,
-				  "tx_slate_id": null,
-				  "tx_type": "ConfirmedCoinbase"
-				}
-			  ]
-			]
-		  }
-		}
+			{
+			  "address": null,
+			  "amount_credited": "2380952380",
+			  "amount_debited": "0",
+			  "confirmation_ts": "2019-01-15T16:01:26Z",
+			  "confirmed": true,
+			  "creation_ts": "2019-01-15T16:01:26Z",
+			  "fee": null,
+			  "id": 1,
+			  "input_commits": [],
+			  "kernel_excess": "09f7677adc7caf8bb44a4ee27d27dfe9ffa1010847a18b182bbb7100bb02f9259e",
+			  "kernel_lookup_min_height": 2,
+			  "kernel_offset": null,
+			  "messages": null,
+			  "num_inputs": 0,
+			  "num_outputs": 1,
+			  "output_commits": [
+				"098778ce2243fa34e5876c8cb7f6dbbbd6a5649c1561973a807a6811941c12363c"
+			  ],
+			  "output_height": 2,
+			  "parent_key_id": "0200000000000000000000000000000000",
+			  "reverted_after": null,
+			  "stored_tx": null,
+			  "ttl_cutoff_height": null,
+			  "tx_slate_id": null,
+			  "tx_type": "ConfirmedCoinbase"
+			}
+		  ]
+		]
+	  }
+	}
 	# "#
 	# , true, 2, false, false, false, false, true);
 	#
 	# mwc_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
 	# r#"
-		{
-			"jsonrpc": "2.0",
-			"method": "retrieve_txs",
-			"params": {
-				"token": "d202964900000000d302964900000000d402964900000000d502964900000000"
-			},
-			"id": 1
-		}
+	{
+		"jsonrpc": "2.0",
+		"method": "retrieve_txs",
+		"params": {
+			"token": "d202964900000000d302964900000000d402964900000000d502964900000000"
+		},
+		"id": 1
+	}
 	# "#
 	# ,
 	# r#"
-		{
-		  "id": 1,
-		  "jsonrpc": "2.0",
-		  "result": {
-			"Ok": [
-			  true,
-			  [
-				{
-				  "address": null,
-				  "amount_credited": "2380952380",
-				  "amount_debited": "0",
-				  "confirmation_ts": "2019-01-15T16:01:26Z",
-				  "confirmed": true,
-				  "creation_ts": "2019-01-15T16:01:26Z",
-				  "fee": null,
-				  "id": 0,
-				  "input_commits": [],
-				  "kernel_excess": "099beea8f814120ac8c559027e55cb26986ae40e279e3093a7d4a52d827a23f0e7",
-				  "kernel_offset": null,
-				  "kernel_lookup_min_height": 1,
-				  "messages": null,
-				  "num_inputs": 0,
-				  "num_outputs": 1,
-				  "output_commits": [
-					"0910c1752100733bae49e877286835aab76d5856ef8139b6c6e3f51798aa461b03"
-				  ],
-				  "output_height": 1,
-				  "parent_key_id": "0200000000000000000000000000000000",
-				  "payment_proof": null,
-				  "reverted_after": null,
-				  "stored_tx": null,
-				  "ttl_cutoff_height": null,
-				  "tx_slate_id": null,
-				  "reverted_after": null,
-				  "tx_type": "ConfirmedCoinbase"
-				},
-				{
-				  "address": null,
-				  "amount_credited": "2380952380",
-				  "amount_debited": "0",
-				  "confirmation_ts": "2019-01-15T16:01:26Z",
-				  "confirmed": true,
-				  "creation_ts": "2019-01-15T16:01:26Z",
-				  "fee": null,
-				  "id": 1,
-				  "input_commits": [],
-				  "kernel_excess": "09f7677adc7caf8bb44a4ee27d27dfe9ffa1010847a18b182bbb7100bb02f9259e",
-				  "kernel_offset": null,
-				  "kernel_lookup_min_height": 2,
-				  "messages": null,
-				  "num_inputs": 0,
-				  "num_outputs": 1,
-				  "output_commits": [
-					"098778ce2243fa34e5876c8cb7f6dbbbd6a5649c1561973a807a6811941c12363c"
-				  ],
-				  "output_height": 2,
-				  "parent_key_id": "0200000000000000000000000000000000",
-				  "payment_proof": null,
-				  "reverted_after": null,
-				  "stored_tx": null,
-				  "ttl_cutoff_height": null,
-				  "reverted_after": null,
-				  "tx_slate_id": null,
-				  "tx_type": "ConfirmedCoinbase"
-				}
-			  ]
-			]
-		  }
-		}
+	{
+	  "id": 1,
+	  "jsonrpc": "2.0",
+	  "result": {
+		"Ok": [
+		  true,
+		  [
+			{
+			  "address": null,
+			  "amount_credited": "2380952380",
+			  "amount_debited": "0",
+			  "confirmation_ts": "2019-01-15T16:01:26Z",
+			  "confirmed": true,
+			  "creation_ts": "2019-01-15T16:01:26Z",
+			  "fee": null,
+			  "id": 0,
+			  "input_commits": [],
+			  "kernel_excess": "099beea8f814120ac8c559027e55cb26986ae40e279e3093a7d4a52d827a23f0e7",
+			  "kernel_lookup_min_height": 1,
+			  "kernel_offset": null,
+			  "messages": null,
+			  "num_inputs": 0,
+			  "num_outputs": 1,
+			  "output_commits": [
+				"0910c1752100733bae49e877286835aab76d5856ef8139b6c6e3f51798aa461b03"
+			  ],
+			  "output_height": 1,
+			  "parent_key_id": "0200000000000000000000000000000000",
+			  "reverted_after": null,
+			  "stored_tx": null,
+			  "ttl_cutoff_height": null,
+			  "tx_slate_id": null,
+			  "tx_type": "ConfirmedCoinbase"
+			},
+			{
+			  "address": null,
+			  "amount_credited": "2380952380",
+			  "amount_debited": "0",
+			  "confirmation_ts": "2019-01-15T16:01:26Z",
+			  "confirmed": true,
+			  "creation_ts": "2019-01-15T16:01:26Z",
+			  "fee": null,
+			  "id": 1,
+			  "input_commits": [],
+			  "kernel_excess": "09f7677adc7caf8bb44a4ee27d27dfe9ffa1010847a18b182bbb7100bb02f9259e",
+			  "kernel_lookup_min_height": 2,
+			  "kernel_offset": null,
+			  "messages": null,
+			  "num_inputs": 0,
+			  "num_outputs": 1,
+			  "output_commits": [
+				"098778ce2243fa34e5876c8cb7f6dbbbd6a5649c1561973a807a6811941c12363c"
+			  ],
+			  "output_height": 2,
+			  "parent_key_id": "0200000000000000000000000000000000",
+			  "reverted_after": null,
+			  "stored_tx": null,
+			  "ttl_cutoff_height": null,
+			  "tx_slate_id": null,
+			  "tx_type": "ConfirmedCoinbase"
+			}
+		  ]
+		]
+	  }
+	}
 	# "#
 	# , true, 2, false, false, false, false, true);
 	```
@@ -486,187 +486,183 @@ pub trait OwnerRpcV3 {
 	parameter. See  (../mwc_wallet_libwallet/types.struct.RetrieveTxQueryArgs.html)
 
 	```
-		# mwc_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
-		# r#"
-		{
-			"jsonrpc": "2.0",
-			"method": "query_txs",
-			"params": {
-				"token": "d202964900000000d302964900000000d402964900000000d502964900000000",
-				"refresh_from_node": true,
-				"show_last_four_days": true,
-				"query": {
-					"min_id": 0,
-					"max_id": 100,
-					"min_amount": "0",
-					"max_amount": "60000000000",
-					"sort_field": "Id",
-					"sort_order": "Asc"
-				}
+	# mwc_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
+	# r#"
+	{
+		"jsonrpc": "2.0",
+		"method": "query_txs",
+		"params": {
+			"token": "d202964900000000d302964900000000d402964900000000d502964900000000",
+			"refresh_from_node": true,
+			"show_last_four_days": true,
+			"query": {
+				"min_id": 0,
+				"max_id": 100,
+				"min_amount": "0",
+				"max_amount": "60000000000",
+				"sort_field": "Id",
+				"sort_order": "Asc"
+			}
+		},
+		"id": 1
+	}
+	# "#
+	# ,
+	# r#"
+	{
+	  "id": 1,
+	  "jsonrpc": "2.0",
+	  "result": {
+		"Ok": [
+		  true,
+		  [
+			{
+			  "address": null,
+			  "amount_credited": "2380952380",
+			  "amount_debited": "0",
+			  "confirmation_ts": "2019-01-15T16:01:26Z",
+			  "confirmed": true,
+			  "creation_ts": "2019-01-15T16:01:26Z",
+			  "fee": null,
+			  "id": 0,
+			  "input_commits": [],
+			  "kernel_excess": "099beea8f814120ac8c559027e55cb26986ae40e279e3093a7d4a52d827a23f0e7",
+			  "kernel_lookup_min_height": 1,
+			  "kernel_offset": null,
+			  "messages": null,
+			  "num_inputs": 0,
+			  "num_outputs": 1,
+			  "output_commits": [
+				"0910c1752100733bae49e877286835aab76d5856ef8139b6c6e3f51798aa461b03"
+			  ],
+			  "output_height": 1,
+			  "parent_key_id": "0200000000000000000000000000000000",
+			  "reverted_after": null,
+			  "stored_tx": null,
+			  "ttl_cutoff_height": null,
+			  "tx_slate_id": null,
+			  "tx_type": "ConfirmedCoinbase"
 			},
-			"id": 1
-		}
-		# "#
-		# ,
-		# r#"
-		{
-		  "id": 1,
-		  "jsonrpc": "2.0",
-		  "result": {
-			"Ok": [
-			  true,
-			  [
-				{
-				  "address": null,
-				  "amount_credited": "2380952380",
-				  "amount_debited": "0",
-				  "confirmation_ts": "2019-01-15T16:01:26Z",
-				  "confirmed": true,
-				  "creation_ts": "2019-01-15T16:01:26Z",
-				  "fee": null,
-				  "id": 0,
-				  "input_commits": [],
-				  "kernel_excess": "099beea8f814120ac8c559027e55cb26986ae40e279e3093a7d4a52d827a23f0e7",
-				  "kernel_lookup_min_height": 1,
-				  "kernel_offset": null,
-				  "messages": null,
-				  "num_inputs": 0,
-				  "num_outputs": 1,
-				  "output_commits": [
-					"0910c1752100733bae49e877286835aab76d5856ef8139b6c6e3f51798aa461b03"
-				  ],
-				  "output_height": 1,
-				  "parent_key_id": "0200000000000000000000000000000000",
-				  "payment_proof": null,
-				  "reverted_after": null,
-				  "stored_tx": null,
-				  "ttl_cutoff_height": null,
-				  "tx_slate_id": null,
-				  "tx_type": "ConfirmedCoinbase"
-				},
-				{
-				  "address": null,
-				  "amount_credited": "2380952380",
-				  "amount_debited": "0",
-				  "confirmation_ts": "2019-01-15T16:01:26Z",
-				  "confirmed": true,
-				  "creation_ts": "2019-01-15T16:01:26Z",
-				  "fee": null,
-				  "id": 1,
-				  "input_commits": [],
-				  "kernel_excess": "09f7677adc7caf8bb44a4ee27d27dfe9ffa1010847a18b182bbb7100bb02f9259e",
-				  "kernel_lookup_min_height": 2,
-				  "kernel_offset": null,
-				  "messages": null,
-				  "num_inputs": 0,
-				  "num_outputs": 1,
-				  "output_commits": [
-					"098778ce2243fa34e5876c8cb7f6dbbbd6a5649c1561973a807a6811941c12363c"
-				  ],
-				  "output_height": 2,
-				  "parent_key_id": "0200000000000000000000000000000000",
-				  "payment_proof": null,
-				  "reverted_after": null,
-				  "stored_tx": null,
-				  "ttl_cutoff_height": null,
-				  "tx_slate_id": null,
-				  "tx_type": "ConfirmedCoinbase"
-				}
-			  ]
-			]
-		  }
-		}
+			{
+			  "address": null,
+			  "amount_credited": "2380952380",
+			  "amount_debited": "0",
+			  "confirmation_ts": "2019-01-15T16:01:26Z",
+			  "confirmed": true,
+			  "creation_ts": "2019-01-15T16:01:26Z",
+			  "fee": null,
+			  "id": 1,
+			  "input_commits": [],
+			  "kernel_excess": "09f7677adc7caf8bb44a4ee27d27dfe9ffa1010847a18b182bbb7100bb02f9259e",
+			  "kernel_lookup_min_height": 2,
+			  "kernel_offset": null,
+			  "messages": null,
+			  "num_inputs": 0,
+			  "num_outputs": 1,
+			  "output_commits": [
+				"098778ce2243fa34e5876c8cb7f6dbbbd6a5649c1561973a807a6811941c12363c"
+			  ],
+			  "output_height": 2,
+			  "parent_key_id": "0200000000000000000000000000000000",
+			  "reverted_after": null,
+			  "stored_tx": null,
+			  "ttl_cutoff_height": null,
+			  "tx_slate_id": null,
+			  "tx_type": "ConfirmedCoinbase"
+			}
+		  ]
+		]
+	  }
+	}
 	# "#
 	# , true, 2, false, false, false, false, true);
 	#
 	# mwc_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
 	# r#"
-		{
-			"jsonrpc": "2.0",
-			"method": "query_txs",
-			"params": {
-				"token": "d202964900000000d302964900000000d402964900000000d502964900000000",
-				"query": {
-					"min_id": 0,
-					"max_id": 100,
-					"min_amount": "0",
-					"max_amount": "60000000000",
-					"sort_field": "Id",
-					"sort_order": "Asc"
-				}
-			},
-			"id": 1
-		}
+	{
+		"jsonrpc": "2.0",
+		"method": "query_txs",
+		"params": {
+			"token": "d202964900000000d302964900000000d402964900000000d502964900000000",
+			"query": {
+				"min_id": 0,
+				"max_id": 100,
+				"min_amount": "0",
+				"max_amount": "60000000000",
+				"sort_field": "Id",
+				"sort_order": "Asc"
+			}
+		},
+		"id": 1
+	}
 	# "#
 	# ,
 	# r#"
-		{
-		  "id": 1,
-		  "jsonrpc": "2.0",
-		  "result": {
-			"Ok": [
-			  true,
-			  [
-				{
-				  "address": null,
-				  "amount_credited": "2380952380",
-				  "amount_debited": "0",
-				  "confirmation_ts": "2019-01-15T16:01:26Z",
-				  "confirmed": true,
-				  "creation_ts": "2019-01-15T16:01:26Z",
-				  "fee": null,
-				  "id": 0,
-				  "input_commits": [],
-				  "kernel_excess": "099beea8f814120ac8c559027e55cb26986ae40e279e3093a7d4a52d827a23f0e7",
-				  "kernel_lookup_min_height": 1,
-				  "kernel_offset": null,
-				  "messages": null,
-				  "num_inputs": 0,
-				  "num_outputs": 1,
-				  "output_commits": [
-					"0910c1752100733bae49e877286835aab76d5856ef8139b6c6e3f51798aa461b03"
-				  ],
-				  "output_height": 1,
-				  "parent_key_id": "0200000000000000000000000000000000",
-				  "payment_proof": null,
-				  "reverted_after": null,
-				  "stored_tx": null,
-				  "ttl_cutoff_height": null,
-				  "tx_slate_id": null,
-				  "tx_type": "ConfirmedCoinbase"
-				},
-				{
-				  "address": null,
-				  "amount_credited": "2380952380",
-				  "amount_debited": "0",
-				  "confirmation_ts": "2019-01-15T16:01:26Z",
-				  "confirmed": true,
-				  "creation_ts": "2019-01-15T16:01:26Z",
-				  "fee": null,
-				  "id": 1,
-				  "input_commits": [],
-				  "kernel_excess": "09f7677adc7caf8bb44a4ee27d27dfe9ffa1010847a18b182bbb7100bb02f9259e",
-				  "kernel_lookup_min_height": 2,
-				  "kernel_offset": null,
-				  "messages": null,
-				  "num_inputs": 0,
-				  "num_outputs": 1,
-				  "output_commits": [
-					"098778ce2243fa34e5876c8cb7f6dbbbd6a5649c1561973a807a6811941c12363c"
-				  ],
-				  "output_height": 2,
-				  "parent_key_id": "0200000000000000000000000000000000",
-				  "payment_proof": null,
-				  "reverted_after": null,
-				  "stored_tx": null,
-				  "ttl_cutoff_height": null,
-				  "tx_slate_id": null,
-				  "tx_type": "ConfirmedCoinbase"
-				}
-			  ]
-			]
-		  }
-		}
+	{
+	  "id": 1,
+	  "jsonrpc": "2.0",
+	  "result": {
+		"Ok": [
+		  true,
+		  [
+			{
+			  "address": null,
+			  "amount_credited": "2380952380",
+			  "amount_debited": "0",
+			  "confirmation_ts": "2019-01-15T16:01:26Z",
+			  "confirmed": true,
+			  "creation_ts": "2019-01-15T16:01:26Z",
+			  "fee": null,
+			  "id": 0,
+			  "input_commits": [],
+			  "kernel_excess": "099beea8f814120ac8c559027e55cb26986ae40e279e3093a7d4a52d827a23f0e7",
+			  "kernel_lookup_min_height": 1,
+			  "kernel_offset": null,
+			  "messages": null,
+			  "num_inputs": 0,
+			  "num_outputs": 1,
+			  "output_commits": [
+				"0910c1752100733bae49e877286835aab76d5856ef8139b6c6e3f51798aa461b03"
+			  ],
+			  "output_height": 1,
+			  "parent_key_id": "0200000000000000000000000000000000",
+			  "reverted_after": null,
+			  "stored_tx": null,
+			  "ttl_cutoff_height": null,
+			  "tx_slate_id": null,
+			  "tx_type": "ConfirmedCoinbase"
+			},
+			{
+			  "address": null,
+			  "amount_credited": "2380952380",
+			  "amount_debited": "0",
+			  "confirmation_ts": "2019-01-15T16:01:26Z",
+			  "confirmed": true,
+			  "creation_ts": "2019-01-15T16:01:26Z",
+			  "fee": null,
+			  "id": 1,
+			  "input_commits": [],
+			  "kernel_excess": "09f7677adc7caf8bb44a4ee27d27dfe9ffa1010847a18b182bbb7100bb02f9259e",
+			  "kernel_lookup_min_height": 2,
+			  "kernel_offset": null,
+			  "messages": null,
+			  "num_inputs": 0,
+			  "num_outputs": 1,
+			  "output_commits": [
+				"098778ce2243fa34e5876c8cb7f6dbbbd6a5649c1561973a807a6811941c12363c"
+			  ],
+			  "output_height": 2,
+			  "parent_key_id": "0200000000000000000000000000000000",
+			  "reverted_after": null,
+			  "stored_tx": null,
+			  "ttl_cutoff_height": null,
+			  "tx_slate_id": null,
+			  "tx_type": "ConfirmedCoinbase"
+			}
+		  ]
+		]
+	  }
+	}
 	# "#
 	# , true, 2, false, false, false, false, true);
 	```
@@ -1860,9 +1856,9 @@ pub trait OwnerRpcV3 {
 			"token": "d202964900000000d302964900000000d402964900000000d502964900000000",
 			"slate": {
 			  "version_info": {
-				"version": 2,
+				"version": 3,
 				"orig_version": 3,
-				"block_header_version": 1
+				"block_header_version": 2
 			  },
 			  "num_participants": 2,
 			  "id": "0436430c-2b02-624c-2032-570501212b00",
@@ -1882,14 +1878,19 @@ pub trait OwnerRpcV3 {
 				  "outputs": [
 					{
 					  "features": "Plain",
-					  "commit": "096e1669267c22ecb38c466d73b8578261d8e91c14dd66702dd5bf34f4232e10db",
-					  "proof": "7d567b0895a1103d19446929da8b98f2086819507ddce4b9dbb5ce6327107744e74aba59ef1834937da1b86eb7c1c1b0bc11d1c5d5ec79d25bc1e52aed1656f60d46f6878ba5ca8639efdbb9203e378e91171c11527c4a34713f06dc22f58ca4a08e68d83ff897e61cfc145fe376fa428b55e25cf20d15f10b9054778229798b30fb4e45d817a5053b682dcf591481a3c8174cfbba81e31aa525d5b884ca7a016713178f26c0fe8ae1f88b5382f8e70c4d91fb3828c0f307d828aa028281d3551525e68d20827ab0e6785c6b5747e895dcd38429b44e62b7f6c1c921d87ae954a9dd6e967ac52e6cd13a1d4bb2f1434da25a0723ef9c869cc573019577552dd0e0f808f8cc57723b041320025f6433779fe907998a4ec7606bf884b2199253b502065bed8e0625c2df858d6508c1aa44deddc68d06d00d81e97720e23e15a3464ed4733fc547e9fb772e563a1dbcd27ac55e40f674f9006e7dd4465444f3eb7527cb01905dee69a51cf2fc1810c861dd0834e7649d594c3e1740d85343a6b63c8a9e0a0f63059031899b38dfd9a192034d54029bd35e683ccab46282519b26cae20d398b754357abe1cf0370890f2897b5d8ada4fb3da777a8f8f1daa4197a380e6734504117dd2a92ea1917f174c44c59e0b50c6b7a5f9eb14e6d96cb6b3e5dbcb3d0eaf0e4aac1b6616d674bb708b7559e37de608e8a828bee7f25f627e2f06d9a87e8d651ade39e1e65db7204b94abc0b7ca6fdd75aadeeac6a876b6297e38039734ebdfa9a555152b4293cb00e423a66d64f827afa4748dd6fdc1dc33332bffb820dacbf5a6d347042db985bbd9cf476dceb45d6978035ba03d25612243fc164c0a902017ce7ffd632d041fa3c56554739e78c6d725ecbfdaa0739d3649239fb53294b7a46ee6ed403bf3815f6c78f06a8ca4e3c9b066234f7574fb6ea8f17d199"
+					  "commit": "082967b3fe580cd110355010ef45450314fb067720db01b0e6873bb083d76708c9",
+					  "proof": "828bb24121aa0332c872062a42a8333c3ef81f8ae37d24053d953217368b3cada90410a50509a0b9fcbb5aded41397fc00ca1ff5acdac20d48afb0a3281d21e7026d32fdc6c5157461a35f98a809ffa09187c1e170ea24652ad213b7e4c9878654ac3dd9a8915eaf742db53182fcb42d2d341fbdfe8bd31bd001f4ff2c1ca9f9b1531da29137214f211edb7a5eb8f494cb8945f8527dd25bf7e698515043db4249540720008a708db5342230d05b069c094688ccb7c07d4a4a2293ea76cf999c555dc0ddc757891c360db1901bbb4dc20cae997f875f8de482d8160e05d60f9b0135e0fc313d8f953db78f1ea252449dd81cfa22dd895512ed39d566f0924542b543d25fc9fc7a819d228f3b0ee5e381f088f54893e86437dafc49dd923b3e6dff956ca843f951910379531fac9bb5fd01a182dd32a4c597f92da3c01af37cb9b0ec984500884438e74e54d7e76fa1ae7241d5050b13376310b24761634a6f6eb7cf000082f50ed7c1899d7918023d4f877586f964932a7af72e7a4984ddecfdd1921a2e1b80b00d6bd2e64a3f4cb6915a27a8d17a69d163cf45220a13fcddd15dc2bb91ae4f1b6a67224ab3b23e8d7d785df178ec78a84cf42cea086426f563822c8a4271a0b89bb21f84b643dbf1de21b6395039d673a376492767199fa36ccd9a13628ce61695424091acc16059450d59bc59fa7879e7306f5727217211b0264a6a560f886d520e41406ef45b1668805b88d246c5b2ca5a1762042c85be34fcd420ac3843f32236d079b4bd57d6b8d8013d9d18f8efb55e8e443cd9e1af9b144e7a56c8c6be0138af3b4a6c99bee9109bed2bce2e5145e736b125a2ec19aaf3fff713f6897fdd4158ce2ab04706b062ca2847bf70259c0fc4b0d390dc7fdaf0362047f775a912bd22da9d40f04d9790bcd5ece4b36b74c6c340b48c2926b916e8a9"
+					},
+					{
+					  "features": "Plain",
+					  "commit": "0989d52e17cd07b2252e4317a5e2f92f74ead54e9baaad4b12d766c141f626dad3",
+					  "proof": "6f9368ccc85c67cbe63c343816667d60dd756619f6c7a531c6086183c74be557974e535d82f3a59bacc2bba17393266bee8e2853d2b6522b1320900e55ec4eaa06d9c3da0242fbf3269af9b7988e3004dc6dfefcede0405d7c8fd43e1b7312d2c36a71bcfe3ce478b1f364d7cbb077cb990115e0d24b3873c3d7c3eb7111ce2a37b595edd2b44990dc96c4a56feb1bb9f598335d95e35d3025ca8282e340f3795a7a07b90329b5f5563fa48fe666827c140f5f8031e8d251e5ab0dff1c28437ed4013a39c7c61e34fbb34830e48ff2362443c2350bbe2fdc75f17f67a0285dd886041832957c0e62926bed15aeb2736387b3f89a15a624133eff824f5ad6c6a6680daabfb796760cada8bf9f91d1dbacfc2404c96cddd01860eb2572d64955d476ed976ae56c34fb2ada8f0e39086c772e951c0008d8c2e354681e69184106bc2d48680767b8b0ffb8ff3fe9e1b12f359a313678cc87413cc04b389eecd8ce52ed0702c48b39cde55a883298eed487ea7d747d7f638ea65fd31f4b38dd611d4e60d5e790425f8bc09f3b26b845a37c4525d166a7af7aa0f32590dc843362a783f937033f0be33337367328ce7b9ad7a06ac1c752019d761c8e34e3668cfa75dfdb0a4508eb594ac022f15a40a8722d6c7a6ccd13b6d1f37fe8a173b27cc4918c88b58a8604004624ce32100ae5784fd67d68dce8e42bf9826d1d1f7335b5e972536973c358ba12c80efc5798a6276d813a47e9f3d1e4a84fbf4acc1f26d916babd632077cd1df97e23fbf03b82621f8a0fc461e7b2df4299f987bb87fcfab202c80b79d3c0f572d3cd2bc9afde75e609522fe10bb7a33d2d9b6402a425becfc336a99b74c7c0f3a34f894a76f6ac246e72e74ff9acd06c6ab703d4f183b49143e7748652493396db021a3b3d7926196ec3fa55006697f0a025471eeb4e97fc5f854fb4"
 					}
 				  ],
 				  "kernels": [
 					{
 					  "features": "Plain",
-					  "fee": "7000000",
+					  "fee": "70000",
 					  "lock_height": "0",
 					  "excess": "000000000000000000000000000000000000000000000000000000000000000000",
 					  "excess_sig": "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
@@ -1898,21 +1899,31 @@ pub trait OwnerRpcV3 {
 				}
 			  },
 			  "amount": "2000000000",
-			  "fee": "7000000",
+			  "fee": "70000",
 			  "height": "5",
 			  "lock_height": "0",
+			  "ttl_cutoff_height": null,
 			  "coin_type": "mwc",
 			  "network_type": "automatedtests",
 			  "participant_data": [
 				{
 				  "id": "0",
-				  "public_blind_excess": "03ad559b009e8231fcc2a06d40b7341322974c9b13a52000ca2462df2de60aba9f",
+				  "public_blind_excess": "0321d743d91cdd8b126cadb76b1b7c6b6073385be37625fea2a8a891354672fc41",
 				  "public_nonce": "031b84c5567b126440995d3ed5aaba0565d71e1834604819ff9c17f5e9d5dd078f",
 				  "part_sig": null,
 				  "message": null,
 				  "message_sig": null
+				},
+				{
+				  "id": "1",
+				  "public_blind_excess": "0256ebbe7886197266fbd2d039ec1cb8b551655bf58508dcb5c6a0179e640bafcd",
+				  "public_nonce": "031b84c5567b126440995d3ed5aaba0565d71e1834604819ff9c17f5e9d5dd078f",
+				  "part_sig": "8f07ddd5e9f5179cff19486034181ed76505baaad53e5d994064127b56c5841bbd23a1489fb9d4d0bbf66bb600ab9f6326a6c9dbfdb6b8bf8d4f22f97e94fc4e",
+				  "message": null,
+				  "message_sig": null
 				}
-			  ]
+			  ],
+			  "payment_proof": null
 			},
 			"participant_id": 0
 		}
@@ -1940,39 +1951,76 @@ pub trait OwnerRpcV3 {
 		"params": {
 			"token": "d202964900000000d302964900000000d402964900000000d502964900000000",
 			"slate": {
-			  "amount": "200000000",
-			  "coin_type": "mwc",
-			  "compact_slate": true,
-			  "fee": "8000000",
-			  "height": "4",
-			  "id": "0436430c-2b02-624c-2032-570501212b01",
-			  "lock_height": "0",
-			  "network_type": "automatedtests",
+			  "version_info": {
+				"version": 3,
+				"orig_version": 3,
+				"block_header_version": 2
+			  },
 			  "num_participants": 2,
+			  "id": "0436430c-2b02-624c-2032-570501212b01",
+			  "tx": {
+				"offset": "97e0fccd0b805d10065a4f8ca46aa6cc73f0962e829c7f13836e2c8371da6293",
+				"body": {
+				  "inputs": [
+					{
+					  "features": "Coinbase",
+					  "commit": "098778ce2243fa34e5876c8cb7f6dbbbd6a5649c1561973a807a6811941c12363c"
+					},
+					{
+					  "features": "Coinbase",
+					  "commit": "0910c1752100733bae49e877286835aab76d5856ef8139b6c6e3f51798aa461b03"
+					}
+				  ],
+				  "outputs": [
+					{
+					  "features": "Plain",
+					  "commit": "082967b3fe580cd110355010ef45450314fb067720db01b0e6873bb083d76708c9",
+					  "proof": "828bb24121aa0332c872062a42a8333c3ef81f8ae37d24053d953217368b3cada90410a50509a0b9fcbb5aded41397fc00ca1ff5acdac20d48afb0a3281d21e7026d32fdc6c5157461a35f98a809ffa09187c1e170ea24652ad213b7e4c9878654ac3dd9a8915eaf742db53182fcb42d2d341fbdfe8bd31bd001f4ff2c1ca9f9b1531da29137214f211edb7a5eb8f494cb8945f8527dd25bf7e698515043db4249540720008a708db5342230d05b069c094688ccb7c07d4a4a2293ea76cf999c555dc0ddc757891c360db1901bbb4dc20cae997f875f8de482d8160e05d60f9b0135e0fc313d8f953db78f1ea252449dd81cfa22dd895512ed39d566f0924542b543d25fc9fc7a819d228f3b0ee5e381f088f54893e86437dafc49dd923b3e6dff956ca843f951910379531fac9bb5fd01a182dd32a4c597f92da3c01af37cb9b0ec984500884438e74e54d7e76fa1ae7241d5050b13376310b24761634a6f6eb7cf000082f50ed7c1899d7918023d4f877586f964932a7af72e7a4984ddecfdd1921a2e1b80b00d6bd2e64a3f4cb6915a27a8d17a69d163cf45220a13fcddd15dc2bb91ae4f1b6a67224ab3b23e8d7d785df178ec78a84cf42cea086426f563822c8a4271a0b89bb21f84b643dbf1de21b6395039d673a376492767199fa36ccd9a13628ce61695424091acc16059450d59bc59fa7879e7306f5727217211b0264a6a560f886d520e41406ef45b1668805b88d246c5b2ca5a1762042c85be34fcd420ac3843f32236d079b4bd57d6b8d8013d9d18f8efb55e8e443cd9e1af9b144e7a56c8c6be0138af3b4a6c99bee9109bed2bce2e5145e736b125a2ec19aaf3fff713f6897fdd4158ce2ab04706b062ca2847bf70259c0fc4b0d390dc7fdaf0362047f775a912bd22da9d40f04d9790bcd5ece4b36b74c6c340b48c2926b916e8a9"
+					},
+					{
+					  "features": "Plain",
+					  "commit": "0989d52e17cd07b2252e4317a5e2f92f74ead54e9baaad4b12d766c141f626dad3",
+					  "proof": "6f9368ccc85c67cbe63c343816667d60dd756619f6c7a531c6086183c74be557974e535d82f3a59bacc2bba17393266bee8e2853d2b6522b1320900e55ec4eaa06d9c3da0242fbf3269af9b7988e3004dc6dfefcede0405d7c8fd43e1b7312d2c36a71bcfe3ce478b1f364d7cbb077cb990115e0d24b3873c3d7c3eb7111ce2a37b595edd2b44990dc96c4a56feb1bb9f598335d95e35d3025ca8282e340f3795a7a07b90329b5f5563fa48fe666827c140f5f8031e8d251e5ab0dff1c28437ed4013a39c7c61e34fbb34830e48ff2362443c2350bbe2fdc75f17f67a0285dd886041832957c0e62926bed15aeb2736387b3f89a15a624133eff824f5ad6c6a6680daabfb796760cada8bf9f91d1dbacfc2404c96cddd01860eb2572d64955d476ed976ae56c34fb2ada8f0e39086c772e951c0008d8c2e354681e69184106bc2d48680767b8b0ffb8ff3fe9e1b12f359a313678cc87413cc04b389eecd8ce52ed0702c48b39cde55a883298eed487ea7d747d7f638ea65fd31f4b38dd611d4e60d5e790425f8bc09f3b26b845a37c4525d166a7af7aa0f32590dc843362a783f937033f0be33337367328ce7b9ad7a06ac1c752019d761c8e34e3668cfa75dfdb0a4508eb594ac022f15a40a8722d6c7a6ccd13b6d1f37fe8a173b27cc4918c88b58a8604004624ce32100ae5784fd67d68dce8e42bf9826d1d1f7335b5e972536973c358ba12c80efc5798a6276d813a47e9f3d1e4a84fbf4acc1f26d916babd632077cd1df97e23fbf03b82621f8a0fc461e7b2df4299f987bb87fcfab202c80b79d3c0f572d3cd2bc9afde75e609522fe10bb7a33d2d9b6402a425becfc336a99b74c7c0f3a34f894a76f6ac246e72e74ff9acd06c6ab703d4f183b49143e7748652493396db021a3b3d7926196ec3fa55006697f0a025471eeb4e97fc5f854fb4"
+					}
+				  ],
+				  "kernels": [
+					{
+					  "features": "Plain",
+					  "fee": "70000",
+					  "lock_height": "0",
+					  "excess": "000000000000000000000000000000000000000000000000000000000000000000",
+					  "excess_sig": "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+					}
+				  ]
+				}
+			  },
+			  "amount": "2000000000",
+			  "fee": "70000",
+			  "height": "5",
+			  "lock_height": "0",
+			  "ttl_cutoff_height": null,
+			  "coin_type": "mwc",
+			  "network_type": "automatedtests",
 			  "participant_data": [
 				{
 				  "id": "0",
-				  "message": "my message",
-				  "message_sig": "8f07ddd5e9f5179cff19486034181ed76505baaad53e5d994064127b56c5841b7f9d23b4293ae333244716b93f8c85153042fe7e3375eab56ceccb786c66c917",
-				  "part_sig": null,
 				  "public_blind_excess": "02e89cce4499ac1e9bb498dab9e3fab93cc40cd3d26c04a0292e00f4bf272499ec",
-				  "public_nonce": "031b84c5567b126440995d3ed5aaba0565d71e1834604819ff9c17f5e9d5dd078f"
+				  "public_nonce": "031b84c5567b126440995d3ed5aaba0565d71e1834604819ff9c17f5e9d5dd078f",
+				  "part_sig": null,
+				  "message": null,
+				  "message_sig": null
+				},
+				{
+				  "id": "1",
+				  "public_blind_excess": "02e3c128e436510500616fef3f9a22b15ca015f407c8c5cf96c9059163c873828f",
+				  "public_nonce": "031b84c5567b126440995d3ed5aaba0565d71e1834604819ff9c17f5e9d5dd078f",
+				  "part_sig": "8f07ddd5e9f5179cff19486034181ed76505baaad53e5d994064127b56c5841bc55e87a5a5316a4ca06dac37f29a9d99cb5a85d60e6799e24db155a6d257f2c3",
+				  "message": null,
+				  "message_sig": null
 				}
 			  ],
-			  "ttl_cutoff_height": null,
-			  "tx": {
-				"body": {
-				  "inputs": [],
-				  "kernels": [],
-				  "outputs": []
-				},
-				"offset": "0000000000000000000000000000000000000000000000000000000000000000"
-			  },
-			  "version_info": {
-				"block_header_version": 2,
-				"orig_version": 3,
-				"version": 3
-			  }
+			  "payment_proof": null,
+			  "compact_slate": true
 			},
 			"participant_id": 0
 		}
@@ -1999,7 +2047,7 @@ pub trait OwnerRpcV3 {
 		"id": 1,
 		"params": {
 			"token": "d202964900000000d302964900000000d402964900000000d502964900000000",
-			"slate": "BEGINSLATEPACK. 78D5yXBmC2t4fQ5 ZNwtM3YncAH1bZZ 19fotVi4TM2mY7E AbDHZVyiX6zhNFW UZmyL5AbufF5kyP Q6ekjrhm5J5R7wv r4cdUTpbttyytAf p6x6M8SSoTT5qSP YwbhBta78KtSz6J 9rx8xisfw7T2Rh1 W2nRpB6TCnS8h15 ArsUfK6ppY8ZCsW Ny2gxC7jQJj7yWi 72j514HZwSs7qbX 8BvCWH7f2k29K7E 8mM4gv2fYkbbaUT hv9z4oU3ixnocFd YrYr25PNyp6n5ar JPCbXNGZV82zJZh WTXZ4XNY17jJc5S Y6pS8MNGB1EjG2H 1gqBANTaTwrkLXE 5N42xskNEhtAFwp RqcZaEzcEgtCadU wrz5ba8F3Aa3g9n Fm9XbHGD3qJsbCu X7dg5eunEvubDpP nbqXeZsGu4eMBhJ aEw9LN4FiTxZZKv D7rQJM67UcH44ou Hx4B5pRVd7bbopf BGmG23uwhh9ASUU 5vx2NkGGH8coRUW vJnKsxB2DNKdv3V ZhJPRq98QtFqTw8 ZpHj3XCYsxzrZ6D MeZXNmFC1BFR7ew zCRobkFFVvXiZ56 NoKqFxVydSzyPVw 2Sy9y1yFxXnWaZz 9ji1oUQQVSSozjS M42WhZaf8rHEGSs jkL4fBrZ12oBaNN K2KUbiHdngtS4bd r12QgT2nPamqizj au8yMNqHLhYFC2A R89a38gbJtwaFrX x4KVqRyXXYTijFu dXfrgB4A39ePyQr ZrPoBmcp4AHDUdf yGmfX83rLVtednY dVULZ63TNTzC393 CDffkNxSt3JKjoV GVTv4BMxSu4YDcv YEvBkoVkdABYkyH M8SKCeLgHMfYRM7 GHcKPauzo636oR5 JjZndjphUfPUpAR Ejj4UAdYqDWvkPV YnbfUHrYjsdszmB 2TAWSyNk6npe1h7 HKwnddyWJzxm1DE WgEVTLCTb2qsMm1 8viMY1UsdYYfMiy 1ytoqZqAPWwWxR4 qHEFYhU63Aq2pjm 4KiLVtkr1LNygFb eFCb6ZeVqu9xKGT 71NnR5j7B5sGuKm YSfX8LopuHV7Ewk aBdrtxpkSzQfr7d 8x6GZPh2pxPg9xW UywhYxDoRbts1Q9 D4m63djAfA9jPYu MEQWiDhnDf1v4CD s7CcYyiyi3MX1Gk JbHyBLaKfkNyA6p e6LWmFm5dJusfco Ej2CyYyC632fE8Z PfxWgiCNEphe1kX W7F529X8NRVKEj8 qUccuviVC7GR94q EecQ8hVK1TbrTAQ MM1QYFxSTrA1qEg PTvKdwxAs1Qb6Ej 8Jkb7nrXALDzSct edf6i5QygNRnZup VYKdBeznoSYpG7D rjTPQJBNLtJ4t46 7sD2FZL5edzb4Ah LZ3zPmpXeLDemU2 NJ6qRXJbPpZQbWW hZ3rFMd4UMfm2Zc BVrfgjeqskCVAtu 6hvxm9eY91xuYzu JWMQUYSZWENQqcU mfd6RgrPFH7wtpm cB4Sv1o9C6LXidR v2srdppm3gTQyMV 9V5NXFykMbqpcJX iWrDVwWi2DELt1P N4NvdkdTxq6LNup okimDBoCYKbH4Va zYgzdJeZ872Jp3M Mg4qUGLFd8SHZED PJsx7B7jmZ62fPq UAi39HU8nRH5GYS y2iZB2rH8j8GD4Q hZ5wUSSi7jq46WZ 4KVY6iuCpLrgYwU Hn6DCbNVmNrNK9t bSBXEJQYqbXkHwQ bTccv3LJ3b5dtEa NzwvwUv833FdpxK hvh5e6zd2Gph7Ms ELhd19sPYfvFmWH RvqWrYgbdUjs7Rf WEeM998zqL7RjM2 trmizdfVMjxCrKk pp94TnVyyPfDBgE LtYwquWnzsjUDqh 8Wm9cV1dcAzuZyr pDsqQ5i89vieieN ZAtqhJb1agE6XC3 zwzVAdMuGvLLZVf MB2XrtWWcRxks9H AvqgVUxtRrS8e8f tNTw5aJxP8fJksZ UXXq68BGcV9wt3w T8NoAetqxKeL22c QyFg1VHoeNHczML NtY49ip3LKQ1vL6 yKrjAQ12TY7vZVj f3DnAHFDb5DeA6t RYwnhCamBubygiK KvYYTV5Y8RDW551 Xqp2kmWKr6tBrJ2 QBVgP4G5JcWrCRp jgR4Dq3crmnR9o4 5vgT5UFrLYydsYX 5NWKCdkkJ66KVPE cEgpqYo5eBoyade fSgXhv4CvRVYtk2 HQRcjbUVrFS2KJ1 RdJuxr8dY6QgihK ZNwCqDQHRx3NCGv aW2V2QzAqbSMQsK cnuZUYwWFZ9nZWs kD8uxYre9jwe9Wp DNpP8iB3AWuP1Kx AUu2Hu4c3PnXSi5 uDPUGmDjcWtUxUv pUj3yNE1XzBJxPH nqstVEP5PqLjUAr 8afecWyaCeNaXq3 KtmWe8fzyEYQ7TJ QSe5QKYAKjUfiCE 4zJofoamEthP9LE wwwXDGpSq8sUb8Y owWi6BVY6MCTCX6 yixBxPgWrtqSYwk BUi5wNA7ybCtMY5 a17ovnwkSbrCoZD dyHCSYTrs7zq5jP FNRK. ENDSLATEPACK.",
+			"slate": "BEGINSLATEPACK. 2YfzS93kwhLYEnW AXvVuaVmtsXLxJk FDvL8ggDyVdS63y KgmcGcBikR93k5m Ay32tJQQUKEXpS4 n14D2L3Dy73Lhkv izQNRW1M2Ff6X7N BApUkLZ7SjKLHci 4DnN8fbx2DctVBF XUBisbYhPfq7wvU r6EmoULdWbHn7k7 qTqLWnWK3J8fxiC aKzVgq8eyufYT9J gsxhK8dBeQsP3aL Jy3RezBSuyeWsoP SsBGDSCMCg3UXdM hThLSeaLrQeRLqy CD7HKW4gFV. ENDSLATEPACK.",
 			"participant_id": 0
 		}
 	}
@@ -3608,7 +3656,6 @@ pub trait OwnerRpcV3 {
 		"method": "retrieve_payment_proof",
 		"params": {
 			"token": "d202964900000000d302964900000000d402964900000000d502964900000000",
-			"refresh_from_node": true,
 			"tx_slate_id": "0436430c-2b02-624c-2032-570501212b00"
 		},
 		"id": 1
@@ -3621,20 +3668,19 @@ pub trait OwnerRpcV3 {
 	  "jsonrpc": "2.0",
 	  "result": {
 		"Ok": {
-		  "amount": "2000000000",
-		  "excess": "09bbe0e251ebd77edd17c6407778e816112433a31eed6a740278d4471fcacaee97",
-		  "recipient_address": {
-			"domain": "",
-			"port": null,
-			"public_key": "xmgceW7Z2phenRwaBeKvTRZkPMJarwLFa8h5LW5bdHKucaKTeuE2"
-		  },
-		  "recipient_sig": "3044022044afc455c9e47002a761ba27c4fa929cef3d239818d8dd68788b951792df10320220641c3e7244d7312a4152ea82b8e74c6c58125ece2140362196be70d35e36a1a9",
-		  "sender_address": {
-			"domain": "",
-			"port": null,
-			"public_key": "xmgwbyjMEMBojnVadEkwVi1GyL1WPiVE5dziQf3TLedHdrVBPGw5"
-		  },
-		  "sender_sig": "3045022100cd79c09fd39b2ed64bbcd3952b926a824f4be569d35f22af44990b91dc98729202204614e0514826c894d7dec594df6e50890c46d279dbd82692d06d4ec2d166026b"
+		  "address": "xmgceW7Z2phenRwaBeKvTRZkPMJarwLFa8h5LW5bdHKucaKTeuE2",
+		  "amount": 2000000000,
+		  "challenge": "",
+		  "fee": 70000,
+		  "inputs": [[9,135,120,206,34,67,250,52,229,135,108,140,183,246,219,187,214,165,100,156,21,97,151,58,128,122,104,17,148,28,18,54,60],[9,16,193,117,33,0,115,59,174,73,232,119,40,104,53,170,183,109,88,86,239,129,57,182,198,227,245,23,152,170,70,27,3]],
+		  "key": [178,214,169,41,51,242,104,31,198,94,249,72,242,14,219,56,98,255,165,45,172,150,214,162,224,22,108,170,88,110,184,180],
+		  "message": "09bbe0e251ebd77edd17c6407778e816112433a31eed6a740278d4471fcacaee97xmgwbyjMEMBojnVadEkwVi1GyL1WPiVE5dziQf3TLedHdrVBPGw52000000000",
+		  "outputs": [[9,137,213,46,23,205,7,178,37,46,67,23,165,226,249,47,116,234,213,78,155,170,173,75,18,215,102,193,65,246,38,218,211]],
+		  "signature": [68, 175, 196, 85, 201, 228, 112, 2, 167, 97, 186, 39, 196, 250, 146, 156, 239, 61, 35, 152, 24, 216, 221, 104, 120, 139, 149, 23, 146, 223, 16, 50, 100, 28, 62, 114, 68, 215, 49, 42, 65, 82, 234, 130, 184, 231, 76, 108, 88, 18, 94, 206, 33, 64, 54, 33, 150, 190, 112, 211, 94, 54, 161, 169],
+		  "slate_message": "{\"destination\":{\"public_key\":\"xmgwbyjMEMBojnVadEkwVi1GyL1WPiVE5dziQf3TLedHdrVBPGw5\",\"domain\":\"\",\"port\":null},\"encrypted_message\":\"2e14c3e33f4c7948811f706469d8081aec26e4fa002456a97ad4e98527ed1618dc7ba693697f8849ebd4576d2d73a55ec81aa0508750b34a804f54531c91f7c94f69dca0679471cb61520515d8b02993f8d1d27b0cb3aebb1bed5fb4e06753d14b40fbcd9d9d22391fdf83fa1a8bd471e15d83e9af83ae3dfd09715e7d7ac353dc4a66486279d6911d9490d9417be9dd6837ac85e603bc50e04b35047c8cc6f27eac6681f514f0dd654cb4d3d0c84eedfd54cbf7d23818fa63fd5736376135ec5c9e5f95c619def8acd9788cf786ea966ab816ea668aed15c5bc063a0a8780aa040c2d2f92e4849f5ff897200092d654f59a169572e886ee6dd60c9937d1b6742b5d893ed395fb794911334ded61339f3e07a85aab598b002d51db412dc16e99dedf57e050697356a907bff460bcf6bca41fb9ad4a29215fb2ce994457a92ac7f8d894036db723be0961d290b675dd11a8bf44596ecf65e7270a5c22271ece96c2ae22e1f65917867750ecb46a3855a6ebae2bb8731304abee14d1ee1595a81625f2350d27b389703114efec85915c7ba0ab7406695c205431bca9764d5378a55cce52ab027627a59509792625bee934453569d04a54a18f8d8f33a596b1e0b65fbf7cd166de7268cf3fda3227fa308665553b69b62b95031d5ca46ab3d536da09e90e21d82eb2921dcabf3ffc46ac68ec8c2b1c5e4119545c5b9ff956553f166e8580775e2e3c5646e880d4c41f43206de7e2d2ccb8145406f404681fadca647f9b5b62d76f5ff4375f7eed7033591f17317fef2198c7c6b708fbf4dd4da34e5b7bdef8309bb49dc568d7a3d5a6b1346661c1b3fe0aefdaa1657197eb5659c35587f3c732e59657eb5f1ae52e8c84972f945aaa32ad33a9a917257d661fb0efcf0d09e7000039d91886e1126b8cdddbcf021ed07ebb6f8b57a546efdc1b09830feed99f192171a299b064123f290088cd3fa187c9c847fb5b9f1bd84c3e2f7741a591bf7a889b9b75efd75749d5fd90865ee149abaabf7784d9dd19277ca45ff89ce6c2fd298158baf706b944b7d411e530d1f93d4ef640d43dbef3dd71192fc200beb191ad158c69729ace15a7e7cd0861033e1027edc7212cd50c5b494193f5e11f38cf522284ef48aa680f006d06afdafd5de6ccef6500b223e28fc891b72e089d09b33e7dda7409389ad3cbed2919e569242cb1714c538cc7a7bfc3a1fecef8888c2cf9eabc33f75da2202801364c8f99eef4a4accaa1b9be7bab31fd58b9db56e622bc21ddbc0bced3e2141ebbc72ef777e0901064c0d27b11cfd121d9703736109944e318ee9dded5a7c51d5c8cf46eb1f1fada2912d0e404c604ba74de974544e25b6435111083d9d3871e06d592527d51c043552d9074a5810d2ac0cc73af4239034eaec08f79190753dc020d6464916ec752d930283ad347615f95d5378362b33e8914cde7d0713939773ee39534c565261074df694e139749366fc10470fc23e326fbd58adbb2b4dc75bd2866969ade7b697627d6a3737458e6bf433cb147fc7dde57f965939253c79b7d6d6b9c52a1caf38a3241c1959fa1f85de60479285fa01a37de5a4dd9f88635cad41b7f346bb36999047a9f6e79936e153c700b3618f2bd881978671bccbc78551eede4dae28d648ed701466c528c56bb4f62cff5312c785addb218ccd7798742cdde2f2958fb7bb6ed8e7cd4a406ad8b933250abead39d6267c38f9fa8254805f262588c367e3f4e289245a9796e43c0c6b9243d37c1c7c150e7adb23c074489cf7c2e556871aacb5cc124184f9494412950b9e530158e574b62f91e5145841f4a0107ec2ea36e23dfaf36f4ce3bd88b73347a1cafc8965f6aa5feadea13159e60c800a9ef79eeb3ac5c35bb1102dc264117702facc37cd257a915c9819b98e548dfc8f0b9eba3565a27ed78afad4da7b7cf34207fcaea7797b84ec738c7a98bc7b94778c35f7f7054c3b2501eb9e01d9e0a6c78b0fed897129cca148eb95f2664c712adaa345486359fa09920e4965752137d5a01a2212a307f1771cb28e83b9dde774755fd6b1342ff193a52988a33dea7bb8134b8c8a312e09c74bd3523ea8ab97f091f8f472af1eaaf8dcced3360b9ce4dfe6c0ba9571e206f402b661c575ceaa1ae53c2100d4914df2fc501f0c1d91393ef34bbafd1c4547ef997f756b9161e9fb3332b29ab5f2ce82a7f077d1ef1da59d0a1f77b38daa150ee9bf3227a72b4bf20913d5f9003b312fabd9be7512033fdc5d43a70a655ad97a53bd56e9850d684ec9160508d397b185f55581f93d60c0c7f52cd08c4ded24707c103573e527c1e79925a53e3747a0263c5e4d81a49dec13f10b497e371f32875fa38d6e33f4fa240a66003db075420f822870f79f6512441a52966f1bdd3af0108c831ad1c02be00bedcbd39b55b0c9af843e64f905d86e4ad88a1e3f489ba18004fd77c08077295e6a00baf566e0bb48a7400778e9f2893cf3f4c052d128cdc94c6378e82603c5e2e0bf2dd00650e719961878ababaaf768c7f9dd54ee5d4697280a28aa3c59b70d89b8c6b1e78e535b6502229e25f014f4ab326a65f9afa8d393cf18f7ddca848b9d6272214139b736e32a130503c3c7a172f7a426174b1fdc1b3438c88fe90fcd1e423474da105cc4f4e373ca5e084d4535ea25f7fe3cf0a57c79a0a042f4df9f036f4c3263dbba92794b8f029d904864870f9ba4e5fd045a1661617d7fc3fe78e0c70f21588722e551fc4fc5fa04d2f05b203dbe626bdd42019e50b75b91ff94fdcbb943b127067a0876bb1c1be9578ca5e55d5b161c6b30e77452ca0096ada434d39534399ecdaa5597e6271268fb0f2b83fea8285f7abd9c3e212c7ca3dc8622beedb1de611a0de94d6066e0f9579dd736164982a3d743ffbe5d7d66c9f43f5c5cfddeaca141be180aa7c3317477c00c4cee654ab9a9f421deec909f6892cfe52577f1f919e30391546b4024e6c0b06cbeb98637eb666262d0df2346d032df2ed4f6928ba9423104f4894d0a22bd44f96b4de9e53fecf78bba347702b71ce2e080b04b3caebb76076aaa7b1d28fdad52fc0f06f736aa0fa334b35a816c8cd1629f7e035dfe9e8738087b408724ff4b2572011ee54ea3ff97dba5531a5a7fc3a3f4e9e4cfca3348dc929ff856036464f6e8aa7a10f0e744a435d501cdaf41a2e0a16f8c396ba5d15b576be1478cc90a8718f1fd435e556e4b4b6f86cfae2aa4536a38f2dd4bd6cdfc2c6d171e9b53e7c41ce190e912402415b69f72f64be33a69a6c163e00012c1c035c3a3083742036047b606d114e8ab844c02c697a97b09283d1fd7540d85f6b09b14a34f985a7f8cd3b70fc3ea38d2faf958f4d3c7698261a37ba1db3387f235bf1a7a39098a36e2c6666b76041a9006af750ed9dd0677e2b9df00d4148bd2f1818c0b125bc934892bbb29c931ab2af37d4f3fdcffab631e965be93f3bada4d9ed30cef1e0feb99739c35fe69a0041db29fb35f324dc363c76d0d2b2a6ba9f219f1d1b7ade03f01804656df86caa936b2895b6e988afc5c7f51b76f7888f1b3c7b00617abb3f2185a5c8a38d273f62e35e9767f7705573ce778d0b6d3184bd8628f0fd906ae9f55859fbb577a29940790c5375aa2a236bbea90e59a7762b06b0d8bf8fcbd989d35481617d70a9b94e5db9daf5e68591cf19252fe0184369cf3b294329aea728f71f6e0f0baaf1521239bfda24396da109a83581c48b005960fe335a7ff9f00544f50b0151cfe586bb954134b254288e0b024a108909a7a7b4c31c442bf43fb42ea643a9b3bc84b5deaf6bab5a0d9a4fd03a566fe917a770c2a3e0fdcb50a913e2682207b28db789f3f56f1a27ad1aea4dfcfeeeb9057721f4855ab80c6e8997530b607dbc11a873c23dc534464a5641e494dc37dc9e6e2b30f053c0419a6d323105de2da807aa41e4829b6e9c897d20eccb80d90419e6ae13ceff6974c986a590c6cd7ab5a19f661f86cf65ea473ef774a4aa72c4875fa8e4e45e7d70a1d062b71c373a33fa65ca95940d88b758e8c1a007d64cf539940d4d2f0785097c72c576611a30af70d0bf3eeaf22a31b5033d767573f0c7e3b3299ab9b7cb944798f9727a47ee7f27d20b52468cf4172ec7fa77c8aa3c415b5e319619f726d58bc8041498664b4435d07b95cf0641541d35a24669802bdb9615fcdf9ac92e6fc808d2917265e64facc8561d01e56739e0b7dadeeae8b1b918ac05f0a3068c24cdbf716ce860ddc40136c8aebdffcab943230fd853fef269477673192939d3ef1e3792a91b3598f4d10fbd37f5a92effa9c44916fd43fad768f22b8c4e6fa93500b88949292ecfe848938478dd19f3d610599033b267a563fb7279080bbc92e092c72867f806bf86edc901b3fc8c203c46fe516f493527eb08c6fc5153811b25aa27b57a32f1fb5933c84d28bdf3a847151051e8eb38f775a51247ff27ac532eaf41a001c0af37f242cb26186846268855975b8e0566ec8aae7545077096792feeed03db23b1c1057870769a250205ceecc737a5a8f2ef014ccc4dae9c8a35a0f81be3c00119f72e61138ef19072d1cd7e9a713fdf4d8f75c96b591cfddc0bb13515d23d5a1c6a45bf6693faaa5870c1e15951f7de5ee07db4de4c22c9ca10660d9c55a8786fc0a5c143e07b2e5cea1ecb20dd8f01779d2d7ea66e4c3601fabe2a818e51dbcd5677ec7b7f898037fb6ecc35a7cb7ec4aeeb4aba462eece7ba995266ddd995d3fd1953ac66bc0f70abc846608153e55ca50ea44d1182ac7ff31f44a9da46321f033e21f623195c66fc288b4f786cedc43efcd6af6aa912de3d4d3a9ce44ae8f35a745b739cd7469be4f9e5cf188ed4bca89b0994d67bc2118bca91686fc0638cae1b1d2e93ed97ec603c9293c015cfc4e51988cbe511ba090111c600355a9f4a39e1e419fa186f733f6531470b2ad38f79d104acdbc930f2a4c2c1cf7736c443fc277387a6f0a75cec35eb7cea5dd930b5789e1912f07faab45341e83cb68f8caca1651c00212221938f461bbfc5b6ee5b2bbab368965352677f31cfd4033941d2f47705a5d8b07b70a3da15fda8d65fc0b8996cf5c998d1c12720a81059b4c57c6d9d48a835896c815413b7f9564e0fce38d07dbeb742d822c0f4011d58796e6b7a752098723b80ac08bdc36db326718b87ba6da3ce050d7b35d826654ce8c52fda834136015d148d73ff78743107511e27459024a5d056efd7210bf0079cfd53836276d41a8f8727d3f9873d387384072fa711689fe9b29b2586c4f61f4de5c8ffd65e9c1a63bf039ea8aeebbf3149e73c1ab2ac5505f5b019af9d9859f3b832a50e8b43109c33904a8b6f85355ba56e8c3faf416148357c94b8893fe3aea15e10b80df0269ce97c729516fa5c29410dd1bf4f96617ae72ccc0c5f4e6b8a9011a46c1521bf1116073006430b49c53589a65eda0508b46683c5c88adb267d04e1864aa54daea4775751c4900ed46e548bd59269cac179fca9ecad75bcdf0b940ce4bc301ee8b4b44c3061798bf936aebfeed19c66babb9f8f15dd1f09ce45985271b0b44b8fdedc41f93189a5c2dacd2f026ed00861500a8266aba5b1e862d9a84be48a4038cdb48be228d194f06b9c07b96ec00ea181ab8884d36dff15187d8cbd39f376e0c261df365f1598ed238df34f8c3b6e9f0991d0d91baad8442870b75f9c8d6e7db21b50c3aafc0c867c8d174b64d5478f29bd78ece430f6e55bf190a1ee847ed7312f3eb625ab569759ec5f43ecfbf163ed0d903de1e35edd088213c8a64ab29c49e2e6277132b4a613f4037e1fbe5607e8139f9c8a16952bfc80f8b345297979bfe28fa01f65b8bb7833cff5e85a9fa7d4befb115a312bab1207caaf9848aeee0fd73e07b5aa2d858a90953fd3dfa8c52f1d64a742161d2d573abc6d2074701a13b5dc301a66b9ca9e28a38b1a4df96b2b2c537565ca383024490e5805fca97d4a66b564a6080d41f6581a3bb2b82f2b2d19d134d47ef62c4dbe3056c922ae75a994ec4d83ea3c14c8319a8b2da3c4c3aec7ba220f410e10dfae20229d5febe5671a99501d5ecc15cf4133d2789dfce825df42babfc7b05ce782b41019799afa375909e0618d26eca8c95bad5d167464ff8f8541f331e6c0d77c91b65d76473f9b60988bd27f19a43e4c575d51f92a6723586d555c7e11c261d0edbabf8c36fb89bf2d32001849adb7538be9567c9d0e6c3529ab2cfe5595b8f8d1d28206162fea6f710c1fa0090fe87e960e5ce159fa453b78ff80569914f07d055f0ceba2ef0de76f34875f6ee1e2b20930387195dc6fec5f0cb4735a7ec84a779f038736fc679f0abf1f3a1f9c6a42a131bd18f132de24d81d126b5f6253f9e698fddd4ed9aa8c86852e95e3cc3b344fe694f7984b4481f0a3ddd58cf7451ef51a235ea0fc9684cea495012600c9ee2d353fe895932b972c23b05911733d0aaf79ba41a4b3e7ce65a177024d8cec021eef3585238baeeeab2ff051471b2222d64292b16e0e9761e590f9e2fb90a0efa340cd1f2b4439bf916ba05725d12d5192dc22bf447167050b562bb014bfce93f66ffbfa3fe0ded225ef7c87536e06fe0efeba1a2578010a6d16a546945e05f15aeb3497517d8c4bed8da1b3eed576d90592501d2e25488bc1e0185246873889e5d74e4b411f1984229aeee051f10738536bd5355f29af8de2eb5921b2ed0c2c3b12cbe8ef73f958990049367c6baa1e80254a24c012626d4f52dc596548546039d221dd176ea8a2b7cf70204493e496ccd44642bbe1000552f56ec6fa06e1cf235d3c17beda3a9e30b339f0f462566f67c99a0e61f7166fc107debe73da6b01dd0695359f49edd9c80729a68617bc706bed99c68ffa44e96a4875c8dbf189023b9dcd77696c2d6\",\"salt\":\"d3d4d5d6d7d8d9da\",\"nonce\":\"dbdcdddedfe0e1e2e3e4e5e6\"}",
+		  "tor_proof_signature": null,
+		  "tor_sender_address": null,
+		  "version": "version2"
 		}
 	  }
 	}
@@ -3649,7 +3695,6 @@ pub trait OwnerRpcV3 {
 		"method": "retrieve_payment_proof",
 		"params": {
 			"token": "d202964900000000d302964900000000d402964900000000d502964900000000",
-			"refresh_from_node": true,
 			"tx_id": null,
 			"tx_slate_id": "0436430c-2b02-624c-2032-570501212b01"
 		},
@@ -3663,36 +3708,33 @@ pub trait OwnerRpcV3 {
 	  "jsonrpc": "2.0",
 	  "result": {
 		"Ok": {
-		  "amount": "2000000000",
-		  "excess": "09eac5f5872fa5e08e0c29fd900f1b8f77ff3ad1d0d1c46aeb202cbf92363fe0af",
-		  "recipient_address": {
-			"public_key": "xmgceW7Z2phenRwaBeKvTRZkPMJarwLFa8h5LW5bdHKucaKTeuE2",
-			"domain": "",
-			"port": null
-		  },
-		  "recipient_sig": "304402204417c3b64709c7e38197103b6979dacee4e41c3ee44d89ea75191f553e2bbcc2022044c52df100fffd080c95575c92329b6ddbd0c77545e31ee439112655918fe0ee",
-		  "sender_address": {
-			"public_key": "xmgwbyjMEMBojnVadEkwVi1GyL1WPiVE5dziQf3TLedHdrVBPGw5",
-			"domain": "",
-			"port": null
-		  },
-		  "sender_sig": "3044022001d10e4e1fd303748120a45cfcdedcd8b1abc1ffe8ff59d35ddb2ec5b7c2e1a902207dab490bd26d16784933724c559e5a1e4dc56a6c0941f4dd70a22b0c4cfbcc40"
+		  "address": "xmgceW7Z2phenRwaBeKvTRZkPMJarwLFa8h5LW5bdHKucaKTeuE2",
+		  "amount": 2000000000,
+		  "challenge": "",
+		  "fee": 70000,
+		  "inputs": [[9, 135, 120, 206, 34, 67, 250, 52, 229, 135, 108, 140, 183, 246, 219, 187, 214, 165, 100, 156, 21, 97, 151, 58, 128, 122, 104, 17, 148, 28, 18, 54, 60], [9, 16, 193, 117, 33, 0, 115, 59, 174, 73, 232, 119, 40, 104, 53, 170, 183, 109, 88, 86, 239, 129, 57, 182, 198, 227, 245, 23, 152, 170, 70, 27, 3]],
+		  "key": [178, 214, 169, 41, 51, 242, 104, 31, 198, 94, 249, 72, 242, 14, 219, 56, 98, 255, 165, 45, 172, 150, 214, 162, 224, 22, 108, 170, 88, 110, 184, 180],
+		  "message": "09eac5f5872fa5e08e0c29fd900f1b8f77ff3ad1d0d1c46aeb202cbf92363fe0afxmgwbyjMEMBojnVadEkwVi1GyL1WPiVE5dziQf3TLedHdrVBPGw52000000000",
+		  "outputs": [[9, 137, 213, 46, 23, 205, 7, 178, 37, 46, 67, 23, 165, 226, 249, 47, 116, 234, 213, 78, 155, 170, 173, 75, 18, 215, 102, 193, 65, 246, 38, 218, 211]],
+		  "signature": [68, 23, 195, 182, 71, 9, 199, 227, 129, 151, 16, 59, 105, 121, 218, 206, 228, 228, 28, 62, 228, 77, 137, 234, 117, 25, 31, 85, 62, 43, 188, 194, 68, 197, 45, 241, 0, 255, 253, 8, 12, 149, 87, 92, 146, 50, 155, 109, 219, 208, 199, 117, 69, 227, 30, 228, 57, 17, 38, 85, 145, 143, 224, 238],
+		  "slate_message": "{\"destination\":{\"public_key\":\"xmgwbyjMEMBojnVadEkwVi1GyL1WPiVE5dziQf3TLedHdrVBPGw5\",\"domain\":\"\",\"port\":null},\"encrypted_message\":\"2e14c3e33f4c7948811f706469d8081aec26e4fa002456a97ad4e98527ed1618dc7ba693697f8849ebd4576d2d73a55ec81aa0508750b34a804f54531c91f7c94f69dca0679471cb61520515d8b02993f8d1d27b0cb3aebb1bed5fb4e06753d14b40fbcd9d9d22391fdf83fa1a8bd471e15d83e9af83ae3dfd09715e7d7ac353dc4a66486279d7911d9490d9417be9dd6837ac85e603bc50e01c31072d8d96f326fa33d2f647a6da314de3db80c240bca25dcaf5866d1af936f85536343c62e854cd0c93974adcfdff8e298cf38de9c462e940e333d9bb1197bc063a0a8780aa040c2d2f92e4849f5ff897200092d654f59a169572e886ee6dd60c9937d1b6742b5d893ed395fb794911334ded61339f3e07a85aab598b002d51db412dc16e99dedf57e050697356a907bff460bcf6bca41fb9ad4a29215fb2ce994457a92ac7f8d894036db723be0961d290b675dd11a8bf44596ecf65e7270a5c22271ece96c2ae22e1f65917867750ecb46a3855a6ebae2bb8731304abee14d1ee1595a81625f2350d27b389703114efec85915c7ba0ab7406695c205431bca9764d5378a55cce52ab027627a59509792625bee934453569d04a54a18f8d8f33a596b1e0b65fbf7cd166de7268cf3fda3227fa308665553b69b62b95031d5ca46ab3d536da09e90e21d82eb2921dcabf3ffc46ac68ec8c2b1c5e4119545c5b9ff956553f166e8580775e2e3c5646e880d4c41f43206de7e2d2ccb8145406f404681fadca647f9b5b62d76f5ff4375f7eed7033591f17317fef2198c7c6b708fbf4dd4da34e5b7bdef8309bb49dc568d7a3d5a6b1346661c1b3fe0aefdaa1657197eb5659c35587f3c732e59657eb5f1ae52e8c84972f945aaa32ad33a9a917257d661fb0efcf0d09e7000039d91886e1126b8cdddbcf021ed07ebb6f8b57a546efdc1b09830feed99f192171a299b064123f290088cd3fa187c9c847fb5b9f1bd84c3e2f7741a591bf7a889b9b75efd75749d5fd90865ee149abaabf7784d9dd19277ca45ff89ce6c2fd298158baf706b944b7d411e530d1f93d4ef640d43dbef3dd71192fc200beb191ad158c69729ace15a7e7cd0861033e1027edc7212cd50c5b494193f5e11f38cf522284ef48aa680f006d06afdafd5de6ccef6500b223e28fc891b72e089d09b33e7dda7409389ad3cbed2919e569242cb1714c538cc7a7bfc3a1fecef8888c2cf9eabc33f75da2202801364c8f99eef4a4accaa1b9be7bab31fd58b9db56e622bc21ddbc0bced3e2141ebbc72ef777e0901064c0d27b11cfd121d9703736109944e318ee9dded5a7c51d5c8cf46eb1f1fada2912d0e404c604ba74de974544e25b6435111083d9d3871e06d592527d51c043552d9074a5810d2ac0cc73af4239034eaec08f79190753dc020d6464916ec752d930283ad347615f95d5378362b33e8914cde7d0713939773ee39534c565261074df694e139749366fc10470fc23e326fbd58adbb2b4dc75bd2866969ade7b697627d6a3737458e6bf433cb147fc7dde57f965939253c79b7d6d6b9c52a1caf38a3241c1959fa1f85de60479285fa01a37de5a4dd9f88635cad41b7f346bb36999047a9f6e79936e153c700b3618f2bd881978671bccbc78551eede4dae28d648ed701466c528c56bb4f62cff5312c785addb218ccd7798742cdde2f2958fb7bb6ed8e7cd4a406ad8b933250abead39d6267c38f9fa8254805f262588c367e3f4e289245a9796e43c0c6b9243d37c1c7c150e7adb23c074489cf7c2e556871aacb5cc124184f9494412950b9e530158e574b62f91e5145841f4a0107ec2ea36e23dfaf36f4ce3bd88b73347a1cafc8965f6aa5feadea13159e60c800a9ef79eeb3ac5c35bb1102dc264117702facc37cd257a915c9819b98e548dfc8f0b9eba3565a27ed78afad4da7b7cf34207fcaea7797b84ec738c7a98bc7b94778c35f7f7054c3b2501eb9e01d9e0a6c78b0fed897129cca148eb95f2664c712adaa345486359fa09920e4965752137d5a01a2212a307f1771cb28e83b9dde774755fd6b1342ff193a52988a33dea7bb8134b8c8a312e09c74bd3523ea8ab97f091f8f472af1eaaf8dcced3360b9ce4dfe6c0ba9571e206f402b661c575ceaa1ae53c2100d4914df2fc501f0c1d91393ef34bbafd1c4547ef997f756b9161e9fb3332b29ab5f2ce82a7f077d1ef1da59d0a1f77b38daa150ee9bf3227a72b4bf20913d5f9003b312fabd9be7512033fdc5d43a70a655ad97a53bd56e9850d684ec9160508d397b185f55581f93d60c0c7f52cd08c4ded24707c103573e527c1e79925a53e3747a0263c5e4d81a49dec13f10b497e371f32875fa38d6e33f4fa240a66003db075420f822870f79f6512441a52966f1bdd3af0108c831ad1c02be00bedcbd39b55b0c9af843e64f905d86e4ad88a1e3f489ba18004fd77c08077295e6a00baf566e0bb48a7400778e9f2893cf3f4c052d128cdc94c6378e82603c5e2e0bf2dd00650e719961878ababaaf768c7f9dd54ee5d4697280a28aa3c59b70d89b8c6b1e78e535b6502229e25f014f4ab326a65f9afa8d393cf18f7ddca848b9d6272214139b736e32a130503c3c7a172f7a426174b1fdc1b3438c88fe90fcd1e423474da105cc4f4e373ca5e084d4535ea25f7fe3cf0a57c79a0a042f4df9f036f4c3263dbba92794b8f029d904864870f9ba4e5fd045a1661617d7fc3fe78e0c70f21588722e551fc4fc5fa04d2f05b203dbe626bdd42019e50b75b91ff94fdcbb943b127067a0876bb1c1be9578ca5e55d5b161c6b30e77452ca0096ada434d39534399ecdaa5597e6271268fb0f2b83fea8285f7abd9c3e212c7ca3dc8622beedb1de611a0de94d6066e0f9579dd736164982a3d743ffbe5d7d66c9f43f5c5cfddeaca141be180aa7c3317477c00c4cee654ab9a9f421deec909f6892cfe52577f1f919e30391546b4024e6c0b06cbeb98637eb666262d0df2346d032df2ed4f6928ba9423104f4894d0a22bd44f96b4de9e53fecf78bba347702b71ce2e080b04b3caebb76076aaa7b1d28fdad52fc0f06f736aa0fa334b35a816c8cd1629f7e035dfe9e8738087b408724ff4b2572011ee54ea3ff97dba5531a5a7fc3a3f4e9e4cfca3348dc929ff856036464f6e8aa7a10f0e744a435d501cdaf41a2e0a16f8c396ba5d15b576be1478cc90a8718f1fd435e556e4b4b6f86cfae2aa4536a38f2dd4bd6cdfc2c6d171e9b53e7c41ce190e912402415b69f72f64be33a69a6c163e00012c1c035c3a3083742036047b606d114e8ab844c02c697a97b09283d1fd7540d85f6b09b14a34f985a7f8cd3b70fc3ea38d2faf958f4d3c7698261a37ba1db3387f235bf1a7a39098a36e2c6666b76041a9006af750ed9dd0677e2b9df00d4148bd2f1818c0b125bc934892bbb29c931ab2af37d4f3fdcffab631e965be93f3bada4d9ed30cef1e0feb99739c35fe69a0041db29fb35f324dc363c76d0d2b2a6ba9f219f1d1b7ade03f01804656df86caa936b2895b6e988afc5c7f51b76f7888f1b3c7b00617abb3f2185a5c8a38d273f62e35e9767f7705573ce778d0b6d3184bd8628f0fd906ae9f55859fbb577a29940790c5375aa2a236bbea90e59a7762b06b0d8bf8fcbd989d35481617d70a9b94e5db9daf5e68591cf19252fe0184369cf3b294329aea728f71f6e0f0baaf1521239bfda24396da109a83581c48b005960fe335a7ff9f00544f50b0151cfe586bb954134b254288e0b024a108909a7a7b4c31c442bf43fb42ea643a9b3bc84b5deaf6bab5a0d9a4fd03a566fe917a770c2a3e0fdcb50a913e2682207b28db789f3f56f1a27ad1aea4dfcfeeeb9057721f4855ab80c6e8997530b607dbc11a873c23dc534464a5641e494dc37dc9e6e2b30f053c0419a6d323105de2da807aa41e4829b6e9c897d20eccb80d90419e6ae13ceff6974c986a590c6cd7ab5a19f661f86cf65ea473ef774a4aa72c4875fa8e4e45e7d70a1d062b71c373a33fa65ca95940d88b758e8c1a007d64cf539940d4d2f0785097c72c576611a30af70d0bf3eeaf22a31b5033d767573f0c7e3b3299ab9b7cb944798f9727a47ee7f27d20b52468cf4172ec7fa77c8aa3c415b5e319619f726d58bc8041498664b4435d07b95cf0641541d35a24669802bdb9615fcdf9ac92e6fc808d2917265e64facc8561d01e56739e0b7dadeeae8b1b918ac05f0a3068c24cdbf716ce860ddc40136c8aebdffcab943230fd853fef269477673192939d3ef1e3792a91b3598f4d10fbd37f5a92effa9c44916fd43fad768f22b8c4e6fa93500b88949292ecfe848938478dd19f3d610599033b267a563fb7279080bbc92e092c72867f806bf86edc901b3fc8c203c46fe516f493527eb08c6fc5153811b25aa27b57a32f1fb5933c84d28bdf3a847151051e8eb38f775a51247ff27ac532eaf41a001c0af37f242cb26186846268855975b8e0566ec8aae7545077096792feeed03db23b1c1057870769a250205ceecc737a5a8f2ef014ccc4dae9c8a35a0f81be3c00119f72e61138ef19072d1cd7e9a713fdf4d8f75c96b591cfddc0bb13515d23d5a1c6a45bf6693faaa5870c1e15951f7de5ee07db4de4c22c9ca10660d9c55a8786fc0a5c143e07b2e5cea1ecb20dd8f01779d2d7ea66e4c3601fabe2a818e51dbcd5677ec7b7f898037fb6ecc35a7cb7ec4aeeb4aba462eece7ba995266ddd995d3fd1953ac66bc0f70abc846608153e55ca50ea44d1182ac7ff31f44a9da46321f033e21f623195c66fc288b4f786cedc43efcd6af6aa912de3d4d3a9ce44ae8f35a745b739cd7469be4f9e5cf188ed4bca89b09e4e61b9221fb1af4182f9046a9fbdb0d3bd6fd62c920dce2e625506f51e579ed8ec5149a5924449615600fcf5f6cb4e4497f7d1a162fe074427e2aa38a2c5414acdbc930f2a4c2c1cf7736c443fc277387a6f0a75cec35eb7cea5dd930b5789e1912f07faab45341e83cb68f8caca1651c00212221938f461bbfc5b6ee5b2bbab368965352677f31cfd4033941d2f4774585cda51e50b6af0588c8830ad088192935bce8d4f407e0b815fc81d07968e8689805d97c3154d387ccc32e5a2b3dd008bed2924d42100431182d092e5bdaf52098723b80ac08bdc36db326718b87ba6da3ce050d7b35d826654ce8c52fda834136015d148d73ff78743107511e27459024a5d056efd7210bf0079cfd53836276d41a8f8727d3f9873d387384072fa711689fe9b29b2586c4f61f4de5c8ffd65e9c1a63bf039ea8aeebbf3149e73c1ab2ac5505f5b019af9d9859f3b832a50e8b43109c33904a8b6f85355ba56e8c3faf416148357c94b8893fe3aea15e10b80df0269ce97c729516fa5c29410dd1bf4f96617ae72ccc0c5f4e6b8a9011a46c1521bf1116073006430b5cb5a05ce32bbf05d831c6d3b558fa5e23387164462fc0081be162477481205be12e24be608779dad16cac89fcd8208c6a3e411c614c650bd8d4a41c5594dc9ed936aebfeed19c66babb9f8f15dd1f09ce45985271b0b44b8fdedc41f93189a5c2dacd2f026ed00861500a8266aba5b1e862d9a84be48a4038cdb48be228d194f06b9c07b96ec00ea181ab8884d36dff15187d8cbd39f376e0c261df365f1598ed238df34f8c3b6e9f0991d0d91baad8442870b75f9c8d6e7db21b50c3aafc0c867c8d174b64d5478f29bd78ece430f6e55bf190a1ee847ed7312f3eb625ab569759ec5a43fc1e84439818c55821833e8ddda793e8167a82bc3c92e3723412e1a603f4360e4f2b2347e8039fd9ff53c02ba9a06da340ec191c1a826fe55a65c87b2863cff5e85a9fa7d4befb115a312bab1207caaf9848aeee0fd73e07b5aa2d858a90953fd3dfa8c52f1d64a742161d2d573abc6d2074701a13b5dc301a66b9ca9e28a38b1a4df96b2b29532500ff3de50489be58457cd90d2a03b05183481821f3adda1b87a82fbe587c9124a47bc3492d9b8083f9f2de2019a4ecb893babc743d54ca4b58b651861ee7ba220f410e10dfae20229d5febe5671a99501d5ecc15cf4133d2789dfce825df42babfc7b05ce782b41019799afa375909e0618d26eca8c95bad5d167464ff8f8541f331e6c0d77c91b65d76473f9b60988bd27f19a43e4c575d51f92a6723586d555c7e11c261d0edbabf8c36fb89bf2d32001849adb7538be9567c9d0e6c3529ab2cfe5595b8f8d1d28206162fea6f710c1fa0090fe87e960e5ce159fa453b78ff9546ec716018558a89deb26a28b26a04b27a6bc492a71925585415ec6fccafa9a1361f0b788a72da639276e9d78f7fffdf3f7aec1a32d1c488683102db31ad7d126b5f6253f9e698fddd4ed9aa8c86852e95e3cc3b344fe694f7984b4481f0a3ddd58cf7451ef51a235ea0fc9684cea495012600c9ee2d353fe895932b972c23b05911733d0aaf79ba41a4b3e7ce65a177024d8cec021eef3585238baeeeab2ff051471b2222d64292b16e0e9761e590f9e2fb90a0efa340cd1f2b4439bf916ba05725d12d5192dc22bf447167050b562bb014bfce93f66ffbfa3fe0ded225ef7c87536e06fe0efeba1a2578010a6d16a546945e05f15aeb3497517d8c4bed8da1b3eed576d90592501d2e25488bc1e0185246873889e5d74e4b411f1984229aeee051f10738536bd0304f29dafdd79bbc7167ad797c2e82ab188a46e94dcc509c23f9be9fbee0206f41c02762c89a12195ca08d8155a9d2f148a7eb98e2976a054001a6d196ccd44642bbc1052032e57bd6ca46a1ea36086c322e9f1a5e45b65925e1d2f30f37198a0e14e2b33fe462fbfb73ba2e11ed23a045cfe918ec88574cb6e6d2fcc56bad89834ffa41f1014a238460e68c529d891c37f5f04d48c3f01e024bc5f347ddec051f914c98e87d1ba753f\",\"salt\":\"d3d4d5d6d7d8d9da\",\"nonce\":\"dbdcdddedfe0e1e2e3e4e5e6\"}",
+		  "tor_proof_signature": null,
+		  "tor_sender_address": null,
+		  "version": "version2"
 		}
 	  }
 	}
 	# "#
 	# , true, 5, true, true, true, true, true);
-	```
-	```
-	# // Compact slate case, kernel is different now.
+	#
+	# // Invalid params
 	# mwc_wallet_api::doctest_helper_json_rpc_owner_assert_response!(
 	# r#"
 	{
 		"jsonrpc": "2.0",
 		"method": "retrieve_payment_proof",
 		"params": {
-			"token": "d202964900000000d302964900000000d402964900000000d502964900000000",
-			"tx_slate_id": "0436430c-2b02-624c-2032-570501212b00"
+			"token": "d202964900000000d302964900000000d402964900000000d502964900000000"
 		},
 		"id": 1
 	}
@@ -3703,22 +3745,9 @@ pub trait OwnerRpcV3 {
 	  "id": 1,
 	  "jsonrpc": "2.0",
 	  "result": {
-		"Ok": {
-		  "amount": "2000000000",
-		  "excess": "09eac5f5872fa5e08e0c29fd900f1b8f77ff3ad1d0d1c46aeb202cbf92363fe0af",
-		  "recipient_address": {
-			"public_key": "xmgceW7Z2phenRwaBeKvTRZkPMJarwLFa8h5LW5bdHKucaKTeuE2",
-			"domain": "",
-			"port": null
-		  },
-		  "recipient_sig": "304402204417c3b64709c7e38197103b6979dacee4e41c3ee44d89ea75191f553e2bbcc2022044c52df100fffd080c95575c92329b6ddbd0c77545e31ee439112655918fe0ee",
-		  "sender_address": {
-			"public_key": "xmgwbyjMEMBojnVadEkwVi1GyL1WPiVE5dziQf3TLedHdrVBPGw5",
-			"domain": "",
-			"port": null
-		  },
-		  "sender_sig": "3044022001d10e4e1fd303748120a45cfcdedcd8b1abc1ffe8ff59d35ddb2ec5b7c2e1a902207dab490bd26d16784933724c559e5a1e4dc56a6c0941f4dd70a22b0c4cfbcc40"
-		}
+		 "Err": {
+			 "PaymentProofRetrieval": "Transaction ID or Slate UUID must be specified"
+		 }
 	  }
 	}
 	# "#
@@ -3729,10 +3758,9 @@ pub trait OwnerRpcV3 {
 	fn retrieve_payment_proof(
 		&self,
 		token: Token,
-		refresh_from_node: Option<bool>,
 		tx_id: Option<u32>,
 		tx_slate_id: Option<Uuid>,
-	) -> Result<PaymentProof, Error>;
+	) -> Result<TxProof, Error>;
 
 	/**
 	Networked version of [Owner::verify_payment_proof](struct.Owner.html#method.verify_payment_proof).
@@ -3745,20 +3773,19 @@ pub trait OwnerRpcV3 {
 		"params": {
 			"token": "d202964900000000d302964900000000d402964900000000d502964900000000",
 			"proof": {
-			  "amount": "2000000000",
-			  "excess": "09bbe0e251ebd77edd17c6407778e816112433a31eed6a740278d4471fcacaee97",
-			  "recipient_address": {
-				"domain": "",
-				"port": null,
-				"public_key": "xmgceW7Z2phenRwaBeKvTRZkPMJarwLFa8h5LW5bdHKucaKTeuE2"
-			  },
-			  "recipient_sig": "3044022044afc455c9e47002a761ba27c4fa929cef3d239818d8dd68788b951792df10320220641c3e7244d7312a4152ea82b8e74c6c58125ece2140362196be70d35e36a1a9",
-			  "sender_address": {
-				"domain": "",
-				"port": null,
-				"public_key": "xmgwbyjMEMBojnVadEkwVi1GyL1WPiVE5dziQf3TLedHdrVBPGw5"
-			  },
-			  "sender_sig": "3045022100cd79c09fd39b2ed64bbcd3952b926a824f4be569d35f22af44990b91dc98729202204614e0514826c894d7dec594df6e50890c46d279dbd82692d06d4ec2d166026b"
+			  "address": "xmgceW7Z2phenRwaBeKvTRZkPMJarwLFa8h5LW5bdHKucaKTeuE2",
+			  "amount": 2000000000,
+			  "challenge": "",
+			  "fee": 70000,
+			  "inputs": [[9,135,120,206,34,67,250,52,229,135,108,140,183,246,219,187,214,165,100,156,21,97,151,58,128,122,104,17,148,28,18,54,60],[9,16,193,117,33,0,115,59,174,73,232,119,40,104,53,170,183,109,88,86,239,129,57,182,198,227,245,23,152,170,70,27,3]],
+			  "key": [178,214,169,41,51,242,104,31,198,94,249,72,242,14,219,56,98,255,165,45,172,150,214,162,224,22,108,170,88,110,184,180],
+			  "message": "09bbe0e251ebd77edd17c6407778e816112433a31eed6a740278d4471fcacaee97xmgwbyjMEMBojnVadEkwVi1GyL1WPiVE5dziQf3TLedHdrVBPGw52000000000",
+			  "outputs": [[9,137,213,46,23,205,7,178,37,46,67,23,165,226,249,47,116,234,213,78,155,170,173,75,18,215,102,193,65,246,38,218,211]],
+			  "signature": [68, 175, 196, 85, 201, 228, 112, 2, 167, 97, 186, 39, 196, 250, 146, 156, 239, 61, 35, 152, 24, 216, 221, 104, 120, 139, 149, 23, 146, 223, 16, 50, 100, 28, 62, 114, 68, 215, 49, 42, 65, 82, 234, 130, 184, 231, 76, 108, 88, 18, 94, 206, 33, 64, 54, 33, 150, 190, 112, 211, 94, 54, 161, 169],
+			  "slate_message": "{\"destination\":{\"public_key\":\"xmgwbyjMEMBojnVadEkwVi1GyL1WPiVE5dziQf3TLedHdrVBPGw5\",\"domain\":\"\",\"port\":null},\"encrypted_message\":\"2e14c3e33f4c7948811f706469d8081aec26e4fa002456a97ad4e98527ed1618dc7ba693697f8849ebd4576d2d73a55ec81aa0508750b34a804f54531c91f7c94f69dca0679471cb61520515d8b02993f8d1d27b0cb3aebb1bed5fb4e06753d14b40fbcd9d9d22391fdf83fa1a8bd471e15d83e9af83ae3dfd09715e7d7ac353dc4a66486279d6911d9490d9417be9dd6837ac85e603bc50e04b35047c8cc6f27eac6681f514f0dd654cb4d3d0c84eedfd54cbf7d23818fa63fd5736376135ec5c9e5f95c619def8acd9788cf786ea966ab816ea668aed15c5bc063a0a8780aa040c2d2f92e4849f5ff897200092d654f59a169572e886ee6dd60c9937d1b6742b5d893ed395fb794911334ded61339f3e07a85aab598b002d51db412dc16e99dedf57e050697356a907bff460bcf6bca41fb9ad4a29215fb2ce994457a92ac7f8d894036db723be0961d290b675dd11a8bf44596ecf65e7270a5c22271ece96c2ae22e1f65917867750ecb46a3855a6ebae2bb8731304abee14d1ee1595a81625f2350d27b389703114efec85915c7ba0ab7406695c205431bca9764d5378a55cce52ab027627a59509792625bee934453569d04a54a18f8d8f33a596b1e0b65fbf7cd166de7268cf3fda3227fa308665553b69b62b95031d5ca46ab3d536da09e90e21d82eb2921dcabf3ffc46ac68ec8c2b1c5e4119545c5b9ff956553f166e8580775e2e3c5646e880d4c41f43206de7e2d2ccb8145406f404681fadca647f9b5b62d76f5ff4375f7eed7033591f17317fef2198c7c6b708fbf4dd4da34e5b7bdef8309bb49dc568d7a3d5a6b1346661c1b3fe0aefdaa1657197eb5659c35587f3c732e59657eb5f1ae52e8c84972f945aaa32ad33a9a917257d661fb0efcf0d09e7000039d91886e1126b8cdddbcf021ed07ebb6f8b57a546efdc1b09830feed99f192171a299b064123f290088cd3fa187c9c847fb5b9f1bd84c3e2f7741a591bf7a889b9b75efd75749d5fd90865ee149abaabf7784d9dd19277ca45ff89ce6c2fd298158baf706b944b7d411e530d1f93d4ef640d43dbef3dd71192fc200beb191ad158c69729ace15a7e7cd0861033e1027edc7212cd50c5b494193f5e11f38cf522284ef48aa680f006d06afdafd5de6ccef6500b223e28fc891b72e089d09b33e7dda7409389ad3cbed2919e569242cb1714c538cc7a7bfc3a1fecef8888c2cf9eabc33f75da2202801364c8f99eef4a4accaa1b9be7bab31fd58b9db56e622bc21ddbc0bced3e2141ebbc72ef777e0901064c0d27b11cfd121d9703736109944e318ee9dded5a7c51d5c8cf46eb1f1fada2912d0e404c604ba74de974544e25b6435111083d9d3871e06d592527d51c043552d9074a5810d2ac0cc73af4239034eaec08f79190753dc020d6464916ec752d930283ad347615f95d5378362b33e8914cde7d0713939773ee39534c565261074df694e139749366fc10470fc23e326fbd58adbb2b4dc75bd2866969ade7b697627d6a3737458e6bf433cb147fc7dde57f965939253c79b7d6d6b9c52a1caf38a3241c1959fa1f85de60479285fa01a37de5a4dd9f88635cad41b7f346bb36999047a9f6e79936e153c700b3618f2bd881978671bccbc78551eede4dae28d648ed701466c528c56bb4f62cff5312c785addb218ccd7798742cdde2f2958fb7bb6ed8e7cd4a406ad8b933250abead39d6267c38f9fa8254805f262588c367e3f4e289245a9796e43c0c6b9243d37c1c7c150e7adb23c074489cf7c2e556871aacb5cc124184f9494412950b9e530158e574b62f91e5145841f4a0107ec2ea36e23dfaf36f4ce3bd88b73347a1cafc8965f6aa5feadea13159e60c800a9ef79eeb3ac5c35bb1102dc264117702facc37cd257a915c9819b98e548dfc8f0b9eba3565a27ed78afad4da7b7cf34207fcaea7797b84ec738c7a98bc7b94778c35f7f7054c3b2501eb9e01d9e0a6c78b0fed897129cca148eb95f2664c712adaa345486359fa09920e4965752137d5a01a2212a307f1771cb28e83b9dde774755fd6b1342ff193a52988a33dea7bb8134b8c8a312e09c74bd3523ea8ab97f091f8f472af1eaaf8dcced3360b9ce4dfe6c0ba9571e206f402b661c575ceaa1ae53c2100d4914df2fc501f0c1d91393ef34bbafd1c4547ef997f756b9161e9fb3332b29ab5f2ce82a7f077d1ef1da59d0a1f77b38daa150ee9bf3227a72b4bf20913d5f9003b312fabd9be7512033fdc5d43a70a655ad97a53bd56e9850d684ec9160508d397b185f55581f93d60c0c7f52cd08c4ded24707c103573e527c1e79925a53e3747a0263c5e4d81a49dec13f10b497e371f32875fa38d6e33f4fa240a66003db075420f822870f79f6512441a52966f1bdd3af0108c831ad1c02be00bedcbd39b55b0c9af843e64f905d86e4ad88a1e3f489ba18004fd77c08077295e6a00baf566e0bb48a7400778e9f2893cf3f4c052d128cdc94c6378e82603c5e2e0bf2dd00650e719961878ababaaf768c7f9dd54ee5d4697280a28aa3c59b70d89b8c6b1e78e535b6502229e25f014f4ab326a65f9afa8d393cf18f7ddca848b9d6272214139b736e32a130503c3c7a172f7a426174b1fdc1b3438c88fe90fcd1e423474da105cc4f4e373ca5e084d4535ea25f7fe3cf0a57c79a0a042f4df9f036f4c3263dbba92794b8f029d904864870f9ba4e5fd045a1661617d7fc3fe78e0c70f21588722e551fc4fc5fa04d2f05b203dbe626bdd42019e50b75b91ff94fdcbb943b127067a0876bb1c1be9578ca5e55d5b161c6b30e77452ca0096ada434d39534399ecdaa5597e6271268fb0f2b83fea8285f7abd9c3e212c7ca3dc8622beedb1de611a0de94d6066e0f9579dd736164982a3d743ffbe5d7d66c9f43f5c5cfddeaca141be180aa7c3317477c00c4cee654ab9a9f421deec909f6892cfe52577f1f919e30391546b4024e6c0b06cbeb98637eb666262d0df2346d032df2ed4f6928ba9423104f4894d0a22bd44f96b4de9e53fecf78bba347702b71ce2e080b04b3caebb76076aaa7b1d28fdad52fc0f06f736aa0fa334b35a816c8cd1629f7e035dfe9e8738087b408724ff4b2572011ee54ea3ff97dba5531a5a7fc3a3f4e9e4cfca3348dc929ff856036464f6e8aa7a10f0e744a435d501cdaf41a2e0a16f8c396ba5d15b576be1478cc90a8718f1fd435e556e4b4b6f86cfae2aa4536a38f2dd4bd6cdfc2c6d171e9b53e7c41ce190e912402415b69f72f64be33a69a6c163e00012c1c035c3a3083742036047b606d114e8ab844c02c697a97b09283d1fd7540d85f6b09b14a34f985a7f8cd3b70fc3ea38d2faf958f4d3c7698261a37ba1db3387f235bf1a7a39098a36e2c6666b76041a9006af750ed9dd0677e2b9df00d4148bd2f1818c0b125bc934892bbb29c931ab2af37d4f3fdcffab631e965be93f3bada4d9ed30cef1e0feb99739c35fe69a0041db29fb35f324dc363c76d0d2b2a6ba9f219f1d1b7ade03f01804656df86caa936b2895b6e988afc5c7f51b76f7888f1b3c7b00617abb3f2185a5c8a38d273f62e35e9767f7705573ce778d0b6d3184bd8628f0fd906ae9f55859fbb577a29940790c5375aa2a236bbea90e59a7762b06b0d8bf8fcbd989d35481617d70a9b94e5db9daf5e68591cf19252fe0184369cf3b294329aea728f71f6e0f0baaf1521239bfda24396da109a83581c48b005960fe335a7ff9f00544f50b0151cfe586bb954134b254288e0b024a108909a7a7b4c31c442bf43fb42ea643a9b3bc84b5deaf6bab5a0d9a4fd03a566fe917a770c2a3e0fdcb50a913e2682207b28db789f3f56f1a27ad1aea4dfcfeeeb9057721f4855ab80c6e8997530b607dbc11a873c23dc534464a5641e494dc37dc9e6e2b30f053c0419a6d323105de2da807aa41e4829b6e9c897d20eccb80d90419e6ae13ceff6974c986a590c6cd7ab5a19f661f86cf65ea473ef774a4aa72c4875fa8e4e45e7d70a1d062b71c373a33fa65ca95940d88b758e8c1a007d64cf539940d4d2f0785097c72c576611a30af70d0bf3eeaf22a31b5033d767573f0c7e3b3299ab9b7cb944798f9727a47ee7f27d20b52468cf4172ec7fa77c8aa3c415b5e319619f726d58bc8041498664b4435d07b95cf0641541d35a24669802bdb9615fcdf9ac92e6fc808d2917265e64facc8561d01e56739e0b7dadeeae8b1b918ac05f0a3068c24cdbf716ce860ddc40136c8aebdffcab943230fd853fef269477673192939d3ef1e3792a91b3598f4d10fbd37f5a92effa9c44916fd43fad768f22b8c4e6fa93500b88949292ecfe848938478dd19f3d610599033b267a563fb7279080bbc92e092c72867f806bf86edc901b3fc8c203c46fe516f493527eb08c6fc5153811b25aa27b57a32f1fb5933c84d28bdf3a847151051e8eb38f775a51247ff27ac532eaf41a001c0af37f242cb26186846268855975b8e0566ec8aae7545077096792feeed03db23b1c1057870769a250205ceecc737a5a8f2ef014ccc4dae9c8a35a0f81be3c00119f72e61138ef19072d1cd7e9a713fdf4d8f75c96b591cfddc0bb13515d23d5a1c6a45bf6693faaa5870c1e15951f7de5ee07db4de4c22c9ca10660d9c55a8786fc0a5c143e07b2e5cea1ecb20dd8f01779d2d7ea66e4c3601fabe2a818e51dbcd5677ec7b7f898037fb6ecc35a7cb7ec4aeeb4aba462eece7ba995266ddd995d3fd1953ac66bc0f70abc846608153e55ca50ea44d1182ac7ff31f44a9da46321f033e21f623195c66fc288b4f786cedc43efcd6af6aa912de3d4d3a9ce44ae8f35a745b739cd7469be4f9e5cf188ed4bca89b0994d67bc2118bca91686fc0638cae1b1d2e93ed97ec603c9293c015cfc4e51988cbe511ba090111c600355a9f4a39e1e419fa186f733f6531470b2ad38f79d104acdbc930f2a4c2c1cf7736c443fc277387a6f0a75cec35eb7cea5dd930b5789e1912f07faab45341e83cb68f8caca1651c00212221938f461bbfc5b6ee5b2bbab368965352677f31cfd4033941d2f47705a5d8b07b70a3da15fda8d65fc0b8996cf5c998d1c12720a81059b4c57c6d9d48a835896c815413b7f9564e0fce38d07dbeb742d822c0f4011d58796e6b7a752098723b80ac08bdc36db326718b87ba6da3ce050d7b35d826654ce8c52fda834136015d148d73ff78743107511e27459024a5d056efd7210bf0079cfd53836276d41a8f8727d3f9873d387384072fa711689fe9b29b2586c4f61f4de5c8ffd65e9c1a63bf039ea8aeebbf3149e73c1ab2ac5505f5b019af9d9859f3b832a50e8b43109c33904a8b6f85355ba56e8c3faf416148357c94b8893fe3aea15e10b80df0269ce97c729516fa5c29410dd1bf4f96617ae72ccc0c5f4e6b8a9011a46c1521bf1116073006430b49c53589a65eda0508b46683c5c88adb267d04e1864aa54daea4775751c4900ed46e548bd59269cac179fca9ecad75bcdf0b940ce4bc301ee8b4b44c3061798bf936aebfeed19c66babb9f8f15dd1f09ce45985271b0b44b8fdedc41f93189a5c2dacd2f026ed00861500a8266aba5b1e862d9a84be48a4038cdb48be228d194f06b9c07b96ec00ea181ab8884d36dff15187d8cbd39f376e0c261df365f1598ed238df34f8c3b6e9f0991d0d91baad8442870b75f9c8d6e7db21b50c3aafc0c867c8d174b64d5478f29bd78ece430f6e55bf190a1ee847ed7312f3eb625ab569759ec5f43ecfbf163ed0d903de1e35edd088213c8a64ab29c49e2e6277132b4a613f4037e1fbe5607e8139f9c8a16952bfc80f8b345297979bfe28fa01f65b8bb7833cff5e85a9fa7d4befb115a312bab1207caaf9848aeee0fd73e07b5aa2d858a90953fd3dfa8c52f1d64a742161d2d573abc6d2074701a13b5dc301a66b9ca9e28a38b1a4df96b2b2c537565ca383024490e5805fca97d4a66b564a6080d41f6581a3bb2b82f2b2d19d134d47ef62c4dbe3056c922ae75a994ec4d83ea3c14c8319a8b2da3c4c3aec7ba220f410e10dfae20229d5febe5671a99501d5ecc15cf4133d2789dfce825df42babfc7b05ce782b41019799afa375909e0618d26eca8c95bad5d167464ff8f8541f331e6c0d77c91b65d76473f9b60988bd27f19a43e4c575d51f92a6723586d555c7e11c261d0edbabf8c36fb89bf2d32001849adb7538be9567c9d0e6c3529ab2cfe5595b8f8d1d28206162fea6f710c1fa0090fe87e960e5ce159fa453b78ff80569914f07d055f0ceba2ef0de76f34875f6ee1e2b20930387195dc6fec5f0cb4735a7ec84a779f038736fc679f0abf1f3a1f9c6a42a131bd18f132de24d81d126b5f6253f9e698fddd4ed9aa8c86852e95e3cc3b344fe694f7984b4481f0a3ddd58cf7451ef51a235ea0fc9684cea495012600c9ee2d353fe895932b972c23b05911733d0aaf79ba41a4b3e7ce65a177024d8cec021eef3585238baeeeab2ff051471b2222d64292b16e0e9761e590f9e2fb90a0efa340cd1f2b4439bf916ba05725d12d5192dc22bf447167050b562bb014bfce93f66ffbfa3fe0ded225ef7c87536e06fe0efeba1a2578010a6d16a546945e05f15aeb3497517d8c4bed8da1b3eed576d90592501d2e25488bc1e0185246873889e5d74e4b411f1984229aeee051f10738536bd5355f29af8de2eb5921b2ed0c2c3b12cbe8ef73f958990049367c6baa1e80254a24c012626d4f52dc596548546039d221dd176ea8a2b7cf70204493e496ccd44642bbe1000552f56ec6fa06e1cf235d3c17beda3a9e30b339f0f462566f67c99a0e61f7166fc107debe73da6b01dd0695359f49edd9c80729a68617bc706bed99c68ffa44e96a4875c8dbf189023b9dcd77696c2d6\",\"salt\":\"d3d4d5d6d7d8d9da\",\"nonce\":\"dbdcdddedfe0e1e2e3e4e5e6\"}",
+			  "tor_proof_signature": null,
+			  "tor_sender_address": null,
+			  "version": "version2"
 			}
 		},
 		"id": 1
@@ -3770,10 +3797,16 @@ pub trait OwnerRpcV3 {
 		"id": 1,
 		"jsonrpc": "2.0",
 		"result": {
-			"Ok": [
-				true,
-				false
-			]
+			"Ok": {
+			  "amount": 2000000000,
+			  "kernel": "09bbe0e251ebd77edd17c6407778e816112433a31eed6a740278d4471fcacaee97",
+			  "outputs": [
+				"082967b3fe580cd110355010ef45450314fb067720db01b0e6873bb083d76708c9"
+			  ],
+			  "reciever_address": "xmgceW7Z2phenRwaBeKvTRZkPMJarwLFa8h5LW5bdHKucaKTeuE2",
+			  "sender_address": "xmgwbyjMEMBojnVadEkwVi1GyL1WPiVE5dziQf3TLedHdrVBPGw5",
+			  "slate": "{\"version_info\":{\"version\":3,\"orig_version\":3,\"block_header_version\":2},\"num_participants\":2,\"id\":\"0436430c-2b02-624c-2032-570501212b00\",\"tx\":{\"offset\":\"d202964900000000d302964900000000d402964900000000d502964900000000\",\"body\":{\"inputs\":[{\"features\":\"Coinbase\",\"commit\":\"098778ce2243fa34e5876c8cb7f6dbbbd6a5649c1561973a807a6811941c12363c\"},{\"features\":\"Coinbase\",\"commit\":\"0910c1752100733bae49e877286835aab76d5856ef8139b6c6e3f51798aa461b03\"}],\"outputs\":[{\"features\":\"Plain\",\"commit\":\"082967b3fe580cd110355010ef45450314fb067720db01b0e6873bb083d76708c9\",\"proof\":\"828bb24121aa0332c872062a42a8333c3ef81f8ae37d24053d953217368b3cada90410a50509a0b9fcbb5aded41397fc00ca1ff5acdac20d48afb0a3281d21e7026d32fdc6c5157461a35f98a809ffa09187c1e170ea24652ad213b7e4c9878654ac3dd9a8915eaf742db53182fcb42d2d341fbdfe8bd31bd001f4ff2c1ca9f9b1531da29137214f211edb7a5eb8f494cb8945f8527dd25bf7e698515043db4249540720008a708db5342230d05b069c094688ccb7c07d4a4a2293ea76cf999c555dc0ddc757891c360db1901bbb4dc20cae997f875f8de482d8160e05d60f9b0135e0fc313d8f953db78f1ea252449dd81cfa22dd895512ed39d566f0924542b543d25fc9fc7a819d228f3b0ee5e381f088f54893e86437dafc49dd923b3e6dff956ca843f951910379531fac9bb5fd01a182dd32a4c597f92da3c01af37cb9b0ec984500884438e74e54d7e76fa1ae7241d5050b13376310b24761634a6f6eb7cf000082f50ed7c1899d7918023d4f877586f964932a7af72e7a4984ddecfdd1921a2e1b80b00d6bd2e64a3f4cb6915a27a8d17a69d163cf45220a13fcddd15dc2bb91ae4f1b6a67224ab3b23e8d7d785df178ec78a84cf42cea086426f563822c8a4271a0b89bb21f84b643dbf1de21b6395039d673a376492767199fa36ccd9a13628ce61695424091acc16059450d59bc59fa7879e7306f5727217211b0264a6a560f886d520e41406ef45b1668805b88d246c5b2ca5a1762042c85be34fcd420ac3843f32236d079b4bd57d6b8d8013d9d18f8efb55e8e443cd9e1af9b144e7a56c8c6be0138af3b4a6c99bee9109bed2bce2e5145e736b125a2ec19aaf3fff713f6897fdd4158ce2ab04706b062ca2847bf70259c0fc4b0d390dc7fdaf0362047f775a912bd22da9d40f04d9790bcd5ece4b36b74c6c340b48c2926b916e8a9\"},{\"features\":\"Plain\",\"commit\":\"0989d52e17cd07b2252e4317a5e2f92f74ead54e9baaad4b12d766c141f626dad3\",\"proof\":\"6f9368ccc85c67cbe63c343816667d60dd756619f6c7a531c6086183c74be557974e535d82f3a59bacc2bba17393266bee8e2853d2b6522b1320900e55ec4eaa06d9c3da0242fbf3269af9b7988e3004dc6dfefcede0405d7c8fd43e1b7312d2c36a71bcfe3ce478b1f364d7cbb077cb990115e0d24b3873c3d7c3eb7111ce2a37b595edd2b44990dc96c4a56feb1bb9f598335d95e35d3025ca8282e340f3795a7a07b90329b5f5563fa48fe666827c140f5f8031e8d251e5ab0dff1c28437ed4013a39c7c61e34fbb34830e48ff2362443c2350bbe2fdc75f17f67a0285dd886041832957c0e62926bed15aeb2736387b3f89a15a624133eff824f5ad6c6a6680daabfb796760cada8bf9f91d1dbacfc2404c96cddd01860eb2572d64955d476ed976ae56c34fb2ada8f0e39086c772e951c0008d8c2e354681e69184106bc2d48680767b8b0ffb8ff3fe9e1b12f359a313678cc87413cc04b389eecd8ce52ed0702c48b39cde55a883298eed487ea7d747d7f638ea65fd31f4b38dd611d4e60d5e790425f8bc09f3b26b845a37c4525d166a7af7aa0f32590dc843362a783f937033f0be33337367328ce7b9ad7a06ac1c752019d761c8e34e3668cfa75dfdb0a4508eb594ac022f15a40a8722d6c7a6ccd13b6d1f37fe8a173b27cc4918c88b58a8604004624ce32100ae5784fd67d68dce8e42bf9826d1d1f7335b5e972536973c358ba12c80efc5798a6276d813a47e9f3d1e4a84fbf4acc1f26d916babd632077cd1df97e23fbf03b82621f8a0fc461e7b2df4299f987bb87fcfab202c80b79d3c0f572d3cd2bc9afde75e609522fe10bb7a33d2d9b6402a425becfc336a99b74c7c0f3a34f894a76f6ac246e72e74ff9acd06c6ab703d4f183b49143e7748652493396db021a3b3d7926196ec3fa55006697f0a025471eeb4e97fc5f854fb4\"}],\"kernels\":[{\"features\":\"Plain\",\"fee\":\"70000\",\"lock_height\":\"0\",\"excess\":\"09bbe0e251ebd77edd17c6407778e816112433a31eed6a740278d4471fcacaee97\",\"excess_sig\":\"66074d25a751c4743342c90ad8ead9454daa00d9b9aed29bca321036d16c4b4de77bdeeda144e7214d2dc10587b6bbda63a729d913adafe6141d9e8604c31480\"}]}},\"amount\":\"2000000000\",\"fee\":\"70000\",\"height\":\"5\",\"lock_height\":\"0\",\"ttl_cutoff_height\":null,\"coin_type\":\"mwc\",\"network_type\":\"automatedtests\",\"participant_data\":[{\"id\":\"0\",\"public_blind_excess\":\"0321d743d91cdd8b126cadb76b1b7c6b6073385be37625fea2a8a891354672fc41\",\"public_nonce\":\"031b84c5567b126440995d3ed5aaba0565d71e1834604819ff9c17f5e9d5dd078f\",\"part_sig\":\"8f07ddd5e9f5179cff19486034181ed76505baaad53e5d994064127b56c5841b2a583da5028b12519136554f860b1c773d0160fd15f6f62687cd7b8d852e1831\",\"message\":null,\"message_sig\":null},{\"id\":\"1\",\"public_blind_excess\":\"0256ebbe7886197266fbd2d039ec1cb8b551655bf58508dcb5c6a0179e640bafcd\",\"public_nonce\":\"031b84c5567b126440995d3ed5aaba0565d71e1834604819ff9c17f5e9d5dd078f\",\"part_sig\":\"8f07ddd5e9f5179cff19486034181ed76505baaad53e5d994064127b56c5841bbd23a1489fb9d4d0bbf66bb600ab9f6326a6c9dbfdb6b8bf8d4f22f97e94fc4e\",\"message\":null,\"message_sig\":null}],\"payment_proof\":{\"sender_address\":\"xmgwbyjMEMBojnVadEkwVi1GyL1WPiVE5dziQf3TLedHdrVBPGw5\",\"receiver_address\":\"xmgceW7Z2phenRwaBeKvTRZkPMJarwLFa8h5LW5bdHKucaKTeuE2\",\"receiver_signature\":\"3044022044afc455c9e47002a761ba27c4fa929cef3d239818d8dd68788b951792df10320220641c3e7244d7312a4152ea82b8e74c6c58125ece2140362196be70d35e36a1a9\"}}"
+			}
 		}
 	}
 	# "#
@@ -3788,20 +3821,19 @@ pub trait OwnerRpcV3 {
 		"params": {
 			"token": "d202964900000000d302964900000000d402964900000000d502964900000000",
 			"proof": {
-			  "amount": "2000000000",
-			  "excess": "09eac5f5872fa5e08e0c29fd900f1b8f77ff3ad1d0d1c46aeb202cbf92363fe0af",
-			  "recipient_address": {
-				"public_key": "xmgceW7Z2phenRwaBeKvTRZkPMJarwLFa8h5LW5bdHKucaKTeuE2",
-				"domain": "",
-				"port": null
-			  },
-			  "recipient_sig": "304402204417c3b64709c7e38197103b6979dacee4e41c3ee44d89ea75191f553e2bbcc2022044c52df100fffd080c95575c92329b6ddbd0c77545e31ee439112655918fe0ee",
-			  "sender_address": {
-				"public_key": "xmgwbyjMEMBojnVadEkwVi1GyL1WPiVE5dziQf3TLedHdrVBPGw5",
-				"domain": "",
-				"port": null
-			  },
-			  "sender_sig": "3044022001d10e4e1fd303748120a45cfcdedcd8b1abc1ffe8ff59d35ddb2ec5b7c2e1a902207dab490bd26d16784933724c559e5a1e4dc56a6c0941f4dd70a22b0c4cfbcc40"
+			  "address": "xmgceW7Z2phenRwaBeKvTRZkPMJarwLFa8h5LW5bdHKucaKTeuE2",
+			  "amount": 2000000000,
+			  "challenge": "",
+			  "fee": 70000,
+			  "inputs": [[9, 135, 120, 206, 34, 67, 250, 52, 229, 135, 108, 140, 183, 246, 219, 187, 214, 165, 100, 156, 21, 97, 151, 58, 128, 122, 104, 17, 148, 28, 18, 54, 60], [9, 16, 193, 117, 33, 0, 115, 59, 174, 73, 232, 119, 40, 104, 53, 170, 183, 109, 88, 86, 239, 129, 57, 182, 198, 227, 245, 23, 152, 170, 70, 27, 3]],
+			  "key": [178, 214, 169, 41, 51, 242, 104, 31, 198, 94, 249, 72, 242, 14, 219, 56, 98, 255, 165, 45, 172, 150, 214, 162, 224, 22, 108, 170, 88, 110, 184, 180],
+			  "message": "09eac5f5872fa5e08e0c29fd900f1b8f77ff3ad1d0d1c46aeb202cbf92363fe0afxmgwbyjMEMBojnVadEkwVi1GyL1WPiVE5dziQf3TLedHdrVBPGw52000000000",
+			  "outputs": [[9, 137, 213, 46, 23, 205, 7, 178, 37, 46, 67, 23, 165, 226, 249, 47, 116, 234, 213, 78, 155, 170, 173, 75, 18, 215, 102, 193, 65, 246, 38, 218, 211]],
+			  "signature": [68, 23, 195, 182, 71, 9, 199, 227, 129, 151, 16, 59, 105, 121, 218, 206, 228, 228, 28, 62, 228, 77, 137, 234, 117, 25, 31, 85, 62, 43, 188, 194, 68, 197, 45, 241, 0, 255, 253, 8, 12, 149, 87, 92, 146, 50, 155, 109, 219, 208, 199, 117, 69, 227, 30, 228, 57, 17, 38, 85, 145, 143, 224, 238],
+			  "slate_message": "{\"destination\":{\"public_key\":\"xmgwbyjMEMBojnVadEkwVi1GyL1WPiVE5dziQf3TLedHdrVBPGw5\",\"domain\":\"\",\"port\":null},\"encrypted_message\":\"2e14c3e33f4c7948811f706469d8081aec26e4fa002456a97ad4e98527ed1618dc7ba693697f8849ebd4576d2d73a55ec81aa0508750b34a804f54531c91f7c94f69dca0679471cb61520515d8b02993f8d1d27b0cb3aebb1bed5fb4e06753d14b40fbcd9d9d22391fdf83fa1a8bd471e15d83e9af83ae3dfd09715e7d7ac353dc4a66486279d7911d9490d9417be9dd6837ac85e603bc50e01c31072d8d96f326fa33d2f647a6da314de3db80c240bca25dcaf5866d1af936f85536343c62e854cd0c93974adcfdff8e298cf38de9c462e940e333d9bb1197bc063a0a8780aa040c2d2f92e4849f5ff897200092d654f59a169572e886ee6dd60c9937d1b6742b5d893ed395fb794911334ded61339f3e07a85aab598b002d51db412dc16e99dedf57e050697356a907bff460bcf6bca41fb9ad4a29215fb2ce994457a92ac7f8d894036db723be0961d290b675dd11a8bf44596ecf65e7270a5c22271ece96c2ae22e1f65917867750ecb46a3855a6ebae2bb8731304abee14d1ee1595a81625f2350d27b389703114efec85915c7ba0ab7406695c205431bca9764d5378a55cce52ab027627a59509792625bee934453569d04a54a18f8d8f33a596b1e0b65fbf7cd166de7268cf3fda3227fa308665553b69b62b95031d5ca46ab3d536da09e90e21d82eb2921dcabf3ffc46ac68ec8c2b1c5e4119545c5b9ff956553f166e8580775e2e3c5646e880d4c41f43206de7e2d2ccb8145406f404681fadca647f9b5b62d76f5ff4375f7eed7033591f17317fef2198c7c6b708fbf4dd4da34e5b7bdef8309bb49dc568d7a3d5a6b1346661c1b3fe0aefdaa1657197eb5659c35587f3c732e59657eb5f1ae52e8c84972f945aaa32ad33a9a917257d661fb0efcf0d09e7000039d91886e1126b8cdddbcf021ed07ebb6f8b57a546efdc1b09830feed99f192171a299b064123f290088cd3fa187c9c847fb5b9f1bd84c3e2f7741a591bf7a889b9b75efd75749d5fd90865ee149abaabf7784d9dd19277ca45ff89ce6c2fd298158baf706b944b7d411e530d1f93d4ef640d43dbef3dd71192fc200beb191ad158c69729ace15a7e7cd0861033e1027edc7212cd50c5b494193f5e11f38cf522284ef48aa680f006d06afdafd5de6ccef6500b223e28fc891b72e089d09b33e7dda7409389ad3cbed2919e569242cb1714c538cc7a7bfc3a1fecef8888c2cf9eabc33f75da2202801364c8f99eef4a4accaa1b9be7bab31fd58b9db56e622bc21ddbc0bced3e2141ebbc72ef777e0901064c0d27b11cfd121d9703736109944e318ee9dded5a7c51d5c8cf46eb1f1fada2912d0e404c604ba74de974544e25b6435111083d9d3871e06d592527d51c043552d9074a5810d2ac0cc73af4239034eaec08f79190753dc020d6464916ec752d930283ad347615f95d5378362b33e8914cde7d0713939773ee39534c565261074df694e139749366fc10470fc23e326fbd58adbb2b4dc75bd2866969ade7b697627d6a3737458e6bf433cb147fc7dde57f965939253c79b7d6d6b9c52a1caf38a3241c1959fa1f85de60479285fa01a37de5a4dd9f88635cad41b7f346bb36999047a9f6e79936e153c700b3618f2bd881978671bccbc78551eede4dae28d648ed701466c528c56bb4f62cff5312c785addb218ccd7798742cdde2f2958fb7bb6ed8e7cd4a406ad8b933250abead39d6267c38f9fa8254805f262588c367e3f4e289245a9796e43c0c6b9243d37c1c7c150e7adb23c074489cf7c2e556871aacb5cc124184f9494412950b9e530158e574b62f91e5145841f4a0107ec2ea36e23dfaf36f4ce3bd88b73347a1cafc8965f6aa5feadea13159e60c800a9ef79eeb3ac5c35bb1102dc264117702facc37cd257a915c9819b98e548dfc8f0b9eba3565a27ed78afad4da7b7cf34207fcaea7797b84ec738c7a98bc7b94778c35f7f7054c3b2501eb9e01d9e0a6c78b0fed897129cca148eb95f2664c712adaa345486359fa09920e4965752137d5a01a2212a307f1771cb28e83b9dde774755fd6b1342ff193a52988a33dea7bb8134b8c8a312e09c74bd3523ea8ab97f091f8f472af1eaaf8dcced3360b9ce4dfe6c0ba9571e206f402b661c575ceaa1ae53c2100d4914df2fc501f0c1d91393ef34bbafd1c4547ef997f756b9161e9fb3332b29ab5f2ce82a7f077d1ef1da59d0a1f77b38daa150ee9bf3227a72b4bf20913d5f9003b312fabd9be7512033fdc5d43a70a655ad97a53bd56e9850d684ec9160508d397b185f55581f93d60c0c7f52cd08c4ded24707c103573e527c1e79925a53e3747a0263c5e4d81a49dec13f10b497e371f32875fa38d6e33f4fa240a66003db075420f822870f79f6512441a52966f1bdd3af0108c831ad1c02be00bedcbd39b55b0c9af843e64f905d86e4ad88a1e3f489ba18004fd77c08077295e6a00baf566e0bb48a7400778e9f2893cf3f4c052d128cdc94c6378e82603c5e2e0bf2dd00650e719961878ababaaf768c7f9dd54ee5d4697280a28aa3c59b70d89b8c6b1e78e535b6502229e25f014f4ab326a65f9afa8d393cf18f7ddca848b9d6272214139b736e32a130503c3c7a172f7a426174b1fdc1b3438c88fe90fcd1e423474da105cc4f4e373ca5e084d4535ea25f7fe3cf0a57c79a0a042f4df9f036f4c3263dbba92794b8f029d904864870f9ba4e5fd045a1661617d7fc3fe78e0c70f21588722e551fc4fc5fa04d2f05b203dbe626bdd42019e50b75b91ff94fdcbb943b127067a0876bb1c1be9578ca5e55d5b161c6b30e77452ca0096ada434d39534399ecdaa5597e6271268fb0f2b83fea8285f7abd9c3e212c7ca3dc8622beedb1de611a0de94d6066e0f9579dd736164982a3d743ffbe5d7d66c9f43f5c5cfddeaca141be180aa7c3317477c00c4cee654ab9a9f421deec909f6892cfe52577f1f919e30391546b4024e6c0b06cbeb98637eb666262d0df2346d032df2ed4f6928ba9423104f4894d0a22bd44f96b4de9e53fecf78bba347702b71ce2e080b04b3caebb76076aaa7b1d28fdad52fc0f06f736aa0fa334b35a816c8cd1629f7e035dfe9e8738087b408724ff4b2572011ee54ea3ff97dba5531a5a7fc3a3f4e9e4cfca3348dc929ff856036464f6e8aa7a10f0e744a435d501cdaf41a2e0a16f8c396ba5d15b576be1478cc90a8718f1fd435e556e4b4b6f86cfae2aa4536a38f2dd4bd6cdfc2c6d171e9b53e7c41ce190e912402415b69f72f64be33a69a6c163e00012c1c035c3a3083742036047b606d114e8ab844c02c697a97b09283d1fd7540d85f6b09b14a34f985a7f8cd3b70fc3ea38d2faf958f4d3c7698261a37ba1db3387f235bf1a7a39098a36e2c6666b76041a9006af750ed9dd0677e2b9df00d4148bd2f1818c0b125bc934892bbb29c931ab2af37d4f3fdcffab631e965be93f3bada4d9ed30cef1e0feb99739c35fe69a0041db29fb35f324dc363c76d0d2b2a6ba9f219f1d1b7ade03f01804656df86caa936b2895b6e988afc5c7f51b76f7888f1b3c7b00617abb3f2185a5c8a38d273f62e35e9767f7705573ce778d0b6d3184bd8628f0fd906ae9f55859fbb577a29940790c5375aa2a236bbea90e59a7762b06b0d8bf8fcbd989d35481617d70a9b94e5db9daf5e68591cf19252fe0184369cf3b294329aea728f71f6e0f0baaf1521239bfda24396da109a83581c48b005960fe335a7ff9f00544f50b0151cfe586bb954134b254288e0b024a108909a7a7b4c31c442bf43fb42ea643a9b3bc84b5deaf6bab5a0d9a4fd03a566fe917a770c2a3e0fdcb50a913e2682207b28db789f3f56f1a27ad1aea4dfcfeeeb9057721f4855ab80c6e8997530b607dbc11a873c23dc534464a5641e494dc37dc9e6e2b30f053c0419a6d323105de2da807aa41e4829b6e9c897d20eccb80d90419e6ae13ceff6974c986a590c6cd7ab5a19f661f86cf65ea473ef774a4aa72c4875fa8e4e45e7d70a1d062b71c373a33fa65ca95940d88b758e8c1a007d64cf539940d4d2f0785097c72c576611a30af70d0bf3eeaf22a31b5033d767573f0c7e3b3299ab9b7cb944798f9727a47ee7f27d20b52468cf4172ec7fa77c8aa3c415b5e319619f726d58bc8041498664b4435d07b95cf0641541d35a24669802bdb9615fcdf9ac92e6fc808d2917265e64facc8561d01e56739e0b7dadeeae8b1b918ac05f0a3068c24cdbf716ce860ddc40136c8aebdffcab943230fd853fef269477673192939d3ef1e3792a91b3598f4d10fbd37f5a92effa9c44916fd43fad768f22b8c4e6fa93500b88949292ecfe848938478dd19f3d610599033b267a563fb7279080bbc92e092c72867f806bf86edc901b3fc8c203c46fe516f493527eb08c6fc5153811b25aa27b57a32f1fb5933c84d28bdf3a847151051e8eb38f775a51247ff27ac532eaf41a001c0af37f242cb26186846268855975b8e0566ec8aae7545077096792feeed03db23b1c1057870769a250205ceecc737a5a8f2ef014ccc4dae9c8a35a0f81be3c00119f72e61138ef19072d1cd7e9a713fdf4d8f75c96b591cfddc0bb13515d23d5a1c6a45bf6693faaa5870c1e15951f7de5ee07db4de4c22c9ca10660d9c55a8786fc0a5c143e07b2e5cea1ecb20dd8f01779d2d7ea66e4c3601fabe2a818e51dbcd5677ec7b7f898037fb6ecc35a7cb7ec4aeeb4aba462eece7ba995266ddd995d3fd1953ac66bc0f70abc846608153e55ca50ea44d1182ac7ff31f44a9da46321f033e21f623195c66fc288b4f786cedc43efcd6af6aa912de3d4d3a9ce44ae8f35a745b739cd7469be4f9e5cf188ed4bca89b09e4e61b9221fb1af4182f9046a9fbdb0d3bd6fd62c920dce2e625506f51e579ed8ec5149a5924449615600fcf5f6cb4e4497f7d1a162fe074427e2aa38a2c5414acdbc930f2a4c2c1cf7736c443fc277387a6f0a75cec35eb7cea5dd930b5789e1912f07faab45341e83cb68f8caca1651c00212221938f461bbfc5b6ee5b2bbab368965352677f31cfd4033941d2f4774585cda51e50b6af0588c8830ad088192935bce8d4f407e0b815fc81d07968e8689805d97c3154d387ccc32e5a2b3dd008bed2924d42100431182d092e5bdaf52098723b80ac08bdc36db326718b87ba6da3ce050d7b35d826654ce8c52fda834136015d148d73ff78743107511e27459024a5d056efd7210bf0079cfd53836276d41a8f8727d3f9873d387384072fa711689fe9b29b2586c4f61f4de5c8ffd65e9c1a63bf039ea8aeebbf3149e73c1ab2ac5505f5b019af9d9859f3b832a50e8b43109c33904a8b6f85355ba56e8c3faf416148357c94b8893fe3aea15e10b80df0269ce97c729516fa5c29410dd1bf4f96617ae72ccc0c5f4e6b8a9011a46c1521bf1116073006430b5cb5a05ce32bbf05d831c6d3b558fa5e23387164462fc0081be162477481205be12e24be608779dad16cac89fcd8208c6a3e411c614c650bd8d4a41c5594dc9ed936aebfeed19c66babb9f8f15dd1f09ce45985271b0b44b8fdedc41f93189a5c2dacd2f026ed00861500a8266aba5b1e862d9a84be48a4038cdb48be228d194f06b9c07b96ec00ea181ab8884d36dff15187d8cbd39f376e0c261df365f1598ed238df34f8c3b6e9f0991d0d91baad8442870b75f9c8d6e7db21b50c3aafc0c867c8d174b64d5478f29bd78ece430f6e55bf190a1ee847ed7312f3eb625ab569759ec5a43fc1e84439818c55821833e8ddda793e8167a82bc3c92e3723412e1a603f4360e4f2b2347e8039fd9ff53c02ba9a06da340ec191c1a826fe55a65c87b2863cff5e85a9fa7d4befb115a312bab1207caaf9848aeee0fd73e07b5aa2d858a90953fd3dfa8c52f1d64a742161d2d573abc6d2074701a13b5dc301a66b9ca9e28a38b1a4df96b2b29532500ff3de50489be58457cd90d2a03b05183481821f3adda1b87a82fbe587c9124a47bc3492d9b8083f9f2de2019a4ecb893babc743d54ca4b58b651861ee7ba220f410e10dfae20229d5febe5671a99501d5ecc15cf4133d2789dfce825df42babfc7b05ce782b41019799afa375909e0618d26eca8c95bad5d167464ff8f8541f331e6c0d77c91b65d76473f9b60988bd27f19a43e4c575d51f92a6723586d555c7e11c261d0edbabf8c36fb89bf2d32001849adb7538be9567c9d0e6c3529ab2cfe5595b8f8d1d28206162fea6f710c1fa0090fe87e960e5ce159fa453b78ff9546ec716018558a89deb26a28b26a04b27a6bc492a71925585415ec6fccafa9a1361f0b788a72da639276e9d78f7fffdf3f7aec1a32d1c488683102db31ad7d126b5f6253f9e698fddd4ed9aa8c86852e95e3cc3b344fe694f7984b4481f0a3ddd58cf7451ef51a235ea0fc9684cea495012600c9ee2d353fe895932b972c23b05911733d0aaf79ba41a4b3e7ce65a177024d8cec021eef3585238baeeeab2ff051471b2222d64292b16e0e9761e590f9e2fb90a0efa340cd1f2b4439bf916ba05725d12d5192dc22bf447167050b562bb014bfce93f66ffbfa3fe0ded225ef7c87536e06fe0efeba1a2578010a6d16a546945e05f15aeb3497517d8c4bed8da1b3eed576d90592501d2e25488bc1e0185246873889e5d74e4b411f1984229aeee051f10738536bd0304f29dafdd79bbc7167ad797c2e82ab188a46e94dcc509c23f9be9fbee0206f41c02762c89a12195ca08d8155a9d2f148a7eb98e2976a054001a6d196ccd44642bbc1052032e57bd6ca46a1ea36086c322e9f1a5e45b65925e1d2f30f37198a0e14e2b33fe462fbfb73ba2e11ed23a045cfe918ec88574cb6e6d2fcc56bad89834ffa41f1014a238460e68c529d891c37f5f04d48c3f01e024bc5f347ddec051f914c98e87d1ba753f\",\"salt\":\"d3d4d5d6d7d8d9da\",\"nonce\":\"dbdcdddedfe0e1e2e3e4e5e6\"}",
+			  "tor_proof_signature": null,
+			  "tor_sender_address": null,
+			  "version": "version2"
 			}
 		},
 		"id": 1
@@ -3813,10 +3845,17 @@ pub trait OwnerRpcV3 {
 		"id": 1,
 		"jsonrpc": "2.0",
 		"result": {
-			"Ok": [
-				true,
-				false
-			]
+			"Ok": {
+			  "amount": 2000000000,
+			  "kernel": "09eac5f5872fa5e08e0c29fd900f1b8f77ff3ad1d0d1c46aeb202cbf92363fe0af",
+			  "outputs": [
+				"082967b3fe580cd110355010ef45450314fb067720db01b0e6873bb083d76708c9",
+				"0989d52e17cd07b2252e4317a5e2f92f74ead54e9baaad4b12d766c141f626dad3"
+			  ],
+			  "reciever_address": "xmgceW7Z2phenRwaBeKvTRZkPMJarwLFa8h5LW5bdHKucaKTeuE2",
+			  "sender_address": "xmgwbyjMEMBojnVadEkwVi1GyL1WPiVE5dziQf3TLedHdrVBPGw5",
+			  "slate": "{\"version_info\":{\"version\":3,\"orig_version\":3,\"block_header_version\":2},\"num_participants\":2,\"id\":\"0436430c-2b02-624c-2032-570501212b01\",\"tx\":{\"offset\":\"363c8f5afec3cf7ded8b38ef912de23ea601da01cc6ac25c3d0625f1af9ecf4b\",\"body\":{\"inputs\":[{\"features\":\"Coinbase\",\"commit\":\"098778ce2243fa34e5876c8cb7f6dbbbd6a5649c1561973a807a6811941c12363c\"},{\"features\":\"Coinbase\",\"commit\":\"0910c1752100733bae49e877286835aab76d5856ef8139b6c6e3f51798aa461b03\"}],\"outputs\":[{\"features\":\"Plain\",\"commit\":\"082967b3fe580cd110355010ef45450314fb067720db01b0e6873bb083d76708c9\",\"proof\":\"828bb24121aa0332c872062a42a8333c3ef81f8ae37d24053d953217368b3cada90410a50509a0b9fcbb5aded41397fc00ca1ff5acdac20d48afb0a3281d21e7026d32fdc6c5157461a35f98a809ffa09187c1e170ea24652ad213b7e4c9878654ac3dd9a8915eaf742db53182fcb42d2d341fbdfe8bd31bd001f4ff2c1ca9f9b1531da29137214f211edb7a5eb8f494cb8945f8527dd25bf7e698515043db4249540720008a708db5342230d05b069c094688ccb7c07d4a4a2293ea76cf999c555dc0ddc757891c360db1901bbb4dc20cae997f875f8de482d8160e05d60f9b0135e0fc313d8f953db78f1ea252449dd81cfa22dd895512ed39d566f0924542b543d25fc9fc7a819d228f3b0ee5e381f088f54893e86437dafc49dd923b3e6dff956ca843f951910379531fac9bb5fd01a182dd32a4c597f92da3c01af37cb9b0ec984500884438e74e54d7e76fa1ae7241d5050b13376310b24761634a6f6eb7cf000082f50ed7c1899d7918023d4f877586f964932a7af72e7a4984ddecfdd1921a2e1b80b00d6bd2e64a3f4cb6915a27a8d17a69d163cf45220a13fcddd15dc2bb91ae4f1b6a67224ab3b23e8d7d785df178ec78a84cf42cea086426f563822c8a4271a0b89bb21f84b643dbf1de21b6395039d673a376492767199fa36ccd9a13628ce61695424091acc16059450d59bc59fa7879e7306f5727217211b0264a6a560f886d520e41406ef45b1668805b88d246c5b2ca5a1762042c85be34fcd420ac3843f32236d079b4bd57d6b8d8013d9d18f8efb55e8e443cd9e1af9b144e7a56c8c6be0138af3b4a6c99bee9109bed2bce2e5145e736b125a2ec19aaf3fff713f6897fdd4158ce2ab04706b062ca2847bf70259c0fc4b0d390dc7fdaf0362047f775a912bd22da9d40f04d9790bcd5ece4b36b74c6c340b48c2926b916e8a9\"},{\"features\":\"Plain\",\"commit\":\"0989d52e17cd07b2252e4317a5e2f92f74ead54e9baaad4b12d766c141f626dad3\",\"proof\":\"6f9368ccc85c67cbe63c343816667d60dd756619f6c7a531c6086183c74be557974e535d82f3a59bacc2bba17393266bee8e2853d2b6522b1320900e55ec4eaa06d9c3da0242fbf3269af9b7988e3004dc6dfefcede0405d7c8fd43e1b7312d2c36a71bcfe3ce478b1f364d7cbb077cb990115e0d24b3873c3d7c3eb7111ce2a37b595edd2b44990dc96c4a56feb1bb9f598335d95e35d3025ca8282e340f3795a7a07b90329b5f5563fa48fe666827c140f5f8031e8d251e5ab0dff1c28437ed4013a39c7c61e34fbb34830e48ff2362443c2350bbe2fdc75f17f67a0285dd886041832957c0e62926bed15aeb2736387b3f89a15a624133eff824f5ad6c6a6680daabfb796760cada8bf9f91d1dbacfc2404c96cddd01860eb2572d64955d476ed976ae56c34fb2ada8f0e39086c772e951c0008d8c2e354681e69184106bc2d48680767b8b0ffb8ff3fe9e1b12f359a313678cc87413cc04b389eecd8ce52ed0702c48b39cde55a883298eed487ea7d747d7f638ea65fd31f4b38dd611d4e60d5e790425f8bc09f3b26b845a37c4525d166a7af7aa0f32590dc843362a783f937033f0be33337367328ce7b9ad7a06ac1c752019d761c8e34e3668cfa75dfdb0a4508eb594ac022f15a40a8722d6c7a6ccd13b6d1f37fe8a173b27cc4918c88b58a8604004624ce32100ae5784fd67d68dce8e42bf9826d1d1f7335b5e972536973c358ba12c80efc5798a6276d813a47e9f3d1e4a84fbf4acc1f26d916babd632077cd1df97e23fbf03b82621f8a0fc461e7b2df4299f987bb87fcfab202c80b79d3c0f572d3cd2bc9afde75e609522fe10bb7a33d2d9b6402a425becfc336a99b74c7c0f3a34f894a76f6ac246e72e74ff9acd06c6ab703d4f183b49143e7748652493396db021a3b3d7926196ec3fa55006697f0a025471eeb4e97fc5f854fb4\"}],\"kernels\":[{\"features\":\"Plain\",\"fee\":\"70000\",\"lock_height\":\"0\",\"excess\":\"09eac5f5872fa5e08e0c29fd900f1b8f77ff3ad1d0d1c46aeb202cbf92363fe0af\",\"excess_sig\":\"66074d25a751c4743342c90ad8ead9454daa00d9b9aed29bca321036d16c4b4da56327d306b10f190853cbb9978e3246d0b232d52082d85f6d790359344d5728\"}]}},\"amount\":\"2000000000\",\"fee\":\"70000\",\"height\":\"5\",\"lock_height\":\"0\",\"ttl_cutoff_height\":null,\"coin_type\":\"mwc\",\"network_type\":\"automatedtests\",\"participant_data\":[{\"id\":\"0\",\"public_blind_excess\":\"02e89cce4499ac1e9bb498dab9e3fab93cc40cd3d26c04a0292e00f4bf272499ec\",\"public_nonce\":\"031b84c5567b126440995d3ed5aaba0565d71e1834604819ff9c17f5e9d5dd078f\",\"part_sig\":\"8f07ddd5e9f5179cff19486034181ed76505baaad53e5d994064127b56c5841b2146d6fdeddd778ca38567318cd043670358adfe111b3f7d1fc8adb261f56464\",\"message\":null,\"message_sig\":null},{\"id\":\"1\",\"public_blind_excess\":\"02e3c128e436510500616fef3f9a22b15ca015f407c8c5cf96c9059163c873828f\",\"public_nonce\":\"031b84c5567b126440995d3ed5aaba0565d71e1834604819ff9c17f5e9d5dd078f\",\"part_sig\":\"8f07ddd5e9f5179cff19486034181ed76505baaad53e5d994064127b56c5841bc55e87a5a5316a4ca06dac37f29a9d99cb5a85d60e6799e24db155a6d257f2c3\",\"message\":null,\"message_sig\":null}],\"payment_proof\":{\"sender_address\":\"xmgwbyjMEMBojnVadEkwVi1GyL1WPiVE5dziQf3TLedHdrVBPGw5\",\"receiver_address\":\"xmgceW7Z2phenRwaBeKvTRZkPMJarwLFa8h5LW5bdHKucaKTeuE2\",\"receiver_signature\":\"304402204417c3b64709c7e38197103b6979dacee4e41c3ee44d89ea75191f553e2bbcc2022044c52df100fffd080c95575c92329b6ddbd0c77545e31ee439112655918fe0ee\"},\"compact_slate\":true}"
+			}
 		}
 	}
 	# "#
@@ -3827,8 +3866,8 @@ pub trait OwnerRpcV3 {
 	fn verify_payment_proof(
 		&self,
 		token: Token,
-		proof: PaymentProof,
-	) -> Result<(bool, bool), Error>;
+		proof: TxProof,
+	) -> Result<VerifyProofResult, Error>;
 
 	/**
 	Networked version of [Owner::set_tor_config](struct.Owner.html#method.set_tor_config).
@@ -4360,7 +4399,19 @@ where
 	}
 
 	fn init_send_tx(&self, token: Token, args: InitTxArgs) -> Result<VersionedSlate, Error> {
-		let slate = Owner::init_send_tx(self, (&token.keychain_mask).as_ref(), &args, 1)?;
+		let tx_session = Some(RefCell::new(TxSession::new()));
+		let slate =
+			Owner::init_send_tx(self, (&token.keychain_mask).as_ref(), &tx_session, &args, 1)?;
+		{
+			// Save session only on success.
+			wallet_lock!(self.wallet_inst, w);
+			tx_session.unwrap().borrow_mut().save_tx_data(
+				&mut **w,
+				(&token.keychain_mask).as_ref(),
+				&slate.id,
+			)?;
+		}
+
 		// Return plain slate. If caller don't want sent slate with this API, than probvably caller want
 		// handle the workflow in lower level.
 		// If caller did send with thius API - then the slate is just for logging. For logging it is
@@ -4375,7 +4426,18 @@ where
 		token: Token,
 		args: IssueInvoiceTxArgs,
 	) -> Result<VersionedSlate, Error> {
-		let slate = Owner::issue_invoice_tx(self, (&token.keychain_mask).as_ref(), &args)?;
+		let tx_session = Some(RefCell::new(TxSession::new()));
+		let slate =
+			Owner::issue_invoice_tx(self, (&token.keychain_mask).as_ref(), &tx_session, &args)?;
+		{
+			// Save session only on success.
+			wallet_lock!(self.wallet_inst, w);
+			tx_session.unwrap().borrow_mut().save_tx_data(
+				&mut **w,
+				(&token.keychain_mask).as_ref(),
+				&slate.id,
+			)?;
+		}
 
 		// Invoice slate respond does a slatepack encoding if recipient is defined.
 
@@ -4418,8 +4480,23 @@ where
 			}
 		}
 
-		let out_slate =
-			Owner::process_invoice_tx(self, (&token.keychain_mask).as_ref(), &slate_from, &args)?;
+		let tx_session = Some(RefCell::new(TxSession::new()));
+		let out_slate = Owner::process_invoice_tx(
+			self,
+			(&token.keychain_mask).as_ref(),
+			&tx_session,
+			&slate_from,
+			&args,
+		)?;
+		{
+			// Save session only on success.
+			wallet_lock!(self.wallet_inst, w);
+			tx_session.unwrap().borrow_mut().save_tx_data(
+				&mut **w,
+				(&token.keychain_mask).as_ref(),
+				&out_slate.id,
+			)?;
+		}
 
 		let res_slate = Owner::encrypt_slate(
 			self,
@@ -4443,7 +4520,8 @@ where
 			Owner::decrypt_versioned_slate(self, (&token.keychain_mask).as_ref(), in_slate)
 				.map_err(|e| Error::SlatepackDecodeError(format!("{}", e)))?;
 
-		let out_slate = Owner::finalize_tx(self, (&token.keychain_mask).as_ref(), &slate_from)?;
+		let out_slate =
+			Owner::finalize_tx(self, (&token.keychain_mask).as_ref(), &None, &slate_from)?;
 
 		let res_slate = Owner::encrypt_slate(
 			self,
@@ -4474,6 +4552,7 @@ where
 		Owner::tx_lock_outputs(
 			self,
 			(&token.keychain_mask).as_ref(),
+			&None,
 			&slate_from,
 			None, // RPC doesn't support address
 			participant_id,
@@ -4518,6 +4597,7 @@ where
 				tx.kernel_excess.clone(),
 				tx.kernel_offset.clone(),
 				tx.kernel_lookup_min_height.clone(),
+				#[cfg(feature = "grin_proof")]
 				tx.payment_proof.clone(),
 				tx.input_commits
 					.iter()
@@ -4737,25 +4817,18 @@ where
 	fn retrieve_payment_proof(
 		&self,
 		token: Token,
-		refresh_from_node: Option<bool>,
 		tx_id: Option<u32>,
 		tx_slate_id: Option<Uuid>,
-	) -> Result<PaymentProof, Error> {
-		Owner::retrieve_payment_proof(
-			self,
-			(&token.keychain_mask).as_ref(),
-			refresh_from_node.unwrap_or(true),
-			tx_id,
-			tx_slate_id,
-		)
+	) -> Result<TxProof, Error> {
+		Owner::get_stored_tx_proof(self, (&token.keychain_mask).as_ref(), tx_id, tx_slate_id)
 	}
 
 	fn verify_payment_proof(
 		&self,
-		token: Token,
-		proof: PaymentProof,
-	) -> Result<(bool, bool), Error> {
-		Owner::verify_payment_proof(self, (&token.keychain_mask).as_ref(), &proof)
+		_token: Token,
+		proof: TxProof,
+	) -> Result<VerifyProofResult, Error> {
+		Owner::verify_tx_proof(self, &proof)
 	}
 
 	fn set_tor_config(&self, tor_config: Option<TorConfig>) -> Result<(), Error> {
@@ -4842,5 +4915,5 @@ where
 // Keeping as a placeholder for doc tests
 #[test]
 fn owner_api_v3_test() {
-	// use crate as mwc_wallet_api;
+	//use crate as mwc_wallet_api;
 }

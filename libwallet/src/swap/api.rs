@@ -82,7 +82,7 @@ pub trait SwapApi<K: Keychain>: Sync + Send {
 	) -> Result<Swap, Error>;
 
 	/// get state machine fro this trade.
-	fn get_fsm(&self, keychain: &K, swap: &Swap) -> StateMachine;
+	fn get_fsm(&self, keychain: &K, swap: &Swap) -> StateMachine<'_>;
 
 	/// Request confirmation numberss for all transactions that are known and in the in the swap
 	fn request_tx_confirmations(

@@ -211,12 +211,12 @@ fn scan_impl(test_dir: &str) {
 			selection_strategy_is_use_all: true,
 			..Default::default()
 		};
-		let slate = api.init_send_tx(m, &args, 1)?;
+		let slate = api.init_send_tx(m, &None, &args, 1)?;
 
 		// output tx file
 		let send_file = format!("{}/part_tx_1.tx", test_dir);
 		PathToSlatePutter::build_plain(Some(send_file.into())).put_tx(&slate, None, true, &secp)?;
-		api.tx_lock_outputs(m, &slate, None, 0)?;
+		api.tx_lock_outputs(m, &None, &slate, None, 0)?;
 		Ok(())
 	})
 	.unwrap();

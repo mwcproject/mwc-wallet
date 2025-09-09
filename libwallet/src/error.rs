@@ -307,9 +307,9 @@ pub enum Error {
 	#[error("Unable to parse address {0}")]
 	ProofableAddressParsingError(String),
 
-	/// Tx Proof error
-	#[error("Tx Proof error, {0}")]
-	TxProofGenericError(String),
+	/// Proof verify error
+	#[error("Tx Proof is invalid, {0}")]
+	TxProofVerify(String),
 
 	/// Unable to verify signature for the proof
 	#[error("Tx Proof unable to verify signature, {0}")]

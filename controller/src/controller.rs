@@ -15,6 +15,7 @@
 
 //! Controller for wallet.. instantiates and handles listeners (or single-run
 //! invocations) as needed.
+
 use crate::api::{self, ApiServer, BasicAuthMiddleware, ResponseFuture, Router, TLSConfig};
 use crate::libwallet::{
 	NodeClient, NodeVersionInfo, Slate, WalletInst, WalletLCProvider, MWC_BLOCK_HEADER_VERSION,
@@ -32,6 +33,7 @@ use mwc_wallet_util::OnionV3Address;
 use qr_code::QrCode;
 use serde::{Deserialize, Serialize};
 use serde_json;
+use std::cell::RefCell;
 
 use mwc_wallet_impls::{
 	Address, CloseReason, HttpDataSender, MWCMQPublisher, MWCMQSAddress, MWCMQSubscriber,
@@ -60,6 +62,7 @@ use mwc_wallet_impls::tor;
 use mwc_wallet_libwallet::proof::crypto;
 use mwc_wallet_libwallet::proof::proofaddress;
 use mwc_wallet_libwallet::proof::proofaddress::ProvableAddress;
+use mwc_wallet_libwallet::types::TxSession;
 #[cfg(feature = "libp2p")]
 use mwc_wallet_util::mwc_core::core::TxKernel;
 #[cfg(feature = "libp2p")]
@@ -237,9 +240,9 @@ where
 		.map_err(|e| Error::TorConfig(format!("Unable to build onion address, {}", e)))?;
 
 	let mut hm_tor_bridge: HashMap<String, String> = HashMap::new();
-	let mut tor_timeout = 200;
+	let mut tor_timeout = 60;
 	if bridge.bridge_line.is_some() {
-		tor_timeout = 300;
+		tor_timeout = 120;
 		let bridge_config = tor_bridge::TorBridge::try_from(bridge.clone())
 			.map_err(|e| Error::TorConfig(format!("{}", e)))?;
 		hm_tor_bridge = bridge_config
@@ -437,11 +440,10 @@ where
 		dest_acct_name: &Option<String>,
 		secp: &Secp256k1,
 	) -> Result<(), Error> {
-		let owner_api = Owner::new(self.wallet.clone(), None, None);
 		let foreign_api = Foreign::new(self.wallet.clone(), None, None);
-		let mask = self.keychain_mask.lock().clone();
 
 		if slate.num_participants > slate.participant_data.len() {
+			let tx_session = Some(RefCell::new(TxSession::new()));
 			//TODO: this needs to be changed to properly figure out if this slate is an invoice or a send
 			if slate.tx_or_err()?.inputs().len() == 0 {
 				// mwc-wallet doesn't support invoices
@@ -449,7 +451,7 @@ where
 
 				// reject by default unless wallet is set to auto accept invoices under a certain threshold
 
-				let max_auto_accept_invoice = self
+				/*let max_auto_accept_invoice = self
 					.max_auto_accept_invoice
 					.ok_or(Error::DoesNotAcceptInvoices)?;
 
@@ -505,6 +507,9 @@ where
 					min_fee: None,
 				};
 
+				let owner_api = Owner::new(self.wallet.clone(), None, None);
+				let mask = self.keychain_mask.lock().clone();
+
 				*slate = owner_api.process_invoice_tx((&mask).as_ref(), slate, &params)?;
 
 				owner_api.tx_lock_outputs(
@@ -512,10 +517,16 @@ where
 					slate,
 					Some(from.get_full_name()),
 					1,
-				)?;
+				)?;*/
 			} else {
 				let s = foreign_api
-					.receive_tx(slate, Some(from.get_full_name()), dest_acct_name, None)
+					.receive_tx(
+						&tx_session,
+						slate,
+						Some(from.get_full_name()),
+						dest_acct_name,
+						None,
+					)
 					.map_err(|e| {
 						Error::LibWallet(format!(
 							"Unable to process incoming slate, receive_tx failed, {}",
@@ -541,6 +552,20 @@ where
 				slate.id.to_string(),
 				from.get_stripped()
 			));
+
+			{
+				debug_assert!(tx_session
+					.as_ref()
+					.unwrap()
+					.borrow()
+					.get_context_participant()
+					.is_none());
+				wallet_lock!(self.wallet, w);
+				tx_session
+					.unwrap()
+					.borrow_mut()
+					.save_tx_data(&mut **w, None, &slate.id)?;
+			}
 
 			Ok(())
 		} else {

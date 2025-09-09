@@ -139,7 +139,7 @@ fn late_lock_test_impl(test_dir: &str) -> Result<(), libwallet::Error> {
 				late_lock: Some(true),
 				..Default::default()
 			};
-			let slate_i = sender_api.init_send_tx(m, &args, 1)?;
+			let slate_i = sender_api.init_send_tx(m, &None, &args, 1)?;
 			println!("S1 SLATE: {:?}", slate_i);
 			slate = client1.send_tx_slate_direct("wallet2", &slate_i)?;
 			println!("S2 SLATE: {:?}", slate);
@@ -165,7 +165,7 @@ fn late_lock_test_impl(test_dir: &str) -> Result<(), libwallet::Error> {
 			// Note we don't call `tx_lock_outputs` on the sender side here,
 			// as the outputs will only be locked during finalization
 
-			slate = sender_api.finalize_tx(m, &slate)?;
+			slate = sender_api.finalize_tx(m, &None, &slate)?;
 			println!("S3 SLATE: {:?}", slate);
 
 			// Now one input should be locked

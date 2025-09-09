@@ -419,10 +419,10 @@ fn owner_v3_lifecycle() -> Result<(), mwc_wallet_controller::Error> {
 				selection_strategy_is_use_all: false,
 				..Default::default()
 			};
-			let res = api.process_invoice_tx(m, &slate, &args);
+			let res = api.process_invoice_tx(m, &None, &slate, &args);
 			assert!(res.is_ok());
 			slate = res.unwrap();
-			api.tx_lock_outputs(m, &slate, None, 1)?;
+			api.tx_lock_outputs(m, &None, &slate, None, 1)?;
 
 			Ok(())
 		},

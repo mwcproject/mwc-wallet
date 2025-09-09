@@ -110,7 +110,7 @@ impl BuyApi {
 
 		match lock_slate.tx_or_err()?.body.kernels[0].features {
 			KernelFeatures::Plain { fee } => {
-				if fee.fee(current_height) != lock_slate.fee {
+				if fee.fee() != lock_slate.fee {
 					return Err(Error::InvalidMessageData(
 						"Lock Slate invalid kernel fee".to_string(),
 					));
@@ -157,7 +157,7 @@ impl BuyApi {
 		}
 		match refund_slate.tx_or_err()?.body.kernels[0].features {
 			KernelFeatures::HeightLocked { fee, lock_height } => {
-				if fee.fee(current_height) != refund_slate.fee
+				if fee.fee() != refund_slate.fee
 					|| lock_height != refund_slate.get_lock_height_check()?
 				{
 					return Err(Error::InvalidMessageData(
@@ -657,7 +657,6 @@ impl BuyApi {
 		swap: &mut Swap,
 		context: &Context,
 		part: TxParticipant,
-		height: u64,
 	) -> Result<(), Error> {
 		let id = swap.participant_id;
 		let other_id = swap.other_participant_id();
@@ -690,7 +689,7 @@ impl BuyApi {
 			&context.redeem_nonce,
 			swap.participant_id,
 		)?;
-		slate.finalize(keychain, height)?;
+		slate.finalize(keychain)?;
 
 		Ok(())
 	}

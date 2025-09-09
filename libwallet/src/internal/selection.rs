@@ -26,12 +26,15 @@ use crate::mwc_core::libtx::{
 use crate::mwc_keychain::{Identifier, Keychain};
 use crate::mwc_util::secp::key::SecretKey;
 use crate::mwc_util::secp::pedersen::Commitment;
+#[cfg(feature = "grin_proof")]
 use crate::proof::proofaddress;
 use crate::slate::Slate;
 use crate::types::*;
 use mwc_wallet_util::mwc_core::libtx::{inputs_for_fee_points, inputs_for_minimal_fee};
 use mwc_wallet_util::mwc_util as util;
-use std::collections::{HashMap, HashSet};
+use mwc_wallet_util::mwc_util::ToHex;
+use std::cell::RefCell;
+use std::collections::HashSet;
 
 /// Initialize a transaction on the sender side, returns a corresponding
 /// libwallet transaction slate with the appropriate inputs selected,
@@ -41,7 +44,6 @@ use std::collections::{HashMap, HashSet};
 pub fn build_send_tx<'a, T: ?Sized, C, K>(
 	wallet: &mut T,
 	keychain: &K,
-	keychain_mask: Option<&SecretKey>,
 	slate: &mut Slate,
 	min_fee: &Option<u64>,
 	fixed_fee: Option<u64>, // Max fee to limit fee for late_lock case
@@ -106,6 +108,10 @@ where
 			slate.amount,
 			slate.fee,
 			message,
+			0, // lock_height is none, Plain Tx Kernel
+			0 as u8,
+			slate.ttl_cutoff_height.clone(),
+			slate.compact_slate,
 		)
 	} else {
 		// Legacy part
@@ -118,6 +124,10 @@ where
 			slate.amount,
 			slate.fee,
 			message,
+			0, // lock_height is none, Plain Tx Kernel
+			0 as u8,
+			slate.ttl_cutoff_height.clone(),
+			slate.compact_slate,
 		)
 	};
 
@@ -126,15 +136,9 @@ where
 		context.add_input(&input.key_id, &input.mmr_index, input.value);
 	}
 
-	let mut commits: HashMap<Identifier, Option<String>> = HashMap::new();
-
 	// Store change output(s) and cached commits
 	for (change_amount, id, mmr_index) in &change_amounts_derivations {
 		context.add_output(&id, &mmr_index, *change_amount);
-		commits.insert(
-			id.clone(),
-			wallet.calc_commit_for_cache(keychain_mask, *change_amount, &id)?,
-		);
 	}
 
 	Ok(context)
@@ -145,6 +149,7 @@ where
 pub fn lock_tx_context<'a, T: ?Sized, C, K>(
 	wallet: &mut T,
 	keychain_mask: Option<&SecretKey>,
+	tx_session: &Option<RefCell<TxSession>>,
 	slate: &Slate,
 	current_height: u64,
 	context: &Context,
@@ -156,147 +161,186 @@ where
 	C: NodeClient + 'a,
 	K: Keychain + 'a,
 {
-	let mut output_commits: HashMap<Identifier, (Option<String>, u64)> = HashMap::new();
+	let mut output_commits: Vec<(Identifier, Commitment, u64)> = Vec::new();
 	// Store cached commits before locking wallet
-	let mut total_change = 0;
-	for (id, _, change_amount) in &context.get_outputs() {
-		output_commits.insert(
+	for (id, _, change_amount) in context.get_outputs() {
+		output_commits.push((
 			id.clone(),
-			(
-				wallet.calc_commit_for_cache(keychain_mask, *change_amount, &id)?,
-				*change_amount,
-			),
-		);
-		total_change += change_amount;
+			wallet.calc_commit(keychain_mask, change_amount, &id)?,
+			change_amount,
+		));
 	}
 
-	debug!("Change amount is: {}", total_change);
+	let mut input_commits: Vec<(Identifier, Option<u64>, Commitment, u64)> = Vec::new();
+	// Store cached commits before locking wallet
+	for (id, mmr, amount) in context.get_inputs() {
+		input_commits.push((
+			id.clone(),
+			mmr,
+			wallet.calc_commit(keychain_mask, amount, &id)?,
+			amount,
+		));
+	}
 
 	let keychain = wallet.keychain(keychain_mask)?;
 
-	let tx_entry = {
-		let lock_inputs = context.get_inputs();
-		let messages = Some(slate.participant_messages());
-		let slate_id = slate.id;
-		let height = current_height;
-		let parent_key_id = context.parent_key_id.clone();
-		let mut batch = wallet.batch(keychain_mask)?;
+	let messages = Some(slate.participant_messages());
+	let slate_id = slate.id;
+	let height = current_height;
+	let parent_key_id = context.parent_key_id.clone();
 
-		// Check if such transaction already exist. It is very possible for lock after case.
-		let found_tx = batch
-			.tx_log_iter()
-			.filter(|tx_entry| {
-				if tx_entry.tx_type != TxLogEntryType::TxSent {
-					return false;
-				}
-				match tx_entry.tx_slate_id {
-					None => false,
-					Some(uuid) => uuid == slate_id,
-				}
-			})
-			.next();
-
-		let mut t = match found_tx {
-			Some(tx) => tx,
-			None => {
-				// Creating a new record
-				let log_id = batch.next_tx_log_id(&parent_key_id)?;
-				TxLogEntry::new(parent_key_id.clone(), TxLogEntryType::TxSent, log_id)
-			}
-		};
-
-		t.tx_slate_id = Some(slate_id);
-		let filename = format!("{}.mwctx", slate_id);
-		t.stored_tx = Some(filename);
-		t.fee = Some(context.fee);
-		t.ttl_cutoff_height = slate.ttl_cutoff_height;
-		if t.ttl_cutoff_height == Some(0) {
-			t.ttl_cutoff_height = None;
+	let found_tx = match tx_session {
+		Some(tx) => tx.borrow().get_tx_log_entry().clone(),
+		None => {
+			let batch = wallet.batch(keychain_mask)?;
+			// Check if such transaction already exist. It is very possible for lock after case.
+			batch
+				.tx_log_iter()
+				.filter(|tx_entry| {
+					if tx_entry.tx_type != TxLogEntryType::TxSent {
+						return false;
+					}
+					match tx_entry.tx_slate_id {
+						None => false,
+						Some(uuid) => uuid == slate_id,
+					}
+				})
+				.next()
 		}
-
-		t.address = address;
-
-		if let Ok(e) = slate.calc_excess(keychain.secp(), Some(&keychain), current_height) {
-			t.kernel_excess = Some(e)
-		}
-		if let Some(e) = excess_override {
-			debug_assert!(slate.compact_slate);
-			t.kernel_excess = Some(e)
-		}
-		t.kernel_lookup_min_height = Some(current_height);
-
-		let mut amount_debited = 0;
-		t.num_inputs = lock_inputs.len();
-		t.input_commits = context.input_commits.clone();
-
-		if context.late_lock_args.is_none() || !t.input_commits.is_empty() {
-			for id in lock_inputs {
-				let mut coin = batch.get(&id.0, &id.1)?;
-				coin.tx_log_entry = Some(t.id);
-				amount_debited += coin.value;
-				batch.lock_output(&mut coin)?;
-			}
-			t.amount_debited = amount_debited;
-		} else {
-			// It is lock later case. No inputs does exist yet.
-			t.amount_debited = slate.amount;
-		}
-
-		t.messages = messages;
-
-		// store extra payment proof info, if required
-		if let Some(ref p) = slate.payment_proof {
-			let sender_address_path = match context.payment_proof_derivation_index {
-				Some(p) => p,
-				None => {
-					return Err(Error::PaymentProof(
-						"Payment proof derivation index required".to_owned(),
-					));
-				}
-			};
-			// MQS type because public key is requred
-			let sender_a = proofaddress::payment_proof_address_from_index(
-				&keychain,
-				sender_address_path,
-				proofaddress::ProofAddressType::MQS,
-			)?;
-			t.payment_proof = Some(StoredProofInfo {
-				receiver_address: p.receiver_address.clone(),
-				receiver_signature: p.receiver_signature.clone(),
-				sender_address: sender_a,
-				sender_address_path,
-				sender_signature: None,
-			});
-		};
-
-		// write the output representing our change
-		t.num_outputs = context.output_commits.len();
-		t.output_commits = context.output_commits.clone();
-		for (id, _, _) in &context.get_outputs() {
-			let (commit, change_amount) = output_commits.get(&id).unwrap().clone();
-			t.amount_credited += change_amount;
-			batch.save(OutputData {
-				root_key_id: parent_key_id.clone(),
-				key_id: id.clone(),
-				n_child: id.to_path().last_path_index(),
-				commit: commit,
-				mmr_index: None,
-				value: change_amount,
-				status: OutputStatus::Unconfirmed,
-				height: height,
-				lock_height: 0,
-				is_coinbase: false,
-				tx_log_entry: Some(t.id),
-			})?;
-		}
-		batch.save_tx_log_entry(t.clone(), &parent_key_id)?;
-		batch.commit()?;
-		t
 	};
-	wallet.store_tx(
-		&format!("{}", tx_entry.tx_slate_id.unwrap()),
-		slate.tx_or_err()?,
-	)?;
+
+	let (mut t, need_new_id) = match found_tx {
+		Some(tx) => (tx, false),
+		None => {
+			// Creating a new record
+			(
+				TxLogEntry::new(parent_key_id.clone(), TxLogEntryType::TxSent, 0),
+				true,
+			)
+		}
+	};
+
+	t.tx_slate_id = Some(slate_id);
+	let filename = format!("{}.mwctx", slate_id);
+	t.stored_tx = Some(filename);
+	t.fee = Some(context.fee);
+	t.ttl_cutoff_height = context.ttl_cutoff_height;
+	if t.ttl_cutoff_height == Some(0) {
+		t.ttl_cutoff_height = None;
+	}
+
+	t.address = address;
+
+	if let Ok(e) = slate.calc_excess(keychain.secp()) {
+		t.kernel_excess = Some(e)
+	}
+	if let Some(e) = excess_override {
+		debug_assert!(slate.compact_slate);
+		t.kernel_excess = Some(e)
+	}
+	t.kernel_lookup_min_height = Some(current_height);
+
+	t.num_inputs = context.input_commits.len();
+	t.input_commits = context.input_commits.clone();
+
+	if context.late_lock_args.is_none() || !t.input_commits.is_empty() {
+		t.num_inputs = input_commits.len();
+		t.input_commits.clear();
+		t.amount_debited = 0;
+		for (_id, _mmr, commit, amount) in &input_commits {
+			t.amount_debited += amount;
+			t.input_commits.push(commit.clone());
+		}
+	} else {
+		// It is lock later case. No inputs does exist yet.
+		t.amount_debited = slate.amount;
+	}
+
+	t.messages = messages;
+
+	// store extra payment proof info, if required
+	#[cfg(feature = "grin_proof")]
+	if let Some(ref p) = slate.payment_proof {
+		let sender_address_path = match context.payment_proof_derivation_index {
+			Some(p) => p,
+			None => {
+				return Err(Error::PaymentProof(
+					"Payment proof derivation index required".to_owned(),
+				));
+			}
+		};
+		// MQS type because public key is requred
+		let sender_a = proofaddress::payment_proof_address_from_index(
+			&keychain,
+			sender_address_path,
+			proofaddress::ProofAddressType::MQS,
+		)?;
+		t.payment_proof = Some(StoredProofInfo {
+			receiver_address: p.receiver_address.clone(),
+			receiver_signature: p.receiver_signature.clone(),
+			sender_address: sender_a,
+			sender_address_path,
+			sender_signature: None,
+		});
+	};
+
+	// write the output representing our change
+	t.num_outputs = 0;
+	t.output_commits.clear();
+	let mut outputs = Vec::new();
+	for (id, commit, change_amount) in output_commits {
+		t.amount_credited += change_amount;
+		t.num_outputs += 1;
+		t.output_commits.push(commit.clone());
+		outputs.push(OutputData {
+			root_key_id: parent_key_id.clone(),
+			key_id: id.clone(),
+			n_child: id.to_path().last_path_index(),
+			commit: Some(ToHex::to_hex(&commit)),
+			mmr_index: None,
+			value: change_amount,
+			status: OutputStatus::Unconfirmed,
+			height: height,
+			lock_height: 0,
+			is_coinbase: false,
+			tx_log_entry: Some(t.id),
+		});
+	}
+
+	match tx_session {
+		Some(tx) => {
+			let mut tx = tx.borrow_mut();
+			tx.set_tx_log_entry(t.clone());
+			tx.set_outputs(outputs);
+			tx.set_input_commits(input_commits);
+			tx.set_transaction(slate.tx_or_err()?.clone());
+		}
+		None => {
+			{
+				let mut batch = wallet.batch(keychain_mask)?;
+
+				if need_new_id {
+					let log_id = batch.next_tx_log_id(&parent_key_id)?;
+					t.id = log_id;
+				}
+
+				for out in outputs {
+					batch.save(out)?;
+				}
+
+				for (id, mmr, _commit, _amount) in input_commits {
+					let mut coin = batch.get(&id, &mmr)?;
+					coin.tx_log_entry = Some(t.id);
+					batch.lock_output(&mut coin)?;
+				}
+
+				batch.save_tx_log_entry(t.clone(), &parent_key_id)?;
+				batch.commit()?;
+			}
+
+			wallet.store_tx(&format!("{}", slate.id), slate.tx_or_err()?)?;
+		}
+	}
 	Ok(())
 }
 
@@ -307,6 +351,7 @@ where
 pub fn build_recipient_output<'a, T: ?Sized, C, K>(
 	wallet: &mut T,
 	keychain_mask: Option<&SecretKey>,
+	tx_session: &Option<RefCell<TxSession>>,
 	slate: &mut Slate,
 	current_height: u64,
 	address: Option<String>,
@@ -412,6 +457,10 @@ where
 			amount,
 			slate.fee,
 			message,
+			slate.get_lock_height(),
+			slate.get_kernel_features(),
+			slate.ttl_cutoff_height.clone(),
+			slate.compact_slate,
 		)
 	} else {
 		// Legacy model
@@ -424,6 +473,10 @@ where
 			amount,
 			slate.fee,
 			message,
+			slate.get_lock_height(),
+			slate.get_kernel_features(),
+			slate.ttl_cutoff_height.clone(),
+			slate.compact_slate,
 		)
 	};
 
@@ -436,18 +489,12 @@ where
 	let mut commit_vec = Vec::new();
 	let mut commit_ped = Vec::new();
 	for kva in &key_vec_amounts {
-		let commit = wallet.calc_commit_for_cache(keychain_mask, kva.1, &kva.0)?;
-		if let Some(cm) = commit.clone() {
-			commit_ped.push(Commitment::from_vec(util::from_hex(&cm).map_err(|e| {
-				Error::GenericError(format!("Output commit parse error, {}", e))
-			})?));
-		}
-		commit_vec.push(commit);
+		let commit = wallet.calc_commit(keychain_mask, kva.1, &kva.0)?;
+		commit_ped.push(commit);
+		commit_vec.push(Some(commit.to_hex()));
 	}
 
-	let mut batch = wallet.batch(keychain_mask)?;
-	let log_id = batch.next_tx_log_id(&parent_key_id)?;
-	let mut t = TxLogEntry::new(parent_key_id.clone(), TxLogEntryType::TxReceived, log_id);
+	let mut t = TxLogEntry::new(parent_key_id.clone(), TxLogEntryType::TxReceived, 0);
 	t.tx_slate_id = Some(slate_id);
 	t.amount_credited = amount;
 	t.address = address;
@@ -465,15 +512,15 @@ where
 	}
 
 	// when invoicing, this will be invalid
-	if let Ok(e) = slate.calc_excess(keychain.secp(), Some(&keychain), current_height) {
+	if let Ok(e) = slate.calc_excess(keychain.secp()) {
 		t.kernel_excess = Some(e)
 	}
 	t.kernel_lookup_min_height = Some(current_height);
-	batch.save_tx_log_entry(t.clone(), &parent_key_id)?;
 
 	let mut i = 0;
+	let mut outputs = Vec::new();
 	for kva in &key_vec_amounts {
-		batch.save(OutputData {
+		outputs.push(OutputData {
 			root_key_id: parent_key_id.clone(),
 			key_id: kva.0.clone(),
 			mmr_index: None,
@@ -484,11 +531,30 @@ where
 			height: height,
 			lock_height: 0,
 			is_coinbase: false,
-			tx_log_entry: Some(log_id),
-		})?;
+			tx_log_entry: None,
+		});
 		i = i + 1;
 	}
-	batch.commit()?;
+
+	match tx_session {
+		Some(tx) => {
+			tx.borrow_mut().set_tx_log_entry(t.clone());
+			tx.borrow_mut().set_outputs(outputs);
+		}
+		None => {
+			let mut batch = wallet.batch(keychain_mask)?;
+			let log_id = batch.next_tx_log_id(&parent_key_id)?;
+			t.id = log_id;
+
+			batch.save_tx_log_entry(t.clone(), &parent_key_id)?;
+
+			for mut out in outputs {
+				out.tx_log_entry = Some(log_id);
+				batch.save(out)?;
+			}
+			batch.commit()?;
+		}
+	}
 
 	// returning last key that was used in the chain.
 	// That suppose to satisfy all caller needs
@@ -795,7 +861,7 @@ where
 			&& change / (num_change_outputs as u64) < 100_000_000
 		{
 			warn!("Transaction requested has {} change outputs with change amount {}. We don't want create many small outputs, the number of change outputs is reduced to 1", num_change_outputs, change);
-			1
+			std::cmp::max((change / 100_000_000) as usize, 1)
 		} else {
 			num_change_outputs
 		};
@@ -987,13 +1053,15 @@ where
 	eligible[best_idx0..best_idx0 + best_len].to_vec()
 }
 
-/// Repopulates output in the slate's tranacstion
+/// Repopulates output in the slate's transaction
 /// with outputs from the stored context
 /// change outputs and tx log entry
 /// Remove the explicitly stored excess
+/// Note, this method is expecting to use for compact slates only
 pub fn repopulate_tx<'a, T: ?Sized, C, K>(
 	wallet: &mut T,
 	keychain_mask: Option<&SecretKey>,
+	tx_session: &Option<RefCell<TxSession>>,
 	slate: &mut Slate,
 	context: &Context,
 	update_fee: bool,
@@ -1044,14 +1112,37 @@ where
 	}
 
 	for (id, mmr, amount) in context.get_outputs() {
-		if let Ok(out) = wallet.get(&id, &mmr) {
-			if amount != out.value {
-				return Err(Error::GenericError(format!(
-					"Internal error. Output value {} doesn't match expected {} for {} {:?}",
-					out.value, amount, id, mmr
-				)));
+		match tx_session {
+			Some(ts_ses) => {
+				// Outputs are expected to exist in the session
+				debug_assert!(wallet.get(&id, &mmr).is_err());
+
+				if let Some(out) = ts_ses
+					.borrow()
+					.get_outputs()
+					.iter()
+					.find(|out| out.key_id == id)
+				{
+					if amount != out.value {
+						return Err(Error::GenericError(format!(
+							"Internal error. Output value {} doesn't match expected {} for {} {:?}",
+							out.value, amount, id, mmr
+						)));
+					}
+					parts.push(build::output(out.value, out.key_id.clone()));
+				}
 			}
-			parts.push(build::output(out.value, out.key_id.clone()));
+			None => {
+				if let Ok(out) = wallet.get(&id, &mmr) {
+					if amount != out.value {
+						return Err(Error::GenericError(format!(
+							"Internal error. Output value {} doesn't match expected {} for {} {:?}",
+							out.value, amount, id, mmr
+						)));
+					}
+					parts.push(build::output(out.value, out.key_id.clone()));
+				}
+			}
 		}
 	}
 

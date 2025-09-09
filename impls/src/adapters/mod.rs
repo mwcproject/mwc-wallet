@@ -62,7 +62,6 @@ pub trait SlateSender {
 		slatepack_secret: &DalekSecretKey,
 		recipient: Option<DalekPublicKey>,
 		other_wallet_version: Option<(SlateVersion, Option<String>)>,
-		height: u64,
 		secp: &Secp256k1,
 	) -> Result<Slate, Error>;
 }
@@ -106,7 +105,6 @@ pub trait SlateGetter {
 	fn get_tx(
 		&self,
 		slatepack_secret: Option<&DalekSecretKey>,
-		height: u64,
 		secp: &Secp256k1,
 	) -> Result<SlateGetData, Error>;
 }

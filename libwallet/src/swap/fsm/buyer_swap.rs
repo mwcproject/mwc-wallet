@@ -60,7 +60,6 @@ impl State for BuyerOfferCreated {
 		input: Input,
 		swap: &mut Swap,
 		_context: &Context,
-		_height: u64,
 		_tx_conf: &SwapTransactionsConfirmations,
 		_secp: &Secp256k1,
 	) -> Result<StateProcessRespond, Error> {
@@ -135,7 +134,6 @@ where
 		input: Input,
 		swap: &mut Swap,
 		_context: &Context,
-		_height: u64,
 		tx_conf: &SwapTransactionsConfirmations,
 		_secp: &Secp256k1,
 	) -> Result<StateProcessRespond, Error> {
@@ -243,7 +241,6 @@ impl State for BuyerWaitingForSellerToLock {
 		input: Input,
 		swap: &mut Swap,
 		_context: &Context,
-		_height: u64,
 		tx_conf: &SwapTransactionsConfirmations,
 		_secp: &Secp256k1,
 	) -> Result<StateProcessRespond, Error> {
@@ -386,7 +383,6 @@ where
 		input: Input,
 		swap: &mut Swap,
 		_context: &Context,
-		_height: u64,
 		tx_conf: &SwapTransactionsConfirmations,
 		secp: &Secp256k1,
 	) -> Result<StateProcessRespond, Error> {
@@ -554,7 +550,6 @@ where
 		input: Input,
 		swap: &mut Swap,
 		context: &Context,
-		_height: u64,
 		tx_conf: &SwapTransactionsConfirmations,
 		secp: &Secp256k1,
 	) -> Result<StateProcessRespond, Error> {
@@ -699,7 +694,6 @@ impl State for BuyerSendingInitRedeemMessage {
 		input: Input,
 		swap: &mut Swap,
 		_context: &Context,
-		_height: u64,
 		tx_conf: &SwapTransactionsConfirmations,
 		_secp: &Secp256k1,
 	) -> Result<StateProcessRespond, Error> {
@@ -810,7 +804,6 @@ impl<K: Keychain> State for BuyerWaitingForRespondRedeemMessage<K> {
 		input: Input,
 		swap: &mut Swap,
 		context: &Context,
-		height: u64,
 		tx_conf: &SwapTransactionsConfirmations,
 		secp: &Secp256k1,
 	) -> Result<StateProcessRespond, Error> {
@@ -838,7 +831,7 @@ impl<K: Keychain> State for BuyerWaitingForRespondRedeemMessage<K> {
 				if swap
 					.refund_slate
 					.tx_or_err()?
-					.validate(Weighting::AsTransaction, height, secp)
+					.validate(Weighting::AsTransaction, secp)
 					.is_ok()
 				{
 					// Was already processed. Can go to the next step
@@ -870,7 +863,7 @@ impl<K: Keychain> State for BuyerWaitingForRespondRedeemMessage<K> {
 				if swap
 					.redeem_slate
 					.tx_or_err()?
-					.validate(Weighting::AsTransaction, height, secp)
+					.validate(Weighting::AsTransaction, secp)
 					.is_err()
 				{
 					let (_, redeem, _) = message.unwrap_redeem()?;
@@ -879,7 +872,6 @@ impl<K: Keychain> State for BuyerWaitingForRespondRedeemMessage<K> {
 						swap,
 						context,
 						redeem.redeem_participant,
-						height,
 					)?;
 					swap.ack_msg2();
 					swap.add_journal_message("Process Redeem response message".to_string());
@@ -887,7 +879,7 @@ impl<K: Keychain> State for BuyerWaitingForRespondRedeemMessage<K> {
 				debug_assert!(swap
 					.redeem_slate
 					.tx_or_err()?
-					.validate(Weighting::AsTransaction, height, secp)
+					.validate(Weighting::AsTransaction, secp)
 					.is_ok());
 				Ok(StateProcessRespond::new(StateId::BuyerRedeemMwc))
 			}
@@ -949,7 +941,6 @@ where
 		input: Input,
 		swap: &mut Swap,
 		_context: &Context,
-		_height: u64,
 		tx_conf: &SwapTransactionsConfirmations,
 		_secp: &Secp256k1,
 	) -> Result<StateProcessRespond, Error> {
@@ -1072,7 +1063,6 @@ impl State for BuyerWaitForRedeemMwcConfirmations {
 		input: Input,
 		swap: &mut Swap,
 		_context: &Context,
-		_height: u64,
 		tx_conf: &SwapTransactionsConfirmations,
 		_secp: &Secp256k1,
 	) -> Result<StateProcessRespond, Error> {
@@ -1160,7 +1150,6 @@ impl State for BuyerSwapComplete {
 		input: Input,
 		_swap: &mut Swap,
 		_context: &Context,
-		_height: u64,
 		_tx_conf: &SwapTransactionsConfirmations,
 		_secp: &Secp256k1,
 	) -> Result<StateProcessRespond, Error> {
@@ -1210,7 +1199,6 @@ impl State for BuyerCancelled {
 		input: Input,
 		_swap: &mut Swap,
 		_context: &Context,
-		_height: u64,
 		_tx_conf: &SwapTransactionsConfirmations,
 		_secp: &Secp256k1,
 	) -> Result<StateProcessRespond, Error> {
@@ -1268,7 +1256,6 @@ impl State for BuyerWaitingForRefundTime {
 		input: Input,
 		swap: &mut Swap,
 		_context: &Context,
-		_height: u64,
 		tx_conf: &SwapTransactionsConfirmations,
 		_secp: &Secp256k1,
 	) -> Result<StateProcessRespond, Error> {
@@ -1370,7 +1357,6 @@ where
 		input: Input,
 		swap: &mut Swap,
 		context: &Context,
-		_height: u64,
 		tx_conf: &SwapTransactionsConfirmations,
 		_secp: &Secp256k1,
 	) -> Result<StateProcessRespond, Error> {
@@ -1483,7 +1469,6 @@ where
 		input: Input,
 		swap: &mut Swap,
 		_context: &Context,
-		_height: u64,
 		tx_conf: &SwapTransactionsConfirmations,
 		_secp: &Secp256k1,
 	) -> Result<StateProcessRespond, Error> {
@@ -1581,7 +1566,6 @@ impl State for BuyerCancelledRefunded {
 		input: Input,
 		_swap: &mut Swap,
 		_context: &Context,
-		_height: u64,
 		_tx_conf: &SwapTransactionsConfirmations,
 		_secp: &Secp256k1,
 	) -> Result<StateProcessRespond, Error> {

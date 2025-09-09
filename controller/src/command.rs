@@ -44,6 +44,7 @@ use mwc_wallet_impls::{Address, MWCMQSAddress, Publisher};
 #[cfg(feature = "libp2p")]
 use mwc_wallet_libwallet::api_impl::owner_libp2p;
 use mwc_wallet_libwallet::api_impl::{owner, owner_eth, owner_swap};
+use std::cell::RefCell;
 
 use mwc_wallet_libwallet::proof::proofaddress::{self, ProvableAddress};
 use mwc_wallet_libwallet::proof::tx_proof::TxProof;
@@ -54,6 +55,7 @@ use mwc_wallet_libwallet::swap::fsm::state::StateId;
 use mwc_wallet_libwallet::swap::trades;
 use mwc_wallet_libwallet::swap::types::Action;
 use mwc_wallet_libwallet::swap::{message, Swap};
+use mwc_wallet_libwallet::types::TxSession;
 use mwc_wallet_libwallet::{
 	wallet_lock, OwnershipProof, Slate, StatusMessage, TxLogEntry, WalletInst,
 };
@@ -620,7 +622,7 @@ where
 					min_fee: args.min_fee,
 					..Default::default()
 				};
-				let slate = api.init_send_tx(m, &init_args, 1)?;
+				let slate = api.init_send_tx(m, &None, &init_args, 1)?;
 				strategies.push((strategy, slate.amount, slate.fee));
 			}
 			display::estimate(amount, strategies, dark_scheme);
@@ -706,7 +708,11 @@ where
 				_ => None,
 			};
 
-			let result = api.init_send_tx(m, &init_args, 1);
+			let tx_session = Some(RefCell::new(TxSession::new()));
+			let tx_receive_session = Some(RefCell::new(TxSession::new()));
+
+			let result = api.init_send_tx(m, &tx_session, &init_args, 1);
+
 			let mut slate = match result {
 				Ok(s) => {
 					info!(
@@ -731,19 +737,13 @@ where
 				recipient = Some(sp_address.tor_public_key()?);
 			}
 
-			let (slatepack_secret, slatepack_sender, height, secp) = {
+			let (slatepack_secret, slatepack_sender, secp) = {
 				wallet_lock!(api.wallet_inst, w);
 				let keychain = w.keychain(keychain_mask)?;
 				let slatepack_secret =
 					proofaddress::payment_proof_address_dalek_secret(&keychain, None)?;
 				let slate_pub_key = DalekPublicKey::from(&slatepack_secret);
-				let (height, _, _) = w.w2n_client().get_chain_tip()?;
-				(
-					slatepack_secret,
-					slate_pub_key,
-					height,
-					keychain.secp().clone(),
-				)
+				(slatepack_secret, slate_pub_key, keychain.secp().clone())
 			};
 
 			match args.method.as_str() {
@@ -773,7 +773,7 @@ where
 					})?;
 					// Late lock expected to do the lock at finalize step. Don't do that now
 					if !init_args.late_lock.unwrap_or(false) {
-						api.tx_lock_outputs(m, &slate, Some(String::from("file")), 0)?;
+						api.tx_lock_outputs(m, &tx_session, &slate, Some(String::from("file")), 0)?;
 					}
 
 					if !args.dest.is_empty() {
@@ -796,22 +796,37 @@ where
 						)?;
 					}
 
+					{
+						wallet_lock!(api.wallet_inst, w);
+						tx_session
+							.unwrap()
+							.borrow_mut()
+							.save_tx_data(&mut **w, m, &slate.id)?;
+					}
+
 					return Ok(());
 				}
 				"self" => {
 					debug_assert!(!slate.compact_slate);
-					api.tx_lock_outputs(m, &slate, Some(String::from("self")), 0)?;
+					api.tx_lock_outputs(m, &tx_session, &slate, Some(String::from("self")), 0)?;
 					let km = match keychain_mask.as_ref() {
 						None => None,
 						Some(&m) => Some(m.to_owned()),
 					};
 					controller::foreign_single_use(wallet_inst, km, |api| {
 						slate = api.receive_tx(
+							&tx_receive_session,
 							&slate,
 							Some(String::from("self")),
 							&Some(args.dest.clone()),
 							None,
 						)?;
+						debug_assert!(tx_receive_session
+							.as_ref()
+							.unwrap()
+							.borrow()
+							.get_context_participant()
+							.is_none());
 						Ok(())
 					})?;
 				}
@@ -831,29 +846,46 @@ where
 						&slatepack_secret,
 						recipient,
 						wallet_info,
-						height,
 						&secp,
 					)?;
 					// Restore back ttl, because it can be gone
 					slate.ttl_cutoff_height = original_slate.ttl_cutoff_height.clone();
 					// Checking is sender didn't do any harm to slate
-					Slate::compare_slates_send(&original_slate, &slate)?;
 					api.verify_slate_messages(m, &slate).map_err(|e| {
 						error!("Error validating participant messages: {}", e);
 						e
 					})?;
 					// Late lock expected to do the lock at finalize step. Don't do that now
 					if !init_args.late_lock.unwrap_or(false) {
-						api.tx_lock_outputs(m, &slate, Some(args.dest.clone()), 0)?; //this step needs to be done before finalizing the slate
+						api.tx_lock_outputs(m, &tx_session, &slate, Some(args.dest.clone()), 0)?; //this step needs to be done before finalizing the slate
 					}
 				}
 			}
 
-			slate = api.finalize_tx(m, &slate)?;
+			slate = api.finalize_tx(m, &tx_session, &slate)?;
 
 			let result = api.post_tx(m, slate.tx_or_err()?, args.fluff);
 			match result {
 				Ok(_) => {
+					{
+						debug_assert!(tx_session
+							.as_ref()
+							.unwrap()
+							.borrow()
+							.get_context_participant()
+							.is_none());
+						wallet_lock!(api.wallet_inst, w);
+						tx_session
+							.unwrap()
+							.borrow_mut()
+							.save_tx_data(&mut **w, m, &slate.id)?;
+						let tx_receive_session = tx_receive_session.unwrap();
+						let mut tx_receive_session = tx_receive_session.borrow_mut();
+						if !tx_receive_session.is_empty() {
+							tx_receive_session.save_tx_data(&mut **w, m, &slate.id)?;
+						}
+					}
+
 					info!("slate [{}] finalized successfully", slate.id.to_string());
 					println!("slate [{}] finalized successfully", slate.id.to_string());
 					return Ok(());
@@ -882,8 +914,11 @@ where
 {
 	let wallet_inst = owner_api.wallet_inst.clone();
 	let mut res_slate = Slate::blank(2, false);
+
+	let tx_session = Some(RefCell::new(TxSession::new()));
+
 	controller::owner_single_use(None, keychain_mask, Some(owner_api), |api, m| {
-		let (slate, context) = api.generate_invoice_slate(m, amount)?;
+		let (slate, context) = api.generate_invoice_slate(m, amount, &tx_session)?;
 
 		if mwc_wallet_impls::adapters::get_mwcmqs_brocker().is_none() {
 			//check to see if mqs_config is there, if not, return error
@@ -932,17 +967,14 @@ where
 			&slatepack_secret,
 			None,
 			None,
-			slate.height,
 			&secp,
 		)?;
 
-		{
-			wallet_lock!(api.wallet_inst, w);
-			let mut batch = w.batch(keychain_mask)?;
-			// Participant id is 0 for mwc713 compatibility
-			batch.save_private_context(slate.id.as_bytes(), 0, &context)?;
-			batch.commit()?;
-		}
+		tx_session
+			.as_ref()
+			.unwrap()
+			.borrow_mut()
+			.set_context_participant(context, 0);
 
 		Ok(())
 	})?;
@@ -960,7 +992,7 @@ where
 				e
 			)));
 		}
-		res_slate = api.finalize_invoice_tx(&res_slate)?;
+		res_slate = api.finalize_invoice_tx(&tx_session, &res_slate)?;
 		Ok(())
 	})?;
 
@@ -970,6 +1002,20 @@ where
 		match result {
 			Ok(_) => {
 				info!("Transaction finished successfully.");
+				// Saving everyhting related to the transaction into DB
+				{
+					debug_assert!(tx_session
+						.as_ref()
+						.unwrap()
+						.borrow()
+						.get_context_participant()
+						.is_none());
+					wallet_lock!(api.wallet_inst, w);
+					tx_session
+						.unwrap()
+						.borrow_mut()
+						.save_tx_data(&mut **w, m, &res_slate.id)?;
+				}
 				Ok(())
 			}
 			Err(e) => {
@@ -1088,27 +1134,20 @@ where
 		Some(&m) => Some(m.to_owned()),
 	};
 	controller::foreign_single_use(owner_api.wallet_inst.clone(), km, |api| {
-		let (slatepack_secret, height, secp) = {
+		let (slatepack_secret, secp) = {
 			wallet_lock!(api.wallet_inst, w);
 			let keychain = w.keychain(keychain_mask)?;
 			let slatepack_secret =
 				proofaddress::payment_proof_address_dalek_secret(&keychain, None)?;
-			let (height, _, _) = w.w2n_client().get_chain_tip()?;
-			(slatepack_secret, height, keychain.secp().clone())
+			(slatepack_secret, keychain.secp().clone())
 		};
 
 		let slate_pkg = match &args.input_file {
-			Some(file_name) => PathToSlateGetter::build_form_path(file_name.into()).get_tx(
-				Some(&slatepack_secret),
-				height,
-				&secp,
-			)?,
+			Some(file_name) => PathToSlateGetter::build_form_path(file_name.into())
+				.get_tx(Some(&slatepack_secret), &secp)?,
 			None => match &args.input_slatepack_message {
-				Some(message) => PathToSlateGetter::build_form_str(message.clone()).get_tx(
-					Some(&slatepack_secret),
-					height,
-					&secp,
-				)?,
+				Some(message) => PathToSlateGetter::build_form_str(message.clone())
+					.get_tx(Some(&slatepack_secret), &secp)?,
 				None => {
 					return Err(Error::ArgumentError(
 						"Please specify 'file' or 'content' argument".to_string(),
@@ -1134,6 +1173,7 @@ where
 			)));
 		}
 		slate = api.receive_tx(
+			&None,
 			&slate,
 			Some(String::from("file")),
 			&g_args.account,
@@ -1195,27 +1235,20 @@ where
 		Some(&m) => Some(m.to_owned()),
 	};
 	controller::foreign_single_use(owner_api.wallet_inst.clone(), km, |api| {
-		let (slatepack_secret, height, secp) = {
+		let (slatepack_secret, secp) = {
 			wallet_lock!(api.wallet_inst, w);
 			let keychain = w.keychain(keychain_mask)?;
 			let slatepack_secret =
 				proofaddress::payment_proof_address_dalek_secret(&keychain, None)?;
-			let (height, _, _) = w.w2n_client().get_chain_tip()?;
-			(slatepack_secret, height, keychain.secp().clone())
+			(slatepack_secret, keychain.secp().clone())
 		};
 
 		let slate_pkg = match &args.input_file {
-			Some(file_name) => PathToSlateGetter::build_form_path(file_name.into()).get_tx(
-				Some(&slatepack_secret),
-				height,
-				&secp,
-			)?,
+			Some(file_name) => PathToSlateGetter::build_form_path(file_name.into())
+				.get_tx(Some(&slatepack_secret), &secp)?,
 			None => match &args.input_slatepack_message {
-				Some(message) => PathToSlateGetter::build_form_str(message.clone()).get_tx(
-					Some(&slatepack_secret),
-					height,
-					&secp,
-				)?,
+				Some(message) => PathToSlateGetter::build_form_str(message.clone())
+					.get_tx(Some(&slatepack_secret), &secp)?,
 				None => {
 					return Err(Error::ArgumentError(
 						"Please specify 'file' or 'content' argument".to_string(),
@@ -1304,28 +1337,21 @@ where
 	let mut slatepack_format = false;
 
 	controller::owner_single_use(None, keychain_mask, Some(owner_api), |api, m| {
-		let (slatepack_secret, height, secp) = {
+		let (slatepack_secret, secp) = {
 			wallet_lock!(api.wallet_inst, w);
 			let keychain = w.keychain(m)?;
 			let slatepack_secret = proofaddress::payment_proof_address_secret(&keychain, None)?;
 			let slatepack_secret = DalekSecretKey::from_bytes(&slatepack_secret.0)
 				.map_err(|e| Error::GenericError(format!("Unable to build secret, {}", e)))?;
-			let (height, _, _) = w.w2n_client().get_chain_tip()?;
-			(slatepack_secret, height, keychain.secp().clone())
+			(slatepack_secret, keychain.secp().clone())
 		};
 
 		let slate_pkg = match &args.input_file {
-			Some(file_name) => PathToSlateGetter::build_form_path(file_name.into()).get_tx(
-				Some(&slatepack_secret),
-				height,
-				&secp,
-			)?,
+			Some(file_name) => PathToSlateGetter::build_form_path(file_name.into())
+				.get_tx(Some(&slatepack_secret), &secp)?,
 			None => match &args.input_slatepack_message {
-				Some(message) => PathToSlateGetter::build_form_str(message.clone()).get_tx(
-					Some(&slatepack_secret),
-					height,
-					&secp,
-				)?,
+				Some(message) => PathToSlateGetter::build_form_str(message.clone())
+					.get_tx(Some(&slatepack_secret), &secp)?,
 				None => {
 					return Err(Error::ArgumentError(
 						"Please specify 'file' or 'content' argument".to_string(),
@@ -1368,7 +1394,7 @@ where
 					e
 				)));
 			}
-			slate = api.finalize_invoice_tx(&slate)?;
+			slate = api.finalize_invoice_tx(&None, &slate)?;
 			Ok(())
 		})?;
 	} else {
@@ -1387,7 +1413,7 @@ where
 					e
 				)));
 			}
-			slate = api.finalize_tx(m, &slate)?;
+			slate = api.finalize_tx(m, &None, &slate)?;
 			Ok(())
 		})?;
 	}
@@ -1481,7 +1507,7 @@ where
 			recipient = Some(sp_address.tor_public_key()?);
 		}
 
-		let slate = api.issue_invoice_tx(m, &args.issue_args)?;
+		let slate = api.issue_invoice_tx(m, &None, &args.issue_args)?;
 
 		let (slatepack_secret, tor_address, secp) = {
 			wallet_lock!(api.wallet_inst, w);
@@ -1548,32 +1574,20 @@ where
 	C: NodeClient + 'static,
 	K: keychain::Keychain + 'static,
 {
-	let (slatepack_secret, tor_address, height, secp) = {
+	let (slatepack_secret, tor_address, secp) = {
 		wallet_lock!(owner_api.wallet_inst, w);
 		let keychain = w.keychain(keychain_mask)?;
 		let slatepack_secret = proofaddress::payment_proof_address_dalek_secret(&keychain, None)?;
 		let slatepack_pk = DalekPublicKey::from(&slatepack_secret);
-		let (height, _, _) = w.w2n_client().get_chain_tip()?;
-		(
-			slatepack_secret,
-			slatepack_pk,
-			height,
-			keychain.secp().clone(),
-		)
+		(slatepack_secret, slatepack_pk, keychain.secp().clone())
 	};
 
 	let slate_pkg = match &args.input_file {
-		Some(file_name) => PathToSlateGetter::build_form_path(file_name.into()).get_tx(
-			Some(&slatepack_secret),
-			height,
-			&secp,
-		)?,
+		Some(file_name) => PathToSlateGetter::build_form_path(file_name.into())
+			.get_tx(Some(&slatepack_secret), &secp)?,
 		None => match &args.input_slatepack_message {
-			Some(message) => PathToSlateGetter::build_form_str(message.clone()).get_tx(
-				Some(&slatepack_secret),
-				height,
-				&secp,
-			)?,
+			Some(message) => PathToSlateGetter::build_form_str(message.clone())
+				.get_tx(Some(&slatepack_secret), &secp)?,
 			None => {
 				return Err(Error::ArgumentError(
 					"Please specify 'file' or 'content' argument".to_string(),
@@ -1605,7 +1619,7 @@ where
 					estimate_only: Some(true),
 					..Default::default()
 				};
-				let slate = api.init_send_tx(m, &init_args, 1)?;
+				let slate = api.init_send_tx(m, &None, &init_args, 1)?;
 				strategies.push((strategy, slate.amount, slate.fee));
 			}
 			display::estimate(slate.amount, strategies, dark_scheme);
@@ -1629,7 +1643,10 @@ where
 					e
 				)));
 			}
-			let result = api.process_invoice_tx(m, &slate, &init_args);
+
+			let tx_session = Some(RefCell::new(TxSession::new()));
+
+			let result = api.process_invoice_tx(m, &tx_session, &slate, &init_args);
 			let slate = match result {
 				Ok(s) => {
 					info!(
@@ -1661,7 +1678,7 @@ where
 						slatepack_format,
 					)
 					.put_tx(&slate, Some(&slatepack_secret), false, &secp)?;
-					api.tx_lock_outputs(m, &slate, Some(String::from("file")), 1)?;
+					api.tx_lock_outputs(m, &tx_session, &slate, Some(String::from("file")), 1)?;
 
 					if slatepack_format {
 						show_slatepack(
@@ -1696,14 +1713,21 @@ where
 						&slatepack_secret,
 						sender_pk,
 						sender.check_other_wallet_version(&args.dest, true)?,
-						height,
 						&secp,
 					)?;
-					api.tx_lock_outputs(m, &slate, Some(args.dest.clone()), 1)?;
+					api.tx_lock_outputs(m, &tx_session, &slate, Some(args.dest.clone()), 1)?;
 
 					let result = api.post_tx(m, slate.tx_or_err()?, true);
 					match result {
 						Ok(_) => {
+							{
+								wallet_lock!(api.wallet_inst, w);
+								tx_session
+									.unwrap()
+									.borrow_mut()
+									.save_tx_data(&mut **w, m, &slate.id)?;
+							}
+
 							let msg = format!(
 								"Invoice slate [{}] finalized and posted successfully",
 								slate.id.to_string()
@@ -1828,6 +1852,12 @@ where
 		let first_tx = args
 			.count
 			.map_or(0, |c| txs.len().saturating_sub(c as usize));
+
+		let data_file_dir = {
+			wallet_lock!(api.wallet_inst.clone(), w);
+			w.get_data_file_dir().to_string()
+		};
+
 		display::txs(
 			&g_args.account,
 			res.height,
@@ -1836,7 +1866,12 @@ where
 			include_status,
 			dark_scheme,
 			true, // mwc-wallet alwways show the full info because it is advanced tool
-			|tx: &TxLogEntry| tx.payment_proof.is_some(), // it is how mwc-wallet address proofs feature
+			|tx: &TxLogEntry| match &tx.tx_slate_id {
+				Some(slate_id) => {
+					TxProof::get_stored_tx_proof(&data_file_dir, &slate_id.to_string()).is_ok()
+				}
+				None => false,
+			},
 		)?;
 
 		// if given a particular transaction id or uuid, also get and display associated
@@ -1869,6 +1904,7 @@ where
 			// should only be one here, but just in case
 			for tx in txs {
 				display::tx_messages(&tx, dark_scheme, &secp)?;
+				#[cfg(feature = "grin_proof")]
 				display::payment_proof(&tx)?;
 			}
 		}
@@ -1909,13 +1945,12 @@ where
 	}
 
 	controller::owner_single_use(None, keychain_mask, Some(owner_api), |api, m| {
-		let (slatepack_secret, height, secp) = {
+		let (slatepack_secret, secp) = {
 			wallet_lock!(api.wallet_inst, w);
 			let keychain = w.keychain(keychain_mask)?;
 			let slatepack_secret =
 				proofaddress::payment_proof_address_dalek_secret(&keychain, None)?;
-			let (height, _, _) = w.w2n_client().get_chain_tip()?;
-			(slatepack_secret, height, keychain.secp().clone())
+			(slatepack_secret, keychain.secp().clone())
 		};
 
 		let tx = match serde_json::from_str::<TransactionV3>(&content) {
@@ -1928,11 +1963,8 @@ where
 					}
 					Err(_) => {
 						// Let's try decode as a slate
-						let slate_pkg = PathToSlateGetter::build_form_str(content).get_tx(
-							Some(&slatepack_secret),
-							height,
-							&secp,
-						)?;
+						let slate_pkg = PathToSlateGetter::build_form_str(content)
+							.get_tx(Some(&slatepack_secret), &secp)?;
 						let (slate, _, _, content, _slatepack_format) = slate_pkg.to_slate()?;
 						if content != SlatePurpose::FullSlate {
 							return Err(Error::LibWallet(format!(
@@ -2254,10 +2286,8 @@ where
 	};
 
 	match mwc_wallet_libwallet::proof::tx_proof::verify_tx_proof_wrapper(&tx_pf, &secp) {
-		Ok((sender, receiver, amount, outputs, kernel)) => {
-			mwc_wallet_libwallet::proof::tx_proof::proof_ok(
-				sender, receiver, amount, outputs, kernel,
-			);
+		Ok(proof_result) => {
+			mwc_wallet_libwallet::proof::tx_proof::proof_ok(&proof_result);
 			Ok(())
 		}
 		Err(e) => {

@@ -13,6 +13,7 @@
 // limitations under the License.
 
 //! tests differing accounts in the same wallet
+use crate::mwc_wallet_util::mwc_util::ToHex;
 #[macro_use]
 extern crate log;
 extern crate mwc_wallet_controller as wallet;
@@ -114,7 +115,7 @@ fn payment_proofs_test_impl(test_dir: &str) -> Result<(), wallet::Error> {
 			payment_proof_recipient_address: Some(address.clone()),
 			..Default::default()
 		};
-		let slate_i = sender_api.init_send_tx(m, &args, 1)?;
+		let slate_i = sender_api.init_send_tx(m, &None, &args, 1)?;
 
 		assert_eq!(
 			slate_i
@@ -139,14 +140,46 @@ fn payment_proofs_test_impl(test_dir: &str) -> Result<(), wallet::Error> {
 		assert_eq!(0, slate_i.get_lock_height());
 
 		slate = client1.send_tx_slate_direct("wallet2", &slate_i)?;
-		sender_api.tx_lock_outputs(m, &slate, None, 0)?;
+		sender_api.tx_lock_outputs(m, &None, &slate, None, 0)?;
 
-		// Ensure what's stored in TX log for payment proof is correct
-		let (_, txs) = sender_api.retrieve_txs(m, true, None, Some(slate.id), None, None)?;
-		assert!(txs[0].payment_proof.is_some());
-		let pp = txs[0].clone().payment_proof.unwrap();
+		#[cfg(feature = "grin_proof")]
+		{
+			// Ensure what's stored in TX log for payment proof is correct
+			let (_, txs) = sender_api.retrieve_txs(m, true, None, Some(slate.id), None, None)?;
+
+			assert!(txs[0].payment_proof.is_some());
+			let pp = txs[0].clone().payment_proof.unwrap();
+			assert_eq!(
+				pp.receiver_address.public_key,
+				slate
+					.payment_proof
+					.as_ref()
+					.unwrap()
+					.receiver_address
+					.public_key
+			);
+			assert!(pp.receiver_signature.is_some());
+			assert_eq!(pp.sender_address_path, 0);
+			assert_eq!(pp.sender_signature, None);
+
+			// check we should get an error at this point since proof is not complete
+			let pp = sender_api.retrieve_payment_proof(m, true, None, Some(slate.id));
+			assert!(pp.is_err());
+		}
+
+		slate = sender_api.finalize_tx(m, &None, &slate)?;
+		sender_api.post_tx(m, slate.tx_or_err()?, true)?;
+		Ok(())
+	})?;
+
+	wallet::controller::owner_single_use(Some(wallet1.clone()), mask1, None, |sender_api, _m| {
+		let tx_proof = sender_api
+			.get_stored_tx_proof(None, None, Some(slate.id))
+			.unwrap();
+		let proof_verify = sender_api.verify_tx_proof(&tx_proof).unwrap();
+
 		assert_eq!(
-			pp.receiver_address.public_key,
+			tx_proof.address.public_key,
 			slate
 				.payment_proof
 				.as_ref()
@@ -154,16 +187,52 @@ fn payment_proofs_test_impl(test_dir: &str) -> Result<(), wallet::Error> {
 				.receiver_address
 				.public_key
 		);
-		assert!(pp.receiver_signature.is_some());
-		assert_eq!(pp.sender_address_path, 0);
-		assert_eq!(pp.sender_signature, None);
+		assert_eq!(tx_proof.amount, slate.amount);
 
-		// check we should get an error at this point since proof is not complete
-		let pp = sender_api.retrieve_payment_proof(m, true, None, Some(slate.id));
-		assert!(pp.is_err());
+		assert_eq!(proof_verify.amount, slate.amount);
+		assert_eq!(
+			proof_verify.sender_address,
+			slate
+				.payment_proof
+				.as_ref()
+				.unwrap()
+				.sender_address
+				.public_key
+		);
+		assert_eq!(
+			proof_verify.reciever_address,
+			slate
+				.payment_proof
+				.as_ref()
+				.unwrap()
+				.receiver_address
+				.public_key
+		);
 
-		slate = sender_api.finalize_tx(m, &slate)?;
-		sender_api.post_tx(m, slate.tx_or_err()?, true)?;
+		assert_eq!(
+			proof_verify.outputs.len(),
+			slate.tx.as_ref().unwrap().body.outputs.len() - 1
+		);
+		let sz = proof_verify.outputs.len();
+		for i in 0..sz {
+			let mut found = false;
+			for j in 0..sz + 1 {
+				if proof_verify.outputs[i]
+					== slate.tx.as_ref().unwrap().body.outputs[j]
+						.identifier
+						.commit
+						.to_hex()
+				{
+					found = true;
+					break;
+				}
+			}
+			assert!(found);
+		}
+		assert_eq!(
+			proof_verify.kernel,
+			slate.tx.as_ref().unwrap().body.kernels[0].excess.to_hex()
+		);
 		Ok(())
 	})?;
 
@@ -176,6 +245,7 @@ fn payment_proofs_test_impl(test_dir: &str) -> Result<(), wallet::Error> {
 		tx_pool.lock().deref_mut(),
 	);
 
+	#[cfg(feature = "grin_proof")]
 	wallet::controller::owner_single_use(Some(wallet1.clone()), mask1, None, |sender_api, m| {
 		// Check payment proof here
 		let mut pp = sender_api.retrieve_payment_proof(m, true, None, Some(slate.id))?;
@@ -189,6 +259,24 @@ fn payment_proofs_test_impl(test_dir: &str) -> Result<(), wallet::Error> {
 		// Modify values, should not be good
 		pp.amount = 20;
 		let res = sender_api.verify_payment_proof(m, &pp);
+		assert!(res.is_err());
+		Ok(())
+	})?;
+
+	wallet::controller::owner_single_use(Some(wallet1.clone()), mask1, None, |sender_api, _m| {
+		// Check payment proof here
+		let mut tx_proof = sender_api
+			.get_stored_tx_proof(None, None, Some(slate.id))
+			.unwrap();
+
+		println!("{:?}", tx_proof);
+
+		// verify, should be good
+		let _proof_verify = sender_api.verify_tx_proof(&tx_proof).unwrap();
+
+		// Modify values, should not be good
+		tx_proof.amount = 20;
+		let res = sender_api.verify_tx_proof(&tx_proof);
 		assert!(res.is_err());
 		Ok(())
 	})?;

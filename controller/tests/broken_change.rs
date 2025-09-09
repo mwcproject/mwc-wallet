@@ -112,10 +112,10 @@ fn broken_change_test_impl(
 				selection_strategy_is_use_all: false,
 				..Default::default()
 			};
-			slate = api.init_send_tx(m, &args, 1)?;
+			slate = api.init_send_tx(m, &None, &args, 1)?;
 			slate = client1.send_tx_slate_direct("wallet2", &slate)?;
-			api.tx_lock_outputs(m, &slate, None, 0)?;
-			slate = api.finalize_tx(m, &slate)?;
+			api.tx_lock_outputs(m, &None, &slate, None, 0)?;
+			slate = api.finalize_tx(m, &None, &slate)?;
 			assert!(slate.tx.clone().unwrap().body.inputs.len() == inputs_num);
 			assert!(slate.tx.clone().unwrap().body.outputs.len() == expected_outputs);
 			api.post_tx(m, slate.tx_or_err()?, false)?;
@@ -129,7 +129,7 @@ fn broken_change_test_impl(
 				amount: reward * inputs_num as u64 - fee - put_into_change,
 				..Default::default()
 			};
-			slate = api.issue_invoice_tx(m, &args)?;
+			slate = api.issue_invoice_tx(m, &None, &args)?;
 			Ok(())
 		})?;
 
@@ -144,8 +144,8 @@ fn broken_change_test_impl(
 				selection_strategy_is_use_all: false,
 				..Default::default()
 			};
-			slate = api.process_invoice_tx(m, &slate, &args)?;
-			api.tx_lock_outputs(m, &slate, None, 1)?;
+			slate = api.process_invoice_tx(m, &None, &slate, &args)?;
+			api.tx_lock_outputs(m, &None, &slate, None, 1)?;
 			assert!(slate.tx.clone().unwrap().body.inputs.len() == inputs_num);
 			assert!(slate.tx.clone().unwrap().body.outputs.len() == expected_outputs);
 			Ok(())
@@ -179,5 +179,5 @@ fn broken_change() {
 	run_broken_change_test("test_output/broken_change3", 7, 2, true);
 	run_broken_change_test("test_output/broken_change4", 100, 2, false);
 	run_broken_change_test("test_output/broken_change5", 500_000_000, 6, true); // 0.5 MWC for 1 outputs is good
-	run_broken_change_test("test_output/broken_change6", 499_999_999, 2, false); // 0.4999999 MWC for 5 outputs is below the threshold, expected to use 1 output instead of 5.
+	run_broken_change_test("test_output/broken_change6", 499_999_999, 5, false); // 0.4999999 MWC for 5 outputs is below the threshold, expected to use 4 output instead of 5.
 }

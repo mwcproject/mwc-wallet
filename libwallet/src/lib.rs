@@ -85,7 +85,7 @@ pub use api_impl::owner_swap;
 pub use api_impl::owner_updater::StatusMessage;
 pub use api_impl::types::{
 	Amount, BlockFees, BuiltOutput, InitTxArgs, InitTxSendArgs, IssueInvoiceTxArgs,
-	NodeHeightResult, OutputCommitMapping, OwnershipProof, OwnershipProofValidation, PaymentProof,
+	NodeHeightResult, OutputCommitMapping, OwnershipProof, OwnershipProofValidation,
 	PubKeySignature, ReplayMitigationConfig, RetrieveTxQueryArgs, RetrieveTxQuerySortField,
 	RetrieveTxQuerySortOrder, SendTXArgs, SwapStartArgs, VersionInfo,
 };
@@ -95,9 +95,14 @@ pub use proof::tx_proof::{proof_ok, verify_tx_proof_wrapper};
 pub use slate_versions::ser as dalek_ser;
 pub use types::{
 	AcctPathMapping, BlockIdentifier, CbData, Context, HeaderInfo, NodeClient, NodeVersionInfo,
-	OutputData, OutputStatus, ScannedBlockInfo, StoredProofInfo, TxLogEntry, TxLogEntryType,
-	ViewWallet, WalletBackend, WalletInfo, WalletInst, WalletLCProvider, WalletOutputBatch,
+	OutputData, OutputStatus, ScannedBlockInfo, TxLogEntry, TxLogEntryType, ViewWallet,
+	WalletBackend, WalletInfo, WalletInst, WalletLCProvider, WalletOutputBatch,
 };
+
+#[cfg(feature = "grin_proof")]
+pub use api_impl::types::PaymentProof;
+#[cfg(feature = "grin_proof")]
+pub use types::StoredProofInfo;
 
 pub use api_impl::foreign::{get_receive_account, set_receive_account};
 

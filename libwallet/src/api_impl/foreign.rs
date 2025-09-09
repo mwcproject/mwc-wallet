@@ -14,6 +14,7 @@
 // limitations under the License.
 
 //! Generic implementation of owner API functions
+
 use crate::api_impl::owner::check_ttl;
 use crate::api_impl::owner_swap;
 use crate::internal::selection;
@@ -27,6 +28,7 @@ use crate::proof::proofaddress;
 use crate::proof::proofaddress::ProofAddressType;
 use crate::proof::proofaddress::ProvableAddress;
 use crate::slate_versions::SlateVersion;
+use crate::types::TxSession;
 use crate::Context;
 use crate::{
 	BlockFees, CbData, Error, NodeClient, Slate, SlatePurpose, TxLogEntryType, VersionInfo,
@@ -34,6 +36,7 @@ use crate::{
 };
 use ed25519_dalek::PublicKey as DalekPublicKey;
 use mwc_wallet_util::OnionV3Address;
+use std::cell::RefCell;
 use std::sync::Arc;
 use std::sync::RwLock;
 use strum::IntoEnumIterator;
@@ -111,6 +114,7 @@ pub fn verify_slate_messages(slate: &Slate) -> Result<(), Error> {
 pub fn receive_tx<'a, T: ?Sized, C, K>(
 	w: &mut T,
 	keychain_mask: Option<&SecretKey>,
+	tx_session: &Option<RefCell<TxSession>>,
 	slate: &Slate,
 	address: Option<String>,
 	key_id_opt: Option<&str>,
@@ -215,6 +219,7 @@ where
 	let mut context = tx::add_output_to_slate(
 		&mut *w,
 		keychain_mask,
+		tx_session,
 		&mut ret_slate,
 		height,
 		Some(address_for_logging),
@@ -235,9 +240,9 @@ where
 		ret_slate.adjust_offset(&keychain, &mut context)?;
 	}
 
-	tx::update_message(&mut *w, keychain_mask, &ret_slate)?;
+	tx::update_message(&mut *w, keychain_mask, tx_session, &ret_slate)?;
 
-	let excess = ret_slate.calc_excess(keychain.secp(), Some(&keychain), height)?;
+	let excess = ret_slate.calc_excess(keychain.secp())?;
 
 	if let Some(ref mut p) = ret_slate.payment_proof {
 		if p.sender_address
@@ -269,6 +274,7 @@ where
 pub fn finalize_invoice_tx<'a, T: ?Sized, C, K>(
 	w: &mut T,
 	keychain_mask: Option<&SecretKey>,
+	tx_session: &Option<RefCell<TxSession>>,
 	slate: &Slate,
 	refresh_from_node: bool,
 	use_test_rng: bool,
@@ -281,9 +287,22 @@ where
 	let mut sl = slate.clone();
 	check_ttl(w, &sl, refresh_from_node)?;
 	// Participant id 0 for mwc713 compatibility
-	let context = w
-		.get_private_context(keychain_mask, sl.id.as_bytes(), 0)
-		.map_err(|_| Error::TransactionWasFinalizedOrCancelled(format!("{}", sl.id)))?;
+	let context = match tx_session {
+		Some(tx) => {
+			tx.borrow()
+				.get_context_participant()
+				.clone()
+				.ok_or(Error::TransactionWasFinalizedOrCancelled(format!(
+					"{}",
+					sl.id
+				)))?
+				.0
+		}
+		None => w
+			.get_private_context(keychain_mask, sl.id.as_bytes(), 0)
+			.map_err(|_| Error::TransactionWasFinalizedOrCancelled(format!("{}", sl.id)))?,
+	};
+
 	let mut slate_message = String::new();
 	for participant_data in &slate.participant_data {
 		if let Some(msg2) = &participant_data.message {
@@ -326,6 +345,7 @@ where
 		selection::repopulate_tx(
 			&mut *w,
 			keychain_mask,
+			tx_session,
 			&mut sl,
 			&temp_ctx,
 			false,
@@ -335,13 +355,25 @@ where
 
 	// Participant id 0 for mwc713 compatibility
 	tx::complete_tx(&mut *w, keychain_mask, &mut sl, 0, &context)?;
-	tx::update_stored_tx(&mut *w, keychain_mask, &context, &mut sl, true)?;
-	tx::update_message(&mut *w, keychain_mask, &sl)?;
-	{
-		let mut batch = w.batch(keychain_mask)?;
-		// Participant id 0 for mwc713 compatibility
-		batch.delete_private_context(sl.id.as_bytes(), 0)?;
-		batch.commit()?;
+	tx::update_stored_tx(
+		&mut *w,
+		keychain_mask,
+		tx_session,
+		#[cfg(feature = "grin_proof")]
+		&context,
+		&mut sl,
+		true,
+	)?;
+	tx::update_message(&mut *w, keychain_mask, tx_session, &sl)?;
+
+	match tx_session {
+		Some(tx) => tx.borrow_mut().clear_context_participant(),
+		None => {
+			let mut batch = w.batch(keychain_mask)?;
+			// Participant id 0 for mwc713 compatibility
+			batch.delete_private_context(sl.id.as_bytes(), 0)?;
+			batch.commit()?;
+		}
 	}
 
 	println!(
@@ -411,8 +443,7 @@ where
 		.map_err(|e| {
 			Error::SlatepackDecodeError(format!("Unable to build key to decrypt, {}", e))
 		})?;
-	let (current_height, _, _) = w.w2n_client().get_chain_tip()?;
-	let sp = encrypted_slate.into_slatepack(&sec_key, current_height, keychain.secp())?;
+	let sp = encrypted_slate.into_slatepack(&sec_key, keychain.secp())?;
 	let sender = sp.get_sender();
 	let recipient = sp.get_recipient();
 	let content = sp.get_content();

@@ -40,6 +40,7 @@ use blake2_rfc::blake2b::blake2b;
 use chrono::{Duration, Utc};
 use mwc_wallet_util::mwc_chain::Chain;
 use mwc_wallet_util::mwc_core::consensus::DAY_HEIGHT;
+use std::cell::RefCell;
 use std::cmp;
 use std::collections::{HashMap, HashSet};
 use std::sync::mpsc::Sender;
@@ -324,7 +325,7 @@ where
 			};
 
 			let output_info = ViewWalletOutputResult {
-				commit: commit.to_hex(),
+				commit: ToHex::to_hex(&commit),
 				value: info.value,
 				height: *height,
 				mmr_index: *mmr_index,
@@ -420,7 +421,7 @@ where
 	K: Keychain + 'a,
 {
 	let node_client = wallet.w2n_client().clone();
-	let commit = wallet.calc_commit_for_cache(keychain_mask, output.value, &output.key_id)?;
+	let commit = wallet.calc_commit(keychain_mask, output.value, &output.key_id)?;
 	let mut batch = wallet.batch(keychain_mask)?;
 
 	let parent_key_id = output.key_id.parent_path();
@@ -434,9 +435,7 @@ where
 	}
 
 	let log_id = {
-		if let Some(uuid) =
-			commit2transactionuuid.get(&commit.clone().unwrap_or("None".to_string()))
-		{
+		if let Some(uuid) = commit2transactionuuid.get(&ToHex::to_hex(&commit)) {
 			// Transaction already exist. using it...
 			transaction.get(uuid).unwrap().tx_log.id
 		} else {
@@ -465,7 +464,7 @@ where
 		key_id: output.key_id,
 		n_child: output.n_child,
 		mmr_index: Some(output.mmr_index),
-		commit: commit,
+		commit: Some(ToHex::to_hex(&commit)),
 		value: output.value,
 		status: OutputStatus::Unspent,
 		height: output.height,
@@ -1127,14 +1126,11 @@ where
 		//convert the commitment to string in self_spend list
 
 		for output in self_spend_candidate_list {
-			let commit = wallet
-				.calc_commit_for_cache(keychain_mask, output.value, &output.key_id)
-				.unwrap()
-				.unwrap();
+			let commit = wallet.calc_commit(keychain_mask, output.value, &output.key_id)?;
 			self_spend_candidate_light_list.push(OutputResultLight {
 				key_id: output.key_id,
 				value: output.value.clone(),
-				commit: commit,
+				commit: ToHex::to_hex(&commit),
 			});
 		}
 	}
@@ -2410,10 +2406,13 @@ where
 		..Default::default()
 	};
 
+	let tx_session_send = Some(RefCell::new(TxSession::new()));
+	let tx_session_receive = Some(RefCell::new(TxSession::new()));
+
 	let mut slate;
 	{
 		//send
-		slate = owner::init_send_tx(wallet, keychain_mask, &args, false, 1)?;
+		slate = owner::init_send_tx(wallet, keychain_mask, &tx_session_send, &args, false, 1)?;
 		//receiver
 		let mut dest_account_name: Option<String> = None;
 		let address_string;
@@ -2424,6 +2423,7 @@ where
 		slate = foreign::receive_tx(
 			wallet,
 			keychain_mask,
+			&tx_session_receive,
 			&slate,
 			address.clone(),
 			None,
@@ -2434,10 +2434,25 @@ where
 			false,
 		)?
 		.0;
-		owner::tx_lock_outputs(wallet, keychain_mask, &slate, address, 0, false)?;
-		slate = owner::finalize_tx(wallet, keychain_mask, &slate, false, false)
-			.unwrap()
-			.0;
+		owner::tx_lock_outputs(
+			wallet,
+			keychain_mask,
+			&tx_session_send,
+			&slate,
+			address,
+			0,
+			false,
+		)?;
+		slate = owner::finalize_tx(
+			wallet,
+			keychain_mask,
+			&tx_session_send,
+			&slate,
+			false,
+			false,
+			false,
+		)?
+		.0;
 	}
 	let client = {
 		// Test keychain mask, to keep API consistent
@@ -2445,5 +2460,28 @@ where
 		wallet.w2n_client().clone()
 	};
 	owner::post_tx(&client, slate.tx_or_err()?, false)?;
+
+	debug_assert!(tx_session_send
+		.as_ref()
+		.unwrap()
+		.borrow()
+		.get_context_participant()
+		.is_none());
+	debug_assert!(tx_session_receive
+		.as_ref()
+		.unwrap()
+		.borrow()
+		.get_context_participant()
+		.is_none());
+
+	tx_session_send
+		.unwrap()
+		.borrow_mut()
+		.save_tx_data(wallet, keychain_mask, &slate.id)?;
+	tx_session_receive
+		.unwrap()
+		.borrow_mut()
+		.save_tx_data(wallet, keychain_mask, &slate.id)?;
+
 	Ok(())
 }

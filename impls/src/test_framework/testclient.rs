@@ -38,7 +38,9 @@ use crate::util::secp::key::SecretKey;
 use crate::util::secp::pedersen;
 use crate::util::secp::pedersen::Commitment;
 use crate::util::{Mutex, ToHex};
+use mwc_wallet_libwallet::types::TxSession;
 use serde_json;
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender};
@@ -224,9 +226,11 @@ where
 			let w = w_lock.lc_provider()?.wallet_inst()?;
 			let mask = wallet.2.clone();
 			// receive tx
-			match foreign::receive_tx(
+			let tx_session = Some(RefCell::new(TxSession::new()));
+			let slate = match foreign::receive_tx(
 				&mut **w,
 				(&mask).as_ref(),
+				&tx_session,
 				&slate.to_slate(false)?,
 				Some(String::from(m.dest.clone())),
 				None,
@@ -245,7 +249,18 @@ where
 					})
 				}
 				Ok((s, _context)) => s,
-			}
+			};
+			debug_assert!(tx_session
+				.as_ref()
+				.unwrap()
+				.borrow()
+				.get_context_participant()
+				.is_none());
+			tx_session
+				.unwrap()
+				.borrow_mut()
+				.save_tx_data(&mut **w, (&mask).as_ref(), &slate.id)?;
+			slate
 		};
 
 		Ok(WalletProxyMessage {

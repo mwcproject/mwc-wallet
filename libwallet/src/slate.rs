@@ -51,7 +51,6 @@ use crate::slate_versions::v3::{
 
 // use crate::slate_versions::{CURRENT_SLATE_VERSION, MWC_BLOCK_HEADER_VERSION};
 use crate::mwc_core::core::{Inputs, NRDRelativeHeight, OutputIdentifier};
-use crate::proof::proofaddress;
 use crate::proof::proofaddress::ProvableAddress;
 use crate::types::CbData;
 use crate::{SlateVersion, Slatepacker, CURRENT_SLATE_VERSION};
@@ -64,15 +63,9 @@ use rand::thread_rng;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct PaymentInfo {
-	#[serde(
-		serialize_with = "proofaddress::as_string",
-		deserialize_with = "proofaddress::proof_address_from_string"
-	)]
+	#[serde(serialize_with = "ProvableAddress::serialize_as_string")]
 	pub sender_address: ProvableAddress,
-	#[serde(
-		serialize_with = "proofaddress::as_string",
-		deserialize_with = "proofaddress::proof_address_from_string"
-	)]
+	#[serde(serialize_with = "ProvableAddress::serialize_as_string")]
 	pub receiver_address: ProvableAddress,
 	pub receiver_signature: Option<String>,
 }
@@ -388,10 +381,9 @@ impl Slate {
 	pub fn deserialize_upgrade_slatepack(
 		slate_str: &str,
 		dec_key: &DalekSecretKey,
-		height: u64,
 		secp: &Secp256k1,
 	) -> Result<Slatepacker, Error> {
-		let sp = Slatepacker::decrypt_slatepack(slate_str.as_bytes(), dec_key, height, secp)?;
+		let sp = Slatepacker::decrypt_slatepack(slate_str.as_bytes(), dec_key, secp)?;
 		Ok(sp)
 	}
 
@@ -467,63 +459,6 @@ impl Slate {
 			kernel_features: 0,
 		};
 		slate
-	}
-
-	/// Compare two slates for send: sended and responded. Just want to check if sender didn't mess with slate
-	pub fn compare_slates_send(send_slate: &Self, respond_slate: &Self) -> Result<(), Error> {
-		if send_slate.id != respond_slate.id {
-			return Err(Error::SlateValidation("uuid mismatch".to_string()));
-		}
-		if !send_slate.compact_slate {
-			if send_slate.amount != respond_slate.amount {
-				return Err(Error::SlateValidation("amount mismatch".to_string()));
-			}
-			if send_slate.fee != respond_slate.fee {
-				return Err(Error::SlateValidation("fee mismatch".to_string()));
-			}
-			// Checking transaction...
-			// Inputs must match exactly
-			if send_slate.tx_or_err()?.body.inputs != respond_slate.tx_or_err()?.body.inputs {
-				return Err(Error::SlateValidation("inputs mismatch".to_string()));
-			}
-
-			// Checking if participant data match each other
-			for pat_data in &send_slate.participant_data {
-				if !respond_slate.participant_data.contains(&pat_data) {
-					return Err(Error::SlateValidation(
-						"participant data mismatch".to_string(),
-					));
-				}
-			}
-
-			// Respond outputs must include send_slate's. Expected that some was added
-			for output in &send_slate.tx_or_err()?.body.outputs {
-				if !respond_slate.tx_or_err()?.body.outputs.contains(&output) {
-					return Err(Error::SlateValidation("outputs mismatch".to_string()));
-				}
-			}
-
-			// Kernels must match exactly
-			if send_slate.tx_or_err()?.body.kernels != respond_slate.tx_or_err()?.body.kernels {
-				return Err(Error::SlateValidation("kernels mismatch".to_string()));
-			}
-		}
-		if send_slate.kernel_features != respond_slate.kernel_features {
-			return Err(Error::SlateValidation(
-				"kernel_features mismatch".to_string(),
-			));
-		}
-		if send_slate.lock_height != respond_slate.lock_height {
-			return Err(Error::SlateValidation("lock_height mismatch".to_string()));
-		}
-		if send_slate.height != respond_slate.height {
-			return Err(Error::SlateValidation("height mismatch".to_string()));
-		}
-		if send_slate.ttl_cutoff_height != respond_slate.ttl_cutoff_height {
-			return Err(Error::SlateValidation("ttl_cutoff mismatch".to_string()));
-		}
-
-		Ok(())
 	}
 
 	/// Compare two slates for invoice: sended and responded. Just want to check if sender didn't mess with slate
@@ -732,12 +667,12 @@ impl Slate {
 
 	/// Creates the final signature, callable by either the sender or recipient
 	/// (after phase 3: sender confirmation)
-	pub fn finalize<K>(&mut self, keychain: &K, height: u64) -> Result<(), Error>
+	pub fn finalize<K>(&mut self, keychain: &K) -> Result<(), Error>
 	where
 		K: Keychain,
 	{
 		let final_sig = self.finalize_signature(keychain.secp())?;
-		self.finalize_transaction(keychain, &final_sig, height)
+		self.finalize_transaction(keychain, &final_sig)
 	}
 
 	/// Return the participant with the given id
@@ -952,17 +887,17 @@ impl Slate {
 	}
 
 	/// Checks the fees in the transaction in the given slate are valid
-	fn check_fees(&self, height: u64) -> Result<(), Error> {
+	fn check_fees(&self) -> Result<(), Error> {
 		let tx = self.tx_or_err()?;
 		// double check the fee amount included in the partial tx
 		// we don't necessarily want to just trust the sender
 		// we could just overwrite the fee here (but we won't) due to the sig
 		let fee = tx_fee(tx.inputs().len(), tx.outputs().len(), tx.kernels().len());
 
-		if fee > tx.fee(height) {
+		if fee > tx.fee() {
 			return Err(Error::Fee(format!(
 				"Fee Dispute Error: {}, {}",
-				tx.fee(height),
+				tx.fee(),
 				fee,
 			)));
 		}
@@ -1082,15 +1017,7 @@ impl Slate {
 	}
 
 	/// return the final excess
-	pub fn calc_excess<K>(
-		&self,
-		secp: &Secp256k1,
-		keychain: Option<&K>,
-		height: u64,
-	) -> Result<Commitment, Error>
-	where
-		K: Keychain,
-	{
+	pub fn calc_excess(&self, secp: &Secp256k1) -> Result<Commitment, Error> {
 		if self.compact_slate {
 			let sum = self.pub_blind_sum(secp)?;
 			Ok(Commitment::from_pubkey(secp, &sum)?)
@@ -1098,8 +1025,7 @@ impl Slate {
 			// Legacy method
 			let tx = self.tx_or_err()?.clone();
 			let kernel_offset = tx.offset.clone();
-			let overage = tx.fee(height) as i64;
-			let secp = keychain.unwrap().secp();
+			let overage = tx.fee() as i64;
 			let tx_excess = tx.sum_commitments(overage, secp)?;
 
 			// subtract the kernel_excess (built from kernel_offset)
@@ -1113,15 +1039,14 @@ impl Slate {
 		&mut self,
 		keychain: &K,
 		final_sig: &secp::Signature,
-		height: u64,
 	) -> Result<(), Error>
 	where
 		K: Keychain,
 	{
-		self.check_fees(height)?;
+		self.check_fees()?;
 		// build the final excess based on final tx and offset
 		let secp = keychain.secp();
-		let final_excess = self.calc_excess(secp, Some(keychain), height)?;
+		let final_excess = self.calc_excess(secp)?;
 
 		debug!("Final Tx excess: {:?}", final_excess);
 
@@ -1150,7 +1075,7 @@ impl Slate {
 
 		// confirm the overall transaction is valid (including the updated kernel)
 		// accounting for tx weight limits
-		final_tx.validate(Weighting::AsTransaction, height, secp)?;
+		final_tx.validate(Weighting::AsTransaction, secp)?;
 
 		// replace our slate tx with the new one with updated kernel
 		self.tx = Some(final_tx);

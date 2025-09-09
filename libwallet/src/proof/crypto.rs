@@ -61,13 +61,13 @@ pub fn sign_challenge(
 /// convert to a signature from string
 pub fn signature_from_string(sig_str: &str, secp: &Secp256k1) -> Result<Signature, Error> {
 	let signature_ser = util::from_hex(sig_str).map_err(|e| {
-		Error::TxProofGenericError(format!(
+		Error::TxProofVerify(format!(
 			"Unable to build signature from HEX {}, {}",
 			sig_str, e
 		))
 	})?;
 	let signature = Signature::from_der(secp, &signature_ser)
-		.map_err(|e| Error::TxProofGenericError(format!("Unable to build signature, {}", e)))?;
+		.map_err(|e| Error::TxProofVerify(format!("Unable to build signature, {}", e)))?;
 	Ok(signature)
 }
 
@@ -83,8 +83,9 @@ pub trait Hex<T> {
 
 impl Hex<PublicKey> for PublicKey {
 	fn from_hex(str: &str) -> Result<PublicKey, Error> {
-		let hex = util::from_hex(str)
-			.map_err(|e| Error::HexError(format!("Unable convert Publi Key HEX {}, {}", str, e)))?;
+		let hex = util::from_hex(str).map_err(|e| {
+			Error::HexError(format!("Unable convert Public Key HEX {}, {}", str, e))
+		})?;
 		let secp = Secp256k1::with_caps(ContextFlag::None);
 		PublicKey::from_slice(&secp, &hex).map_err(|e| {
 			Error::HexError(format!(

@@ -1,6 +1,6 @@
 [package]
 name = "mwc_wallet_api"
-version = "5.3.8"
+version = "5.3.9"
 authors = ["Mwc Developers <info@mwc.mw>"]
 description = "Mwc Wallet API"
 license = "Apache-2.0"
@@ -23,11 +23,14 @@ ed25519-dalek = "1.0.0-pre.4"
 easy-jsonrpc-mwc = { git = "https://github.com/mwcproject/easy-jsonrpc-mwc", version = "0.5.5", branch = "master" }
 lazy_static = "1.4"
 
-mwc_wallet_libwallet = { path = "../libwallet", version = "5.3.8" }
-mwc_wallet_config = { path = "../config", version = "5.3.8" }
-mwc_wallet_impls = { path = "../impls", version = "5.3.8" }
-mwc_wallet_util = { path = "../util", version = "5.3.8" }
+mwc_wallet_libwallet = { path = "../libwallet", version = "5.3.9" }
+mwc_wallet_config = { path = "../config", version = "5.3.9" }
+mwc_wallet_impls = { path = "../impls", version = "5.3.9" }
+mwc_wallet_util = { path = "../util", version = "5.3.9" }
 
 [dev-dependencies]
 serde_json = "1"
 tempfile = "3.1"
+
+[features]
+grin_proof = ["mwc_wallet_libwallet/grin_proof"]

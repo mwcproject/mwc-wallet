@@ -31,8 +31,10 @@ use crate::util::secp::key::SecretKey;
 use crate::util::secp::pedersen;
 use crate::util::Mutex;
 use chrono::Duration;
+use mwc_wallet_libwallet::types::TxSession;
 use mwc_wallet_libwallet::wallet_lock;
 use mwc_wallet_util::mwc_core::consensus::HeaderDifficultyInfo;
+use std::cell::RefCell;
 use std::collections::{HashSet, VecDeque};
 use std::sync::Arc;
 use std::thread;
@@ -183,7 +185,7 @@ where
 	K: keychain::Keychain + 'a,
 {
 	// build block fees
-	let fee_amt = txs.iter().map(|tx| tx.fee(prev.height + 1)).sum();
+	let fee_amt = txs.iter().map(|tx| tx.fee()).sum();
 	let block_fees = BlockFees {
 		fees: fee_amt,
 		key_id: None,
@@ -264,6 +266,7 @@ where
 	C: NodeClient + 'a,
 	K: keychain::Keychain + 'a,
 {
+	let tx_session = Some(RefCell::new(TxSession::new()));
 	let (slate, client) = {
 		wallet_lock!(wallet, w);
 		// Caller need to update the wallet first
@@ -280,23 +283,53 @@ where
 				outputs,
 				..Default::default()
 			};
-			let slate_i = owner::init_send_tx(&mut **w, keychain_mask, &args, test_mode, routputs)?;
+			let slate_i = owner::init_send_tx(
+				&mut **w,
+				keychain_mask,
+				&tx_session,
+				&args,
+				test_mode,
+				routputs,
+			)?;
 			let slate = client.send_tx_slate_direct(dest, &slate_i)?;
 			owner::tx_lock_outputs(
 				&mut **w,
 				keychain_mask,
+				&tx_session,
 				&slate,
 				Some(String::from(dest)),
 				0,
 				true,
 			)?;
-			let (slate, _) = owner::finalize_tx(&mut **w, keychain_mask, &slate, false, true)?;
+			let (slate, _) = owner::finalize_tx(
+				&mut **w,
+				keychain_mask,
+				&tx_session,
+				&slate,
+				false,
+				true,
+				true,
+			)?;
 			slate
 		};
 		let client = { w.w2n_client().clone() };
 		(slate, client)
 	};
 	owner::post_tx(&client, slate.tx_or_err()?, false)?; // mines a block
+
+	{
+		debug_assert!(tx_session
+			.as_ref()
+			.unwrap()
+			.borrow()
+			.get_context_participant()
+			.is_none());
+		wallet_lock!(wallet, w);
+		tx_session
+			.unwrap()
+			.borrow_mut()
+			.save_tx_data(&mut **w, keychain_mask, &slate.id)?;
+	}
 	Ok(())
 }
 

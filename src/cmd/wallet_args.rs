@@ -830,7 +830,6 @@ pub fn parse_process_invoice_args(
 	args: &ArgMatches,
 	prompt: bool,
 	slatepack_secret: &DalekSecretKey,
-	height: u64,
 	secp: &Secp256k1,
 ) -> Result<command::ProcessInvoiceArgs, ParseError> {
 	// TODO: display and prompt for confirmation of what we're doing
@@ -881,7 +880,7 @@ pub fn parse_process_invoice_args(
 
 	let slate = match &tx_file {
 		Some(file_name) => PathToSlateGetter::build_form_path(file_name.into())
-			.get_tx(Some(&slatepack_secret), height, &secp)
+			.get_tx(Some(&slatepack_secret), &secp)
 			.map_err(|e| {
 				ParseError::IOError(format!(
 					"Unable to read slate data from file {}, {}",
@@ -890,7 +889,7 @@ pub fn parse_process_invoice_args(
 			})?,
 		None => match &input_slatepack_message {
 			Some(message) => PathToSlateGetter::build_form_str(message.clone())
-				.get_tx(Some(&slatepack_secret), height, &secp)
+				.get_tx(Some(&slatepack_secret), &secp)
 				.map_err(|e| {
 					ParseError::IOError(format!(
 						"Unable to read slate data from the content, {}",
@@ -1817,21 +1816,19 @@ where
 			command::issue_invoice_tx(owner_api, km, a)
 		}
 		("pay", Some(args)) => {
-			let (slatepack_secret, height, secp) = {
+			let (slatepack_secret, secp) = {
 				let mut w_lock = owner_api.wallet_inst.lock();
 				let w = w_lock.lc_provider()?.wallet_inst()?;
 				let keychain = w.keychain(km)?;
 				let slatepack_secret =
 					proofaddress::payment_proof_address_dalek_secret(&keychain, None)?;
-				let (height, _, _) = w.w2n_client().get_chain_tip()?;
-				(slatepack_secret, height, keychain.secp().clone())
+				(slatepack_secret, keychain.secp().clone())
 			};
 
 			let a = arg_parse!(parse_process_invoice_args(
 				&args,
 				!test_mode,
 				&slatepack_secret,
-				height,
 				&secp,
 			));
 			command::process_invoice(
@@ -1876,7 +1873,7 @@ where
 			let a = arg_parse!(parse_post_args(&args));
 			command::post(owner_api, km, a)
 		}
-		// Submit is a synonim for 'post'. Since MWC intoduce it ealier, let's keep it
+		// Submit is a synonim for 'post'. Since MWC introduce it earlier, let's keep it
 		("submit", Some(args)) => {
 			let a = arg_parse!(parse_submit_args(&args));
 			command::submit(owner_api, km, a)

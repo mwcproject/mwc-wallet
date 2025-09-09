@@ -28,7 +28,6 @@ use crate::mwc_util::secp;
 use crate::mwc_util::secp::key::PublicKey;
 use crate::mwc_util::secp::pedersen::{Commitment, RangeProof};
 use crate::mwc_util::secp::Signature;
-use crate::proof::proofaddress;
 use crate::proof::proofaddress::ProvableAddress;
 use crate::slate::CompatKernelFeatures;
 use std::convert::TryFrom;
@@ -212,15 +211,9 @@ pub struct ParticipantDataV3 {
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct PaymentInfoV3 {
-	#[serde(
-		serialize_with = "proofaddress::as_string",
-		deserialize_with = "proofaddress::proof_address_from_string"
-	)]
+	#[serde(serialize_with = "ProvableAddress::serialize_as_string")]
 	pub sender_address: ProvableAddress,
-	#[serde(
-		serialize_with = "proofaddress::as_string",
-		deserialize_with = "proofaddress::proof_address_from_string"
-	)]
+	#[serde(serialize_with = "ProvableAddress::serialize_as_string")]
 	pub receiver_address: ProvableAddress,
 	pub receiver_signature: Option<String>,
 }

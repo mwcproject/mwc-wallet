@@ -21,6 +21,7 @@ use rand::{thread_rng, Rng};
 use super::proofaddress;
 use crate::error::Error;
 
+use rand::rngs::mock::StepRng;
 use ring::aead;
 use ring::pbkdf2;
 use std::num::NonZeroU32;
@@ -49,16 +50,26 @@ impl EncryptedMessage {
 		receiver_public_key: &PublicKey,
 		secret_key: &SecretKey,
 		secp: &Secp256k1,
+		use_test_rng: bool,
 	) -> Result<EncryptedMessage, Error> {
 		let mut common_secret = receiver_public_key.clone();
 		common_secret
 			.mul_assign(&secp, secret_key)
-			.map_err(|e| Error::TxProofGenericError(format!("Unable to encrypt message, {}", e)))?;
+			.map_err(|e| Error::PaymentProof(format!("Unable to encrypt message, {}", e)))?;
 		let common_secret_ser = common_secret.serialize_vec(secp, true);
 		let common_secret_slice = &common_secret_ser[1..33];
 
-		let salt: [u8; 8] = thread_rng().gen();
-		let nonce: [u8; 12] = thread_rng().gen();
+		let (salt, nonce) = if use_test_rng {
+			let mut test_rng = StepRng::new(1_234_567_891_u64, 1);
+			let salt: [u8; 8] = test_rng.gen();
+			let nonce: [u8; 12] = test_rng.gen();
+			(salt, nonce)
+		} else {
+			let salt: [u8; 8] = thread_rng().gen();
+			let nonce: [u8; 12] = thread_rng().gen();
+			(salt, nonce)
+		};
+
 		let mut key = [0; 32];
 		pbkdf2::derive(
 			ring::pbkdf2::PBKDF2_HMAC_SHA512,
@@ -69,7 +80,7 @@ impl EncryptedMessage {
 		);
 		let mut enc_bytes = message.as_bytes().to_vec();
 		let unbound_key = aead::UnboundKey::new(&aead::CHACHA20_POLY1305, &key)
-			.map_err(|e| Error::TxProofGenericError(format!("Unable to build a key, {}", e)))?;
+			.map_err(|e| Error::PaymentProof(format!("Unable to build a key, {}", e)))?;
 		let sealing_key: aead::LessSafeKey = aead::LessSafeKey::new(unbound_key);
 		let aad = aead::Aad::from(&[]);
 		sealing_key
@@ -78,7 +89,7 @@ impl EncryptedMessage {
 				aad,
 				&mut enc_bytes,
 			)
-			.map_err(|e| Error::TxProofGenericError(format!("Unable to encrypt, {}", e)))?;
+			.map_err(|e| Error::PaymentProof(format!("Unable to encrypt, {}", e)))?;
 
 		Ok(EncryptedMessage {
 			destination: destination.clone(),
@@ -96,7 +107,7 @@ impl EncryptedMessage {
 		secp: &Secp256k1,
 	) -> Result<[u8; 32], Error> {
 		let salt = util::from_hex(&self.salt).map_err(|e| {
-			Error::TxProofGenericError(format!(
+			Error::PaymentProof(format!(
 				"Unable to decode salt from HEX {}, {}",
 				self.salt, e
 			))
@@ -105,7 +116,7 @@ impl EncryptedMessage {
 		let mut common_secret = sender_public_key.clone();
 		common_secret
 			.mul_assign(&secp, secret_key)
-			.map_err(|e| Error::TxProofGenericError(format!("Key manipulation error, {}", e)))?;
+			.map_err(|e| Error::PaymentProof(format!("Key manipulation error, {}", e)))?;
 		let common_secret_ser = common_secret.serialize_vec(secp, true);
 		let common_secret_slice = &common_secret_ser[1..33];
 
@@ -123,13 +134,13 @@ impl EncryptedMessage {
 	/// Decrypt/verify message with a key
 	pub fn decrypt_with_key(&self, key: &[u8; 32]) -> Result<String, Error> {
 		let mut encrypted_message = util::from_hex(&self.encrypted_message).map_err(|e| {
-			Error::TxProofGenericError(format!(
+			Error::PaymentProof(format!(
 				"Unable decode message from HEX {}, {}",
 				self.encrypted_message, e
 			))
 		})?;
 		let nonce = util::from_hex(&self.nonce).map_err(|e| {
-			Error::TxProofGenericError(format!(
+			Error::PaymentProof(format!(
 				"Unable decode nonce from HEX {}, {}",
 				self.nonce, e
 			))
@@ -138,7 +149,7 @@ impl EncryptedMessage {
 		n.copy_from_slice(&nonce[0..12]);
 
 		let unbound_key = aead::UnboundKey::new(&aead::CHACHA20_POLY1305, key)
-			.map_err(|e| Error::TxProofGenericError(format!("Unable to build a key, {}", e)))?;
+			.map_err(|e| Error::PaymentProof(format!("Unable to build a key, {}", e)))?;
 		let opening_key: aead::LessSafeKey = aead::LessSafeKey::new(unbound_key);
 		let aad = aead::Aad::from(&[]);
 		let decrypted_data = opening_key
@@ -147,13 +158,10 @@ impl EncryptedMessage {
 				aad,
 				&mut encrypted_message,
 			)
-			.map_err(|e| {
-				Error::TxProofGenericError(format!("Unable to decrypt the message, {}", e))
-			})?;
+			.map_err(|e| Error::PaymentProof(format!("Unable to decrypt the message, {}", e)))?;
 
-		let res_msg = String::from_utf8(decrypted_data.to_vec()).map_err(|e| {
-			Error::TxProofGenericError(format!("Decrypted message is corrupted, {}", e))
-		})?;
+		let res_msg = String::from_utf8(decrypted_data.to_vec())
+			.map_err(|e| Error::PaymentProof(format!("Decrypted message is corrupted, {}", e)))?;
 		Ok(res_msg)
 	}
 }

@@ -672,6 +672,7 @@ pub fn tx_messages(
 }
 
 /// Display individual Payment Proof
+#[cfg(feature = "grin_proof")]
 pub fn payment_proof(tx: &TxLogEntry) -> Result<(), Error> {
 	println!();
 	println!(

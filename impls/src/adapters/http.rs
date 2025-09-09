@@ -457,7 +457,6 @@ impl SlateSender for HttpDataSender {
 		slatepack_secret: &DalekSecretKey,
 		recipient: Option<DalekPublicKey>,
 		other_wallet_version: Option<(SlateVersion, Option<String>)>,
-		height: u64,
 		secp: &Secp256k1,
 	) -> Result<Slate, Error> {
 		if other_wallet_version.is_none() {
@@ -646,13 +645,8 @@ impl SlateSender for HttpDataSender {
 					slate_str, e
 				))
 			})?;
-			let sp = Slate::deserialize_upgrade_slatepack(
-				&slatepack_str,
-				&slatepack_secret,
-				height,
-				secp,
-			)
-			.map_err(|e| Error::LibWallet(format!("Unable to process slate, {}", e)))?;
+			let sp = Slate::deserialize_upgrade_slatepack(&slatepack_str, &slatepack_secret, secp)
+				.map_err(|e| Error::LibWallet(format!("Unable to process slate, {}", e)))?;
 			sp.to_result_slate()
 		};
 

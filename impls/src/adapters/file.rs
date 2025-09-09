@@ -176,7 +176,6 @@ impl SlateGetter for PathToSlateGetter {
 	fn get_tx(
 		&self,
 		slatepack_secret: Option<&DalekSecretKey>,
-		height: u64,
 		secp: &Secp256k1,
 	) -> Result<SlateGetData, Error> {
 		let content = match &self.slate_str {
@@ -247,13 +246,11 @@ impl SlateGetter for PathToSlateGetter {
 					"slatepack_secret is none for get encrypted slatepack".into(),
 				));
 			}
-			let sp = Slate::deserialize_upgrade_slatepack(
-				&content,
-				slatepack_secret.unwrap(),
-				height,
-				secp,
-			)
-			.map_err(|e| Error::LibWallet(format!("Unable to deserialize slatepack, {}", e)))?;
+			let sp =
+				Slate::deserialize_upgrade_slatepack(&content, slatepack_secret.unwrap(), secp)
+					.map_err(|e| {
+						Error::LibWallet(format!("Unable to deserialize slatepack, {}", e))
+					})?;
 			Ok(SlateGetData::Slatepack(sp))
 		}
 	}
