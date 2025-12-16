@@ -33,7 +33,7 @@ use std::time::Duration;
 mod common;
 use common::{clean_output_dir, create_wallet_proxy, setup};
 use mwc_wallet_util::mwc_core::core::Transaction;
-use mwc_wallet_util::mwc_util::Mutex;
+use std::sync::Mutex;
 
 /// Test cutoff block times
 fn ttl_cutoff_test_impl(test_dir: &str) -> Result<(), wallet::Error> {
@@ -88,7 +88,7 @@ fn ttl_cutoff_test_impl(test_dir: &str) -> Result<(), wallet::Error> {
 		mask1,
 		bh as usize,
 		false,
-		tx_pool.lock().deref_mut(),
+		tx_pool.lock().expect("Mutex failure").deref_mut(),
 	);
 
 	let amount = 2_000_000_000; // mwc had 60_000_000_000
@@ -124,7 +124,7 @@ fn ttl_cutoff_test_impl(test_dir: &str) -> Result<(), wallet::Error> {
 		mask1,
 		2,
 		false,
-		tx_pool.lock().deref_mut(),
+		tx_pool.lock().expect("Mutex failure").deref_mut(),
 	);
 
 	wallet::controller::owner_single_use(Some(wallet1.clone()), mask1, None, |sender_api, m| {
@@ -180,7 +180,7 @@ fn ttl_cutoff_test_impl(test_dir: &str) -> Result<(), wallet::Error> {
 		mask1,
 		2,
 		false,
-		tx_pool.lock().deref_mut(),
+		tx_pool.lock().expect("Mutex failure").deref_mut(),
 	);
 
 	// Wallet 2 will need to have updated past the TTL

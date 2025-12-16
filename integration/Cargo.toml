@@ -11,7 +11,7 @@ edition = "2018"
 
 [dependencies]
 futures = "0.1"
-http = "0.1"
+http = "0.2.12"
 itertools = "0.7"
 rand = "0.5"
 serde = "1"

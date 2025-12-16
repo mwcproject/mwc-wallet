@@ -68,7 +68,8 @@ where
 		Some(tx) => {
 			let tip_height = wallet.w2n_client().get_chain_tip()?.0;
 			let archive_height =
-				Chain::height_2_archive_height(tip_height).saturating_sub(DAY_HEIGHT * 2);
+				Chain::height_2_archive_height(wallet.get_context_id(), tip_height)
+					.saturating_sub(DAY_HEIGHT * 2);
 			tx.output_height < archive_height
 		}
 		None => false,
@@ -568,7 +569,9 @@ where
 	K: Keychain + 'a,
 {
 	let current_height = wallet.last_confirmed_height()?;
-	println!("updater: the current_height is {}", current_height);
+	if mwc_wallet_util::mwc_util::is_console_output_enabled() {
+		println!("updater: the current_height is {}", current_height);
+	}
 	let outputs = wallet
 		.iter()
 		.filter(|out| out.root_key_id == *parent_key_id);
@@ -671,7 +674,8 @@ where
 	K: Keychain + 'a,
 {
 	let height = block_fees.height;
-	let lock_height = height + global::coinbase_maturity();
+	let contect_id = wallet.get_context_id();
+	let lock_height = height + global::coinbase_maturity(contect_id);
 	let key_id = block_fees.key_id();
 	let parent_key_id = wallet.parent_key_id();
 
@@ -685,7 +689,7 @@ where
 
 	{
 		// Now acquire the wallet lock and write the new output.
-		let amount = reward(block_fees.fees, height);
+		let amount = reward(contect_id, block_fees.fees, height);
 		let commit = wallet.calc_commit(keychain_mask, amount, &key_id)?;
 		let mut batch = wallet.batch(keychain_mask)?;
 		batch.save(OutputData {
@@ -717,6 +721,7 @@ where
 
 	let keychain = wallet.keychain(keychain_mask)?;
 	let (out, kern) = reward::output(
+		contect_id,
 		&keychain,
 		&ProofBuilder::new(&keychain),
 		&key_id,

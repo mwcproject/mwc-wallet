@@ -28,11 +28,11 @@ use std::ops::DerefMut;
 use self::libwallet::{InitTxArgs, Slate};
 use self::libwallet::{RetrieveTxQueryArgs, RetrieveTxQuerySortField};
 use impls::test_framework::{self, LocalWalletClient};
+use std::sync::Mutex;
 use std::sync::{atomic::Ordering, Arc};
 use std::thread;
 use std::time::Duration;
 use util::secp::key::SecretKey;
-use util::Mutex;
 
 use self::keychain::ExtKeychain;
 use self::libwallet::WalletInst;
@@ -266,7 +266,7 @@ fn build_chain_for_tx_filtering(
 	.unwrap();
 
 	// few values to keep things shorter
-	let reward = core::consensus::calc_mwc_block_reward(1);
+	let reward = core::consensus::calc_mwc_block_reward(0, 1);
 
 	// Start off with a few blocks
 	let _ = test_framework::award_blocks_to_wallet(
@@ -275,7 +275,7 @@ fn build_chain_for_tx_filtering(
 		mask1,
 		3,
 		false,
-		tx_pool.lock().deref_mut(),
+		tx_pool.lock().expect("Mutex failure").deref_mut(),
 	);
 
 	for i in 0..block_height {
@@ -302,7 +302,7 @@ fn build_chain_for_tx_filtering(
 				mask1,
 				1,
 				false,
-				tx_pool.lock().deref_mut(),
+				tx_pool.lock().expect("Mutex failure").deref_mut(),
 			);
 			continue;
 		}
@@ -331,7 +331,7 @@ fn build_chain_for_tx_filtering(
 					let slate_i = sender_api.init_send_tx(m, &None, &args, 1)?;
 					slate = client1.send_tx_slate_direct("wallet2", &slate_i)?;
 					sender_api.tx_lock_outputs(m, &None, &slate, None, 0)?;
-					slate = sender_api.finalize_tx(m, &None, &slate)?;
+					slate = sender_api.finalize_tx(m, &None, &slate, true)?;
 					Ok(())
 				},
 			)

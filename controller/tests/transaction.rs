@@ -34,7 +34,7 @@ use std::time::Duration;
 mod common;
 use common::{clean_output_dir, create_wallet_proxy, setup};
 use mwc_wallet_util::mwc_core::core::Transaction;
-use mwc_wallet_util::mwc_util::Mutex;
+use std::sync::Mutex;
 
 /// Exercises the Transaction API fully with a test NodeClient operating
 /// directly on a chain instance
@@ -82,7 +82,7 @@ fn basic_transaction_api(test_dir: &str) -> Result<(), wallet::Error> {
 
 	// few values to keep things shorter
 	let reward = core::consensus::MWC_FIRST_GROUP_REWARD;
-	let cm = global::coinbase_maturity();
+	let cm = global::coinbase_maturity(0);
 	// mine a few blocks
 	let _ = test_framework::award_blocks_to_wallet(
 		&chain,
@@ -90,7 +90,7 @@ fn basic_transaction_api(test_dir: &str) -> Result<(), wallet::Error> {
 		mask1,
 		10,
 		false,
-		tx_pool.lock().deref_mut(),
+		tx_pool.lock().expect("Mutex failure").deref_mut(),
 	);
 
 	// Check wallet 1 contents are as expected
@@ -136,7 +136,7 @@ fn basic_transaction_api(test_dir: &str) -> Result<(), wallet::Error> {
 
 		slate = client1.send_tx_slate_direct("wallet2", &slate_i)?;
 		sender_api.tx_lock_outputs(m, &None, &slate, None, 0)?;
-		slate = sender_api.finalize_tx(m, &None, &slate)?;
+		slate = sender_api.finalize_tx(m, &None, &slate, true)?;
 
 		// Check we have a single kernel and that it is a Plain kernel (no lock_height).
 		// fees for 7 inputs, 2 outputs, 1 kernel (weight 52)  (2 * 4 + 1 - 7)*1m = 2m = 2000000
@@ -162,6 +162,7 @@ fn basic_transaction_api(test_dir: &str) -> Result<(), wallet::Error> {
 		let (refreshed, txs) = api.retrieve_txs(m, true, None, None, None, None)?;
 		assert!(refreshed);
 		let fee = core::libtx::tx_fee(
+			0,
 			wallet1_info.last_confirmed_height as usize - cm as usize,
 			2,
 			1,
@@ -207,7 +208,7 @@ fn basic_transaction_api(test_dir: &str) -> Result<(), wallet::Error> {
 		mask1,
 		1,
 		false,
-		tx_pool.lock().deref_mut(),
+		tx_pool.lock().expect("Mutex failure").deref_mut(),
 	);
 
 	// Check wallet 1 contents are as expected
@@ -218,6 +219,7 @@ fn basic_transaction_api(test_dir: &str) -> Result<(), wallet::Error> {
 			wallet1_info.last_confirmed_height, wallet1_info
 		);
 		let fee = core::libtx::tx_fee(
+			0,
 			wallet1_info.last_confirmed_height as usize - 1 - cm as usize,
 			2,
 			1,
@@ -253,7 +255,7 @@ fn basic_transaction_api(test_dir: &str) -> Result<(), wallet::Error> {
 		mask1,
 		3,
 		false,
-		tx_pool.lock().deref_mut(),
+		tx_pool.lock().expect("Mutex failure").deref_mut(),
 	);
 
 	// refresh wallets and retrieve info/tests for each wallet after maturity
@@ -339,7 +341,7 @@ fn basic_transaction_api(test_dir: &str) -> Result<(), wallet::Error> {
 		let slate_i = sender_api.init_send_tx(m, &None, &args, 1)?;
 		slate = client1.send_tx_slate_direct("wallet2", &slate_i)?;
 		sender_api.tx_lock_outputs(m, &None, &slate, None, 0)?;
-		slate = sender_api.finalize_tx(m, &None, &slate)?;
+		slate = sender_api.finalize_tx(m, &None, &slate, true)?;
 		Ok(())
 	})?;
 
@@ -350,7 +352,7 @@ fn basic_transaction_api(test_dir: &str) -> Result<(), wallet::Error> {
 		mask1,
 		1,
 		false,
-		tx_pool.lock().deref_mut(),
+		tx_pool.lock().expect("Mutex failure").deref_mut(),
 	);
 
 	wallet::controller::owner_single_use(Some(wallet1.clone()), mask1, None, |sender_api, m| {
@@ -374,7 +376,7 @@ fn basic_transaction_api(test_dir: &str) -> Result<(), wallet::Error> {
 		mask1,
 		1,
 		false,
-		tx_pool.lock().deref_mut(),
+		tx_pool.lock().expect("Mutex failure").deref_mut(),
 	);
 
 	wallet::controller::owner_single_use(Some(wallet1.clone()), mask1, None, |sender_api, m| {
@@ -394,7 +396,7 @@ fn basic_transaction_api(test_dir: &str) -> Result<(), wallet::Error> {
 		mask1,
 		4,
 		false,
-		tx_pool.lock().deref_mut(),
+		tx_pool.lock().expect("Mutex failure").deref_mut(),
 	);
 
 	// check wallet2 has stored transaction
@@ -503,15 +505,15 @@ fn tx_rollback(test_dir: &str) -> Result<(), wallet::Error> {
 
 	// few values to keep things shorter
 	let reward = core::consensus::MWC_FIRST_GROUP_REWARD;
-	let cm = global::coinbase_maturity(); // assume all testing precedes soft fork height
-									   // mine a few blocks
+	let cm = global::coinbase_maturity(0); // assume all testing precedes soft fork height
+										// mine a few blocks
 	let _ = test_framework::award_blocks_to_wallet(
 		&chain,
 		wallet1.clone(),
 		mask1,
 		5,
 		false,
-		tx_pool.lock().deref_mut(),
+		tx_pool.lock().expect("Mutex failure").deref_mut(),
 	);
 
 	let amount = core::consensus::MWC_FIRST_GROUP_REWARD / 2;
@@ -531,7 +533,7 @@ fn tx_rollback(test_dir: &str) -> Result<(), wallet::Error> {
 		let slate_i = sender_api.init_send_tx(m, &None, &args, 1)?;
 		slate = client1.send_tx_slate_direct("wallet2", &slate_i)?;
 		sender_api.tx_lock_outputs(m, &None, &slate, None, 0)?;
-		slate = sender_api.finalize_tx(m, &None, &slate)?;
+		slate = sender_api.finalize_tx(m, &None, &slate, true)?;
 		Ok(())
 	})?;
 
@@ -597,7 +599,7 @@ fn tx_rollback(test_dir: &str) -> Result<(), wallet::Error> {
 		mask1,
 		5,
 		false,
-		tx_pool.lock().deref_mut(),
+		tx_pool.lock().expect("Mutex failure").deref_mut(),
 	);
 
 	// Wallet 1 decides to roll back instead

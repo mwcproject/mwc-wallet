@@ -18,9 +18,10 @@
 use chrono::prelude::*;
 use ed25519_dalek::PublicKey as DalekPublicKey;
 use std::cell::RefCell;
+use std::path::Path;
 use uuid::Uuid;
 
-use crate::config::{MQSConfig, TorConfig, WalletConfig};
+use crate::config::{MQSConfig, WalletConfig};
 use crate::core::core::OutputFeatures;
 use crate::core::core::Transaction;
 use crate::core::global;
@@ -44,19 +45,20 @@ use crate::libwallet::{
 
 use crate::util::logger::LoggingConfig;
 use crate::util::secp::key::SecretKey;
-use crate::util::{from_hex, Mutex, ZeroingString};
+use crate::util::{from_hex, ZeroingString};
 use libwallet::proof::tx_proof;
 use libwallet::proof::tx_proof::VerifyProofResult;
-use libwallet::types::TxSession;
+use libwallet::types::{TxSession, U64_DATA_IDX_ADDRESS_INDEX};
 use libwallet::{
 	wallet_lock, Context, OwnershipProof, OwnershipProofValidation, RetrieveTxQueryArgs,
 };
+use mwc_wallet_util::mwc_p2p::TorConfig;
 use mwc_wallet_util::mwc_util::secp::key::PublicKey;
 use mwc_wallet_util::mwc_util::secp::{ContextFlag, Secp256k1};
 use mwc_wallet_util::mwc_util::static_secp_instance;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, Sender};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::thread::JoinHandle;
 use std::time::Duration;
@@ -68,6 +70,7 @@ lazy_static! {
 	// That is we are introducing a simple flag for the send. Only one instance will be ready to go through
 	// send workflow with owner API. Ownser API ans command can act together, in worst case it will throw lock error
 	// Also Finalize need to use this lock as well, because if might use 'lock_later' that does the locking
+	// Note, keeping it as a global because we are not expecting activly multiple wallets run in parallel
 	pub static ref INIT_SEND_FINALIZE_TX_LOCK: Arc<Mutex<u32>> = Arc::new(Mutex::new(0));
 }
 
@@ -91,6 +94,7 @@ where
 	C: NodeClient + 'static,
 	K: Keychain + 'static,
 {
+	pub context_id: u32,
 	/// contain all methods to manage the wallet
 	pub wallet_inst: Arc<Mutex<Box<dyn WalletInst<'static, L, C, K>>>>,
 	/// Flag to normalize some output during testing. Can mostly be ignored.
@@ -101,6 +105,8 @@ where
 	pub shared_key: Arc<Mutex<Option<SecretKey>>>,
 	/// Update thread
 	updater: Arc<Mutex<owner_updater::Updater<'static, L, C, K>>>,
+	// Updater thread for tracking
+	updater_thread: Mutex<Option<JoinHandle<()>>>,
 	/// Stop state for update thread
 	pub updater_running: Arc<AtomicBool>,
 	/// Sender for update messages
@@ -130,10 +136,16 @@ where
 	/// mwc implement it. We are keeping it with smaller number of changes and
 	/// really hope to get a better solution with a next fix
 	fn drop(&mut self) {
+		self.updater_running.store(false, Ordering::Relaxed);
+		self.updater_log_running_state
+			.store(false, Ordering::Relaxed);
+
 		if let Some(thr_info) = self.updater_log_thread.take() {
-			self.updater_log_running_state
-				.store(false, Ordering::Relaxed);
 			let _ = thr_info.join();
+		}
+
+		if let Some(thr) = self.updater_thread.lock().expect("Mutex failure").take() {
+			let _ = thr.join();
 		}
 	}
 }
@@ -175,8 +187,8 @@ where
 	/// use keychain::ExtKeychain;
 	/// use tempfile::tempdir;
 	///
-	/// use std::sync::Arc;
-	/// use util::{Mutex, ZeroingString};
+	/// use std::sync::{Mutex,Arc};
+	/// use util::ZeroingString;
 	///
 	/// use api::Owner;
 	/// use config::WalletConfig;
@@ -197,16 +209,16 @@ where
 	///
 	/// // A NodeClient must first be created to handle communication between
 	/// // the wallet and the node.
-	/// let node_list = parse_node_address_string(wallet_config.check_node_api_http_addr.clone());
-	/// let node_client = HTTPNodeClient::new(node_list, None).unwrap();
+	/// let node_list = parse_node_address_string(wallet_config.check_node_api_http_addr.clone().unwrap_or("http://127.0.0.1:13413".into()));
+	/// let node_client = HTTPNodeClient::new(0, node_list, None).unwrap();
 	///
 	/// // impls::DefaultWalletImpl is provided for convenience in instantiating the wallet
 	/// // It contains the LMDBBackend, DefaultLCProvider (lifecycle) and ExtKeychain used
 	/// // by the reference wallet implementation.
 	/// // These traits can be replaced with alternative implementations if desired
 	///
-	/// let mut wallet = Box::new(DefaultWalletImpl::<'static, HTTPNodeClient>::new(node_client.clone()).unwrap())
-	///     as Box<WalletInst<'static, DefaultLCProvider<HTTPNodeClient, ExtKeychain>, HTTPNodeClient, ExtKeychain>>;
+	/// let mut wallet = Box::new(DefaultWalletImpl::<'static, HTTPNodeClient>::new(0, node_client.clone()))
+	///     as Box<dyn WalletInst<'static, DefaultLCProvider<HTTPNodeClient, ExtKeychain>, HTTPNodeClient, ExtKeychain>>;
 	///
 	/// // Wallet LifeCycle Provider provides all functions init wallet and work with seeds, etc...
 	/// let lc = wallet.lc_provider().unwrap();
@@ -222,12 +234,13 @@ where
 	/// // All wallet functions operate on an Arc::Mutex to allow multithreading where needed
 	/// let mut wallet = Arc::new(Mutex::new(wallet));
 	///
-	/// let api_owner = Owner::new(wallet.clone(), None, None);
+	/// let api_owner = Owner::new(0, wallet.clone(), None, None);
 	/// // .. perform wallet operations
 	///
 	/// ```
 
 	pub fn new(
+		context_id: u32,
 		wallet_inst: Arc<Mutex<Box<dyn WalletInst<'static, L, C, K>>>>,
 		custom_channel: Option<Sender<StatusMessage>>,
 		tor_config: Option<TorConfig>,
@@ -252,11 +265,13 @@ where
 		};
 
 		Owner {
+			context_id,
 			wallet_inst,
 			doctest_mode: false,
 			doctest_retain_tld: false,
 			shared_key: Arc::new(Mutex::new(None)),
 			updater,
+			updater_thread: Mutex::new(None),
 			updater_running,
 			status_tx: Mutex::new(Some(tx)),
 			updater_messages,
@@ -275,7 +290,7 @@ where
 	/// * Nothing
 
 	pub fn set_tor_config(&self, tor_config: Option<TorConfig>) {
-		let mut lock = self.tor_config.lock();
+		let mut lock = self.tor_config.lock().expect("Mutex failure");
 		*lock = tor_config;
 	}
 
@@ -301,7 +316,7 @@ where
 	/// ```
 	/// # mwc_wallet_api::doctest_helper_setup_doc_env!(wallet, wallet_config);
 	///
-	/// let api_owner = Owner::new(wallet.clone(), None, None);
+	/// let api_owner = Owner::new(0, wallet.clone(), None, None);
 	///
 	/// let result = api_owner.accounts(None);
 	///
@@ -351,7 +366,7 @@ where
 	/// ```
 	/// # mwc_wallet_api::doctest_helper_setup_doc_env!(wallet, wallet_config);
 	///
-	/// let api_owner = Owner::new(wallet.clone(), None, None);
+	/// let api_owner = Owner::new(0, wallet.clone(), None, None);
 	///
 	/// let result = api_owner.create_account_path(None, "account1");
 	///
@@ -397,7 +412,7 @@ where
 	/// ```
 	/// # mwc_wallet_api::doctest_helper_setup_doc_env!(wallet, wallet_config);
 	///
-	/// let api_owner = Owner::new(wallet.clone(), None, None);
+	/// let api_owner = Owner::new(0, wallet.clone(), None, None);
 	///
 	/// let result = api_owner.create_account_path(None, "account1");
 	///
@@ -452,7 +467,7 @@ where
 	/// ```
 	/// # mwc_wallet_api::doctest_helper_setup_doc_env!(wallet, wallet_config);
 	///
-	/// let api_owner = Owner::new(wallet.clone(), None, None);
+	/// let api_owner = Owner::new(0, wallet.clone(), None, None);
 	/// let show_spent = false;
 	/// let update_from_node = true;
 	/// let tx_id = None;
@@ -472,7 +487,7 @@ where
 		tx_id: Option<u32>,
 	) -> Result<(bool, Vec<OutputCommitMapping>), Error> {
 		let tx = {
-			let t = self.status_tx.lock();
+			let t = self.status_tx.lock().expect("Mutex failure");
 			t.clone()
 		};
 		let refresh_from_node = match self.updater_running.load(Ordering::Relaxed) {
@@ -523,7 +538,7 @@ where
 	/// ```
 	/// # mwc_wallet_api::doctest_helper_setup_doc_env!(wallet, wallet_config);
 	///
-	/// let api_owner = Owner::new(wallet.clone(), None, None);
+	/// let api_owner = Owner::new(0, wallet.clone(), None, None);
 	/// let update_from_node = true;
 	/// let tx_id = None;
 	/// let tx_slate_id = None;
@@ -546,7 +561,7 @@ where
 		show_last_four_days: Option<bool>,
 	) -> Result<(bool, Vec<TxLogEntry>), Error> {
 		let tx = {
-			let t = self.status_tx.lock();
+			let t = self.status_tx.lock().expect("Mutex failure");
 			t.clone()
 		};
 		let refresh_from_node = match self.updater_running.load(Ordering::Relaxed) {
@@ -604,7 +619,7 @@ where
 	/// ```
 	/// # mwc_wallet_api::doctest_helper_setup_doc_env!(wallet, wallet_config);
 	///
-	/// let mut api_owner = Owner::new(wallet.clone(), None, None);
+	/// let mut api_owner = Owner::new(0, wallet.clone(), None, None);
 	/// let update_from_node = true;
 	/// let minimum_confirmations=10;
 	///
@@ -623,7 +638,7 @@ where
 		minimum_confirmations: u64,
 	) -> Result<(bool, WalletInfo), Error> {
 		let tx = {
-			let t = self.status_tx.lock();
+			let t = self.status_tx.lock().expect("Mutex failure");
 			t.clone()
 		};
 		let refresh_from_node = match self.updater_running.load(Ordering::Relaxed) {
@@ -690,7 +705,7 @@ where
 	/// ```
 	/// # mwc_wallet_api::doctest_helper_setup_doc_env!(wallet, wallet_config);
 	///
-	/// let mut api_owner = Owner::new(wallet.clone(), None, None);
+	/// let mut api_owner = Owner::new(0, wallet.clone(), None, None);
 	/// // Attempt to create a transaction using the 'default' account
 	/// let args = InitTxArgs {
 	///     src_acct_name: None,
@@ -739,7 +754,7 @@ where
 			Some(sa) => {
 				if sa.post_tx && !sa.finalize {
 					return Err(Error::ClientCallback(
-						"Transcations can not be posted without being finalized!".to_owned(),
+						"Transaction can not be posted without being finalized!".to_owned(),
 					));
 				}
 			}
@@ -758,12 +773,22 @@ where
 		let sender_info = if let Some(sa) = &send_args {
 			match sa.method.as_ref() {
 				"http" | "mwcmqs" => {
-					let tor_config_lock = self.tor_config.lock();
-					let comm_adapter =
-						create_sender(&sa.method, &sa.dest, &sa.apisecret, tor_config_lock.clone())
-							.map_err(|e| {
-								Error::GenericError(format!("Unable to create a sender, {}", e))
-							})?;
+					let (base_path, context_id) = {
+						wallet_lock!(self.wallet_inst, w);
+						(w.get_data_file_dir().to_string(), w.get_context_id())
+					};
+					let tor_config_lock = self.tor_config.lock().expect("Mutex failure");
+					let comm_adapter = create_sender(
+						context_id,
+						&sa.method,
+						&sa.dest,
+						&sa.apisecret,
+						tor_config_lock.as_ref(),
+						Path::new(&base_path),
+					)
+					.map_err(|e| {
+						Error::GenericError(format!("Unable to create a sender, {}", e))
+					})?;
 
 					let other_wallet_version = comm_adapter
 						.check_other_wallet_version(&sa.dest, true)
@@ -787,7 +812,7 @@ where
 
 		// Using it as a global lock for the API
 		// Without usage it still works until the end of the block
-		let mut _send_lock = INIT_SEND_FINALIZE_TX_LOCK.lock();
+		let _send_lock = INIT_SEND_FINALIZE_TX_LOCK.lock().expect("Mutex failure");
 
 		let (mut slate, slatepack_secret, secp) = {
 			wallet_lock!(self.wallet_inst, w);
@@ -804,9 +829,18 @@ where
 				)?
 			};
 
+			let address_index: u32 = {
+				let mut batch = w.batch(keychain_mask)?;
+				let index = batch.load_u64(U64_DATA_IDX_ADDRESS_INDEX, 0u64)?;
+				index as u32
+			};
+
 			let keychain = w.keychain(keychain_mask)?;
-			let slatepack_secret =
-				proofaddress::payment_proof_address_dalek_secret(&keychain, None)?;
+			let slatepack_secret = proofaddress::payment_proof_address_dalek_secret(
+				w.get_context_id(),
+				&keychain,
+				address_index,
+			)?;
 
 			(slate, slatepack_secret, keychain.secp().clone())
 		};
@@ -881,10 +915,18 @@ where
 						}
 						false => slate,
 					};
-					println!(
-						"slate [{}] finalized successfully in owner_api",
-						slate.id.to_string()
-					);
+
+					if mwc_wallet_util::mwc_util::is_console_output_enabled() {
+						println!(
+							"slate [{}] finalized successfully in owner_api",
+							slate.id.to_string()
+						);
+					} else {
+						info!(
+							"slate [{}] finalized successfully in owner_api",
+							slate.id.to_string()
+						);
+					}
 
 					w.w2n_client().clone()
 				};
@@ -892,10 +934,17 @@ where
 				if sa.post_tx {
 					owner::post_tx(&w2n_client, slate.tx_or_err()?, sa.fluff)?;
 				}
-				println!(
-					"slate [{}] posted successfully in owner_api",
-					slate.id.to_string()
-				);
+				if mwc_wallet_util::mwc_util::is_console_output_enabled() {
+					println!(
+						"slate [{}] posted successfully in owner_api",
+						slate.id.to_string()
+					);
+				} else {
+					info!(
+						"slate [{}] posted successfully in owner_api",
+						slate.id.to_string()
+					);
+				}
 				Ok(slate)
 			}
 			None => Ok(slate),
@@ -926,7 +975,7 @@ where
 	/// ```
 	/// # mwc_wallet_api::doctest_helper_setup_doc_env!(wallet, wallet_config);
 	///
-	/// let mut api_owner = Owner::new(wallet.clone(), None, None);
+	/// let mut api_owner = Owner::new(0, wallet.clone(), None, None);
 	///
 	/// let args = IssueInvoiceTxArgs {
 	///     amount: 60_000_000_000,
@@ -947,7 +996,7 @@ where
 	) -> Result<Slate, Error> {
 		// Using it as a global lock for the API
 		// Without usage it still works until the end of the block
-		let mut _send_lock = INIT_SEND_FINALIZE_TX_LOCK.lock();
+		let mut _send_lock = INIT_SEND_FINALIZE_TX_LOCK.lock().expect("Mutex failure");
 
 		wallet_lock!(self.wallet_inst, w);
 		owner::issue_invoice_tx(
@@ -968,7 +1017,7 @@ where
 	) -> Result<(Slate, Context), Error> {
 		// Using it as a global lock for the API
 		// Without usage it still works until the end of the block
-		let mut _send_lock = INIT_SEND_FINALIZE_TX_LOCK.lock();
+		let mut _send_lock = INIT_SEND_FINALIZE_TX_LOCK.lock().expect("Mutex failure");
 
 		wallet_lock!(self.wallet_inst, w);
 		owner::generate_invoice_slate(&mut **w, keychain_mask, amount, tx_session)
@@ -1006,7 +1055,7 @@ where
 	/// ```
 	/// # mwc_wallet_api::doctest_helper_setup_doc_env!(wallet, wallet_config);
 	///
-	/// let mut api_owner = Owner::new(wallet.clone(), None, None);
+	/// let mut api_owner = Owner::new(0, wallet.clone(), None, None);
 	///
 	/// // . . .
 	/// // The slate has been recieved from the invoicer, somehow
@@ -1038,7 +1087,7 @@ where
 	) -> Result<Slate, Error> {
 		// Using it as a global lock for the API
 		// Without usage it still works until the end of the block
-		let mut _send_lock = INIT_SEND_FINALIZE_TX_LOCK.lock();
+		let mut _send_lock = INIT_SEND_FINALIZE_TX_LOCK.lock().expect("Mutex failure");
 
 		wallet_lock!(self.wallet_inst, w);
 
@@ -1093,7 +1142,7 @@ where
 	/// ```
 	/// # mwc_wallet_api::doctest_helper_setup_doc_env!(wallet, wallet_config);
 	///
-	/// let mut api_owner = Owner::new(wallet.clone(), None, None);
+	/// let mut api_owner = Owner::new(0, wallet.clone(), None, None);
 	/// let args = InitTxArgs {
 	///     src_acct_name: None,
 	///     amount: 2_000_000_000,
@@ -1170,7 +1219,7 @@ where
 	/// ```
 	/// # mwc_wallet_api::doctest_helper_setup_doc_env!(wallet, wallet_config);
 	///
-	/// let mut api_owner = Owner::new(wallet.clone(), None, None);
+	/// let mut api_owner = Owner::new(0, wallet.clone(), None, None);
 	/// let args = InitTxArgs {
 	///     src_acct_name: None,
 	///     amount: 2_000_000_000,
@@ -1196,7 +1245,7 @@ where
 	///		//
 	///		// Retrieve slate back from recipient
 	///		//
-	///		let res = api_owner.finalize_tx(None, &None, &slate);
+	///		let res = api_owner.finalize_tx(None, &None, &slate, true);
 	/// }
 	/// ```
 
@@ -1205,10 +1254,11 @@ where
 		keychain_mask: Option<&SecretKey>,
 		tx_session: &Option<RefCell<TxSession>>,
 		slate: &Slate,
+		do_proof: bool,
 	) -> Result<Slate, Error> {
 		// Using it as a global lock for the API
 		// Without usage it still works until the end of the block
-		let mut _send_lock = INIT_SEND_FINALIZE_TX_LOCK.lock();
+		let mut _send_lock = INIT_SEND_FINALIZE_TX_LOCK.lock().expect("Mutex failure");
 
 		wallet_lock!(self.wallet_inst, w);
 		let (slate_res, _context) = owner::finalize_tx(
@@ -1218,7 +1268,7 @@ where
 			slate,
 			true,
 			self.doctest_mode,
-			true,
+			do_proof,
 		)?;
 
 		Ok(slate_res)
@@ -1246,7 +1296,7 @@ where
 	/// ```
 	/// # mwc_wallet_api::doctest_helper_setup_doc_env!(wallet, wallet_config);
 	///
-	/// let mut api_owner = Owner::new(wallet.clone(), None, None);
+	/// let mut api_owner = Owner::new(0, wallet.clone(), None, None);
 	/// let args = InitTxArgs {
 	///     src_acct_name: None,
 	///     amount: 2_000_000_000,
@@ -1272,7 +1322,7 @@ where
 	///		//
 	///		// Retrieve slate back from recipient
 	///		//
-	///		let res = api_owner.finalize_tx(None, &None, &slate);
+	///		let res = api_owner.finalize_tx(None, &None, &slate, false);
 	///		let res = api_owner.post_tx(None, slate.tx_or_err().unwrap(), true);
 	/// }
 	/// ```
@@ -1319,7 +1369,7 @@ where
 	/// ```
 	/// # mwc_wallet_api::doctest_helper_setup_doc_env!(wallet, wallet_config);
 	///
-	/// let mut api_owner = Owner::new(wallet.clone(), None, None);
+	/// let mut api_owner = Owner::new(0, wallet.clone(), None, None);
 	/// let args = InitTxArgs {
 	///     src_acct_name: None,
 	///     amount: 2_000_000_000,
@@ -1356,7 +1406,7 @@ where
 		tx_slate_id: Option<Uuid>,
 	) -> Result<(), Error> {
 		let tx = {
-			let t = self.status_tx.lock();
+			let t = self.status_tx.lock().expect("Mutex failure");
 			t.clone()
 		};
 		owner::cancel_tx(
@@ -1387,7 +1437,7 @@ where
 	/// ```
 	/// # mwc_wallet_api::doctest_helper_setup_doc_env!(wallet, wallet_config);
 	///
-	/// let api_owner = Owner::new(wallet.clone(), None, None);
+	/// let api_owner = Owner::new(0, wallet.clone(), None, None);
 	/// let update_from_node = true;
 	/// let tx_id = None;
 	/// let tx_slate_id = None;
@@ -1442,7 +1492,7 @@ where
 	/// ```
 	/// # mwc_wallet_api::doctest_helper_setup_doc_env!(wallet, wallet_config);
 	///
-	/// let mut api_owner = Owner::new(wallet.clone(), None, None);
+	/// let mut api_owner = Owner::new(0, wallet.clone(), None, None);
 	/// let args = InitTxArgs {
 	///     src_acct_name: None,
 	///     amount: 2_000_000_000,
@@ -1501,7 +1551,7 @@ where
 	/// ```
 	/// # mwc_wallet_api::doctest_helper_setup_doc_env!(wallet, wallet_config);
 	///
-	/// let mut api_owner = Owner::new(wallet.clone(), None, None);
+	/// let mut api_owner = Owner::new(0, wallet.clone(), None, None);
 	/// let result = api_owner.scan(
 	///     None,
 	///     Some(20000),
@@ -1541,7 +1591,7 @@ where
 	/// ```
 	/// # mwc_wallet_api::doctest_helper_setup_doc_env!(wallet, wallet_config);
 	///
-	/// let mut api_owner = Owner::new(wallet.clone(), None, None);
+	/// let mut api_owner = Owner::new(0, wallet.clone(), None, None);
 	/// let result = api_owner.scan(
 	///     None,
 	///     Some(20000),
@@ -1560,7 +1610,7 @@ where
 		start_height: Option<u64>,
 	) -> Result<ViewWallet, Error> {
 		let tx = {
-			let t = self.status_tx.lock();
+			let t = self.status_tx.lock().expect("Mutex failure");
 			t.clone()
 		};
 		owner::scan_rewind_hash(self.wallet_inst.clone(), rewind_hash, start_height, &tx)
@@ -1605,7 +1655,7 @@ where
 	/// ```
 	/// # mwc_wallet_api::doctest_helper_setup_doc_env!(wallet, wallet_config);
 	///
-	/// let mut api_owner = Owner::new(wallet.clone(), None, None);
+	/// let mut api_owner = Owner::new(0, wallet.clone(), None, None);
 	/// let result = api_owner.scan(
 	///     None,
 	///     Some(20000),
@@ -1623,9 +1673,9 @@ where
 		keychain_mask: Option<&SecretKey>,
 		start_height: Option<u64>,
 		delete_unconfirmed: bool,
-	) -> Result<(), Error> {
+	) -> Result<u64, Error> {
 		let tx = {
-			let t = self.status_tx.lock();
+			let t = self.status_tx.lock().expect("Mutex failure");
 			t.clone()
 		};
 		owner::scan(
@@ -1641,7 +1691,7 @@ where
 	/// Dump wallet data (outputs,transactions) into the logs
 	pub fn dump_wallet_data(&self, file_name: Option<String>) -> Result<(), Error> {
 		let tx = {
-			let t = self.status_tx.lock();
+			let t = self.status_tx.lock().expect("Mutex failure");
 			t.clone()
 		};
 
@@ -1674,7 +1724,7 @@ where
 	/// ```
 	/// # mwc_wallet_api::doctest_helper_setup_doc_env!(wallet, wallet_config);
 	///
-	/// let api_owner = Owner::new(wallet.clone(), None, None);
+	/// let api_owner = Owner::new(0, wallet.clone(), None, None);
 	/// let result = api_owner.node_height(None);
 	///
 	/// if let Ok(node_height_result) = result {
@@ -1730,7 +1780,7 @@ where
 	/// ```
 	/// # mwc_wallet_api::doctest_helper_setup_doc_env!(wallet, wallet_config);
 	///
-	/// let api_owner = Owner::new(wallet.clone(), None, None);
+	/// let api_owner = Owner::new(0, wallet.clone(), None, None);
 	/// let result = api_owner.get_top_level_directory();
 	///
 	/// if let Ok(dir) = result {
@@ -1740,7 +1790,7 @@ where
 	/// ```
 
 	pub fn get_top_level_directory(&self) -> Result<String, Error> {
-		let mut w_lock = self.wallet_inst.lock();
+		let mut w_lock = self.wallet_inst.lock().expect("Mutex failure");
 		let lc = w_lock.lc_provider()?;
 		if self.doctest_mode && !self.doctest_retain_tld {
 			Ok("/doctest/dir".to_owned())
@@ -1778,7 +1828,7 @@ where
 	/// #   .ok_or("Failed to convert tmpdir path to string.".to_owned())
 	/// #   .unwrap();
 	///
-	/// let api_owner = Owner::new(wallet.clone(), None, None);
+	/// let api_owner = Owner::new(0, wallet.clone(), None, None);
 	/// let result = api_owner.set_top_level_directory(dir);
 	///
 	/// if let Ok(dir) = result {
@@ -1787,7 +1837,7 @@ where
 	/// ```
 
 	pub fn set_top_level_directory(&self, dir: &str) -> Result<(), Error> {
-		let mut w_lock = self.wallet_inst.lock();
+		let mut w_lock = self.wallet_inst.lock().expect("Mutex failure");
 		let lc = w_lock.lc_provider()?;
 		lc.set_top_level_directory(dir)
 	}
@@ -1828,7 +1878,7 @@ where
 	/// #   .ok_or("Failed to convert tmpdir path to string.".to_owned())
 	/// #   .unwrap();
 	///
-	/// let api_owner = Owner::new(wallet.clone(), None, None);
+	/// let api_owner = Owner::new(0, wallet.clone(), None, None);
 	/// let _ = api_owner.set_top_level_directory(dir);
 	///
 	/// let result = api_owner.create_config(&ChainTypes::Mainnet, None, None, None, None );
@@ -1846,7 +1896,7 @@ where
 		tor_config: Option<TorConfig>,
 		mqs_config: Option<MQSConfig>,
 	) -> Result<(), Error> {
-		let mut w_lock = self.wallet_inst.lock();
+		let mut w_lock = self.wallet_inst.lock().expect("Mutex failure");
 		let lc = w_lock.lc_provider()?;
 		lc.create_config(
 			chain_type,
@@ -1878,7 +1928,7 @@ where
 	/// * `password`: The password used to encrypt/decrypt the `wallet.seed` file
 	///
 	/// # Returns
-	/// * Ok if successful
+	/// * Ok with mnemonic phrase if successful
 	/// * or [`libwallet::Error`](../mwc_wallet_libwallet/struct.Error.html) if an error is encountered.
 	///
 	/// # Example
@@ -1899,7 +1949,7 @@ where
 	/// #   .to_str()
 	/// #   .ok_or("Failed to convert tmpdir path to string.".to_owned())
 	/// #   .unwrap();
-	/// let api_owner = Owner::new(wallet.clone(), None, None);
+	/// let api_owner = Owner::new(0, wallet.clone(), None, None);
 	/// let _ = api_owner.set_top_level_directory(dir);
 	///
 	/// // Create configuration
@@ -1907,7 +1957,7 @@ where
 	///
 	///	// create new wallet wirh random seed
 	///	let pw = ZeroingString::from("my_password");
-	/// let result = api_owner.create_wallet(None, None, 0, pw, None);
+	/// let result = api_owner.create_wallet(None, None, 0, pw, None, true);
 	///
 	/// if let Ok(r) = result {
 	///     //...
@@ -1921,8 +1971,9 @@ where
 		mnemonic_length: u32,
 		password: ZeroingString,
 		wallet_data_dir: Option<&str>,
-	) -> Result<(), Error> {
-		let mut w_lock = self.wallet_inst.lock();
+		show_seed: bool,
+	) -> Result<ZeroingString, Error> {
+		let mut w_lock = self.wallet_inst.lock().expect("Mutex failure");
 		let lc = w_lock.lc_provider()?;
 		lc.create_wallet(
 			name,
@@ -1931,6 +1982,7 @@ where
 			password,
 			self.doctest_mode,
 			wallet_data_dir,
+			show_seed,
 		)
 	}
 
@@ -1968,7 +2020,7 @@ where
 	/// #   .to_str()
 	/// #   .ok_or("Failed to convert tmpdir path to string.".to_owned())
 	/// #   .unwrap();
-	/// let api_owner = Owner::new(wallet.clone(), None, None);
+	/// let api_owner = Owner::new(0, wallet.clone(), None, None);
 	/// let _ = api_owner.set_top_level_directory(dir);
 	///
 	/// // Create configuration
@@ -1976,7 +2028,7 @@ where
 	///
 	///	// create new wallet wirh random seed
 	///	let pw = ZeroingString::from("my_password");
-	/// let _ = api_owner.create_wallet(None, None, 0, pw.clone(), None);
+	/// let _ = api_owner.create_wallet(None, None, 0, pw.clone(), None, true);
 	///
 	/// let result = api_owner.open_wallet(None, pw, true, None);
 	///
@@ -1996,14 +2048,14 @@ where
 		// just return a representative string for doctest mode
 		if self.doctest_mode {
 			let secp_inst = static_secp_instance();
-			let secp = secp_inst.lock();
+			let secp = secp_inst.lock().expect("Mutex failure");
 			return Ok(Some(SecretKey::from_slice(
 				&secp,
 				&from_hex("d096b3cb75986b3b13f80b8f5243a9edf0af4c74ac37578c5a12cfb5b59b1868")
 					.unwrap(),
 			)?));
 		}
-		let mut w_lock = self.wallet_inst.lock();
+		let mut w_lock = self.wallet_inst.lock().expect("Mutex failure");
 		let lc = w_lock.lc_provider()?;
 		lc.open_wallet(name, password, use_mask, self.doctest_mode, wallet_data_dir)
 	}
@@ -2026,7 +2078,7 @@ where
 	/// use mwc_core::global::ChainTypes;
 	///
 	/// // Set up as above
-	/// # let api_owner = Owner::new(wallet.clone(), None, None);
+	/// # let api_owner = Owner::new(0, wallet.clone(), None, None);
 	///
 	/// let res = api_owner.close_wallet(None);
 	///
@@ -2036,7 +2088,7 @@ where
 	/// ```
 
 	pub fn close_wallet(&self, name: Option<&str>) -> Result<(), Error> {
-		let mut w_lock = self.wallet_inst.lock();
+		let mut w_lock = self.wallet_inst.lock().expect("Mutex failure");
 		let lc = w_lock.lc_provider()?;
 		lc.close_wallet(name)
 	}
@@ -2062,7 +2114,7 @@ where
 	/// use mwc_core::global::ChainTypes;
 	///
 	/// // Set up as above
-	/// # let api_owner = Owner::new(wallet.clone(), None, None);
+	/// # let api_owner = Owner::new(0, wallet.clone(), None, None);
 	///
 	///	let pw = ZeroingString::from("my_password");
 	/// let res = api_owner.get_mnemonic(None, pw, None);
@@ -2077,7 +2129,7 @@ where
 		password: ZeroingString,
 		wallet_data_dir: Option<&str>,
 	) -> Result<ZeroingString, Error> {
-		let mut w_lock = self.wallet_inst.lock();
+		let mut w_lock = self.wallet_inst.lock().expect("Mutex failure");
 		let lc = w_lock.lc_provider()?;
 		lc.get_mnemonic(name, password, wallet_data_dir)
 	}
@@ -2108,7 +2160,7 @@ where
 	/// use mwc_core::global::ChainTypes;
 	///
 	/// // Set up as above
-	/// # let api_owner = Owner::new(wallet.clone(), None, None);
+	/// # let api_owner = Owner::new(0, wallet.clone(), None, None);
 	///
 	///	let old = ZeroingString::from("my_password");
 	///	let new = ZeroingString::from("new_password");
@@ -2125,7 +2177,7 @@ where
 		new: ZeroingString,
 		wallet_data_dir: Option<&str>,
 	) -> Result<(), Error> {
-		let mut w_lock = self.wallet_inst.lock();
+		let mut w_lock = self.wallet_inst.lock().expect("Mutex failure");
 		let lc = w_lock.lc_provider()?;
 		lc.change_password(name, old, new, wallet_data_dir)
 	}
@@ -2152,7 +2204,7 @@ where
 	/// use mwc_core::global::ChainTypes;
 	///
 	/// // Set up as above
-	/// # let api_owner = Owner::new(wallet.clone(), None, None);
+	/// # let api_owner = Owner::new(0, wallet.clone(), None, None);
 	///
 	/// let res = api_owner.delete_wallet(None);
 	///
@@ -2162,7 +2214,7 @@ where
 	/// ```
 
 	pub fn delete_wallet(&self, name: Option<&str>) -> Result<(), Error> {
-		let mut w_lock = self.wallet_inst.lock();
+		let mut w_lock = self.wallet_inst.lock().expect("Mutex failure");
 		let lc = w_lock.lc_provider()?;
 		lc.delete_wallet(name)
 	}
@@ -2208,7 +2260,7 @@ where
 	/// use std::time::Duration;
 	///
 	/// // Set up as above
-	/// # let api_owner = Owner::new(wallet.clone(), None, None);
+	/// # let mut api_owner = Owner::new(0, wallet.clone(), None, None);
 	///
 	/// let res = api_owner.start_updater(None, Duration::from_secs(60));
 	///
@@ -2222,23 +2274,32 @@ where
 		keychain_mask: Option<&SecretKey>,
 		frequency: Duration,
 	) -> Result<(), Error> {
+		let mut updater_thread = self.updater_thread.lock().expect("Mutex failure");
+
+		if updater_thread.is_some() {
+			return Err(Error::Lifecycle("Updater thread is already started".into()));
+		}
+
 		let updater_inner = self.updater.clone();
 		let tx_inner = {
-			let t = self.status_tx.lock();
+			let t = self.status_tx.lock().expect("Mutex failure");
 			t.clone()
 		};
 		let keychain_mask = match keychain_mask {
 			Some(m) => Some(m.clone()),
 			None => None,
 		};
-		let _ = thread::Builder::new()
-			.name("wallet-updater".to_string())
+		self.updater_running.store(true, Ordering::Relaxed);
+		let updater_thr = thread::Builder::new()
+			.name(format!("wallet-updater-{}", self.context_id))
 			.spawn(move || {
-				let u = updater_inner.lock();
+				let u = updater_inner.lock().expect("Mutex failure");
 				if let Err(e) = u.run(frequency, keychain_mask, &tx_inner) {
 					error!("Wallet state updater failed with error: {}", e);
 				}
 			})?;
+		let _ = updater_thread.insert(updater_thr);
+		thread::sleep(Duration::from_millis(10));
 		Ok(())
 	}
 
@@ -2263,7 +2324,7 @@ where
 	/// use std::time::Duration;
 	///
 	/// // Set up as above
-	/// # let api_owner = Owner::new(wallet.clone(), None, None);
+	/// # let api_owner = Owner::new(0, wallet.clone(), None, None);
 	///
 	/// let res = api_owner.start_updater(None, Duration::from_secs(60));
 	///
@@ -2276,6 +2337,9 @@ where
 
 	pub fn stop_updater(&self) -> Result<(), Error> {
 		self.updater_running.store(false, Ordering::Relaxed);
+		if let Some(thr) = self.updater_thread.lock().expect("Mutex failure").take() {
+			let _ = thr.join();
+		}
 		Ok(())
 	}
 
@@ -2305,7 +2369,7 @@ where
 	/// use std::time::Duration;
 	///
 	/// // Set up as above
-	/// # let api_owner = Owner::new(wallet.clone(), None, None);
+	/// # let api_owner = Owner::new(0, wallet.clone(), None, None);
 	///
 	/// let res = api_owner.start_updater(None, Duration::from_secs(60));
 	///
@@ -2318,7 +2382,7 @@ where
 	/// ```
 
 	pub fn get_updater_messages(&self, count: Option<u32>) -> Result<Vec<StatusMessage>, Error> {
-		let mut q = self.updater_messages.lock();
+		let mut q = self.updater_messages.lock().expect("Mutex failure");
 		let index = match count {
 			Some(count) => q.len().saturating_sub(count as usize),
 			None => 0,
@@ -2347,7 +2411,7 @@ where
 	/// use std::time::Duration;
 	///
 	/// // Set up as above
-	/// # let api_owner = Owner::new(wallet.clone(), None, None);
+	/// # let api_owner = Owner::new(0, wallet.clone(), None, None);
 	///
 	/// let res = api_owner.get_mqs_address(None);
 	///
@@ -2383,7 +2447,7 @@ where
 	/// use std::time::Duration;
 	///
 	/// // Set up as above
-	/// # let api_owner = Owner::new(wallet.clone(), None, None);
+	/// # let api_owner = Owner::new(0, wallet.clone(), None, None);
 	///
 	/// let res = api_owner.get_wallet_public_address(None);
 	///
@@ -2431,7 +2495,7 @@ where
 	/// ```
 	/// # mwc_wallet_api::doctest_helper_setup_doc_env!(wallet, wallet_config);
 	///
-	/// let api_owner = Owner::new(wallet.clone(), None, None);
+	/// let api_owner = Owner::new(0, wallet.clone(), None, None);
 	/// let update_from_node = true;
 	/// let tx_id = None;
 	/// let tx_slate_id = Some(Uuid::parse_str("0436430c-2b02-624c-2032-570501212b00").unwrap());
@@ -2454,7 +2518,7 @@ where
 		tx_slate_id: Option<Uuid>,
 	) -> Result<PaymentProof, Error> {
 		let tx = {
-			let t = self.status_tx.lock();
+			let t = self.status_tx.lock().expect("Mutex failure");
 			t.clone()
 		};
 		let refresh_from_node = match self.updater_running.load(Ordering::Relaxed) {
@@ -2474,7 +2538,7 @@ where
 	/// ```
 	/// # mwc_wallet_api::doctest_helper_setup_doc_env!(wallet, wallet_config);
 	///
-	/// let api_owner = Owner::new(wallet.clone(), None, None);
+	/// let api_owner = Owner::new(0, wallet.clone(), None, None);
 	/// let update_from_node = true;
 	/// let tx_id = None;
 	/// let tx_slate_id = Some(Uuid::parse_str("0436430c-2b02-624c-2032-570501212b00").unwrap());
@@ -2525,7 +2589,7 @@ where
 	/// ```
 	/// # mwc_wallet_api::doctest_helper_setup_doc_env!(wallet, wallet_config);
 	///
-	/// let api_owner = Owner::new(wallet.clone(), None, None);
+	/// let api_owner = Owner::new(0, wallet.clone(), None, None);
 	/// let update_from_node = true;
 	/// let tx_id = None;
 	/// let tx_slate_id = Some(Uuid::parse_str("0436430c-2b02-624c-2032-570501212b00").unwrap());
@@ -2555,7 +2619,11 @@ where
 
 	pub fn verify_tx_proof(&self, proof: &TxProof) -> Result<VerifyProofResult, Error> {
 		let secp = Secp256k1::with_caps(ContextFlag::Commit);
-		tx_proof::verify_tx_proof_wrapper(&proof, &secp)
+		let context_id = {
+			wallet_lock!(self.wallet_inst, w);
+			w.get_context_id()
+		};
+		tx_proof::verify_tx_proof_wrapper(context_id, &proof, &secp)
 	}
 
 	pub fn retrieve_ownership_proof(
@@ -2580,7 +2648,11 @@ where
 		&self,
 		proof: OwnershipProof,
 	) -> Result<OwnershipProofValidation, Error> {
-		owner::validate_ownership_proof(proof)
+		let context_id = {
+			wallet_lock!(self.wallet_inst, w);
+			w.get_context_id()
+		};
+		owner::validate_ownership_proof(context_id, proof)
 	}
 
 	/// Start swap trade process. Return SwapID that can be used to check the status or perform further action.
@@ -2819,7 +2891,11 @@ where
 				})?;
 			(slate_from, Some(content), sender)
 		} else {
-			let slate_from = in_slate.into_slate_plain(false)?;
+			let context_id = {
+				wallet_lock!(self.wallet_inst, w);
+				w.get_context_id()
+			};
+			let slate_from = in_slate.into_slate_plain(context_id, false)?;
 			(slate_from, None, None)
 		};
 		Ok((slate_from, content, sender))
@@ -2898,7 +2974,8 @@ macro_rules! doctest_helper_setup_doc_env {
 		use tempfile::tempdir;
 
 		use std::sync::Arc;
-		use util::{Mutex, ZeroingString};
+		use std::sync::Mutex;
+		use util::ZeroingString;
 
 		use api::{Foreign, Owner};
 		use config::{parse_node_address_string, WalletConfig};
@@ -2909,6 +2986,8 @@ macro_rules! doctest_helper_setup_doc_env {
 
 		// Set our local chain_type for testing.
 		global::set_local_chain_type(global::ChainTypes::AutomatedTesting);
+		global::set_local_nrd_enabled(true);
+		global::set_local_accept_fee_base(global::DEFAULT_ACCEPT_FEE_BASE);
 
 		// don't run on windows CI, which gives very inconsistent results
 		if cfg!(windows) {
@@ -2925,11 +3004,17 @@ macro_rules! doctest_helper_setup_doc_env {
 		wallet_config.data_file_dir = dir.to_owned();
 		let pw = ZeroingString::from("");
 
-		let node_list = parse_node_address_string(wallet_config.check_node_api_http_addr.clone());
-		let node_client = HTTPNodeClient::new(node_list, None).unwrap();
-		let mut wallet = Box::new(
-			DefaultWalletImpl::<'static, HTTPNodeClient>::new(node_client.clone()).unwrap(),
-		)
+		let node_list = parse_node_address_string(
+			wallet_config
+				.check_node_api_http_addr
+				.clone()
+				.unwrap_or("http://127.0.0.1:13413".into()),
+		);
+		let node_client = HTTPNodeClient::new(0, node_list, None).unwrap();
+		let mut wallet = Box::new(DefaultWalletImpl::<'static, HTTPNodeClient>::new(
+			0,
+			node_client.clone(),
+		))
 			as Box<
 				WalletInst<
 					'static,
@@ -2941,29 +3026,11 @@ macro_rules! doctest_helper_setup_doc_env {
 		let lc = wallet.lc_provider().unwrap();
 		let _ = lc.set_top_level_directory(&wallet_config.data_file_dir);
 		lc.open_wallet(None, pw, false, false, None);
-		let mut $wallet = Arc::new(Mutex::new(wallet));
+		let $wallet = Arc::new(Mutex::new(wallet));
 	};
 }
 
 /*#[test]
-#[allow(unused_mut)]
-fn test_api() {
+fn owner_doc_test() {
 	use crate as mwc_wallet_api;
-	global::set_local_chain_type(global::ChainTypes::AutomatedTesting);
-	mwc_wallet_api::doctest_helper_setup_doc_env!(wallet, wallet_config);
-	let mut api_owner = Owner::new(wallet.clone(), None, None);
-
-	let proof = api_owner.retrieve_ownership_proof(None,
-														 "my message to sign".to_string(),
-														 true,
-														 true,
-														 true).unwrap();
-
-	let valiation = api_owner.validate_ownership_proof(proof).unwrap();
-
-	assert_eq!(valiation.network, "floonet");
-	assert_eq!(valiation.message, "my message to sign".to_string());
-	assert!(valiation.viewing_key.is_some());
-	assert!(valiation.tor_address.is_some());
-	assert!(valiation.mqs_address.is_some());
 }*/

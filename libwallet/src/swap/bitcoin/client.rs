@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::mwc_util::Mutex;
 use crate::swap::types::Currency;
 use crate::swap::Error;
 use bitcoin::consensus::Decodable;
@@ -22,6 +21,7 @@ use std::hash::{Hash, Hasher};
 use std::io::Cursor;
 use std::mem;
 use std::sync::Arc;
+use std::sync::Mutex;
 
 /// Single BTC output
 #[derive(Serialize, Deserialize, Debug, Clone, Eq)]
@@ -62,7 +62,12 @@ pub trait BtcNodeClient: Sync + Send + 'static {
 	/// Get node height
 	fn height(&mut self) -> Result<u64, Error>;
 	/// Get unspent outputs for the address
-	fn unspent(&mut self, currency: Currency, address: &String) -> Result<Vec<Output>, Error>;
+	fn unspent(
+		&mut self,
+		context_id: u32,
+		currency: Currency,
+		address: &String,
+	) -> Result<Vec<Output>, Error>;
 	/// Post BTC tranaction,
 	fn post_tx(&mut self, tx: Vec<u8>) -> Result<(), Error>;
 	/// Get BTC transaction info.
@@ -110,7 +115,7 @@ impl TestBtcNodeClient {
 
 	/// Add 'mined' transaction
 	pub fn push_transaction(&self, transaction: &Transaction) {
-		let mut state = self.state.lock();
+		let mut state = self.state.lock().expect("Mutex failure");
 		let height = state.height;
 
 		let txid = transaction.txid();
@@ -120,7 +125,7 @@ impl TestBtcNodeClient {
 
 	/// Add tx into the mem pool transaction
 	pub fn post_transaction(&self, transaction: &Transaction) {
-		let mut state = self.state.lock();
+		let mut state = self.state.lock().expect("Mutex failure");
 		let txid = transaction.txid();
 		state.pending.insert(txid.clone(), transaction.clone());
 	}
@@ -136,7 +141,7 @@ impl TestBtcNodeClient {
 	}
 
 	fn mine_block_impl(&self, include_pending: bool) {
-		let mut state = self.state.lock();
+		let mut state = self.state.lock().expect("Mutex failure");
 		state.height += 1;
 		let height = state.height;
 
@@ -154,7 +159,7 @@ impl TestBtcNodeClient {
 		if count > 0 {
 			self.mine_block();
 			if count > 1 {
-				let mut state = self.state.lock();
+				let mut state = self.state.lock().expect("Mutex failure");
 				state.height += count - 1;
 			}
 		}
@@ -165,7 +170,7 @@ impl TestBtcNodeClient {
 		if count > 0 {
 			self.mine_block_no_pending();
 			if count > 1 {
-				let mut state = self.state.lock();
+				let mut state = self.state.lock().expect("Mutex failure");
 				state.height += count - 1;
 			}
 		}
@@ -173,18 +178,18 @@ impl TestBtcNodeClient {
 
 	/// Get a current state for the test chain
 	pub fn get_state(&self) -> TestBtcNodeClientState {
-		self.state.lock().clone()
+		self.state.lock().expect("Mutex failure").clone()
 	}
 
 	/// Set a state for the test chain
 	pub fn set_state(&self, chain_state: &TestBtcNodeClientState) {
-		let mut state = self.state.lock();
+		let mut state = self.state.lock().expect("Mutex failure");
 		*state = chain_state.clone();
 	}
 
 	/// Clean the data, not height. Reorg attack
 	pub fn clean(&self) {
-		let mut state = self.state.lock();
+		let mut state = self.state.lock().expect("Mutex failure");
 		state.pending.clear();
 		state.tx_heights.clear();
 		state.txs.clear();
@@ -198,12 +203,17 @@ impl BtcNodeClient for TestBtcNodeClient {
 	}
 
 	fn height(&mut self) -> Result<u64, Error> {
-		Ok(self.state.lock().height)
+		Ok(self.state.lock().expect("Mutex failure").height)
 	}
 
-	fn unspent(&mut self, currency: Currency, address: &String) -> Result<Vec<Output>, Error> {
-		let state = self.state.lock();
-		let script_pubkey = currency.address_2_script_pubkey(address)?;
+	fn unspent(
+		&mut self,
+		context_id: u32,
+		currency: Currency,
+		address: &String,
+	) -> Result<Vec<Output>, Error> {
+		let state = self.state.lock().expect("Mutex failure");
+		let script_pubkey = currency.address_2_script_pubkey(context_id, address)?;
 
 		let mut outputs = Vec::new();
 		for (txid, tx) in &state.txs {
@@ -243,7 +253,7 @@ impl BtcNodeClient for TestBtcNodeClient {
 	}
 
 	fn post_tx(&mut self, tx: Vec<u8>) -> Result<(), Error> {
-		let mut state = self.state.lock();
+		let mut state = self.state.lock().expect("Mutex failure");
 
 		let cursor = Cursor::new(tx);
 		let tx = Transaction::consensus_decode(cursor).map_err(|e| {
@@ -275,7 +285,7 @@ impl BtcNodeClient for TestBtcNodeClient {
 	}
 
 	fn transaction(&mut self, tx_hash: &Txid) -> Result<Option<u64>, Error> {
-		let state = self.state.lock();
+		let state = self.state.lock().expect("Mutex failure");
 
 		if state.pending.contains_key(tx_hash) {
 			return Ok(Some(0));

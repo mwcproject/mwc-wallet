@@ -1174,10 +1174,12 @@ impl EthNodeClient for InfuraNodeClient {
 		let height = self.height()?;
 		let swap_details = self.get_swap_details(currency, address_from_secret)?;
 		let refund_time_blocks = swap_details.0;
-		println!(
-			"refund: hegiht = {}, refund_time_blocks = {}",
-			height, refund_time_blocks
-		);
+		if mwc_wallet_util::mwc_util::is_console_output_enabled() {
+			println!(
+				"refund: hegiht = {}, refund_time_blocks = {}",
+				height, refund_time_blocks
+			);
+		}
 		if height < refund_time_blocks {
 			return Err(Error::EthRefundTimeNotArrived);
 		}
@@ -1391,11 +1393,11 @@ impl EthNodeClient for InfuraNodeClient {
 }
 
 /// Infura client error response.
-#[derive(Serialize, Deserialize, Debug)]
+/*#[derive(Serialize, Deserialize, Debug)]
 struct InfuraResponseError {
 	code: i64,
 	pub message: String,
-}
+}*/
 
 #[cfg(test)]
 mod tests {

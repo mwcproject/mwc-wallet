@@ -36,7 +36,7 @@ use std::time::Duration;
 mod common;
 use common::{clean_output_dir, create_wallet_proxy, setup};
 use mwc_wallet_util::mwc_core::core::Transaction;
-use mwc_wallet_util::mwc_util::Mutex;
+use std::sync::Mutex;
 
 /// Various tests on accounts within the same wallet
 fn accounts_test_impl(test_dir: &str) -> Result<(), wallet::Error> {
@@ -83,7 +83,7 @@ fn accounts_test_impl(test_dir: &str) -> Result<(), wallet::Error> {
 
 	// few values to keep things shorter
 	let reward = core::consensus::MWC_FIRST_GROUP_REWARD;
-	let cm = global::coinbase_maturity(); // assume all testing precedes soft fork height
+	let cm = global::coinbase_maturity(0); // assume all testing precedes soft fork height
 
 	// test default accounts exist
 	wallet::controller::owner_single_use(Some(wallet1.clone()), mask1, None, |api, m| {
@@ -132,7 +132,7 @@ fn accounts_test_impl(test_dir: &str) -> Result<(), wallet::Error> {
 		mask1,
 		7,
 		false,
-		tx_pool.lock().deref_mut(),
+		tx_pool.lock().expect("Mutex failure").deref_mut(),
 	);
 
 	{
@@ -146,7 +146,7 @@ fn accounts_test_impl(test_dir: &str) -> Result<(), wallet::Error> {
 		mask1,
 		5,
 		false,
-		tx_pool.lock().deref_mut(),
+		tx_pool.lock().expect("Mutex failure").deref_mut(),
 	);
 
 	// Should have 5 in account1 (5 spendable), 5 in account (2 spendable)
@@ -225,7 +225,7 @@ fn accounts_test_impl(test_dir: &str) -> Result<(), wallet::Error> {
 		let mut slate = api.init_send_tx(m, &None, &args, 1)?;
 		slate = client1.send_tx_slate_direct("wallet2", &slate)?;
 		api.tx_lock_outputs(m, &None, &slate, None, 0)?;
-		slate = api.finalize_tx(m, &None, &slate)?;
+		slate = api.finalize_tx(m, &None, &slate, true)?;
 		api.post_tx(m, slate.tx_or_err()?, false)?;
 		Ok(())
 	})?;
@@ -237,7 +237,7 @@ fn accounts_test_impl(test_dir: &str) -> Result<(), wallet::Error> {
 		mask1,
 		1,
 		false,
-		tx_pool.lock().deref_mut(),
+		tx_pool.lock().expect("Mutex failure").deref_mut(),
 	);
 
 	wallet::controller::owner_single_use(Some(wallet1.clone()), mask1, None, |api, m| {

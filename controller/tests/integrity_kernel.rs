@@ -117,7 +117,7 @@ fn integrity_kernel_impl(test_dir: &str) -> Result<(), wallet::Error> {
 	);
 	{
 		wallet_lock_test!(wallet1, w1);
-		let _ = owner::perform_refresh_from_node(&mut **w1, mask1, &None)?;
+		let _ = owner::update_wallet_state(&mut **w1, mask1, &None)?;
 	}
 
 	// Check wallet 1 contents are as expected
@@ -196,7 +196,7 @@ fn integrity_kernel_impl(test_dir: &str) -> Result<(), wallet::Error> {
 	);
 	{
 		wallet_lock_test!(wallet1, w1);
-		let _ = owner::perform_refresh_from_node(&mut **w1, mask1, &None)?;
+		let _ = owner::update_wallet_state(&mut **w1, mask1, &None)?;
 	}
 
 	let (account, outputs, _height, integral_balance) =
@@ -218,7 +218,7 @@ fn integrity_kernel_impl(test_dir: &str) -> Result<(), wallet::Error> {
 	);
 	{
 		wallet_lock_test!(wallet1, w1);
-		let _ = owner::perform_refresh_from_node(&mut **w1, mask1, &None)?;
+		let _ = owner::update_wallet_state(&mut **w1, mask1, &None)?;
 	}
 
 	// apply posted transaction
@@ -272,7 +272,7 @@ fn integrity_kernel_impl(test_dir: &str) -> Result<(), wallet::Error> {
 	);
 	{
 		wallet_lock_test!(wallet1, w1);
-		let _ = owner::perform_refresh_from_node(&mut **w1, mask1, &None)?;
+		let _ = owner::update_wallet_state(&mut **w1, mask1, &None)?;
 	}
 
 	// apply posted transaction

@@ -96,6 +96,7 @@ pub fn to_norm(value: &str, unit: &str) -> BigDecimal {
 		return m(&v, "1000000000000");
 	}
 
+	error!("unit not supported, fatal error!");
 	println!("unit not supported");
 	process::exit(1);
 }

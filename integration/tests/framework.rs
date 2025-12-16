@@ -19,7 +19,6 @@ extern crate mwc_refwallet as wallet;
 extern crate mwc_wallet_config as wallet_config;
 
 use self::keychain::Keychain;
-use self::util::Mutex;
 use self::wallet::{HTTPNodeClient, HTTPWalletCommAdapter, LMDBBackend};
 use self::wallet_config::WalletConfig;
 use blake2_rfc as blake2;
@@ -33,6 +32,7 @@ use p2p::PeerAddr;
 use std::default::Default;
 use std::ops::Deref;
 use std::sync::Arc;
+use std::sync::Mutex;
 use std::{fs, thread, time};
 
 /// Just removes all results from previous runs

@@ -18,7 +18,7 @@
 use std::cell::RefCell;
 use uuid::Uuid;
 
-use crate::config::{MQSConfig, TorConfig, WalletConfig};
+use crate::config::{MQSConfig, WalletConfig};
 use crate::core::core::OutputFeatures;
 use crate::core::core::Transaction;
 use crate::core::global;
@@ -46,6 +46,7 @@ use libwallet::proof::tx_proof::VerifyProofResult;
 use libwallet::types::TxSession;
 use libwallet::{wallet_lock, RetrieveTxQueryArgs, TxProof};
 use mwc_wallet_libwallet::proof::proofaddress::ProvableAddress;
+use mwc_wallet_util::mwc_p2p::TorConfig;
 use rand::thread_rng;
 use std::convert::TryFrom;
 use std::time::Duration;
@@ -3136,7 +3137,6 @@ pub trait OwnerRpcV3 {
 				"check_node_api_http_addr": "http://127.0.0.1:3413",
 				"owner_api_include_foreign": false,
 				"data_file_dir": "/path/to/data/file/dir",
-				"no_commit_cache": null,
 				"tls_certificate_file": null,
 				"tls_certificate_key": null,
 				"dark_background_color_scheme": null
@@ -4352,7 +4352,7 @@ where
 			(
 				b,
 				tx.iter()
-					.map(|t| TxLogEntryAPI::from_txlogemtry(t))
+					.map(|t| TxLogEntryAPI::from_txlogentry(t))
 					.collect(),
 			)
 		})
@@ -4378,7 +4378,7 @@ where
 			(
 				b,
 				tx.iter()
-					.map(|t| TxLogEntryAPI::from_txlogemtry(t))
+					.map(|t| TxLogEntryAPI::from_txlogentry(t))
 					.collect(),
 			)
 		})
@@ -4402,7 +4402,7 @@ where
 		let tx_session = Some(RefCell::new(TxSession::new()));
 		let slate =
 			Owner::init_send_tx(self, (&token.keychain_mask).as_ref(), &tx_session, &args, 1)?;
-		{
+		let context_id = {
 			// Save session only on success.
 			wallet_lock!(self.wallet_inst, w);
 			tx_session.unwrap().borrow_mut().save_tx_data(
@@ -4410,15 +4410,18 @@ where
 				(&token.keychain_mask).as_ref(),
 				&slate.id,
 			)?;
-		}
+			w.get_context_id()
+		};
 
 		// Return plain slate. If caller don't want sent slate with this API, than probvably caller want
 		// handle the workflow in lower level.
 		// If caller did send with thius API - then the slate is just for logging. For logging it is
 		// better to have plain slate so it can be readable.
 		let version = slate.lowest_version();
-		Ok(VersionedSlate::into_version_plain(slate, version)
-			.map_err(|e| Error::SlatepackEncodeError(format!("{}", e)))?)
+		Ok(
+			VersionedSlate::into_version_plain(context_id, &slate, version)
+				.map_err(|e| Error::SlatepackEncodeError(format!("{}", e)))?,
+		)
 	}
 
 	fn issue_invoice_tx(
@@ -4520,8 +4523,13 @@ where
 			Owner::decrypt_versioned_slate(self, (&token.keychain_mask).as_ref(), in_slate)
 				.map_err(|e| Error::SlatepackDecodeError(format!("{}", e)))?;
 
-		let out_slate =
-			Owner::finalize_tx(self, (&token.keychain_mask).as_ref(), &None, &slate_from)?;
+		let out_slate = Owner::finalize_tx(
+			self,
+			(&token.keychain_mask).as_ref(),
+			&None,
+			&slate_from,
+			true,
+		)?;
 
 		let res_slate = Owner::encrypt_slate(
 			self,
@@ -4633,8 +4641,13 @@ where
 				"verify_slate_messages is not applicable for slatepack".to_string(),
 			));
 		}
+		let context_id = {
+			wallet_lock!(self.wallet_inst, w);
+			w.get_context_id()
+		};
+
 		let slate = slate
-			.into_slate_plain(true)
+			.into_slate_plain(context_id, true)
 			.map_err(|e| Error::SlatepackDecodeError(format!("{}", e)))?;
 
 		Owner::verify_slate_messages(self, (&token.keychain_mask).as_ref(), &Slate::from(slate))
@@ -4658,12 +4671,13 @@ where
 		start_height: Option<u64>,
 		delete_unconfirmed: Option<bool>,
 	) -> Result<(), Error> {
-		Owner::scan(
+		let _ = Owner::scan(
 			self,
 			(&token.keychain_mask).as_ref(),
 			start_height,
 			delete_unconfirmed.unwrap_or(false),
-		)
+		)?;
+		Ok(())
 	}
 
 	fn node_height(&self, token: Token) -> Result<NodeHeightResult, Error> {
@@ -4675,7 +4689,7 @@ where
 
 	fn init_secure_api(&self, ecdh_pubkey: ECDHPubkey) -> Result<ECDHPubkey, Error> {
 		let secp_inst = static_secp_instance();
-		let secp = secp_inst.lock();
+		let secp = secp_inst.lock().expect("Mutex failure");
 		let sec_key = SecretKey::new(&secp, &mut thread_rng());
 
 		let mut shared_pubkey = ecdh_pubkey.ecdh_pubkey;
@@ -4687,7 +4701,7 @@ where
 		let shared_key = SecretKey::from_slice(&secp, &x_coord[1..])
 			.map_err(|e| Error::Secp(format!("{}", e)))?;
 		{
-			let mut s = self.shared_key.lock();
+			let mut s = self.shared_key.lock().expect("Mutex failure");
 			*s = Some(shared_key);
 		}
 
@@ -4739,14 +4753,16 @@ where
 			Some(s) => Some(ZeroingString::from(s)),
 			None => None,
 		};
-		Owner::create_wallet(
+		let _ = Owner::create_wallet(
 			self,
 			n,
 			m,
 			mnemonic_length,
 			ZeroingString::from(password),
 			None,
-		)
+			false,
+		)?;
+		Ok(())
 	}
 
 	fn open_wallet(&self, name: Option<String>, password: String) -> Result<Token, Error> {
@@ -4802,15 +4818,27 @@ where
 
 	fn get_mqs_address(&self, token: Token) -> Result<ProvableAddress, Error> {
 		let address = Owner::get_mqs_address(self, (&token.keychain_mask).as_ref())?;
-		let public_proof_address = ProvableAddress::from_pub_key(&address);
-		println!("mqs_address address {}", public_proof_address.public_key);
+		let context_id = {
+			wallet_lock!(self.wallet_inst, w);
+			w.get_context_id()
+		};
+		let public_proof_address = ProvableAddress::from_pub_key(context_id, &address);
+		if mwc_wallet_util::mwc_util::is_console_output_enabled() {
+			println!("mqs_address address {}", public_proof_address.public_key);
+		} else {
+			info!("mqs_address address {}", public_proof_address.public_key);
+		}
 		Ok(public_proof_address)
 	}
 
 	fn get_wallet_public_address(&self, token: Token) -> Result<ProvableAddress, Error> {
 		let address = Owner::get_wallet_public_address(self, (&token.keychain_mask).as_ref())?;
 		let address = ProvableAddress::from_tor_pub_key(&address);
-		println!("wallet_public_address address {}", address.public_key);
+		if mwc_wallet_util::mwc_util::is_console_output_enabled() {
+			println!("wallet_public_address address {}", address.public_key);
+		} else {
+			info!("wallet_public_address address {}", address.public_key);
+		}
 		Ok(address)
 	}
 
@@ -4854,7 +4882,11 @@ where
 		address_index: Option<u32>,
 	) -> Result<String, Error> {
 		// Expected Slate in Json (plain) format
-		let slate = slate.into_slate_plain(false).map_err(|e| {
+		let context_id = {
+			wallet_lock!(self.wallet_inst, w);
+			w.get_context_id()
+		};
+		let slate = slate.into_slate_plain(context_id, false).map_err(|e| {
 			Error::SlatepackDecodeError(format!("Expected to get slate in Json format, {}", e))
 		})?;
 
@@ -4899,8 +4931,12 @@ where
 		)?;
 
 		let slate_version = slate.lowest_version();
+		let context_id = {
+			wallet_lock!(self.wallet_inst, w);
+			w.get_context_id()
+		};
 
-		let vslate = VersionedSlate::into_version_plain(slate, slate_version)
+		let vslate = VersionedSlate::into_version_plain(context_id, &slate, slate_version)
 			.map_err(|e| Error::SlatepackDecodeError(format!("Unable to convert slate, {}", e)))?;
 
 		Ok(SlatepackInfo {

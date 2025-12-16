@@ -440,6 +440,7 @@ pub fn view_wallet_output(
 
 /// Display summary info in a pretty way
 pub fn info(
+	context_id: u32,
 	account: &Option<String>,
 	wallet_info: &WalletInfo,
 	validated: bool,
@@ -468,7 +469,7 @@ pub fn info(
 		// This row just introduces confusion if the wallet does not receive coinbase rewards.
 		if wallet_info.amount_immature > 0 {
 			table.add_row(row![
-				bFY->format!("Immature Coinbase (< {})", global::coinbase_maturity()),
+				bFY->format!("Immature Coinbase (< {})", global::coinbase_maturity(context_id)),
 				FY->amount_to_hr_string(wallet_info.amount_immature, false)
 			]);
 		}
@@ -507,7 +508,7 @@ pub fn info(
 		// This row just introduces confusion if the wallet does not receive coinbase rewards.
 		if wallet_info.amount_immature > 0 {
 			table.add_row(row![
-				bFB->format!("Immature Coinbase (< {})", global::coinbase_maturity()),
+				bFB->format!("Immature Coinbase (< {})", global::coinbase_maturity(context_id)),
 				FB->amount_to_hr_string(wallet_info.amount_immature, false)
 			]);
 		}
@@ -808,14 +809,16 @@ pub fn swap_trade(
 	};
 	println!("    Locking order: {}", lock_str.bold().yellow());
 
-	if tx_conf.mwc_tip < swap.refund_slate.get_lock_height_check()? {
-		let mwc_lock_sec = (swap.refund_slate.get_lock_height_check()? - tx_conf.mwc_tip) * 60;
+	if tx_conf.mwc_tip < swap.refund_slate.slate.get_lock_height_check()? {
+		let mwc_lock_sec =
+			(swap.refund_slate.slate.get_lock_height_check()? - tx_conf.mwc_tip) * 60;
 		let sel_lock_h = mwc_lock_sec / 3600;
 		let sel_lock_m = (mwc_lock_sec % 3600) / 60;
 		let est_time_str = format!("{} hours and {} minutes", sel_lock_h, sel_lock_m);
 		println!(
 			"    MWC funds will be locked until block {}, and are expected to be mined in {}",
 			swap.refund_slate
+				.slate
 				.get_lock_height()
 				.to_string()
 				.bold()

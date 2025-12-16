@@ -1,0 +1,41 @@
+[package]
+name = "mwc_wallet_lib"
+version = "6.0.0"
+authors = ["Mwc Developers <info@mwc.mw>"]
+description = "Simple, private and scalable cryptocurrency implementation based on the MimbleWimble chain format."
+license = "Apache-2.0"
+repository = "https://github.com/mwcproject/mwc-node"
+keywords = [ "crypto", "mwc", "mimblewimble" ]
+workspace = ".."
+edition = "2021"
+
+[lib]
+name = "mwc_wallet_lib"
+crate-type = ["rlib", "cdylib", "staticlib"]
+
+[[bin]]
+name = "generate-headers"
+path = "src/generate_headers.rs"
+
+[dependencies]
+safer-ffi = { version = "0.1", features = ["std","headers"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+lazy_static = "1"
+libc = "0.2"
+log = "0.4"
+ed25519-dalek = "1.0.0-pre.4"
+zip = "6"
+
+mwc_wallet_api = { path = "../api", version = "6.0.0" }
+mwc_wallet_impls = { path = "../impls", version = "6.0.0" }
+mwc_wallet_libwallet = { path = "../libwallet", version = "6.0.0" }
+mwc_wallet_controller = { path = "../controller", version = "6.0.0" }
+mwc_wallet_config = { path = "../config", version = "6.0.0" }
+mwc_wallet_util = { path = "../util", version = "6.0.0" }
+mwc_wallet_workflow = { path = "../wallet_workflow", version = "6.0.0" }
+
+uuid = { version = "0.8.2", features = ["v4"] }
+
+[target.'cfg(not(target_os = "android"))'.dependencies]
+dirs = "2"

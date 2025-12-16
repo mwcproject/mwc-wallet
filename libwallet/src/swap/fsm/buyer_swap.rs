@@ -514,6 +514,7 @@ pub struct BuyerWaitingForLockConfirmations<'a, K>
 where
 	K: Keychain,
 {
+	context_id: u32,
 	keychain: Arc<K>,
 	swap_api: Arc<Box<dyn SwapApi<K> + 'a>>,
 }
@@ -522,8 +523,12 @@ where
 	K: Keychain,
 {
 	/// Create new instance
-	pub fn new(keychain: Arc<K>, swap_api: Arc<Box<dyn SwapApi<K> + 'a>>) -> Self {
-		Self { keychain, swap_api }
+	pub fn new(context_id: u32, keychain: Arc<K>, swap_api: Arc<Box<dyn SwapApi<K> + 'a>>) -> Self {
+		Self {
+			context_id,
+			keychain,
+			swap_api,
+		}
 	}
 }
 
@@ -639,9 +644,10 @@ where
 
 				// If we got here, funds have been locked on both chains with sufficient confirmations
 				// On the first run - let's update the swap data
-				if swap.redeem_slate.participant_data.len() <= 1 || swap.adaptor_signature.is_none()
+				if swap.redeem_slate.slate.participant_data.len() <= 1
+					|| swap.adaptor_signature.is_none()
 				{
-					BuyApi::init_redeem(&*self.keychain, swap, context)?;
+					BuyApi::init_redeem(self.context_id, &*self.keychain, swap, context)?;
 				}
 
 				swap.add_journal_message(format!(
@@ -670,12 +676,16 @@ where
 
 /// State BuyerSendingInitRedeemMessage
 pub struct BuyerSendingInitRedeemMessage {
+	context_id: u32,
 	message: Option<Message>,
 }
 impl BuyerSendingInitRedeemMessage {
 	/// Create new instance
-	pub fn new() -> Self {
-		Self { message: None }
+	pub fn new(context_id: u32) -> Self {
+		Self {
+			context_id,
+			message: None,
+		}
 	}
 }
 impl State for BuyerSendingInitRedeemMessage {
@@ -727,7 +737,8 @@ impl State for BuyerSendingInitRedeemMessage {
 							self.message = swap.message2.clone();
 						}
 						if self.message.is_none() {
-							self.message = Some(BuyApi::init_redeem_message(swap)?);
+							self.message =
+								Some(BuyApi::init_redeem_message(self.context_id, swap)?);
 						}
 						Ok(
 							StateProcessRespond::new(StateId::BuyerSendingInitRedeemMessage)
@@ -776,12 +787,16 @@ impl State for BuyerSendingInitRedeemMessage {
 
 /// State BuyerWaitingForRespondRedeemMessage
 pub struct BuyerWaitingForRespondRedeemMessage<K: Keychain> {
+	context_id: u32,
 	keychain: Arc<K>,
 }
 impl<K: Keychain> BuyerWaitingForRespondRedeemMessage<K> {
 	/// Create new instance
-	pub fn new(keychain: Arc<K>) -> Self {
-		Self { keychain }
+	pub fn new(context_id: u32, keychain: Arc<K>) -> Self {
+		Self {
+			context_id,
+			keychain,
+		}
 	}
 }
 impl<K: Keychain> State for BuyerWaitingForRespondRedeemMessage<K> {
@@ -830,8 +845,9 @@ impl<K: Keychain> State for BuyerWaitingForRespondRedeemMessage<K> {
 
 				if swap
 					.refund_slate
+					.slate
 					.tx_or_err()?
-					.validate(Weighting::AsTransaction, secp)
+					.validate(self.context_id, Weighting::AsTransaction, secp)
 					.is_ok()
 				{
 					// Was already processed. Can go to the next step
@@ -862,12 +878,14 @@ impl<K: Keychain> State for BuyerWaitingForRespondRedeemMessage<K> {
 			Input::IncomeMessage(message) => {
 				if swap
 					.redeem_slate
+					.slate
 					.tx_or_err()?
-					.validate(Weighting::AsTransaction, secp)
+					.validate(self.context_id, Weighting::AsTransaction, secp)
 					.is_err()
 				{
 					let (_, redeem, _) = message.unwrap_redeem()?;
 					BuyApi::finalize_redeem_slate(
+						self.context_id,
 						&*self.keychain,
 						swap,
 						context,
@@ -878,8 +896,9 @@ impl<K: Keychain> State for BuyerWaitingForRespondRedeemMessage<K> {
 				}
 				debug_assert!(swap
 					.redeem_slate
+					.slate
 					.tx_or_err()?
-					.validate(Weighting::AsTransaction, secp)
+					.validate(self.context_id, Weighting::AsTransaction, secp)
 					.is_ok());
 				Ok(StateProcessRespond::new(StateId::BuyerRedeemMwc))
 			}
@@ -904,6 +923,7 @@ pub struct BuyerRedeemMwc<'a, C>
 where
 	C: NodeClient + 'a,
 {
+	context_id: u32,
 	node_client: Arc<C>,
 	phantom: PhantomData<&'a C>,
 }
@@ -913,8 +933,9 @@ where
 	C: NodeClient + 'a,
 {
 	/// Create a new instance
-	pub fn new(node_client: Arc<C>) -> Self {
+	pub fn new(context_id: u32, node_client: Arc<C>) -> Self {
 		Self {
+			context_id,
 			node_client,
 			phantom: PhantomData,
 		}
@@ -1012,8 +1033,9 @@ where
 				}
 
 				swap::publish_transaction(
+					self.context_id,
 					&*self.node_client,
-					swap.redeem_slate.tx_or_err()?,
+					swap.redeem_slate.slate.tx_or_err()?,
 					false,
 				)?;
 				swap.posted_redeem = Some(swap::get_cur_time());

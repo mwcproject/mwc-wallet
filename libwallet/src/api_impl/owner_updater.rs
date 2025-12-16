@@ -22,7 +22,7 @@ use std::time::Duration;
 
 use crate::mwc_keychain::Keychain;
 use crate::mwc_util::secp::key::SecretKey;
-use crate::mwc_util::Mutex;
+use std::sync::Mutex;
 
 use crate::api_impl::owner;
 use crate::types::NodeClient;
@@ -67,7 +67,7 @@ pub fn start_updater_log_thread(
 				while let Ok(m) = rx.try_recv() {
 					// save to our message queue to be read by other consumers
 					{
-						let mut q = queue.lock();
+						let mut q = queue.lock().expect("Mutex failure");
 						q.insert(0, m.clone());
 						while q.len() > MESSAGE_QUEUE_MAX_LEN {
 							q.pop();
@@ -193,7 +193,7 @@ where
 		self.is_running.store(true, Ordering::Relaxed);
 		loop {
 			let wallet_opened = {
-				let mut w_lock = self.wallet_inst.lock();
+				let mut w_lock = self.wallet_inst.lock().expect("Mutex failure");
 				let w_provider = w_lock.lc_provider()?;
 				w_provider.wallet_inst().is_ok()
 			};

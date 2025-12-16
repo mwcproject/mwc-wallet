@@ -16,20 +16,21 @@
 use crate::cmd::wallet_args;
 use crate::config::GlobalWalletConfig;
 use clap::ArgMatches;
-use mwc_wallet_libwallet::NodeClient;
+use mwc_wallet_config::parse_node_address_string;
+use mwc_wallet_impls::{DefaultLCProvider, HTTPNodeClient};
+use mwc_wallet_libwallet::WalletInst;
+use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
-pub(crate) const MIN_COMPAT_NODE_VERSION: &str = "5.3.0";
+pub(crate) const MIN_COMPAT_NODE_VERSION: &str = "6.0.0";
 
-pub fn wallet_command<C>(
+pub fn wallet_command(
+	context_id: u32,
 	wallet_args: &ArgMatches<'_>,
 	config: GlobalWalletConfig,
-	mut node_client: C,
-) -> i32
-where
-	C: NodeClient + 'static,
-{
+	mut node_client: HTTPNodeClient,
+) -> i32 {
 	// just get defaults from the global config
 	let wallet_config = config.members.clone().unwrap().wallet;
 
@@ -40,18 +41,38 @@ where
 	let global_wallet_args = wallet_args::parse_global_args(&wallet_config, &wallet_args)
 		.expect("Can't read configuration file");
 	node_client.set_node_api_secret(global_wallet_args.node_api_secret.clone());
+	//parse the nodes address and put them in a vec
+	let check_node_api_http_addr = match &wallet_config.check_node_api_http_addr {
+		Some(s) => s.clone(),
+		None => {
+			println!("Error. Config wallet check_node_api_http_addr is not defined");
+			return 1;
+		}
+	};
 
-	// Note, we can't use node here because 'api_server_address' argument needs to be applied first.
-	// That happens inside wallet_command
+	let node_list = parse_node_address_string(check_node_api_http_addr);
+	node_client.set_node_url(node_list);
 
 	let res = wallet_args::wallet_command(
+		context_id,
 		wallet_args,
 		wallet_config,
 		tor_config,
 		mqs_config,
 		node_client,
 		false,
-		|_| {},
+		|_: Arc<
+			std::sync::Mutex<
+				Box<
+					dyn WalletInst<
+							'static,
+							DefaultLCProvider<'static, HTTPNodeClient, _>,
+							HTTPNodeClient,
+							_,
+						> + 'static,
+				>,
+			>,
+		>| {},
 	);
 
 	// we need to give log output a chance to catch up before exiting

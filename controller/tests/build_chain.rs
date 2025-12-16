@@ -35,7 +35,7 @@ use std::time::Duration;
 mod common;
 use common::{clean_output_dir, create_wallet_proxy, setup};
 use mwc_wallet_util::mwc_core::core::Transaction;
-use mwc_wallet_util::mwc_util::Mutex;
+use std::sync::Mutex;
 
 /// Builds a chain with real transactions up to the given height
 fn build_chain(test_dir: &str, block_height: usize) -> Result<(), libwallet::Error> {
@@ -101,13 +101,13 @@ fn build_chain(test_dir: &str, block_height: usize) -> Result<(), libwallet::Err
 		mask1,
 		3,
 		false,
-		tx_pool.lock().deref_mut(),
+		tx_pool.lock().expect("Mutex failure").deref_mut(),
 	);
 
 	for height in 0..block_height {
 		let mut wallet_1_has_funds = false;
 
-		let reward = core::consensus::calc_mwc_block_reward((height + 1) as u64);
+		let reward = core::consensus::calc_mwc_block_reward(0, (height + 1) as u64);
 
 		// Check wallet 1 contents
 		wallet::controller::owner_single_use(Some(wallet1.clone()), mask1, None, |api, m| {
@@ -132,7 +132,7 @@ fn build_chain(test_dir: &str, block_height: usize) -> Result<(), libwallet::Err
 				mask1,
 				1,
 				false,
-				tx_pool.lock().deref_mut(),
+				tx_pool.lock().expect("Mutex failure").deref_mut(),
 			);
 			continue;
 		}
@@ -163,7 +163,7 @@ fn build_chain(test_dir: &str, block_height: usize) -> Result<(), libwallet::Err
 					sender_api
 						.tx_lock_outputs(m, &None, &slate, None, 0)
 						.unwrap();
-					slate = sender_api.finalize_tx(m, &None, &slate)?;
+					slate = sender_api.finalize_tx(m, &None, &slate, true)?;
 					Ok(())
 				},
 			)

@@ -39,8 +39,8 @@ const WORDS_PER_LINE: usize = 200;
 const WEIGHT_RATIO: u64 = 32;
 
 /// Maximum size for an armored Slatepack file
-pub fn max_size() -> u64 {
-	max_tx_weight()
+pub fn max_size(context_id: u32) -> u64 {
+	max_tx_weight(context_id)
 		.saturating_mul(WEIGHT_RATIO)
 		.saturating_add(HEADER_ENC.len() as u64)
 		.saturating_add(FOOTER_ENC.len() as u64)

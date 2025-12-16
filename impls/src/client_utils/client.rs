@@ -17,7 +17,7 @@
 
 use crate::core::global;
 use crate::util::to_base64;
-use mwc_wallet_util::RUNTIME;
+use mwc_wallet_util::mwc_util;
 use reqwest::header::{
 	HeaderMap, HeaderValue, ACCEPT, AUTHORIZATION, CONNECTION, CONTENT_TYPE, USER_AGENT,
 };
@@ -26,7 +26,6 @@ use serde::{Deserialize, Serialize};
 use serde_json;
 use std::net::SocketAddr;
 use std::time::Duration;
-use tokio::runtime::Handle;
 
 #[derive(Clone, Eq, thiserror::Error, PartialEq, Debug)]
 pub enum Error {
@@ -40,20 +39,17 @@ pub enum Error {
 
 #[derive(Clone)]
 pub struct Client {
+	context_id: u32,
 	client: reqwest::Client,
 }
 
 impl Client {
 	/// New client
-	pub fn new() -> Result<Self, Error> {
-		Self::build(None)
+	pub fn new(context_id: u32) -> Result<Self, Error> {
+		Self::build(context_id, None)
 	}
 
-	pub fn with_socks_proxy(socks_proxy_addr: SocketAddr) -> Result<Self, Error> {
-		Self::build(Some(socks_proxy_addr))
-	}
-
-	fn build(socks_proxy_addr: Option<SocketAddr>) -> Result<Self, Error> {
+	fn build(context_id: u32, socks_proxy_addr: Option<SocketAddr>) -> Result<Self, Error> {
 		let mut headers = HeaderMap::new();
 		headers.insert(USER_AGENT, HeaderValue::from_static("mwc-client"));
 		headers.insert(ACCEPT, HeaderValue::from_static("application/json"));
@@ -98,7 +94,7 @@ impl Client {
 			.build()
 			.map_err(|e| Error::Internal(format!("Unable to build client: {}", e)))?;
 
-		Ok(Client { client })
+		Ok(Client { context_id, client })
 	}
 
 	/// Helper function to easily issue a HTTP GET request against a given URL that
@@ -216,9 +212,9 @@ impl Client {
 		api_secret: &Option<String>,
 		body: Option<String>,
 	) -> Result<RequestBuilder, Error> {
-		let basic_auth_key = basic_auth_key.unwrap_or(if global::is_mainnet() {
+		let basic_auth_key = basic_auth_key.unwrap_or(if global::is_mainnet(self.context_id) {
 			"mwcmain".to_string()
-		} else if global::is_floonet() {
+		} else if global::is_floonet(self.context_id) {
 			"mwcfloo".to_string()
 		} else {
 			"mwc".to_string()
@@ -341,17 +337,6 @@ impl Client {
 		// This client is currently used both outside and inside of a tokio runtime
 		// context. In the latter case we are not allowed to do a blocking call to
 		// our global runtime, which unfortunately means we have to spawn a new thread
-		if Handle::try_current().is_ok() {
-			let rt = RUNTIME.clone();
-			let client = self.clone();
-			std::thread::spawn(move || rt.lock().unwrap().block_on(client.send_request_async(req)))
-				.join()
-				.unwrap()
-		} else {
-			RUNTIME
-				.lock()
-				.unwrap()
-				.block_on(self.send_request_async(req))
-		}
+		mwc_util::run_global_async_block(self.send_request_async(req))
 	}
 }

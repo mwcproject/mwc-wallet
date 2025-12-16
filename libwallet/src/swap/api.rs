@@ -18,7 +18,6 @@ use super::types::{Context, Currency};
 use super::Keychain;
 use crate::mwc_core::global;
 use crate::mwc_keychain::Identifier;
-use crate::mwc_util::Mutex;
 use crate::swap::bitcoin::{BtcSwapApi, ElectrumNodeClient};
 use crate::swap::ethereum::{EthSwapApi, EthereumWallet, InfuraNodeClient};
 use crate::swap::fsm::machine::StateMachine;
@@ -27,6 +26,7 @@ use crate::swap::types::SwapTransactionsConfirmations;
 use crate::NodeClient;
 use mwc_wallet_util::mwc_util::secp::Secp256k1;
 use std::sync::Arc;
+use std::sync::Mutex;
 
 /// Swap API trait that is used by both Buyer and Seller.
 /// Every currency that Swap want to support, need to implement
@@ -161,6 +161,7 @@ pub trait SwapApi<K: Keychain>: Sync + Send {
 /// electrumx_uri - mandatory for BTC
 /// Note: Result lifetime is equal of arguments lifetime!
 pub fn create_btc_instance<'a, C, K>(
+	context_id: u32,
 	currency: &Currency,
 	node_client: C,
 	electrum_node_uri1: String,
@@ -180,13 +181,14 @@ where
 		| Currency::Doge => {
 			let secondary_currency_node_client1 = ElectrumNodeClient::new(
 				electrum_node_uri1,
-				currency.get_block1_tx_hash(!global::is_mainnet()),
+				currency.get_block1_tx_hash(!global::is_mainnet(context_id)),
 			);
 			let secondary_currency_node_client2 = ElectrumNodeClient::new(
 				electrum_node_uri2,
-				currency.get_block1_tx_hash(!global::is_mainnet()),
+				currency.get_block1_tx_hash(!global::is_mainnet(context_id)),
 			);
 			Ok(Box::new(BtcSwapApi::new(
+				context_id,
 				currency.clone(),
 				Arc::new(node_client),
 				Arc::new(Mutex::new(secondary_currency_node_client1)),
@@ -203,6 +205,7 @@ where
 /// ethereum - mandatory for ETH
 /// Note: Result lifetime is equal of arguments lifetime!
 pub fn create_eth_instance<'a, C, K>(
+	context_id: u32,
 	currency: &Currency,
 	node_client: C,
 	ethereum_wallet: EthereumWallet,
@@ -227,7 +230,7 @@ where
 		| Currency::Usdc
 		| Currency::Trx
 		| Currency::Tst => {
-			let chain = if global::is_mainnet() {
+			let chain = if global::is_mainnet(context_id) {
 				"mainnet".to_string()
 			} else {
 				"ropsten".to_string()
@@ -242,6 +245,7 @@ where
 			.unwrap();
 
 			Ok(Box::new(EthSwapApi::new(
+				context_id,
 				currency.clone(),
 				Arc::new(node_client),
 				Arc::new(Mutex::new(secondary_currency_node_client)),

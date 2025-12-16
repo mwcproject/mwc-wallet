@@ -256,6 +256,7 @@ impl BtcData {
 	// Build input/output for redeem or refund btc transaciton
 	// Inputs need to have amounts for BCH signature
 	fn build_input_outputs(
+		context_id: u32,
 		currency: &Currency,
 		redeem_address: &String,
 		conf_outputs: &Vec<Output>,
@@ -285,7 +286,7 @@ impl BtcData {
 		let mut output = Vec::with_capacity(1);
 		output.push(TxOut {
 			value: total_amount, // Will be overwritten later
-			script_pubkey: currency.address_2_script_pubkey(redeem_address)?,
+			script_pubkey: currency.address_2_script_pubkey(context_id, redeem_address)?,
 		});
 
 		Ok((input, output, total_amount))
@@ -393,6 +394,7 @@ impl BtcData {
 	/// btc_lock_time must be 0 for redeem and btc_lock_time for refund
 	/// Return:  Options values must be defined for BTC only. They can be used for tests only
 	pub(crate) fn spend_lock_transaction(
+		context_id: u32,
 		currency: &Currency,
 		address: &String, // refund or
 		input_script: &Script,
@@ -410,7 +412,7 @@ impl BtcData {
 		Error,
 	> {
 		let (input, output, total_amount) =
-			Self::build_input_outputs(currency, address, conf_outputs)?;
+			Self::build_input_outputs(context_id, currency, address, conf_outputs)?;
 		let mut tx = Transaction {
 			version: 2,
 			lock_time: if btc_lock_time == 0 {
@@ -751,7 +753,7 @@ mod tests {
 		let lock_time = 1541355813;
 
 		let secp_inst = static_secp_instance();
-		let secp = secp_inst.lock();
+		let secp = secp_inst.lock().expect("Mutex failure");
 
 		let data = BtcData {
 			cosign: PublicKey::from_slice(
@@ -835,7 +837,7 @@ mod tests {
 			.unwrap();
 		let lock_address = data.address(Currency::Btc, &input_script, network).unwrap();
 		let lock_script_pubkey = Currency::Btc
-			.address_2_script_pubkey(&lock_address[0])
+			.address_2_script_pubkey(0, &lock_address[0])
 			.unwrap();
 
 		// Create a bunch of funding transactions
@@ -910,6 +912,7 @@ mod tests {
 
 		// Generate redeem transaction
 		let (_btc_tx, tx, est_size, actual_size) = BtcData::spend_lock_transaction(
+			0,
 			&Currency::Btc,
 			&redeem_address.to_string(),
 			&input_script,

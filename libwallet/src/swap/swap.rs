@@ -32,8 +32,10 @@ use chrono::{DateTime, Utc};
 use std::convert::TryInto;
 use uuid::Uuid;
 
+use crate::slate::SlateCtx;
+use mwc_wallet_util::mwc_core::global;
 #[cfg(test)]
-use crate::mwc_util::RwLock;
+use std::sync::RwLock;
 
 /// Dummy wrapper for the hex-encoded serialized transaction.
 #[derive(Serialize, Deserialize)]
@@ -95,14 +97,11 @@ pub struct Swap {
 	/// Schnorr multisig builder and holder
 	pub(super) multisig: MultisigBuilder,
 	/// MWC Lock Slate
-	#[serde(deserialize_with = "slate_deser")]
-	pub lock_slate: Slate,
+	pub lock_slate: SlateCtx,
 	/// MWC Refund Slate
-	#[serde(deserialize_with = "slate_deser")]
-	pub refund_slate: Slate,
-	#[serde(deserialize_with = "slate_deser")]
+	pub refund_slate: SlateCtx,
 	/// MWC redeem slate
-	pub redeem_slate: Slate,
+	pub redeem_slate: SlateCtx,
 	/// Redeem slate was updated. Seller spot it on the blockchain and get the kernel updated.
 	pub redeem_kernel_updated: bool,
 	/// Signature that is done with multisig
@@ -283,7 +282,7 @@ impl Swap {
 	}
 
 	pub(super) fn refund_amount(&self) -> u64 {
-		self.primary_amount - self.refund_slate.fee
+		self.primary_amount - self.refund_slate.slate.fee
 	}
 
 	pub(super) fn redeem_tx_fields(
@@ -323,6 +322,7 @@ impl Swap {
 	) -> Result<Option<(TxKernel, u64)>, Error> {
 		let excess = &self
 			.redeem_slate
+			.slate
 			.tx_or_err()?
 			.kernels()
 			.get(0)
@@ -507,6 +507,55 @@ impl Swap {
 			}
 		}
 	}
+
+	/// Validate the network. Expected to be done after deserialization
+	/// Unfortunatelly we can't pass context_id into deserializer
+	pub(crate) fn validate_network(&self, context_id: u32) -> Result<(), Error> {
+		let network_name = global::get_network_name(context_id);
+		if *self
+			.lock_slate
+			.network_name
+			.as_ref()
+			.ok_or(Error::UnexpectedNetwork(
+				"lock_slate network_name is not defined".into(),
+			))? != network_name
+		{
+			return Err(Error::UnexpectedNetwork(format!(
+				"lock_slate has invalid network: {:?}  Expected: {}",
+				self.lock_slate.network_name, network_name
+			)));
+		}
+
+		if *self
+			.refund_slate
+			.network_name
+			.as_ref()
+			.ok_or(Error::UnexpectedNetwork(
+				"refund_slate network_name is not defined".into(),
+			))? != network_name
+		{
+			return Err(Error::UnexpectedNetwork(format!(
+				"refund_slate has invalid network: {:?}  Expected: {}",
+				self.refund_slate.network_name, network_name
+			)));
+		}
+
+		if *self
+			.redeem_slate
+			.network_name
+			.as_ref()
+			.ok_or(Error::UnexpectedNetwork(
+				"redeem_slate network_name is not defined".into(),
+			))? != network_name
+		{
+			return Err(Error::UnexpectedNetwork(format!(
+				"redeem_slate has invalid network: {:?}  Expected: {}",
+				self.redeem_slate.network_name, network_name
+			)));
+		}
+
+		Ok(())
+	}
 }
 
 /*impl ser::Writeable for Swap {
@@ -580,12 +629,13 @@ pub fn signature_as_secret(secp: &Secp256k1, signature: &Signature) -> Result<Se
 
 /// Serialize a transaction and submit it to the network
 pub fn publish_transaction<C: NodeClient>(
+	context_id: u32,
 	node_client: &C,
 	tx: &tx::Transaction,
 	fluff: bool,
 ) -> Result<(), Error> {
 	let secp = Secp256k1::with_caps(ContextFlag::Commit);
-	tx.validate(Weighting::AsTransaction, &secp)
+	tx.validate(context_id, Weighting::AsTransaction, &secp)
 		.map_err(|e| Error::UnexpectedAction(format!("slate is not valid, {}", e)))?;
 
 	node_client.post_tx(tx, fluff)?;
@@ -600,19 +650,22 @@ lazy_static! {
 #[cfg(test)]
 /// Test current time as a timestamp for testing. Pleas ebe carefull, in production it is never called.
 pub fn set_testing_cur_time(cur_time: i64) {
-	CURRENT_TEST_TIME.write().replace(cur_time.clone());
+	CURRENT_TEST_TIME
+		.write()
+		.expect("RwLock failure")
+		.replace(cur_time.clone());
 }
 
 #[cfg(test)]
 /// Remove test timer control for swaps. Will use current system time instead
 pub fn reset_testing_cur_time() {
-	CURRENT_TEST_TIME.write().take();
+	CURRENT_TEST_TIME.write().expect("RwLock failure").take();
 }
 
 #[cfg(test)]
 /// Current time. In release it is just a current time. In debug it is a test controlled time that allows us to validate the edge cases
 pub fn get_cur_time() -> i64 {
-	match *CURRENT_TEST_TIME.read() {
+	match *CURRENT_TEST_TIME.read().expect("RwLock failure") {
 		Some(time) => time,
 		None => Utc::now().timestamp(),
 	}

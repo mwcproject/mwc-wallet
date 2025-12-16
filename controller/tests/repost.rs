@@ -36,7 +36,7 @@ mod common;
 use common::{clean_output_dir, create_wallet_proxy, setup};
 use mwc_wallet_util::mwc_core::core::Transaction;
 use mwc_wallet_util::mwc_util::secp::Secp256k1;
-use mwc_wallet_util::mwc_util::Mutex;
+use std::sync::Mutex;
 
 /// self send impl
 fn file_repost_test_impl(test_dir: &str) -> Result<(), wallet::Error> {
@@ -110,7 +110,7 @@ fn file_repost_test_impl(test_dir: &str) -> Result<(), wallet::Error> {
 		mask1,
 		bh as usize,
 		false,
-		tx_pool.lock().deref_mut(),
+		tx_pool.lock().expect("Mutex failure").deref_mut(),
 	);
 
 	let send_file = format!("{}/part_tx_1.tx", test_dir);
@@ -136,7 +136,7 @@ fn file_repost_test_impl(test_dir: &str) -> Result<(), wallet::Error> {
 		};
 
 		let slate = api.init_send_tx(m, &None, &args, 1)?;
-		PathToSlatePutter::build_plain(Some((&send_file).into()))
+		PathToSlatePutter::build_plain(0, Some((&send_file).into()))
 			.put_tx(&slate, None, true, &secp)?;
 		api.tx_lock_outputs(m, &None, &slate, None, 0)?;
 		Ok(())
@@ -148,7 +148,7 @@ fn file_repost_test_impl(test_dir: &str) -> Result<(), wallet::Error> {
 		mask1,
 		3,
 		false,
-		tx_pool.lock().deref_mut(),
+		tx_pool.lock().expect("Mutex failure").deref_mut(),
 	);
 	bh += 3;
 
@@ -159,12 +159,12 @@ fn file_repost_test_impl(test_dir: &str) -> Result<(), wallet::Error> {
 	}
 
 	wallet::controller::foreign_single_use(wallet1.clone(), mask1_i.clone(), |api| {
-		slate = PathToSlateGetter::build_form_path((&send_file).into())
+		slate = PathToSlateGetter::build_form_path(0, (&send_file).into())
 			.get_tx(None, &secp)?
 			.to_slate()?
 			.0;
 		slate = api.receive_tx(&None, &slate, None, &None, None)?;
-		PathToSlatePutter::build_plain(Some((&receive_file).into()))
+		PathToSlatePutter::build_plain(0, Some((&receive_file).into()))
 			.put_tx(&slate, None, true, &secp)?;
 		Ok(())
 	})?;
@@ -177,11 +177,11 @@ fn file_repost_test_impl(test_dir: &str) -> Result<(), wallet::Error> {
 
 	// wallet 1 finalize
 	wallet::controller::owner_single_use(Some(wallet1.clone()), mask1, None, |api, m| {
-		slate = PathToSlateGetter::build_form_path((&receive_file).into())
+		slate = PathToSlateGetter::build_form_path(0, (&receive_file).into())
 			.get_tx(None, &secp)?
 			.to_slate()?
 			.0;
-		slate = api.finalize_tx(m, &None, &slate)?;
+		slate = api.finalize_tx(m, &None, &slate, true)?;
 		Ok(())
 	})?;
 
@@ -199,7 +199,7 @@ fn file_repost_test_impl(test_dir: &str) -> Result<(), wallet::Error> {
 		mask1,
 		3,
 		false,
-		tx_pool.lock().deref_mut(),
+		tx_pool.lock().expect("Mutex failure").deref_mut(),
 	);
 	bh += 3;
 
@@ -252,7 +252,7 @@ fn file_repost_test_impl(test_dir: &str) -> Result<(), wallet::Error> {
 		let slate_i = sender_api.init_send_tx(m, &None, &args, 1)?;
 		slate = client1.send_tx_slate_direct("wallet2", &slate_i)?;
 		sender_api.tx_lock_outputs(m, &None, &slate, None, 0)?;
-		slate = sender_api.finalize_tx(m, &None, &slate)?;
+		slate = sender_api.finalize_tx(m, &None, &slate, true)?;
 		Ok(())
 	})?;
 
@@ -262,7 +262,7 @@ fn file_repost_test_impl(test_dir: &str) -> Result<(), wallet::Error> {
 		mask1,
 		3,
 		false,
-		tx_pool.lock().deref_mut(),
+		tx_pool.lock().expect("Mutex failure").deref_mut(),
 	);
 	bh += 3;
 
@@ -280,7 +280,7 @@ fn file_repost_test_impl(test_dir: &str) -> Result<(), wallet::Error> {
 		mask1,
 		3,
 		false,
-		tx_pool.lock().deref_mut(),
+		tx_pool.lock().expect("Mutex failure").deref_mut(),
 	);
 	bh += 3;
 	//

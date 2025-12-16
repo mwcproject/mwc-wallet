@@ -419,7 +419,7 @@ pub struct TxLogEntryAPI {
 
 impl TxLogEntryAPI {
 	/// Return a new blank with TS initialised with next entry
-	pub fn from_txlogemtry(tle: &TxLogEntry) -> Self {
+	pub fn from_txlogentry(tle: &TxLogEntry) -> Self {
 		TxLogEntryAPI {
 			parent_key_id: tle.parent_key_id.clone(),
 			tx_type: tle.tx_type.clone(),
@@ -485,7 +485,7 @@ fn encrypted_request() -> Result<(), Error> {
 	let shared_key = {
 		let sec_key_bytes = from_hex(sec_key_str).unwrap();
 		let secp_inst = static_secp_instance();
-		let secp = secp_inst.lock();
+		let secp = secp_inst.lock().expect("Mutex failure");
 		SecretKey::from_slice(&secp, &sec_key_bytes)?
 	};
 	let req = serde_json::json!({

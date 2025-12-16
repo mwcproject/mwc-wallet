@@ -124,6 +124,7 @@ impl Slatepack {
 	/// Note:  from_binary & to_binary - are NOT serializers, minimum amount of the data is transported.
 	/// from_binary & to_binary are symmetrical
 	pub fn from_binary(
+		context_id: u32,
 		data: &Vec<u8>,
 		encrypted: bool,
 		secret: &DalekSecretKey,
@@ -213,19 +214,24 @@ impl Slatepack {
 
 		let mut slate = match content {
 			SlatePurpose::InvoiceInitial => Self::read_slate_data(
-				true, false, false, false, false, false, true, false, false, false, &mut r, secp,
+				context_id, true, false, false, false, false, false, true, false, false, false,
+				&mut r, secp,
 			)?,
 			SlatePurpose::InvoiceResponse => Self::read_slate_data(
-				true, true, true, true, true, true, false, true, false, false, &mut r, secp,
+				context_id, true, true, true, true, true, true, false, true, false, false, &mut r,
+				secp,
 			)?,
 			SlatePurpose::FullSlate => Self::read_slate_data(
-				true, true, true, true, true, true, true, true, true, true, &mut r, secp,
+				context_id, true, true, true, true, true, true, true, true, true, true, &mut r,
+				secp,
 			)?,
 			SlatePurpose::SendInitial => Self::read_slate_data(
-				true, true, false, false, false, false, true, false, true, false, &mut r, secp,
+				context_id, true, true, false, false, false, false, true, false, true, false,
+				&mut r, secp,
 			)?,
 			SlatePurpose::SendResponse => Self::read_slate_data(
-				false, false, true, false, true, true, false, true, true, true, &mut r, secp,
+				context_id, false, false, true, false, true, true, false, true, true, true, &mut r,
+				secp,
 			)?,
 		};
 
@@ -246,6 +252,7 @@ impl Slatepack {
 	/// Return: binary data, encrypted flag
 	pub fn to_binary(
 		&self,
+		context_id: u32,
 		slate_version: SlateVersion,
 		secret: &DalekSecretKey,
 		use_test_rng: bool,
@@ -271,6 +278,7 @@ impl Slatepack {
 		match self.content {
 			SlatePurpose::InvoiceInitial => {
 				Self::write_slate_data(
+					context_id,
 					&self.slate,
 					true,
 					false,
@@ -288,6 +296,7 @@ impl Slatepack {
 			}
 			SlatePurpose::InvoiceResponse => {
 				Self::write_slate_data(
+					context_id,
 					&self.slate,
 					true,
 					true,
@@ -305,6 +314,7 @@ impl Slatepack {
 			}
 			SlatePurpose::FullSlate => {
 				Self::write_slate_data(
+					context_id,
 					&self.slate,
 					true,
 					true,
@@ -322,6 +332,7 @@ impl Slatepack {
 			}
 			SlatePurpose::SendInitial => {
 				Self::write_slate_data(
+					context_id,
 					&self.slate,
 					true,
 					true,
@@ -339,6 +350,7 @@ impl Slatepack {
 			}
 			SlatePurpose::SendResponse => {
 				Self::write_slate_data(
+					context_id,
 					&self.slate,
 					false,
 					false,
@@ -523,11 +535,12 @@ impl Slatepack {
 	// or DalekPublicKey aka Tor Address.
 	// We will need to save a a binary
 	fn write_provable_address<W: io::Write, E: Endianness>(
+		context_id: u32,
 		address: &ProvableAddress,
 		w: &mut BitWriter<W, E>,
 		secp: &Secp256k1,
 	) -> Result<(), Error> {
-		match address.public_key() {
+		match address.public_key(context_id) {
 			Ok(pk) => {
 				//
 				w.write(1, 1)?;
@@ -544,6 +557,7 @@ impl Slatepack {
 	}
 
 	fn write_slate_data<W: io::Write, E: Endianness>(
+		context_id: u32,
 		slate: &Slate,
 		write_amount: bool,
 		write_fee: bool,
@@ -562,7 +576,7 @@ impl Slatepack {
 		// 16 bytes
 		w.write_bytes(slate.id.as_bytes())?;
 		// Add network Info. 1 for mainnet, 0 for for the rest...
-		if global::is_mainnet() {
+		if global::is_mainnet(context_id) {
 			w.write(1, 1)?;
 		} else {
 			w.write(1, 0)?;
@@ -695,8 +709,8 @@ impl Slatepack {
 				Some(pp) => {
 					w.write(1, 1)?;
 					// len is 32 bytes
-					Self::write_provable_address(&pp.sender_address, w, secp)?;
-					Self::write_provable_address(&pp.receiver_address, w, secp)?;
+					Self::write_provable_address(context_id, &pp.sender_address, w, secp)?;
+					Self::write_provable_address(context_id, &pp.receiver_address, w, secp)?;
 					// signature is None
 				}
 				None => w.write(1, 0)?,
@@ -808,13 +822,14 @@ impl Slatepack {
 	}
 
 	fn read_provable_address<R: io::Read, E: Endianness>(
+		context_id: u32,
 		r: &mut BitReader<R, E>,
 		secp: &Secp256k1,
 	) -> Result<ProvableAddress, Error> {
 		let pa = if r.read::<u8>(1)? == 1 {
 			// PublicKey (MQS)
 			let pk = Self::read_publick_key(r, secp)?;
-			ProvableAddress::from_pub_key(&pk)
+			ProvableAddress::from_pub_key(context_id, &pk)
 		} else {
 			let mut pk: [u8; PUBLIC_KEY_LENGTH] = [0; PUBLIC_KEY_LENGTH];
 			r.read_bytes(&mut pk)?;
@@ -829,6 +844,7 @@ impl Slatepack {
 	}
 
 	fn read_slate_data<R: io::Read, E: Endianness>(
+		context_id: u32,
 		read_amount: bool,
 		read_fee: bool,
 		read_offset: bool,
@@ -851,7 +867,7 @@ impl Slatepack {
 
 		let network: u8 = r.read(1)?;
 
-		if (network == 1) ^ global::is_mainnet() {
+		if (network == 1) ^ global::is_mainnet(context_id) {
 			return Err(Error::SlatepackDecodeError("Slate from wrong network".to_string()).into());
 		}
 
@@ -989,8 +1005,8 @@ impl Slatepack {
 
 		if read_proof_addresses {
 			if r.read::<u8>(1)? == 1 {
-				let sender_address = Self::read_provable_address(r, secp)?;
-				let receiver_address = Self::read_provable_address(r, secp)?;
+				let sender_address = Self::read_provable_address(context_id, r, secp)?;
+				let receiver_address = Self::read_provable_address(context_id, r, secp)?;
 
 				match &mut slate.payment_proof {
 					Some(proof) => {

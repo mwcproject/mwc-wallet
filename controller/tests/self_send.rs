@@ -37,7 +37,7 @@ use common::{clean_output_dir, create_wallet_proxy, setup};
 use mwc_wallet_libwallet::types::TxSession;
 use mwc_wallet_libwallet::wallet_lock;
 use mwc_wallet_util::mwc_core::core::Transaction;
-use mwc_wallet_util::mwc_util::Mutex;
+use std::sync::Mutex;
 
 /// self send impl
 fn self_send_test_impl(test_dir: &str, use_sessions: bool) -> Result<(), wallet::Error> {
@@ -92,7 +92,7 @@ fn self_send_test_impl(test_dir: &str, use_sessions: bool) -> Result<(), wallet:
 		mask1,
 		bh as usize,
 		false,
-		tx_pool.lock().deref_mut(),
+		tx_pool.lock().expect("Mutex failure").deref_mut(),
 	);
 
 	// Should have 5 in account1 (5 spendable), 5 in account (2 spendable)
@@ -135,7 +135,7 @@ fn self_send_test_impl(test_dir: &str, use_sessions: bool) -> Result<(), wallet:
 			)?;
 			Ok(())
 		})?;
-		slate = api.finalize_tx(m, &sender_tx_sessions, &slate)?;
+		slate = api.finalize_tx(m, &sender_tx_sessions, &slate, true)?;
 		api.post_tx(m, slate.tx_or_err()?, false)?; // mines a block
 
 		if use_sessions {
@@ -171,7 +171,7 @@ fn self_send_test_impl(test_dir: &str, use_sessions: bool) -> Result<(), wallet:
 		mask1,
 		3,
 		false,
-		tx_pool.lock().deref_mut(),
+		tx_pool.lock().expect("Mutex failure").deref_mut(),
 	);
 	bh += 3;
 

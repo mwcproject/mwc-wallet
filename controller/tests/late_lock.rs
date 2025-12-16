@@ -32,7 +32,7 @@ mod common;
 use common::{clean_output_dir, create_wallet_proxy, setup};
 use mwc_wallet_util::mwc_core::consensus::calc_mwc_block_reward;
 use mwc_wallet_util::mwc_core::core::Transaction;
-use mwc_wallet_util::mwc_util::Mutex;
+use std::sync::Mutex;
 
 /// self send impl
 fn late_lock_test_impl(test_dir: &str) -> Result<(), libwallet::Error> {
@@ -104,7 +104,7 @@ fn late_lock_test_impl(test_dir: &str) -> Result<(), libwallet::Error> {
 		mask1,
 		10,
 		false,
-		tx_pool.lock().deref_mut(),
+		tx_pool.lock().expect("Mutex failure").deref_mut(),
 	)?;
 
 	// update/test contents of both accounts
@@ -113,7 +113,7 @@ fn late_lock_test_impl(test_dir: &str) -> Result<(), libwallet::Error> {
 		assert!(wallet1_refreshed);
 		// Reward from mining 11 blocks, minus the amount sent.
 		// Note: We mined the block containing the tx, so fees are effectively refunded.
-		let expected_amount = calc_mwc_block_reward(1) * (10 - 3);
+		let expected_amount = calc_mwc_block_reward(0, 1) * (10 - 3);
 		assert_eq!(expected_amount, wallet_info.amount_currently_spendable);
 		//reward is 2_380_952_380
 		Ok(())
@@ -154,7 +154,7 @@ fn late_lock_test_impl(test_dir: &str) -> Result<(), libwallet::Error> {
 					assert!(wallet1_refreshed);
 					// Reward from mining 11 blocks, minus the amount sent.
 					// Note: We mined the block containing the tx, so fees are effectively refunded.
-					let expected_amount = calc_mwc_block_reward(1) * (10 - 3);
+					let expected_amount = calc_mwc_block_reward(0, 1) * (10 - 3);
 					assert_eq!(expected_amount, wallet_info.amount_currently_spendable);
 					//reward is 2_380_952_380
 					Ok(())
@@ -165,7 +165,7 @@ fn late_lock_test_impl(test_dir: &str) -> Result<(), libwallet::Error> {
 			// Note we don't call `tx_lock_outputs` on the sender side here,
 			// as the outputs will only be locked during finalization
 
-			slate = sender_api.finalize_tx(m, &None, &slate)?;
+			slate = sender_api.finalize_tx(m, &None, &slate, true)?;
 			println!("S3 SLATE: {:?}", slate);
 
 			// Now one input should be locked
@@ -178,7 +178,7 @@ fn late_lock_test_impl(test_dir: &str) -> Result<(), libwallet::Error> {
 					assert!(wallet1_refreshed);
 					// Reward from mining 11 blocks, minus the amount sent.
 					// Note: We mined the block containing the tx, so fees are effectively refunded.
-					let expected_amount = calc_mwc_block_reward(1) * (10 - 3 - 1);
+					let expected_amount = calc_mwc_block_reward(0, 1) * (10 - 3 - 1);
 					assert_eq!(expected_amount, wallet_info.amount_currently_spendable);
 					//reward is 2_380_952_380
 					Ok(())
@@ -200,7 +200,7 @@ fn late_lock_test_impl(test_dir: &str) -> Result<(), libwallet::Error> {
 		mask1,
 		4,
 		false,
-		tx_pool.lock().deref_mut(),
+		tx_pool.lock().expect("Mutex failure").deref_mut(),
 	)?;
 
 	// update/test contents of both accounts
@@ -209,7 +209,7 @@ fn late_lock_test_impl(test_dir: &str) -> Result<(), libwallet::Error> {
 		assert!(wallet1_refreshed);
 		// Reward from mining 11 blocks, minus the amount sent.
 		// Note: We mined the block containing the tx, so fees are effectively refunded.
-		let expected_amount = calc_mwc_block_reward(1) * (14 - 3) - amount; // fee should be mined back,
+		let expected_amount = calc_mwc_block_reward(0, 1) * (14 - 3) - amount; // fee should be mined back,
 		assert_eq!(expected_amount, wallet_info.amount_currently_spendable);
 		// expected is 25190476180
 		Ok(())

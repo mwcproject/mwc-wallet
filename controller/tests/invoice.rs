@@ -34,7 +34,7 @@ use std::time::Duration;
 mod common;
 use common::{clean_output_dir, create_wallet_proxy, setup};
 use mwc_wallet_util::mwc_core::core::Transaction;
-use mwc_wallet_util::mwc_util::Mutex;
+use std::sync::Mutex;
 
 /// self send impl
 fn invoice_tx_impl(test_dir: &str) -> Result<(), wallet::Error> {
@@ -98,7 +98,7 @@ fn invoice_tx_impl(test_dir: &str) -> Result<(), wallet::Error> {
 		mask1,
 		bh as usize,
 		false,
-		tx_pool.lock().deref_mut(),
+		tx_pool.lock().expect("Mutex failure").deref_mut(),
 	);
 
 	// Sanity check wallet 1 contents
@@ -157,7 +157,7 @@ fn invoice_tx_impl(test_dir: &str) -> Result<(), wallet::Error> {
 		mask1,
 		3,
 		false,
-		tx_pool.lock().deref_mut(),
+		tx_pool.lock().expect("Mutex failure").deref_mut(),
 	);
 	bh += 3;
 
@@ -227,7 +227,7 @@ fn invoice_tx_impl(test_dir: &str) -> Result<(), wallet::Error> {
 		mask1,
 		3,
 		false,
-		tx_pool.lock().deref_mut(),
+		tx_pool.lock().expect("Mutex failure").deref_mut(),
 	);
 	//bh += 3;
 

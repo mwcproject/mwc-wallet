@@ -171,6 +171,7 @@ impl WalletSeed {
 		seed_length: usize,
 		recovery_phrase: Option<util::ZeroingString>,
 		password: util::ZeroingString,
+		show_seed: bool,
 		test_mode: bool,
 	) -> Result<WalletSeed, Error> {
 		WalletSeed::init_file_impl(
@@ -179,7 +180,7 @@ impl WalletSeed {
 			recovery_phrase,
 			password,
 			true,
-			true,
+			show_seed,
 			None,
 			test_mode,
 		)

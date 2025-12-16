@@ -29,13 +29,14 @@ use impls::{DefaultLCProvider, DefaultWalletImpl};
 use mwc_wallet_util::mwc_core::consensus;
 use mwc_wallet_util::mwc_core::core::Transaction;
 use std::sync::Arc;
+use std::sync::Mutex;
 use util::secp::key::SecretKey;
-use util::{Mutex, ZeroingString};
+use util::ZeroingString;
 
 #[macro_export]
 macro_rules! wallet_inst {
 	($wallet:ident, $w: ident) => {
-		let mut w_lock = $wallet.lock();
+		let mut w_lock = $wallet.lock().expect("Mutex failure");
 		let lc = w_lock.lc_provider()?;
 		let $w = lc.wallet_inst()?;
 	};
@@ -44,7 +45,7 @@ macro_rules! wallet_inst {
 #[macro_export]
 macro_rules! wallet_inst_test {
 	($wallet:ident, $w: ident) => {
-		let mut w_lock = $wallet.lock();
+		let mut w_lock = $wallet.lock().expect("Mutex failure");
 		let lc = w_lock.lc_provider().unwrap();
 		let $w = lc.wallet_inst().unwrap();
 	};
@@ -105,6 +106,7 @@ pub fn setup(test_dir: &str) {
 	clean_output_dir(test_dir);
 	global::set_local_chain_type(global::ChainTypes::AutomatedTesting);
 	global::set_local_accept_fee_base(consensus::MILLI_MWC / 100);
+	global::set_local_nrd_enabled(true);
 }
 
 /// Some tests require the global chain_type to be configured due to threads being spawned internally.
@@ -112,7 +114,9 @@ pub fn setup(test_dir: &str) {
 /// leaks across multiple tests and will likely have unintended consequences.
 #[allow(dead_code)]
 pub fn setup_global_chain_type() {
-	global::init_global_chain_type(global::ChainTypes::AutomatedTesting);
+	global::init_global_chain_type(0, global::ChainTypes::AutomatedTesting);
+	global::init_global_nrd_enabled(0, true);
+	global::init_global_accept_fee_base(0, global::DEFAULT_ACCEPT_FEE_BASE);
 }
 
 #[allow(dead_code)]
@@ -150,7 +154,7 @@ pub fn create_local_wallet(
 	>,
 	Option<SecretKey>,
 ) {
-	let mut wallet = Box::new(DefaultWalletImpl::<LocalWalletClient>::new(client).unwrap())
+	let mut wallet = Box::new(DefaultWalletImpl::<LocalWalletClient>::new(0, client))
 		as Box<
 			dyn WalletInst<
 				DefaultLCProvider<'static, LocalWalletClient, ExtKeychain>,
@@ -160,8 +164,16 @@ pub fn create_local_wallet(
 		>;
 	let lc = wallet.lc_provider().unwrap();
 	let _ = lc.set_top_level_directory(&format!("{}/{}", test_dir, name));
-	lc.create_wallet(None, mnemonic, 32, ZeroingString::from(""), false, None)
-		.unwrap();
+	lc.create_wallet(
+		None,
+		mnemonic,
+		32,
+		ZeroingString::from(""),
+		false,
+		None,
+		true,
+	)
+	.unwrap();
 	let mask = lc
 		.open_wallet(None, ZeroingString::from(""), create_mask, false, None)
 		.unwrap();
@@ -189,7 +201,7 @@ pub fn open_local_wallet(
 	>,
 	Option<SecretKey>,
 ) {
-	let mut wallet = Box::new(DefaultWalletImpl::<LocalWalletClient>::new(client).unwrap())
+	let mut wallet = Box::new(DefaultWalletImpl::<LocalWalletClient>::new(0, client))
 		as Box<
 			dyn WalletInst<
 				DefaultLCProvider<'static, LocalWalletClient, ExtKeychain>,

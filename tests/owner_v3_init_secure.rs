@@ -32,9 +32,10 @@ use std::time::Duration;
 use mwc_wallet_impls::DefaultLCProvider;
 use mwc_wallet_util::mwc_core::global;
 use mwc_wallet_util::mwc_keychain::ExtKeychain;
+use mwc_wallet_util::mwc_util::from_hex;
 use mwc_wallet_util::mwc_util::secp::key::SecretKey;
-use mwc_wallet_util::mwc_util::{from_hex, Mutex};
 use serde_json;
+use std::sync::Mutex;
 
 #[macro_use]
 mod common;
@@ -70,7 +71,7 @@ fn owner_v3_init_secure() -> Result<(), mwc_wallet_controller::Error> {
 		mask1,
 		bh as usize,
 		false,
-		tx_pool.lock().deref_mut(),
+		tx_pool.lock().expect("Mutex failure").deref_mut(),
 	);
 
 	// run a wallet owner listener

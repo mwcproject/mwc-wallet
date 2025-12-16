@@ -42,6 +42,7 @@ pub mod adapters;
 mod backends;
 mod client_utils;
 mod error;
+pub mod http_parser;
 pub mod lifecycle;
 pub mod node_clients;
 pub mod test_framework;
@@ -56,6 +57,7 @@ pub use crate::adapters::{
 	SlateSender, Subscriber, SubscriptionHandler, SwapMessageSender,
 };
 pub use crate::backends::{wallet_db_exists, LMDBBackend};
+pub use crate::client_utils::json_rpc;
 pub use crate::error::Error;
 pub use crate::lifecycle::DefaultLCProvider;
 pub use crate::node_clients::HTTPNodeClient;
@@ -76,11 +78,11 @@ impl<'a, C> DefaultWalletImpl<'a, C>
 where
 	C: NodeClient + 'a,
 {
-	pub fn new(node_client: C) -> Result<Self, Error> {
-		let lc_provider = DefaultLCProvider::new(node_client);
-		Ok(DefaultWalletImpl {
+	pub fn new(context_id: u32, node_client: C) -> Self {
+		let lc_provider = DefaultLCProvider::new(context_id, node_client);
+		DefaultWalletImpl {
 			lc_provider: lc_provider,
-		})
+		}
 	}
 }
 

@@ -15,7 +15,7 @@
 //! Generic implementation libp2p related communication functionality
 
 use crate::mwc_util::secp::key::SecretKey;
-use crate::mwc_util::Mutex;
+use std::sync::Mutex;
 
 use crate::api_impl::{foreign, owner};
 use crate::internal::{keys, updater};

@@ -18,7 +18,7 @@
 //! Versions earlier than V2 are removed for the 2.0.0 release, but versioning code
 //! remains for future needs
 
-use crate::slate::Slate;
+use crate::slate::{Slate, SlateCtx};
 use crate::slate_versions::v2::{CoinbaseV2, SlateV2};
 use crate::slate_versions::v3::{CoinbaseV3, SlateV3};
 use crate::slatepack::SlatePurpose;
@@ -27,6 +27,7 @@ use crate::Error;
 use crate::Slatepacker;
 use ed25519_dalek::PublicKey as DalekPublicKey;
 use ed25519_dalek::SecretKey as DalekSecretKey;
+use mwc_wallet_util::mwc_core::global;
 use mwc_wallet_util::mwc_util::secp::Secp256k1;
 use std::convert::TryFrom;
 
@@ -103,6 +104,7 @@ impl VersionedSlate {
 
 	/// convert this slate type to a specified older version
 	pub fn into_version(
+		context_id: u32,
 		slate: Slate,
 		version: SlateVersion,
 		content: SlatePurpose,
@@ -115,6 +117,7 @@ impl VersionedSlate {
 		match version {
 			SlateVersion::SP => {
 				let armored_slatepack = Slatepacker::encrypt_to_send(
+					context_id,
 					slate,
 					SlateVersion::SP,
 					content,
@@ -126,22 +129,27 @@ impl VersionedSlate {
 				)?;
 				Ok(VersionedSlate::SP(armored_slatepack))
 			}
-			_ => Ok(Self::into_version_plain(slate.clone(), version)?),
+			_ => Ok(Self::into_version_plain(context_id, &slate, version)?),
 		}
 	}
 
 	/// Converting into the low version slate (not packed and encrypted)
 	pub fn into_version_plain(
-		slate: Slate,
+		context_id: u32,
+		slate: &Slate,
 		version: SlateVersion,
 	) -> Result<VersionedSlate, Error> {
+		let sl_ctx = SlateCtx {
+			slate: slate.clone(),
+			network_name: Some(global::get_network_name(context_id)),
+		};
 		match version {
 			SlateVersion::SP => return Err(Error::GenericError("Slate is encrypted".to_string())),
-			SlateVersion::V3B | SlateVersion::V3 => Ok(VersionedSlate::V3(slate.into())),
+			SlateVersion::V3B | SlateVersion::V3 => Ok(VersionedSlate::V3((&sl_ctx).into())),
 			// Left here as a reminder of what needs to be inserted on
 			// the release of a new slate
 			SlateVersion::V2 => {
-				let s = SlateV3::from(slate);
+				let s = SlateV3::from(&sl_ctx);
 				let s = SlateV2::try_from(&s)?;
 				Ok(VersionedSlate::V2(s))
 			}
@@ -151,33 +159,46 @@ impl VersionedSlate {
 	/// Decode into the slate and sender address.
 	pub fn into_slatepack(
 		&self,
+		context_id: u32,
 		dec_key: &DalekSecretKey,
 		secp: &Secp256k1,
 	) -> Result<Slatepacker, Error> {
 		match self {
 			VersionedSlate::SP(arm_slatepack) => {
-				let packer =
-					Slatepacker::decrypt_slatepack(arm_slatepack.as_bytes(), dec_key, secp)?;
+				let packer = Slatepacker::decrypt_slatepack(
+					context_id,
+					arm_slatepack.as_bytes(),
+					dec_key,
+					secp,
+				)?;
 				Ok(packer)
 			}
-			VersionedSlate::V3(s) => Ok(Slatepacker::wrap_slate(s.clone().to_slate(false)?)),
+			VersionedSlate::V3(s) => Ok(Slatepacker::wrap_slate(
+				s.clone()
+					.to_slate(Some(global::get_network_name(context_id)), false)?,
+			)),
 			VersionedSlate::V2(s) => {
 				let s = SlateV3::from(s.clone());
-				Ok(Slatepacker::wrap_slate(s.to_slate(false)?))
+				Ok(Slatepacker::wrap_slate(s.to_slate(
+					Some(global::get_network_name(context_id)),
+					false,
+				)?))
 			}
 		}
 	}
 
 	/// Non encrypted slate conversion
-	pub fn into_slate_plain(&self, fix_kernel: bool) -> Result<Slate, Error> {
+	pub fn into_slate_plain(&self, context_id: u32, fix_kernel: bool) -> Result<Slate, Error> {
 		match self {
 			VersionedSlate::SP(_) => {
 				return Err(Error::GenericError("Slate is encrypted".to_string()))
 			}
-			VersionedSlate::V3(s) => Ok(s.clone().to_slate(fix_kernel)?),
+			VersionedSlate::V3(s) => Ok(s
+				.clone()
+				.to_slate(Some(global::get_network_name(context_id)), fix_kernel)?),
 			VersionedSlate::V2(s) => {
 				let s = SlateV3::from(s.clone());
-				Ok(s.to_slate(false)?)
+				Ok(s.to_slate(Some(global::get_network_name(context_id)), false)?)
 			}
 		}
 	}

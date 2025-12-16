@@ -122,6 +122,11 @@ pub enum Error {
 	#[error("BCH error, {0}")]
 	BchError(String),
 
+	/// Deals path is not set
+	#[error(
+		"Trade deals path not defined. Please specify it at wallet config or with swap arguments"
+	)]
+	UndefinedTradeDealsPath,
 	/// Infura Node client error
 	#[error(
 		"Infura Project Id not defined. Please specify it at wallet config or with swap arguments"

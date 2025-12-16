@@ -1,0 +1,15 @@
+[package]
+name = "mwc_wallet_workflow"
+version = "6.0.0"
+authors = ["Mwc Developers <info@mwc.mw>"]
+description = "Simple, private and scalable cryptocurrency implementation based on the MimbleWimble chain format."
+license = "Apache-2.0"
+repository = "https://github.com/mwcproject/mwc-node"
+keywords = [ "crypto", "mwc", "mimblewimble" ]
+workspace = ".."
+edition = "2024"
+
+[dependencies]
+mwc_wallet_libwallet = { path = "../libwallet", version = "6.0.0" }
+mwc_wallet_impls = { path = "../impls", version = "6.0.0" }
+mwc_wallet_controller = { path = "../controller", version = "6.0.0" }

@@ -20,7 +20,6 @@
 
 use crate::error::Error;
 use crate::mwc_core::core::transaction::OutputFeatures;
-use crate::mwc_core::global;
 use crate::mwc_core::libtx::secp_ser;
 use crate::mwc_core::map_vec;
 use crate::mwc_keychain::{BlindingFactor, Identifier};
@@ -113,7 +112,11 @@ pub fn sig_is_blank(s: &secp::Signature) -> bool {
 }
 
 impl SlateV3 {
-	pub fn to_slate(self, fix_kernel: bool) -> Result<Slate, Error> {
+	pub fn to_slate(
+		self,
+		expected_network: Option<String>,
+		fix_kernel: bool,
+	) -> Result<Slate, Error> {
 		if self.coin_type.unwrap_or("mwc".to_string()) != "mwc" {
 			return Err(Error::SlateDeser(
 				"slate doesn't belong to MWC network".to_string(),
@@ -121,12 +124,13 @@ impl SlateV3 {
 		}
 
 		if let Some(network) = self.network_type {
-			if network != global::get_network_name() {
-				return Err(Error::SlateDeser(format!(
-					"slate from {} network, expected {} network",
-					network,
-					global::get_network_name()
-				)));
+			if let Some(expected_network) = &expected_network {
+				if network != *expected_network {
+					return Err(Error::SlateDeser(format!(
+						"slate from {} network, expected {} network",
+						network, expected_network
+					)));
+				}
 			}
 		}
 

@@ -59,5 +59,5 @@ pub use crate::owner_rpc_v2::run_doctest_owner;
 
 pub use types::{
 	ECDHPubkey, EncryptedRequest, EncryptedResponse, EncryptionErrorResponse, JsonId, PubAddress,
-	Token,
+	Token, TxLogEntryAPI,
 };

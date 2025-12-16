@@ -16,8 +16,7 @@
 //! Default wallet lifecycle provider
 
 use crate::config::{
-	config, GlobalWalletConfig, GlobalWalletConfigMembers, MQSConfig, TorConfig, WalletConfig,
-	MWC_WALLET_DIR,
+	config, GlobalWalletConfig, GlobalWalletConfigMembers, MQSConfig, WalletConfig, MWC_WALLET_DIR,
 };
 use crate::core::global;
 use crate::keychain::{ChildNumber, Keychain};
@@ -31,6 +30,7 @@ use mwc_wallet_libwallet::types::{
 	FLAG_CONTEXT_CLEARED, FLAG_NEW_WALLET, FLAG_OUTPUTS_ROOT_KEY_ID_CORRECTION,
 };
 use mwc_wallet_libwallet::{Context, OutputData, TxLogEntryType};
+use mwc_wallet_util::mwc_p2p::TorConfig;
 use mwc_wallet_util::mwc_util::logger::LoggingConfig;
 use std::collections::HashMap;
 use std::fs;
@@ -42,6 +42,7 @@ where
 	C: NodeClient + 'a,
 	K: Keychain + 'a,
 {
+	context_id: u32,
 	data_dir: String,
 	node_client: C,
 	backend: Option<Box<dyn WalletBackend<'a, C, K> + 'a>>,
@@ -53,8 +54,9 @@ where
 	K: Keychain + 'a,
 {
 	/// Create new provider
-	pub fn new(node_client: C) -> Self {
+	pub fn new(context_id: u32, node_client: C) -> Self {
 		DefaultLCProvider {
+			context_id,
 			node_client,
 			data_dir: "default".to_owned(),
 			backend: None,
@@ -194,6 +196,7 @@ where
 		Ok(())
 	}
 
+	// return mnemonic phrase
 	fn create_wallet(
 		&mut self,
 		_name: Option<&str>,
@@ -202,7 +205,8 @@ where
 		password: ZeroingString,
 		test_mode: bool,
 		wallet_data_dir: Option<&str>,
-	) -> Result<(), Error> {
+		show_seed: bool,
+	) -> Result<ZeroingString, Error> {
 		let mut data_dir_name = PathBuf::from(self.data_dir.clone());
 		data_dir_name.push(wallet_data_dir.unwrap_or(MWC_WALLET_DIR));
 		let data_dir_name = data_dir_name.to_str().unwrap();
@@ -213,11 +217,12 @@ where
 				return Err(Error::WalletSeedExists(msg));
 			}
 		}
-		WalletSeed::init_file(
+		let seed = WalletSeed::init_file(
 			&data_dir_name,
 			mnemonic_length,
 			mnemonic.clone(),
 			password,
+			show_seed,
 			test_mode,
 		)
 		.map_err(|e| {
@@ -229,7 +234,7 @@ where
 
 		info!("Wallet seed file created");
 		let mut wallet: LMDBBackend<'a, C, K> =
-			match LMDBBackend::new(&data_dir_name, self.node_client.clone()) {
+			match LMDBBackend::new(self.context_id, &data_dir_name, self.node_client.clone()) {
 				Err(e) => {
 					let msg = format!("Error creating wallet: {}, Data Dir: {}", e, &data_dir_name);
 					error!("{}", msg);
@@ -244,7 +249,10 @@ where
 		}
 		batch.commit()?;
 		info!("Wallet database backend created at {}", data_dir_name);
-		Ok(())
+		let mnemonic = seed
+			.to_mnemonic()
+			.map_err(|e| Error::Lifecycle(format!("Unbale to generate mnemonic phrase, {}", e)))?;
+		Ok(mnemonic.into())
 	}
 
 	fn open_wallet(
@@ -259,7 +267,7 @@ where
 		data_dir_name.push(wallet_data_dir.unwrap_or(MWC_WALLET_DIR));
 		let data_dir_name = data_dir_name.to_str().unwrap();
 		let mut wallet: LMDBBackend<'a, C, K> =
-			match LMDBBackend::new(&data_dir_name, self.node_client.clone()) {
+			match LMDBBackend::new(self.context_id, &data_dir_name, self.node_client.clone()) {
 				Err(e) => {
 					let msg = format!("Error opening wallet: {}, Data Dir: {}", e, &data_dir_name);
 					return Err(Error::Lifecycle(msg));
@@ -274,7 +282,7 @@ where
 		})?;
 
 		if let Ok(mnmenoic) = wallet_seed.to_mnemonic() {
-			let ethereum_wallet = match global::is_mainnet() {
+			let ethereum_wallet = match global::is_mainnet(self.context_id) {
 				true => Some(
 					generate_ethereum_wallet(
 						"mainnet",
@@ -298,7 +306,7 @@ where
 		}
 
 		let keychain = wallet_seed
-			.derive_keychain(global::is_floonet())
+			.derive_keychain(global::is_floonet(self.context_id))
 			.map_err(|e| Error::Lifecycle(format!("Error deriving keychain, {}", e)))?;
 
 		let mask = wallet.set_keychain(Box::new(keychain), create_mask, use_test_rng)?;
@@ -468,6 +476,7 @@ where
 			Some(ZeroingString::from(orig_mnemonic)),
 			new.clone(),
 			false,
+			false,
 		);
 		info!("Wallet seed file created");
 
@@ -506,5 +515,9 @@ where
 			None => Err(Error::Lifecycle("Wallet has not been opened".to_string())),
 			Some(w) => Ok(w),
 		}
+	}
+
+	fn get_context_id(&self) -> u32 {
+		self.context_id
 	}
 }

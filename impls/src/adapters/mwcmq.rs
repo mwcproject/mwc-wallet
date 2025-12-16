@@ -17,10 +17,9 @@ use crate::adapters::types::MWCMQSAddress;
 use crate::error::Error;
 use crate::libwallet::proof::crypto;
 use crate::libwallet::proof::crypto::Hex;
-use crate::util::Mutex;
+use std::sync::Mutex;
 
 use crate::core::core::amount_to_hr_string;
-use crate::util::RwLock;
 use crate::SlateSender;
 use crate::SwapMessageSender;
 use ed25519_dalek::{PublicKey as DalekPublicKey, SecretKey as DalekSecretKey};
@@ -30,7 +29,7 @@ use mwc_wallet_libwallet::proof::tx_proof::{push_proof_for_slate, TxProof};
 use mwc_wallet_libwallet::slatepack::SlatePurpose;
 use mwc_wallet_libwallet::swap::message::Message;
 use mwc_wallet_libwallet::swap::message::SwapMessage;
-use mwc_wallet_libwallet::{Slate, SlateVersion, VersionedSlate};
+use mwc_wallet_libwallet::{Slate, SlateCtx, SlateVersion, VersionedSlate};
 use mwc_wallet_util::mwc_core::global;
 use mwc_wallet_util::mwc_util::secp::key::SecretKey;
 use mwc_wallet_util::mwc_util::secp::Secp256k1;
@@ -39,6 +38,8 @@ use std::io::Read;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Arc;
+use std::sync::RwLock;
+use std::thread::JoinHandle;
 use std::time::Duration;
 use std::{thread, time};
 
@@ -49,31 +50,58 @@ extern crate nanoid;
 // Also all dependent components want to use MQS and they need interface.
 // Since instance is single, interface will be global
 lazy_static! {
-	static ref MWCMQS_BROKER: RwLock<Option<(MWCMQPublisher, MWCMQSubscriber)>> = RwLock::new(None);
+	static ref MWCMQS_BROKER: RwLock<HashMap<u32, (MWCMQPublisher, MWCMQSubscriber)>> =
+		RwLock::new(HashMap::new());
 }
 
 /// Init mwc mqs objects for the access.
-pub fn init_mwcmqs_access_data(publisher: MWCMQPublisher, subscriber: MWCMQSubscriber) {
-	MWCMQS_BROKER.write().replace((publisher, subscriber));
+pub fn init_mwcmqs_access_data(
+	context_id: u32,
+	publisher: MWCMQPublisher,
+	subscriber: MWCMQSubscriber,
+) {
+	if let Some((_, mut subscr)) = MWCMQS_BROKER
+		.write()
+		.expect("RwLock failure")
+		.insert(context_id, (publisher, subscriber))
+	{
+		subscr.stop(false);
+	}
 }
 
 /// Init mwc mqs objects for the access.
-pub fn get_mwcmqs_brocker() -> Option<(MWCMQPublisher, MWCMQSubscriber)> {
-	MWCMQS_BROKER.read().clone()
+pub fn get_mwcmqs_brocker(context_id: u32) -> Option<(MWCMQPublisher, MWCMQSubscriber)> {
+	MWCMQS_BROKER
+		.read()
+		.expect("RwLock failure")
+		.get(&context_id)
+		.cloned()
 }
 
 /// Reset Broker (listener is stopped)
-pub fn reset_mwcmqs_brocker() {
-	MWCMQS_BROKER.write().take();
+/// stop_existing call if already running we want to stop.
+pub fn reset_mwcmqs_brocker(context_id: u32) {
+	let prev_state = {
+		MWCMQS_BROKER
+			.write()
+			.expect("RwLock failure")
+			.remove(&context_id)
+	};
+
+	if let Some((_, mut subscr)) = prev_state {
+		subscr.stop(false);
+	}
 }
 
 pub struct MwcMqsChannel {
+	context_id: u32,
 	des_address: String,
 }
 
 impl MwcMqsChannel {
-	pub fn new(des_address: String) -> Self {
+	pub fn new(context_id: u32, des_address: String) -> Self {
 		Self {
+			context_id,
 			des_address: des_address,
 		}
 	}
@@ -85,7 +113,7 @@ impl MwcMqsChannel {
 		rx_slate: Receiver<Slate>,
 		secp: &Secp256k1,
 	) -> Result<Slate, Error> {
-		let des_address = MWCMQSAddress::from_str(self.des_address.as_ref())
+		let des_address = MWCMQSAddress::from_str(self.context_id, self.des_address.as_ref())
 			.map_err(|e| Error::MqsGenericError(format!("Invalid destination address, {}", e)))?;
 		mwcmqs_publisher
 			.post_slate(&slate, &des_address, secp)
@@ -96,12 +124,21 @@ impl MwcMqsChannel {
 				))
 			})?;
 
-		println!(
-			"slate [{}] for [{}] MWCs sent to [{}]",
-			slate.id.to_string(),
-			amount_to_hr_string(slate.amount, false),
-			des_address,
-		);
+		if mwc_wallet_util::mwc_util::is_console_output_enabled() {
+			println!(
+				"slate [{}] for [{}] MWCs sent to [{}]",
+				slate.id.to_string(),
+				amount_to_hr_string(slate.amount, false),
+				des_address,
+			);
+		} else {
+			info!(
+				"slate [{}] for [{}] MWCs sent to [{}]",
+				slate.id.to_string(),
+				amount_to_hr_string(slate.amount, false),
+				des_address,
+			);
+		}
 
 		//expect to get slate back.
 		let slate_returned = rx_slate
@@ -119,7 +156,7 @@ impl MwcMqsChannel {
 		_rs_message: Receiver<Message>,
 		secp: &Secp256k1,
 	) -> Result<(), Error> {
-		let des_address = MWCMQSAddress::from_str(self.des_address.as_ref())
+		let des_address = MWCMQSAddress::from_str(self.context_id, self.des_address.as_ref())
 			.map_err(|e| Error::MqsGenericError(format!("Invalid destination address, {}", e)))?;
 		mwcmqs_publisher
 			.post_take(swap_message, &des_address, secp)
@@ -154,14 +191,14 @@ impl SlateSender for MwcMqsChannel {
 		secp: &Secp256k1,
 	) -> Result<Slate, Error> {
 		if !send_tx {
-			if global::is_mainnet() {
+			if global::is_mainnet(self.context_id) {
 				return Err(Error::MqsGenericError(
 					"MWCMQS doesn't support invoice transactions".into(),
 				));
 			}
 		}
 
-		if let Some((mwcmqs_publisher, mwcmqs_subscriber)) = get_mwcmqs_brocker() {
+		if let Some((mwcmqs_publisher, mwcmqs_subscriber)) = get_mwcmqs_brocker(self.context_id) {
 			// Creating channels for notification
 			let (tx_slate, rx_slate) = channel(); //this chaneel is used for listener thread to send message to other thread
 
@@ -181,7 +218,7 @@ impl SlateSender for MwcMqsChannel {
 impl SwapMessageSender for MwcMqsChannel {
 	/// Send a swap message. Return true is message delivery acknowledge can be set (message was delivered and procesed)
 	fn send_swap_message(&self, message: &Message, secp: &Secp256k1) -> Result<bool, Error> {
-		if let Some((mwcmqs_publisher, _mwcmqs_subscriber)) = get_mwcmqs_brocker() {
+		if let Some((mwcmqs_publisher, _mwcmqs_subscriber)) = get_mwcmqs_brocker(self.context_id) {
 			let (_ts_message, rs_message) = channel();
 			self.send_swap_to_mqs(message, mwcmqs_publisher, rs_message, &secp)?;
 			// MQS is async protocol, message might never be delivered, so no ack can be granted.
@@ -197,14 +234,16 @@ impl SwapMessageSender for MwcMqsChannel {
 
 #[derive(Clone)]
 pub struct MWCMQPublisher {
-	address: MWCMQSAddress,
-	broker: MWCMQSBroker,
-	secret_key: SecretKey,
+	context_id: u32,
+	address: Arc<MWCMQSAddress>,
+	broker: Arc<MWCMQSBroker>,
+	secret_key: Arc<SecretKey>,
 }
 
 impl MWCMQPublisher {
 	// Note, Publisher must initialize controller with self
 	pub fn new(
+		context_id: u32,
 		address: MWCMQSAddress,
 		secret_key: &SecretKey,
 		mwcmqs_domain: String,
@@ -213,16 +252,23 @@ impl MWCMQPublisher {
 		handler: Box<dyn SubscriptionHandler + Send>,
 	) -> Self {
 		Self {
-			address,
-			broker: MWCMQSBroker::new(mwcmqs_domain, mwcmqs_port, print_to_log, handler),
-			secret_key: secret_key.clone(),
+			context_id,
+			address: Arc::new(address),
+			broker: Arc::new(MWCMQSBroker::new(
+				context_id,
+				mwcmqs_domain,
+				mwcmqs_port,
+				print_to_log,
+				handler,
+			)),
+			secret_key: Arc::new(secret_key.clone()),
 		}
 	}
 }
 impl Publisher for MWCMQPublisher {
 	fn post_slate(&self, slate: &Slate, to: &dyn Address, secp: &Secp256k1) -> Result<(), Error> {
 		let to_address_raw = format!("mwcmqs://{}", to.get_stripped());
-		let to_address = MWCMQSAddress::from_str(&to_address_raw)?;
+		let to_address = MWCMQSAddress::from_str(self.context_id, &to_address_raw)?;
 		self.broker
 			.post_slate(slate, &to_address, &self.address, &self.secret_key, secp)?;
 		Ok(())
@@ -235,7 +281,7 @@ impl Publisher for MWCMQPublisher {
 		secp: &Secp256k1,
 	) -> Result<String, Error> {
 		let to_address_raw = format!("mwcmqs://{}", to.get_stripped());
-		let to_address = MWCMQSAddress::from_str(&to_address_raw)?;
+		let to_address = MWCMQSAddress::from_str(self.context_id, &to_address_raw)?;
 		self.broker
 			.encrypt_slate(slate, &to_address, &self.address, &self.secret_key, secp)
 	}
@@ -255,9 +301,10 @@ impl Publisher for MWCMQPublisher {
 		let r5 = str::replace(&r4, "%2C", ",");
 		let r5 = r5.trim().to_string();
 
-		let from = MWCMQSAddress::from_str(&from)?;
+		let from = MWCMQSAddress::from_str(self.context_id, &from)?;
 
 		let (slate, _tx_proof) = TxProof::from_response(
+			self.context_id,
 			&from.address,
 			r5.clone(),
 			"".to_string(),
@@ -270,8 +317,11 @@ impl Publisher for MWCMQPublisher {
 			Error::MqsGenericError(format!("Unable to build txproof from the payload, {}", e))
 		})?;
 
-		let slate = serde_json::to_string(&slate)
-			.map_err(|e| Error::MqsGenericError(format!("Unable convert Slate to Json, {}", e)))?;
+		let slate = serde_json::to_string(&SlateCtx {
+			slate: slate,
+			network_name: Some(global::get_network_name(self.context_id)),
+		})
+		.map_err(|e| Error::MqsGenericError(format!("Unable convert Slate to Json, {}", e)))?;
 		Ok(slate)
 	}
 
@@ -282,7 +332,7 @@ impl Publisher for MWCMQPublisher {
 		secp: &Secp256k1,
 	) -> Result<(), Error> {
 		let to_address_raw = format!("mwcmqs://{}", to.get_stripped());
-		let to_address = MWCMQSAddress::from_str(&to_address_raw)?;
+		let to_address = MWCMQSAddress::from_str(self.context_id, &to_address_raw)?;
 		self.broker
 			.post_take(message, &to_address, &self.address, &self.secret_key, secp)?;
 		Ok(())
@@ -290,40 +340,88 @@ impl Publisher for MWCMQPublisher {
 
 	// Address of this publisher (from address)
 	fn get_publisher_address(&self) -> Result<Box<dyn Address>, Error> {
-		Ok(Box::new(self.address.clone()))
+		Ok(Box::new((*self.address).clone()))
 	}
 }
 
 #[derive(Clone)]
 pub struct MWCMQSubscriber {
-	address: MWCMQSAddress,
-	broker: MWCMQSBroker,
-	secret_key: SecretKey,
+	context_id: u32,
+	address: Arc<MWCMQSAddress>,
+	broker: Arc<MWCMQSBroker>,
+	secret_key: Arc<SecretKey>,
+	subscribe_thread: Arc<Mutex<Option<JoinHandle<()>>>>,
 }
 
 impl MWCMQSubscriber {
 	pub fn new(publisher: &MWCMQPublisher) -> Self {
 		Self {
+			context_id: publisher.context_id,
 			address: publisher.address.clone(),
 			broker: publisher.broker.clone(),
 			secret_key: publisher.secret_key.clone(),
+			subscribe_thread: Arc::new(Mutex::new(None)),
 		}
+	}
+
+	pub fn take_subscribe_thread(&self) -> Option<JoinHandle<()>> {
+		self.subscribe_thread.lock().expect("Mutex failure").take()
+	}
+
+	pub fn is_mqs_running(&self) -> bool {
+		self.broker.is_running()
+	}
+
+	pub fn is_mqs_healthy(&self) -> bool {
+		self.broker.is_running() && self.broker.is_healthy()
 	}
 }
 impl Subscriber for MWCMQSubscriber {
-	fn start(&mut self, secp: &Secp256k1) -> Result<(), Error> {
-		self.broker
-			.subscribe(&self.address.address, &self.secret_key, secp);
+	fn start(&mut self, secp: Secp256k1) -> Result<(), Error> {
+		let mut subscribe_thread = self.subscribe_thread.lock().expect("Mutex failure");
+
+		if subscribe_thread.is_some() {
+			return Err(Error::MqsGenericError(
+				"MQS listener is already running".into(),
+			));
+		}
+
+		let address = self.address.address.clone();
+		let context_id = self.context_id.clone();
+		let broker = self.broker.clone();
+		let secret_key = self.secret_key.clone();
+		let subscribe_thread2 = self.subscribe_thread.clone();
+
+		let thread = thread::Builder::new()
+			.name(format!("mwcmqs-broker-{}", self.context_id))
+			.spawn(move || {
+				broker.subscribe(&address, &secret_key, &secp);
+				subscribe_thread2.lock().expect("Mutex failure").take();
+				reset_mwcmqs_brocker(context_id);
+			})
+			.map_err(|e| Error::GenericError(format!("Unable to start mwcmqs broker, {}", e)))?;
+
+		*subscribe_thread = Some(thread);
 		Ok(())
 	}
 
-	fn stop(&mut self) -> bool {
+	fn stop(&mut self, call_reset_mwcmqs_brocker: bool) -> bool {
+		if self
+			.subscribe_thread
+			.lock()
+			.expect("Mutex failure")
+			.is_none()
+		{
+			return true; // allready stopped
+		}
+
 		if let Ok(client) = reqwest::blocking::Client::builder()
 			.timeout(Duration::from_secs(60))
 			.build()
 		{
 			let mut params = HashMap::new();
 			params.insert("mapmessage", "nil");
+			self.broker.stop();
 			let response = client
 				.post(&format!(
 					"https://{}:{}/sender?address={}",
@@ -336,7 +434,13 @@ impl Subscriber for MWCMQSubscriber {
 
 			let response_status = response.is_ok();
 			self.broker.stop();
-			reset_mwcmqs_brocker();
+			let listener_thread = self.subscribe_thread.lock().expect("Mutex failure").take();
+			if let Some(listener_thread) = listener_thread {
+				let _ = listener_thread.join();
+			}
+			if call_reset_mwcmqs_brocker {
+				reset_mwcmqs_brocker(self.context_id);
+			}
 			response_status
 		} else {
 			error!("Unable to stop mwcmqs threads");
@@ -352,6 +456,7 @@ impl Subscriber for MWCMQSubscriber {
 		self.broker
 			.handler
 			.lock()
+			.expect("Mutex failure")
 			.set_notification_channels(slate_id, slate_send_channel);
 	}
 
@@ -359,13 +464,16 @@ impl Subscriber for MWCMQSubscriber {
 		self.broker
 			.handler
 			.lock()
+			.expect("Mutex failure")
 			.reset_notification_channels(slate_id);
 	}
 }
 
 #[derive(Clone)]
 struct MWCMQSBroker {
+	context_id: u32,
 	running: Arc<AtomicBool>,
+	healthy: Arc<AtomicBool>,
 	pub mwcmqs_domain: String,
 	pub mwcmqs_port: u16,
 	pub print_to_log: bool,
@@ -374,13 +482,16 @@ struct MWCMQSBroker {
 
 impl MWCMQSBroker {
 	fn new(
+		context_id: u32,
 		mwcmqs_domain: String,
 		mwcmqs_port: u16,
 		print_to_log: bool,
 		handler: Box<dyn SubscriptionHandler + Send>,
 	) -> Self {
 		Self {
+			context_id,
 			running: Arc::new(AtomicBool::new(false)),
+			healthy: Arc::new(AtomicBool::new(true)),
 			mwcmqs_domain,
 			mwcmqs_port,
 			print_to_log,
@@ -396,7 +507,7 @@ impl MWCMQSBroker {
 		secret_key: &SecretKey,
 		secp: &Secp256k1,
 	) -> Result<String, Error> {
-		let pkey = to.address.public_key().map_err(|e| {
+		let pkey = to.address.public_key(self.context_id).map_err(|e| {
 			Error::LibWallet(format!(
 				"Unable to parse address public key {}, {}",
 				to.address.public_key, e
@@ -404,7 +515,7 @@ impl MWCMQSBroker {
 		})?;
 		let skey = secret_key.clone();
 		let version = slate.lowest_version();
-		let slate = VersionedSlate::into_version_plain(slate.clone(), version)
+		let slate = VersionedSlate::into_version_plain(self.context_id, slate, version)
 			.map_err(|e| Error::LibWallet(format!("Unable to process slate, {}", e)))?;
 		let serde_json = serde_json::to_string(&slate)
 			.map_err(|e| Error::MqsGenericError(format!("Unable convert Slate to Json, {}", e)))?;
@@ -449,7 +560,7 @@ impl MWCMQSBroker {
 		if !self.is_running() {
 			return Err(Error::ClosedListener("mwcmqs".to_string()));
 		}
-		let pkey = to.address.public_key().map_err(|e| {
+		let pkey = to.address.public_key(self.context_id).map_err(|e| {
 			Error::LibWallet(format!(
 				"Unable to parse address public key {}, {}",
 				to.address.public_key, e
@@ -457,7 +568,7 @@ impl MWCMQSBroker {
 		})?;
 		let skey = secret_key.clone();
 		let version = slate.lowest_version();
-		let slate = VersionedSlate::into_version_plain(slate.clone(), version)
+		let slate = VersionedSlate::into_version_plain(self.context_id, slate, version)
 			.map_err(|e| Error::LibWallet(format!("Unable to process slate, {}", e)))?;
 
 		let message = EncryptedMessage::new(
@@ -551,7 +662,7 @@ impl MWCMQSBroker {
 		if !self.is_running() {
 			return Err(Error::ClosedListener("mwcmqs".to_string()));
 		}
-		let pkey = to.address.public_key().map_err(|e| {
+		let pkey = to.address.public_key(self.context_id).map_err(|e| {
 			Error::LibWallet(format!(
 				"Unable to parse address public key {}, {}",
 				to.address.public_key, e
@@ -626,12 +737,22 @@ impl MWCMQSBroker {
 					} else {
 						let last_seen = last_seen.unwrap();
 						if last_seen > 10000000000 {
-							println!("\nWARNING: [{}] has not been connected to mwcmqs recently. This user might not receive the swap message.",
-									 to.get_stripped());
+							if mwc_wallet_util::mwc_util::is_console_output_enabled() {
+								println!("\nWARNING: [{}] has not been connected to mwcmqs recently. This user might not receive the swap message.",
+										 to.get_stripped());
+							} else {
+								info!("\nWARNING: [{}] has not been connected to mwcmqs recently. This user might not receive the swap message.",
+										 to.get_stripped());
+							}
 						} else if last_seen > 150000 {
 							let seconds = last_seen / 1000;
-							println!("\nWARNING: [{}] has not been connected to mwcmqs for {} seconds. This user might not receive the swap message.",
-									 to.get_stripped(), seconds);
+							if mwc_wallet_util::mwc_util::is_console_output_enabled() {
+								println!("\nWARNING: [{}] has not been connected to mwcmqs for {} seconds. This user might not receive the swap message.",
+										 to.get_stripped(), seconds);
+							} else {
+								info!("\nWARNING: [{}] has not been connected to mwcmqs for {} seconds. This user might not receive the swap message.",
+										 to.get_stripped(), seconds);
+							}
 						}
 					}
 				}
@@ -641,7 +762,7 @@ impl MWCMQSBroker {
 		Ok(())
 	}
 
-	fn print_error(&mut self, messages: Vec<&str>, error: &str, code: i16) {
+	fn print_error(&self, messages: Vec<&str>, error: &str, code: i16) {
 		self.do_log_error(format!(
 			"ERROR: messages=[{:?}] produced error: {} (code={})",
 			messages, error, code
@@ -672,7 +793,7 @@ impl MWCMQSBroker {
 	}
 
 	fn subscribe(
-		&mut self,
+		&self,
 		source_address: &ProvableAddress,
 		secret_key: &SecretKey,
 		secp: &Secp256k1,
@@ -691,7 +812,6 @@ impl MWCMQSBroker {
 		let cloned_address = address.clone();
 		let cloned_running = self.running.clone();
 		let mut count = 0;
-		let mut connected = false;
 		let mut isnginxerror = false;
 		let mut delcount = 0;
 		let mut is_in_warning = false;
@@ -783,7 +903,11 @@ impl MWCMQSBroker {
 					break;
 				}
 
-				let secs = if !connected { 15 } else { 120 };
+				let secs = if !self.healthy.load(Ordering::Relaxed) {
+					15
+				} else {
+					120
+				};
 				let cl = reqwest::blocking::Client::builder()
 					.timeout(Duration::from_secs(secs))
 					.build();
@@ -806,16 +930,14 @@ impl MWCMQSBroker {
 					let err_message = format!("{:?}", resp_result);
 					if !err_message.contains("source: TimedOut") {
 						// This was not a timeout. Sleep first.
-						if connected {
+						if self.healthy.load(Ordering::Relaxed) {
 							is_in_warning = true;
 							self.do_log_warn(format!("\nWARNING: mwcmqs listener [{}] lost connection. Will try to restore in the background. tid=[{}]",
 													 cloned_cloned_address.get_stripped(), nanoid ));
 						}
 
-						let second = time::Duration::from_millis(5000);
-						thread::sleep(second);
-
-						connected = false;
+						self.healthy.store(false, Ordering::Relaxed);
+						thread::sleep(Duration::from_millis(5000));
 					} else if count == 1 {
 						delcount = 0;
 						self.do_log_warn(format!(
@@ -823,10 +945,10 @@ impl MWCMQSBroker {
 							cloned_cloned_address.get_stripped(),
 							nanoid
 						));
-						connected = true;
+						self.healthy.store(true, Ordering::Relaxed);
 					} else {
 						delcount = 0;
-						if !connected {
+						if !self.healthy.load(Ordering::Relaxed) {
 							if is_in_warning {
 								self.do_log_warn(format!(
 									"INFO: mwcmqs listener [{}] reestablished connection. tid=[{}]",
@@ -837,7 +959,7 @@ impl MWCMQSBroker {
 								isnginxerror = false;
 							}
 						}
-						connected = true;
+						self.healthy.store(true, Ordering::Relaxed);
 					}
 				} else {
 					if count == 1 {
@@ -846,8 +968,8 @@ impl MWCMQSBroker {
 							cloned_cloned_address.get_stripped(),
 							nanoid
 						));
-						connected = true;
-					} else if !connected && !isnginxerror {
+						self.healthy.store(true, Ordering::Relaxed);
+					} else if !self.healthy.load(Ordering::Relaxed) && !isnginxerror {
 						if is_in_warning {
 							self.do_log_warn(format!(
 								"INFO: listener [{}] reestablished connection.",
@@ -856,9 +978,9 @@ impl MWCMQSBroker {
 							is_in_warning = false;
 							isnginxerror = false;
 						}
-						connected = true;
+						self.healthy.store(true, Ordering::Relaxed);
 					} else if !isnginxerror {
-						connected = true;
+						self.healthy.store(true, Ordering::Relaxed);
 					}
 
 					let mut resp = resp_result.unwrap();
@@ -943,7 +1065,7 @@ impl MWCMQSBroker {
 							if resp_str.find("nginx").is_some() {
 								// this is common for nginx to return if the server is down.
 								// so we don't print. We also add a small sleep here.
-								connected = false;
+								self.healthy.store(false, Ordering::Relaxed);
 								if !isnginxerror {
 									is_in_warning = true;
 									self.do_log_warn(format!("\nWARNING: mwcmqs listener [{}] lost connection. Will try to restore in the background. tid=[{}]",
@@ -1018,7 +1140,7 @@ impl MWCMQSBroker {
 							if msgvec[itt].find("nginx").is_some() {
 								// this is common for nginx to return if the server is down.
 								// so we don't print. We also add a small sleep here.
-								connected = false;
+								self.healthy.store(false, Ordering::Relaxed);
 								if !isnginxerror {
 									is_in_warning = true;
 									self.do_log_warn(format!("\nWARNING: mwcmqs listener [{}] lost connection. Will try to restore in the background. tid=[{}]",
@@ -1035,7 +1157,7 @@ impl MWCMQSBroker {
 							continue;
 						} else if isnginxerror {
 							isnginxerror = false;
-							connected = true;
+							self.healthy.store(true, Ordering::Relaxed);
 						}
 
 						let mut from = "".to_string();
@@ -1098,7 +1220,7 @@ impl MWCMQSBroker {
 									delcount = delcount + 1;
 								}
 
-								let from = MWCMQSAddress::from_str(&from);
+								let from = MWCMQSAddress::from_str(self.context_id, &from);
 								let from = if !from.is_ok() {
 									self.print_error(msgvec.clone(), "error parsing from", -12);
 									is_error = true;
@@ -1109,6 +1231,7 @@ impl MWCMQSBroker {
 
 								if slate_or_swap == "slate" {
 									let (mut slate, tx_proof) = match TxProof::from_response(
+										self.context_id,
 										&from.address,
 										r5.clone(),
 										"".to_string(),
@@ -1124,9 +1247,13 @@ impl MWCMQSBroker {
 										}
 									};
 									push_proof_for_slate(&slate.id, tx_proof);
-									self.handler.lock().on_slate(&from, &mut slate);
+									self.handler
+										.lock()
+										.expect("Mutex failure")
+										.on_slate(&from, &mut slate);
 								} else if slate_or_swap == "swap" {
 									let swap_message = match SwapMessage::from_received(
+										self.context_id,
 										&from.address,
 										r5.clone(),
 										"".to_string(),
@@ -1140,10 +1267,14 @@ impl MWCMQSBroker {
 											continue;
 										}
 									};
-									let ack_message =
-										self.handler.lock().on_swap_message(swap_message);
+									let ack_message = self
+										.handler
+										.lock()
+										.expect("Mutex failure")
+										.on_swap_message(swap_message);
 									if let Some(ack_message) = ack_message {
-										let mqs_cannel = MwcMqsChannel::new(from.to_string());
+										let mqs_cannel =
+											MwcMqsChannel::new(self.context_id, from.to_string());
 										if let Err(e) =
 											mqs_cannel.send_swap_message(&ack_message, secp)
 										{
@@ -1176,7 +1307,6 @@ impl MWCMQSBroker {
 		}
 
 		cloned_running.store(false, Ordering::SeqCst);
-		reset_mwcmqs_brocker();
 	}
 
 	fn stop(&self) {
@@ -1185,5 +1315,9 @@ impl MWCMQSBroker {
 
 	fn is_running(&self) -> bool {
 		self.running.load(Ordering::SeqCst)
+	}
+
+	fn is_healthy(&self) -> bool {
+		self.healthy.load(Ordering::Relaxed)
 	}
 }
