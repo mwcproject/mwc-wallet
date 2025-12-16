@@ -37,5 +37,5 @@ pub use crate::config::{
 };
 pub use crate::types::{
 	parse_node_address_string, ConfigError, GlobalWalletConfig, GlobalWalletConfigMembers,
-	MQSConfig, TorConfig, WalletConfig,
+	MQSConfig, WalletConfig,
 };

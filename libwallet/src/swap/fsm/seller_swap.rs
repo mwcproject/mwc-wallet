@@ -88,6 +88,7 @@ pub struct SellerSendingOffer<'a, K>
 where
 	K: Keychain + 'a,
 {
+	context_id: u32,
 	keychain: Arc<K>,
 	swap_api: Arc<Box<dyn SwapApi<K> + 'a>>,
 	message: Option<Message>,
@@ -98,8 +99,9 @@ where
 	K: Keychain + 'a,
 {
 	/// Create new instance
-	pub fn new(keychain: Arc<K>, swap_api: Arc<Box<dyn SwapApi<K> + 'a>>) -> Self {
+	pub fn new(context_id: u32, keychain: Arc<K>, swap_api: Arc<Box<dyn SwapApi<K> + 'a>>) -> Self {
 		Self {
+			context_id,
 			keychain,
 			swap_api,
 			phantom: PhantomData,
@@ -148,7 +150,8 @@ where
 							let sec_update = self
 								.swap_api
 								.build_offer_message_secondary_update(&*self.keychain, swap);
-							self.message = Some(SellApi::offer_message(swap, sec_update)?);
+							self.message =
+								Some(SellApi::offer_message(self.context_id, swap, sec_update)?);
 						}
 						Ok(StateProcessRespond::new(StateId::SellerSendingOffer)
 							.action(Action::SellerSendOfferMessage(
@@ -196,12 +199,16 @@ where
 
 /// State SellerWaitingForAcceptanceMessage
 pub struct SellerWaitingForAcceptanceMessage<K: Keychain> {
+	context_id: u32,
 	keychain: Arc<K>,
 }
 impl<K: Keychain> SellerWaitingForAcceptanceMessage<K> {
 	/// Create new instance
-	pub fn new(keychain: Arc<K>) -> Self {
-		Self { keychain }
+	pub fn new(context_id: u32, keychain: Arc<K>) -> Self {
+		Self {
+			context_id,
+			keychain,
+		}
 	}
 }
 impl<K: Keychain> State for SellerWaitingForAcceptanceMessage<K> {
@@ -265,14 +272,26 @@ impl<K: Keychain> State for SellerWaitingForAcceptanceMessage<K> {
 						true => {
 							let btc_update =
 								secondary_update.unwrap_btc()?.unwrap_accept_offer()?;
-							SellApi::accepted_offer(&*self.keychain, swap, context, accept_offer)?;
+							SellApi::accepted_offer(
+								self.context_id,
+								&*self.keychain,
+								swap,
+								context,
+								accept_offer,
+							)?;
 							let btc_data = swap.secondary_data.unwrap_btc_mut()?;
 							btc_data.accepted_offer(btc_update)?;
 						}
 						_ => {
 							let eth_update =
 								secondary_update.unwrap_eth()?.unwrap_accept_offer()?;
-							SellApi::accepted_offer(&*self.keychain, swap, context, accept_offer)?;
+							SellApi::accepted_offer(
+								self.context_id,
+								&*self.keychain,
+								swap,
+								context,
+								accept_offer,
+							)?;
 							let eth_data = swap.secondary_data.unwrap_eth_mut()?;
 							eth_data.accepted_offer(eth_update)?;
 						}
@@ -468,6 +487,7 @@ pub struct SellerPostingLockMwcSlate<'a, C>
 where
 	C: NodeClient + 'a,
 {
+	context_id: u32,
 	node_client: Arc<C>,
 	phantom: PhantomData<&'a C>,
 }
@@ -477,8 +497,9 @@ where
 	C: NodeClient + 'a,
 {
 	/// Create an instance
-	pub fn new(node_client: Arc<C>) -> Self {
+	pub fn new(context_id: u32, node_client: Arc<C>) -> Self {
 		Self {
+			context_id,
 			node_client,
 			phantom: PhantomData,
 		}
@@ -559,7 +580,12 @@ where
 					return Self::generate_cancel_respond(swap);
 				}
 				// Posting the transaction
-				swap::publish_transaction(&*self.node_client, swap.lock_slate.tx_or_err()?, false)?;
+				swap::publish_transaction(
+					self.context_id,
+					&*self.node_client,
+					swap.lock_slate.slate.tx_or_err()?,
+					false,
+				)?;
 				swap.posted_lock = Some(swap::get_cur_time());
 				swap.add_journal_message("MWC lock slate posted".to_string());
 
@@ -590,13 +616,18 @@ where
 
 /// State SellerWaitingForLockConfirmations
 pub struct SellerWaitingForLockConfirmations<'a, K: Keychain> {
+	context_id: u32,
 	keychain: Arc<K>,
 	swap_api: Arc<Box<dyn SwapApi<K> + 'a>>,
 }
 impl<'a, K: Keychain> SellerWaitingForLockConfirmations<'a, K> {
 	/// Create a new instance
-	pub fn new(keychain: Arc<K>, swap_api: Arc<Box<dyn SwapApi<K> + 'a>>) -> Self {
-		Self { keychain, swap_api }
+	pub fn new(context_id: u32, keychain: Arc<K>, swap_api: Arc<Box<dyn SwapApi<K> + 'a>>) -> Self {
+		Self {
+			context_id,
+			keychain,
+			swap_api,
+		}
 	}
 }
 
@@ -764,7 +795,13 @@ impl<'a, K: Keychain> State for SellerWaitingForLockConfirmations<'a, K> {
 				// We can accept message durinf the wait. Byers can already get a confirmation and sending a message
 				if swap.adaptor_signature.is_none() {
 					let (_, init_redeem, _) = message.unwrap_init_redeem()?;
-					SellApi::init_redeem(&*self.keychain, swap, context, init_redeem)?;
+					SellApi::init_redeem(
+						self.context_id,
+						&*self.keychain,
+						swap,
+						context,
+						init_redeem,
+					)?;
 				}
 				debug_assert!(swap.adaptor_signature.is_some());
 				swap.add_journal_message("Init Redeem message is accepted".to_string());
@@ -790,12 +827,16 @@ impl<'a, K: Keychain> State for SellerWaitingForLockConfirmations<'a, K> {
 
 /// SellerWaitingForInitRedeemMessage
 pub struct SellerWaitingForInitRedeemMessage<K: Keychain> {
+	context_id: u32,
 	keychain: Arc<K>,
 }
 impl<K: Keychain> SellerWaitingForInitRedeemMessage<K> {
 	/// Create an instance
-	pub fn new(keychain: Arc<K>) -> Self {
-		Self { keychain }
+	pub fn new(context_id: u32, keychain: Arc<K>) -> Self {
+		Self {
+			context_id,
+			keychain,
+		}
 	}
 }
 impl<K: Keychain> State for SellerWaitingForInitRedeemMessage<K> {
@@ -869,7 +910,13 @@ impl<K: Keychain> State for SellerWaitingForInitRedeemMessage<K> {
 			Input::IncomeMessage(message) => {
 				if swap.adaptor_signature.is_none() {
 					let (_, init_redeem, _) = message.unwrap_init_redeem()?;
-					SellApi::init_redeem(&*self.keychain, swap, context, init_redeem)?;
+					SellApi::init_redeem(
+						self.context_id,
+						&*self.keychain,
+						swap,
+						context,
+						init_redeem,
+					)?;
 				}
 				debug_assert!(swap.adaptor_signature.is_some());
 				swap.add_journal_message("Init Redeem message is accepted".to_string());
@@ -945,7 +992,7 @@ where
 			Input::Check => {
 				// Checking if can redeem. The Buyer can be sneaky and try to fool us. We should assume that
 				// message was delivered and buyer can do the redeem.
-				if !swap.redeem_slate.tx_or_err()?.kernels().is_empty() {
+				if !swap.redeem_slate.slate.tx_or_err()?.kernels().is_empty() {
 					if check_mwc_redeem(swap, &*self.node_client)? {
 						// Buyer did a redeem, we can continue processing and redeem BTC
 						swap.posted_msg2 = Some(u32::MAX as i64);
@@ -1049,6 +1096,7 @@ pub(crate) fn check_mwc_redeem<C: NodeClient>(
 		// Replace kernel
 		let _ = std::mem::replace(
 			swap.redeem_slate
+				.slate
 				.tx_or_err_mut()?
 				.body
 				.kernels
@@ -1094,7 +1142,13 @@ where
 }
 
 fn calc_mwc_unlock_time(swap: &Swap, tip: &u64) -> i64 {
-	swap::get_cur_time() + (swap.refund_slate.calc_lock_height().saturating_sub(*tip) * 60) as i64
+	swap::get_cur_time()
+		+ (swap
+			.refund_slate
+			.slate
+			.calc_lock_height()
+			.saturating_sub(*tip)
+			* 60) as i64
 }
 
 impl<'a, C> State for SellerWaitingForBuyerToRedeemMwc<'a, C>
@@ -1139,7 +1193,7 @@ where
 
 				// Checking if can redeem first because redeem can be made when we can do refund.
 				// Then we want to do redeem and refund from redeem branch.
-				if !swap.redeem_slate.tx_or_err()?.kernels().is_empty() {
+				if !swap.redeem_slate.slate.tx_or_err()?.kernels().is_empty() {
 					if check_mwc_redeem(swap, &*self.node_client)? {
 						// Buyer did a redeem, we can continue processing and redeem BTC
 						return Ok(StateProcessRespond::new(
@@ -1151,7 +1205,7 @@ where
 				// Check the deadline for locking
 				//
 				let (height, _, _) = self.node_client.get_chain_tip()?;
-				if height > swap.refund_slate.get_lock_height_check()? {
+				if height > swap.refund_slate.slate.get_lock_height_check()? {
 					swap.add_journal_message(
 						"Buyer didn't redeem, time to get a refund".to_string(),
 					);
@@ -1175,7 +1229,7 @@ where
 					StateProcessRespond::new(StateId::SellerWaitingForBuyerToRedeemMwc)
 						.action(Action::SellerWaitForBuyerRedeemPublish {
 							mwc_tip: height,
-							lock_height: swap.refund_slate.get_lock_height_check()?,
+							lock_height: swap.refund_slate.slate.get_lock_height_check()?,
 						})
 						.time_limit(calc_mwc_unlock_time(swap, &height)),
 				)
@@ -1200,17 +1254,23 @@ where
 // It is fair because that code will work only of Buyer delay a lot the redeeming on MWC transaction.
 // One of the reasons to delay is attack.
 fn post_refund_if_possible<C: NodeClient>(
+	context_id: u32,
 	node_client: Arc<C>,
 	swap: &Swap,
 	tx_conf: &SwapTransactionsConfirmations,
 ) -> Result<(), Error> {
 	let (height, _, _) = node_client.get_chain_tip()?;
 	// intentionally no checking at refund step, no failure here
-	if height > swap.refund_slate.get_lock_height()
+	if height > swap.refund_slate.slate.get_lock_height()
 		&& tx_conf.mwc_redeem_conf.is_none()
 		&& tx_conf.mwc_refund_conf.is_none()
 	{
-		let res = swap::publish_transaction(&*node_client, swap.refund_slate.tx_or_err()?, false);
+		let res = swap::publish_transaction(
+			context_id,
+			&*node_client,
+			swap.refund_slate.slate.tx_or_err()?,
+			false,
+		);
 		if let Err(e) = res {
 			info!("MWC refund can be issued even likely it will fail. Trying to post it. get an error {}", e);
 		} else {
@@ -1226,6 +1286,7 @@ where
 	C: NodeClient + 'a,
 	K: Keychain + 'a,
 {
+	context_id: u32,
 	keychain: Arc<K>,
 	node_client: Arc<C>,
 	swap_api: Arc<Box<dyn SwapApi<K> + 'a>>,
@@ -1239,11 +1300,13 @@ where
 {
 	/// Create a new instance
 	pub fn new(
+		context_id: u32,
 		keychain: Arc<K>,
 		node_client: Arc<C>,
 		swap_api: Arc<Box<dyn SwapApi<K> + 'a>>,
 	) -> Self {
 		Self {
+			context_id,
 			keychain,
 			node_client,
 			swap_api,
@@ -1289,7 +1352,7 @@ where
 		match input {
 			Input::Check => {
 				// Be greedy, check the deadline for locking
-				post_refund_if_possible(self.node_client.clone(), swap, tx_conf)?;
+				post_refund_if_possible(self.context_id, self.node_client.clone(), swap, tx_conf)?;
 
 				if !swap.redeem_kernel_updated {
 					debug_assert!(false); // That shouldn't happen
@@ -1371,6 +1434,7 @@ where
 	C: NodeClient + 'a,
 	K: Keychain + 'a,
 {
+	context_id: u32,
 	node_client: Arc<C>,
 	swap_api: Arc<Box<dyn SwapApi<K> + 'a>>,
 	phantom: PhantomData<&'a K>,
@@ -1382,8 +1446,13 @@ where
 	K: Keychain + 'a,
 {
 	/// Create a new instance
-	pub fn new(node_client: Arc<C>, swap_api: Arc<Box<dyn SwapApi<K> + 'a>>) -> Self {
+	pub fn new(
+		context_id: u32,
+		node_client: Arc<C>,
+		swap_api: Arc<Box<dyn SwapApi<K> + 'a>>,
+	) -> Self {
 		Self {
+			context_id,
 			node_client,
 			swap_api,
 			phantom: PhantomData,
@@ -1420,7 +1489,7 @@ where
 	) -> Result<StateProcessRespond, Error> {
 		if let Input::Check = input {
 			// Be greedy, check the deadline for locking
-			post_refund_if_possible(self.node_client.clone(), swap, tx_conf)?;
+			post_refund_if_possible(self.context_id, self.node_client.clone(), swap, tx_conf)?;
 
 			// Just waiting
 			if let Some(conf) = tx_conf.secondary_redeem_conf {
@@ -1675,7 +1744,7 @@ where
 				// Check the deadline for locking
 				//
 				let (height, _, _) = self.node_client.get_chain_tip()?;
-				if height > swap.refund_slate.get_lock_height() {
+				if height > swap.refund_slate.slate.get_lock_height() {
 					swap.add_journal_message("MWC funds are unlocked".to_string());
 					return Ok(StateProcessRespond::new(StateId::SellerPostingRefundSlate));
 				}
@@ -1685,7 +1754,7 @@ where
 					StateProcessRespond::new(StateId::SellerWaitingForRefundHeight)
 						.action(Action::WaitForMwcRefundUnlock {
 							mwc_tip: height,
-							lock_height: swap.refund_slate.get_lock_height(),
+							lock_height: swap.refund_slate.slate.get_lock_height(),
 						})
 						.time_limit(calc_mwc_unlock_time(swap, &height)),
 				)
@@ -1711,6 +1780,7 @@ pub struct SellerPostingRefundSlate<'a, C>
 where
 	C: NodeClient + 'a,
 {
+	context_id: u32,
 	node_client: Arc<C>,
 	phantom: PhantomData<&'a C>,
 }
@@ -1719,8 +1789,9 @@ where
 	C: NodeClient + 'a,
 {
 	/// Create a new instance
-	pub fn new(node_client: Arc<C>) -> Self {
+	pub fn new(context_id: u32, node_client: Arc<C>) -> Self {
 		Self {
+			context_id,
 			node_client,
 			phantom: PhantomData,
 		}
@@ -1785,8 +1856,9 @@ where
 				// Posting the transaction
 				debug_assert!(tx_conf.mwc_refund_conf.is_none());
 				swap::publish_transaction(
+					self.context_id,
 					&*self.node_client,
-					swap.refund_slate.tx_or_err()?,
+					swap.refund_slate.slate.tx_or_err()?,
 					false,
 				)?;
 				swap.posted_refund = Some(swap::get_cur_time());

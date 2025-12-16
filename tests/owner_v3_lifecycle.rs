@@ -34,9 +34,9 @@ use mwc_wallet_util::mwc_keychain::ExtKeychain;
 use serde_json;
 
 use mwc_wallet_util::mwc_core::global;
-use mwc_wallet_util::mwc_util::Mutex;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::Mutex;
 
 #[macro_use]
 mod common;
@@ -80,7 +80,7 @@ fn owner_v3_lifecycle() -> Result<(), mwc_wallet_controller::Error> {
 		tx_pool.clone(),
 	)));
 	let (chain, wallet2, mask2_i) = {
-		let mut wallet_proxy = wallet_proxy_a.lock();
+		let mut wallet_proxy = wallet_proxy_a.lock().expect("Mutex failure");
 		let chain = wallet_proxy.chain.clone();
 
 		// Create wallet 2 manually, which will mine a bit and insert some
@@ -123,7 +123,7 @@ fn owner_v3_lifecycle() -> Result<(), mwc_wallet_controller::Error> {
 				&client1,
 				arg_vec.clone(),
 				|wallet_inst| {
-					let mut wallet_proxy = p.lock();
+					let mut wallet_proxy = p.lock().expect("Mutex failure");
 					wallet_proxy.add_wallet(
 						"wallet1",
 						client1.get_send_instance(),
@@ -144,7 +144,7 @@ fn owner_v3_lifecycle() -> Result<(), mwc_wallet_controller::Error> {
 	// Set the wallet proxy listener running
 	thread::spawn(move || {
 		global::set_local_chain_type(global::ChainTypes::AutomatedTesting);
-		let mut p = wallet_proxy.lock();
+		let mut p = wallet_proxy.lock().expect("Mutex failure");
 		if let Err(e) = p.run() {
 			error!("Wallet Proxy error: {}", e);
 		}
@@ -158,7 +158,7 @@ fn owner_v3_lifecycle() -> Result<(), mwc_wallet_controller::Error> {
 		mask2,
 		bh as usize,
 		false,
-		tx_pool.lock().deref_mut(),
+		tx_pool.lock().expect("Mutex failure").deref_mut(),
 	);
 
 	// We have an owner API with no wallet initialized. Init the secure API
@@ -402,7 +402,7 @@ fn owner_v3_lifecycle() -> Result<(), mwc_wallet_controller::Error> {
 	)?;
 	println!("RES 15: {:?}", res);
 	assert!(res.is_ok());
-	let mut slate: Slate = res.unwrap().into_slate_plain(false)?;
+	let mut slate: Slate = res.unwrap().into_slate_plain(0, false)?;
 
 	// give this slate over to wallet 2 manually
 	mwc_wallet_controller::controller::owner_single_use(
@@ -435,7 +435,7 @@ fn owner_v3_lifecycle() -> Result<(), mwc_wallet_controller::Error> {
 		"id": 1,
 		"method": "finalize_invoice_tx",
 		"params": {
-			"slate": VersionedSlate::into_version_plain(slate, SlateVersion::V3)?,
+			"slate": VersionedSlate::into_version_plain(0, &slate, SlateVersion::V3)?,
 		}
 	});
 	let res =

@@ -17,7 +17,7 @@ use super::types::{to_eth_address, EthBuyerContext, EthData, EthSellerContext};
 use super::{client::EthNodeClient, eth_address};
 use crate::mwc_keychain::{Identifier, Keychain, SwitchCommitmentType};
 use crate::mwc_util::{
-	secp::aggsig::export_secnonce_single as generate_nonce, secp::pedersen, to_hex, Mutex,
+	secp::aggsig::export_secnonce_single as generate_nonce, secp::pedersen, to_hex,
 };
 use crate::swap::fsm::machine::StateMachine;
 use crate::swap::fsm::{buyer_swap, seller_swap};
@@ -34,6 +34,7 @@ use mwc_wallet_util::mwc_util::secp::Secp256k1;
 use mwc_web3::types::{Address, H256};
 use std::marker::PhantomData;
 use std::sync::Arc;
+use std::sync::Mutex;
 
 /// SwapApi trait implementaiton for ETH
 #[derive(Clone)]
@@ -42,6 +43,7 @@ where
 	C: NodeClient + 'a,
 	B: EthNodeClient + 'a,
 {
+	context_id: u32,
 	/// Currency. ETH - it is a ERC20 family. There are some tweaks for different coins.
 	secondary_currency: Currency,
 	/// Client for MWC node
@@ -59,11 +61,13 @@ where
 {
 	/// Create Eth Swap API instance
 	pub fn new(
+		context_id: u32,
 		secondary_currency: Currency,
 		node_client: Arc<C>,
 		eth_node_client: Arc<Mutex<E>>,
 	) -> Self {
 		Self {
+			context_id,
 			secondary_currency,
 			node_client,
 			eth_node_client,
@@ -74,6 +78,7 @@ where
 	/// For tests doesn't make sense to use any failover
 	pub fn new_test(node_client: Arc<C>, eth_node_client: Arc<Mutex<E>>) -> Self {
 		Self {
+			context_id: 0,
 			secondary_currency: Currency::Ether,
 			node_client,
 			eth_node_client,
@@ -84,6 +89,7 @@ where
 	/// Clone instance
 	pub fn clone(&self) -> Self {
 		Self {
+			context_id: self.context_id.clone(),
 			secondary_currency: self.secondary_currency.clone(),
 			node_client: self.node_client.clone(),
 			eth_node_client: self.eth_node_client.clone(),
@@ -93,7 +99,7 @@ where
 
 	/// Get Eth Chain Height.
 	pub(crate) fn eth_height(&self) -> Result<u64, Error> {
-		let c = self.eth_node_client.lock();
+		let c = self.eth_node_client.lock().expect("Mutex failure");
 		c.height()
 	}
 
@@ -107,7 +113,7 @@ where
 			return Err(Error::InvalidEthSwapTradeIndex);
 		}
 
-		let c = self.eth_node_client.lock();
+		let c = self.eth_node_client.lock().expect("Mutex failure");
 		let res = c.get_swap_details(swap.secondary_currency, address_from_secret.unwrap());
 		match res {
 			Ok((_refund_time, _contract_address, _initiator, _participant, _value)) => res,
@@ -117,7 +123,7 @@ where
 
 	/// Seller call contract function to redeem their Ethers, Status::Redeem
 	fn seller_post_redeem_tx<K: Keychain>(&self, keychain: &K, swap: &Swap) -> Result<H256, Error> {
-		let c = self.eth_node_client.lock();
+		let c = self.eth_node_client.lock().expect("Mutex failure");
 		let eth_data = swap.secondary_data.unwrap_eth()?;
 		let redeem_secret = SellApi::calculate_redeem_secret(keychain, swap)?;
 		let secret_key: secp256k1::SecretKey =
@@ -132,7 +138,7 @@ where
 
 	/// Seller transfer eth from internal wallet to users' wallet
 	fn seller_transfer_secondary(&self, swap: &Swap) -> Result<H256, Error> {
-		let c = self.eth_node_client.lock();
+		let c = self.eth_node_client.lock().expect("Mutex failure");
 		let address = swap.unwrap_seller().unwrap().0;
 		c.transfer(
 			swap.secondary_currency,
@@ -149,7 +155,7 @@ where
 		swap: &mut Swap,
 		_post_tx: bool,
 	) -> Result<H256, Error> {
-		let c = self.eth_node_client.lock();
+		let c = self.eth_node_client.lock().expect("Mutex failure");
 		let eth_data = swap.secondary_data.unwrap_eth()?;
 		c.refund(
 			swap.secondary_currency,
@@ -160,7 +166,7 @@ where
 
 	/// buyer deposit eth to contract address
 	fn erc20_approve(&self, swap: &mut Swap) -> Result<H256, Error> {
-		let nc = self.eth_node_client.lock();
+		let nc = self.eth_node_client.lock().expect("Mutex failure");
 		nc.erc20_approve(
 			swap.secondary_currency,
 			swap.secondary_amount,
@@ -187,21 +193,26 @@ where
 
 		let refund_blocks = (eth_lock_time - swap::get_cur_time() as u64)
 			/ swap.secondary_currency.block_time_period_sec() as u64;
-		println!(
-			"eth_lock_time: {},  current_time: {}, refund_blocks: {}",
-			eth_lock_time,
-			swap::get_cur_time(),
-			refund_blocks
-		);
+
+		if mwc_wallet_util::mwc_util::is_console_output_enabled() {
+			println!(
+				"eth_lock_time: {},  current_time: {}, refund_blocks: {}",
+				eth_lock_time,
+				swap::get_cur_time(),
+				refund_blocks
+			);
+		}
 		let eth_data = swap.secondary_data.unwrap_eth()?;
 		let height = self.eth_height()?;
 		let refund_time = height + refund_blocks;
-		println!("height: {}, refund_time: {}", height, refund_time);
+		if mwc_wallet_util::mwc_util::is_console_output_enabled() {
+			println!("height: {}, refund_time: {}", height, refund_time);
+		}
 		let address_from_secret = eth_data.address_from_secret.clone().unwrap();
 		let participant = eth_data.redeem_address.clone().unwrap();
 		let value = swap.secondary_amount;
 
-		let nc = self.eth_node_client.lock();
+		let nc = self.eth_node_client.lock().expect("Mutex failure");
 		nc.initiate(
 			swap.secondary_currency,
 			refund_time,
@@ -260,7 +271,7 @@ where
 			return Err(Error::InvalidTxHash);
 		}
 
-		let c = self.eth_node_client.lock();
+		let c = self.eth_node_client.lock().expect("Mutex failure");
 		let res = c.retrieve_receipt(tx_id.unwrap());
 		match res {
 			Ok(receipt) => match receipt.block_number {
@@ -483,6 +494,7 @@ where
 
 		let height = self.node_client.get_chain_tip()?.0;
 		let mut swap = SellApi::create_swap_offer(
+			self.context_id,
 			keychain,
 			context,
 			primary_amount,
@@ -573,11 +585,11 @@ where
 		let is_seller = swap.is_seller();
 
 		let mwc_lock_conf =
-			self.get_slate_confirmation_number(&mwc_tip, &swap.lock_slate, !is_seller)?;
+			self.get_slate_confirmation_number(&mwc_tip, &swap.lock_slate.slate, !is_seller)?;
 		let mwc_redeem_conf =
-			self.get_slate_confirmation_number(&mwc_tip, &swap.redeem_slate, is_seller)?;
+			self.get_slate_confirmation_number(&mwc_tip, &swap.redeem_slate.slate, is_seller)?;
 		let mwc_refund_conf =
-			self.get_slate_confirmation_number(&mwc_tip, &swap.refund_slate, !is_seller)?;
+			self.get_slate_confirmation_number(&mwc_tip, &swap.refund_slate.slate, !is_seller)?;
 
 		let secondary_tip = self.eth_height()?;
 		// check eth transaction status
@@ -647,21 +659,28 @@ where
 			StateMachine::new(vec![
 				Box::new(seller_swap::SellerOfferCreated::new()),
 				Box::new(seller_swap::SellerSendingOffer::new(
+					self.context_id,
 					kc.clone(),
 					swap_api.clone(),
 				)),
 				Box::new(seller_swap::SellerWaitingForAcceptanceMessage::new(
+					self.context_id,
 					kc.clone(),
 				)),
 				Box::new(seller_swap::SellerWaitingForBuyerLock::new(
 					swap_api.clone(),
 				)),
-				Box::new(seller_swap::SellerPostingLockMwcSlate::new(nc.clone())),
+				Box::new(seller_swap::SellerPostingLockMwcSlate::new(
+					self.context_id,
+					nc.clone(),
+				)),
 				Box::new(seller_swap::SellerWaitingForLockConfirmations::new(
+					self.context_id,
 					kc.clone(),
 					swap_api.clone(),
 				)),
 				Box::new(seller_swap::SellerWaitingForInitRedeemMessage::new(
+					self.context_id,
 					kc.clone(),
 				)),
 				Box::new(seller_swap::SellerSendingInitRedeemMessage::new(nc.clone())),
@@ -669,17 +688,22 @@ where
 					nc.clone(),
 				)),
 				Box::new(seller_swap::SellerRedeemSecondaryCurrency::new(
+					self.context_id,
 					kc.clone(),
 					nc.clone(),
 					swap_api.clone(),
 				)),
 				Box::new(seller_swap::SellerWaitingForRedeemConfirmations::new(
+					self.context_id,
 					nc.clone(),
 					swap_api.clone(),
 				)),
 				Box::new(seller_swap::SellerSwapComplete::new()),
 				Box::new(seller_swap::SellerWaitingForRefundHeight::new(nc.clone())),
-				Box::new(seller_swap::SellerPostingRefundSlate::new(nc.clone())),
+				Box::new(seller_swap::SellerPostingRefundSlate::new(
+					self.context_id,
+					nc.clone(),
+				)),
 				Box::new(seller_swap::SellerWaitingForRefundConfirmations::new()),
 				Box::new(seller_swap::SellerCancelledRefunded::new()),
 				Box::new(seller_swap::SellerCancelled::new()),
@@ -696,14 +720,18 @@ where
 					swap_api.clone(),
 				)),
 				Box::new(buyer_swap::BuyerWaitingForLockConfirmations::new(
+					self.context_id,
 					kc.clone(),
 					swap_api.clone(),
 				)),
-				Box::new(buyer_swap::BuyerSendingInitRedeemMessage::new()),
+				Box::new(buyer_swap::BuyerSendingInitRedeemMessage::new(
+					self.context_id,
+				)),
 				Box::new(buyer_swap::BuyerWaitingForRespondRedeemMessage::new(
+					self.context_id,
 					kc.clone(),
 				)),
-				Box::new(buyer_swap::BuyerRedeemMwc::new(nc.clone())),
+				Box::new(buyer_swap::BuyerRedeemMwc::new(self.context_id, nc.clone())),
 				Box::new(buyer_swap::BuyerWaitForRedeemMwcConfirmations::new()),
 				Box::new(buyer_swap::BuyerSwapComplete::new()),
 				Box::new(buyer_swap::BuyerWaitingForRefundTime::new()),
@@ -813,7 +841,7 @@ where
 
 	fn test_client_connections(&self) -> Result<(), Error> {
 		{
-			let c = self.eth_node_client.lock();
+			let c = self.eth_node_client.lock().expect("Mutex failure");
 			let name = c.name();
 			let _ = c.height().map_err(|e| {
 				Error::InfuraNodeClient(format!(

@@ -38,8 +38,8 @@ pub enum Network {
 
 impl Network {
 	/// Construct from current chaintype
-	pub fn current_network() -> Result<Self, Error> {
-		Ok(Self::from_chain_type(global::get_chain_type())?)
+	pub fn current_network(context_id: u32) -> Result<Self, Error> {
+		Ok(Self::from_chain_type(global::get_chain_type(context_id))?)
 	}
 
 	/// Constructor from mwc-node ChainTypes
@@ -213,18 +213,22 @@ impl Currency {
 		Ok(amount)
 	}
 
-	fn bch_network() -> mwc_bch::network::Network {
-		if global::is_mainnet() {
+	fn bch_network(context_id: u32) -> mwc_bch::network::Network {
+		if global::is_mainnet(context_id) {
 			mwc_bch::network::Network::Mainnet
 		} else {
 			mwc_bch::network::Network::Testnet
 		}
 	}
 
-	fn validate_address_network(addr: &Address, coin_name: &str) -> Result<(), Error> {
+	fn validate_address_network(
+		context_id: u32,
+		addr: &Address,
+		coin_name: &str,
+	) -> Result<(), Error> {
 		match addr.network {
 			bitcoin::network::constants::Network::Bitcoin => {
-				if !global::is_mainnet() {
+				if !global::is_mainnet(context_id) {
 					return Err(Error::Generic(format!(
 						"Address is from main {} network, expected test network",
 						coin_name
@@ -232,7 +236,7 @@ impl Currency {
 				}
 			}
 			bitcoin::network::constants::Network::Testnet => {
-				if global::is_mainnet() {
+				if global::is_mainnet(context_id) {
 					return Err(Error::Generic(format!(
 						"Address is from test {} network, expected main network",
 						coin_name
@@ -250,16 +254,16 @@ impl Currency {
 	}
 
 	/// Validate the secondary address
-	pub fn validate_address(&self, address: &String) -> Result<(), Error> {
+	pub fn validate_address(&self, context_id: u32, address: &String) -> Result<(), Error> {
 		match self {
 			Currency::Btc => {
 				let addr = Address::new_btc().from_str(address).map_err(|e| {
 					Error::Generic(format!("Unable to parse BTC address {}, {}", address, e))
 				})?;
-				Self::validate_address_network(&addr, "BTC")?;
+				Self::validate_address_network(context_id, &addr, "BTC")?;
 			}
 			Currency::Bch => {
-				let nw = Self::bch_network();
+				let nw = Self::bch_network(context_id);
 				let (v, _addr_type) = match mwc_bch::address::cashaddr_decode(&address, nw) {
 					Err(e) => {
 						// Try legacy address
@@ -285,13 +289,13 @@ impl Currency {
 				let addr = Address::new_ltc().from_str(address).map_err(|e| {
 					Error::Generic(format!("Unable to parse LTC address {}, {}", address, e))
 				})?;
-				Self::validate_address_network(&addr, "LTC")?;
+				Self::validate_address_network(context_id, &addr, "LTC")?;
 			}
 			Currency::Dash => {
 				let addr = Address::new_dash().from_str(address).map_err(|e| {
 					Error::Generic(format!("Unable to parse Dash address {}, {}", address, e))
 				})?;
-				Self::validate_address_network(&addr, "Dash")?;
+				Self::validate_address_network(context_id, &addr, "Dash")?;
 
 				match &addr.payload {
 					bitcoin::util::address::Payload::PubkeyHash(_)
@@ -311,7 +315,7 @@ impl Currency {
 						address, e
 					))
 				})?;
-				Self::validate_address_network(&addr, "ZCash")?;
+				Self::validate_address_network(context_id, &addr, "ZCash")?;
 
 				match &addr.payload {
 					bitcoin::util::address::Payload::PubkeyHash(_)
@@ -331,7 +335,7 @@ impl Currency {
 						address, e
 					))
 				})?;
-				Self::validate_address_network(&addr, "Doge")?;
+				Self::validate_address_network(context_id, &addr, "Doge")?;
 
 				match &addr.payload {
 					bitcoin::util::address::Payload::PubkeyHash(_)
@@ -368,14 +372,18 @@ impl Currency {
 	}
 
 	/// Generate a script for this address. Address MUST be Hash160
-	pub fn address_2_script_pubkey(&self, address: &String) -> Result<bitcoin::Script, Error> {
+	pub fn address_2_script_pubkey(
+		&self,
+		context_id: u32,
+		address: &String,
+	) -> Result<bitcoin::Script, Error> {
 		let addr_str = match self {
 			Currency::Btc => address.clone(),
 			Currency::Bch => {
 				// With BCH problem that it doesn't have functionality to build scripts for pay to pubkey
 				// That is why we will use BTC library to do that.
 				// In order to do that, we need to have legacy address.
-				match mwc_bch::address::cashaddr_decode(&address, Self::bch_network()) {
+				match mwc_bch::address::cashaddr_decode(&address, Self::bch_network(context_id)) {
 					Err(_) => {
 						// Legacy address - that is what we need
 						address.clone()
@@ -399,7 +407,7 @@ impl Currency {
 						mwc_bch::address::legacyaddr_encode(
 							&hash160.0,
 							addr_type,
-							Self::bch_network(),
+							Self::bch_network(context_id),
 						)
 					}
 				}
@@ -1513,10 +1521,14 @@ mod tests {
 		let bch_q_address = "bchtest:qr972p5km7a9rdwtsnuqjfnm8epm48mhkgcgt6dprl".to_string();
 		let bch_legacy = "mz73pyxw6hpnyb8HHnPrTe5DikC2xYrfPX".to_string();
 
-		let btc_script = Currency::Btc.address_2_script_pubkey(&bch_legacy).unwrap();
-		let bch_legacy_script = Currency::Bch.address_2_script_pubkey(&bch_legacy).unwrap();
+		let btc_script = Currency::Btc
+			.address_2_script_pubkey(0, &bch_legacy)
+			.unwrap();
+		let bch_legacy_script = Currency::Bch
+			.address_2_script_pubkey(0, &bch_legacy)
+			.unwrap();
 		let bch_q_script = Currency::Bch
-			.address_2_script_pubkey(&bch_q_address)
+			.address_2_script_pubkey(0, &bch_q_address)
 			.unwrap();
 
 		let script_sz = btc_script.len();

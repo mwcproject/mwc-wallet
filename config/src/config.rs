@@ -15,7 +15,13 @@
 
 //! Configuration file management
 
+use crate::comments::{insert_comments, migrate_comments};
+use crate::core::global;
+use crate::types::{ConfigError, GlobalWalletConfig, GlobalWalletConfigMembers};
+use crate::types::{MQSConfig, WalletConfig};
+use crate::util::logger::LoggingConfig;
 use dirs;
+use mwc_wallet_util::mwc_p2p::TorConfig;
 use rand::distributions::{Alphanumeric, Distribution};
 use rand::thread_rng;
 use std::env;
@@ -24,14 +30,6 @@ use std::io::prelude::*;
 use std::io::BufReader;
 use std::path::PathBuf;
 use toml;
-
-use crate::comments::{insert_comments, migrate_comments};
-use crate::core::global;
-use crate::types::{
-	ConfigError, GlobalWalletConfig, GlobalWalletConfigMembers, TorBridgeConfig, TorProxyConfig,
-};
-use crate::types::{MQSConfig, TorConfig, WalletConfig};
-use crate::util::logger::LoggingConfig;
 
 /// Wallet configuration file name
 pub const WALLET_CONFIG_FILE_NAME: &str = "mwc-wallet.toml";
@@ -219,14 +217,14 @@ impl GlobalWalletConfig {
 		match *chain_type {
 			global::ChainTypes::Mainnet => {}
 			global::ChainTypes::Floonet => {
-				defaults.api_listen_port = 13415;
+				defaults.api_listen_port = Some(13415);
 				defaults.libp2p_listen_port = None; // Some(13418);
-				defaults.check_node_api_http_addr = "http://127.0.0.1:13413".to_owned();
+				defaults.check_node_api_http_addr = Some("http://127.0.0.1:13413".to_owned());
 			}
 			global::ChainTypes::UserTesting => {
-				defaults.api_listen_port = 23415;
+				defaults.api_listen_port = Some(23415);
 				defaults.libp2p_listen_port = None; // Some(23418);
-				defaults.check_node_api_http_addr = "http://127.0.0.1:23413".to_owned();
+				defaults.check_node_api_http_addr = Some("http://127.0.0.1:23413".to_owned());
 			}
 			_ => {}
 		}
@@ -295,14 +293,6 @@ impl GlobalWalletConfig {
 			.as_mut()
 			.unwrap()
 			.log_file_path = log_path.to_str().unwrap().to_owned();
-		let tor_path = wallet_home.clone();
-		self.members
-			.as_mut()
-			.unwrap()
-			.tor
-			.as_mut()
-			.unwrap()
-			.send_config_dir = tor_path.to_str().unwrap().to_owned();
 	}
 
 	/// Serialize config
@@ -354,11 +344,7 @@ impl GlobalWalletConfig {
 		}
 		let adjusted_config = GlobalWalletConfigMembers {
 			config_file_version: GlobalWalletConfigMembers::default().config_file_version,
-			tor: Some(TorConfig {
-				bridge: TorBridgeConfig::default(),
-				proxy: TorProxyConfig::default(),
-				..config.tor.unwrap_or(TorConfig::default())
-			}),
+			tor: Some(TorConfig::default()),
 			..config
 		};
 		let mut gc = GlobalWalletConfig {

@@ -55,6 +55,7 @@ subcommands:
       args:
         - rewind_hash:
             help: Rewind hash of the wallet to be scanned in order to retrieve all the outputs and balance.
+            required: true
             index: 1
         - start_height:
             help: If given, the first block from which to start the scan (default 1)
@@ -93,9 +94,17 @@ subcommands:
             short: n
             long: no_tor
             takes_value: false
-        - bridge:
-            help: Enable bridge relay with TOR listener
-            long: bridge
+  - stop_listen:
+      about: Stop listening. Foreign API server will be stopped.
+  - get_address_index:
+      about: Get Slatepack, MQS, tor addresses derivative index
+  - set_address_index:
+      about: Set Slatepack, MQS, tor addresses derivative index. range from 0 to 65535
+      args:
+        - index:
+            help: New address index value
+            short: i
+            long: index
             takes_value: true
   - owner_api:
       about: Runs the wallet's local web API
@@ -114,6 +123,7 @@ subcommands:
       args:
         - amount:
             help: Number of coins to send with optional fraction, e.g. 12.423. Keyword 'max' will send maximum amount.
+            required: true
             index: 1
         - minimum_confirmations:
             help: Minimum number of confirmations required for an output to be spendable
@@ -217,10 +227,6 @@ subcommands:
             help: use specific slate version for the output. Put version 4 if you are using slatepacks.
             long: slate_version
             takes_value: true
-        - bridge:
-            help: Enable tor bridge relay when sending via Slatepack workflow
-            long: bridge
-            takes_value: true
         - slatepack_qr:
             help: Show slatepack data as QR code
             short: q
@@ -304,6 +310,7 @@ subcommands:
       args:
         - amount:
             help: Number of coins to invoice  with optional fraction, e.g. 12.423
+            required: true
             index: 1
         - message:
             help: Optional participant message to include
@@ -404,10 +411,6 @@ subcommands:
             help: If present, the number of blocks from the current after which wallets should refuse to process transactions further
             short: b
             long: ttl_blocks
-            takes_value: true
-        - bridge:
-            help: Enable tor bridge relay when receiving via Slatepack workflow
-            long: bridge
             takes_value: true
         - slatepack_qr:
             help: Show slatepack data as QR code
@@ -560,6 +563,7 @@ subcommands:
       args:
           - output:
               help: Output proof file
+              required: true
               index: 1
           - id:
               help: If specified, retrieve the proof for the given transaction ID
@@ -576,6 +580,7 @@ subcommands:
       args:
           - input:
               help: Filename of a proof file
+              required: true
               index: 1
   - dump-wallet-data:
       about: Print wallet internal data (transactions, outputs)

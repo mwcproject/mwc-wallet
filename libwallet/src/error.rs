@@ -324,7 +324,7 @@ pub enum Error {
 	TxProofVerifySender(String, String),
 
 	/// Not found Tx Proof file
-	#[error("transaction doesn't have a proof, file {0} not found")]
+	#[error("transaction doesn't have a proof, file {0}")]
 	TransactionHasNoProof(String),
 
 	/// Base58 generic error

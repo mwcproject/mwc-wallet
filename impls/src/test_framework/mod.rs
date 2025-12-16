@@ -29,7 +29,6 @@ use crate::libwallet::{
 };
 use crate::util::secp::key::SecretKey;
 use crate::util::secp::pedersen;
-use crate::util::Mutex;
 use chrono::Duration;
 use mwc_wallet_libwallet::types::TxSession;
 use mwc_wallet_libwallet::wallet_lock;
@@ -37,6 +36,7 @@ use mwc_wallet_util::mwc_core::consensus::HeaderDifficultyInfo;
 use std::cell::RefCell;
 use std::collections::{HashSet, VecDeque};
 use std::sync::Arc;
+use std::sync::Mutex;
 use std::thread;
 
 mod testclient;
@@ -125,6 +125,7 @@ fn get_blocks_by_height_local(
 }
 
 fn create_block_with_reward(
+	context_id: u32,
 	chain: &Chain,
 	prev: core::core::BlockHeader,
 	txs: &[Transaction],
@@ -133,11 +134,13 @@ fn create_block_with_reward(
 ) -> core::core::Block {
 	let mut cache_values: VecDeque<HeaderDifficultyInfo> = VecDeque::new();
 	let next_header_info = consensus::next_difficulty(
+		context_id,
 		prev.height + 1,
 		chain.difficulty_iter().unwrap(),
 		&mut cache_values,
 	);
 	let mut b = core::core::Block::new(
+		context_id,
 		&prev,
 		txs,
 		next_header_info.clone().difficulty,
@@ -149,10 +152,11 @@ fn create_block_with_reward(
 	b.header.pow.secondary_scaling = next_header_info.secondary_scaling;
 	chain.set_txhashset_roots(&mut b).unwrap();
 	pow::pow_size(
+		context_id,
 		&mut b.header,
 		next_header_info.difficulty,
-		global::proofsize(),
-		global::min_edge_bits(),
+		global::proofsize(context_id),
+		global::min_edge_bits(context_id),
 	)
 	.unwrap();
 	b
@@ -160,13 +164,15 @@ fn create_block_with_reward(
 
 /// Adds a block with a given reward to the chain and mines it
 pub fn add_block_with_reward(
+	context_id: u32,
 	chain: &Chain,
 	txs: &[Transaction],
 	reward_output: Output,
 	reward_kernel: TxKernel,
 ) {
 	let prev = chain.head_header().unwrap();
-	let block = create_block_with_reward(chain, prev, txs, reward_output, reward_kernel);
+	let block =
+		create_block_with_reward(context_id, chain, prev, txs, reward_output, reward_kernel);
 	process_block(chain, block);
 }
 
@@ -192,12 +198,22 @@ where
 		height: prev.height + 1,
 	};
 	// build coinbase (via api) and add block
-	let coinbase_tx = {
-		let mut w_lock = wallet.lock();
+	let (coinbase_tx, context_id) = {
+		let mut w_lock = wallet.lock().expect("Mutex failure");
 		let w = w_lock.lc_provider()?.wallet_inst()?;
-		foreign::build_coinbase(&mut **w, keychain_mask, &block_fees, false)?
+		(
+			foreign::build_coinbase(&mut **w, keychain_mask, &block_fees, false)?,
+			w.get_context_id(),
+		)
 	};
-	let block = create_block_with_reward(chain, prev, txs, coinbase_tx.output, coinbase_tx.kernel);
+	let block = create_block_with_reward(
+		context_id,
+		chain,
+		prev,
+		txs,
+		coinbase_tx.output,
+		coinbase_tx.kernel,
+	);
 	Ok(block)
 }
 

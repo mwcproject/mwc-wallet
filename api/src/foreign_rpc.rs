@@ -25,7 +25,7 @@ use easy_jsonrpc_mwc;
 use ed25519_dalek::PublicKey as DalekPublicKey;
 use libwallet::slatepack::SlatePurpose;
 use libwallet::types::TxSession;
-use libwallet::wallet_lock_test;
+use libwallet::{wallet_lock, wallet_lock_test, SlateCtx};
 use mwc_wallet_libwallet::proof::proofaddress::{self, ProvableAddress};
 use mwc_wallet_util::mwc_core::consensus;
 use mwc_wallet_util::mwc_core::core::Transaction;
@@ -949,7 +949,12 @@ where
 
 	// verify_slate_messages doesn't make sense for the slate pack. That is why supporting only plain slates
 	fn verify_slate_messages(&self, slate: VersionedSlate) -> Result<(), Error> {
-		Foreign::verify_slate_messages(self, &slate.into_slate_plain(true)?)
+		let context_id = {
+			wallet_lock!(self.wallet_inst, w);
+			w.get_context_id()
+		};
+
+		Foreign::verify_slate_messages(self, &slate.into_slate_plain(context_id, true)?)
 	}
 
 	fn receive_tx(
@@ -960,7 +965,7 @@ where
 	) -> Result<VersionedSlate, Error> {
 		let version = in_slate.version();
 		let (slate_from, sender) = if in_slate.is_slatepack() {
-			let (slate_from, content, sender) = Foreign::decrypt_slate(self, in_slate)?;
+			let (slate_from, content, sender) = Foreign::decrypt_slate(self, in_slate, None)?;
 
 			if content != SlatePurpose::SendInitial {
 				return Err(Error::SlatepackDecodeError(format!(
@@ -970,7 +975,11 @@ where
 			}
 			(slate_from, sender)
 		} else {
-			let slate_from = in_slate.into_slate_plain(false)?;
+			let context_id = {
+				wallet_lock!(self.wallet_inst, w);
+				w.get_context_id()
+			};
+			let slate_from = in_slate.into_slate_plain(context_id, false)?;
 			(slate_from, None)
 		};
 		let out_slate = Foreign::receive_tx(
@@ -998,7 +1007,7 @@ where
 	fn finalize_invoice_tx(&self, in_slate: VersionedSlate) -> Result<VersionedSlate, Error> {
 		let version = in_slate.version();
 		let (in_slate, sender) = if in_slate.is_slatepack() {
-			let (slate_from, content, sender) = Foreign::decrypt_slate(self, in_slate)?;
+			let (slate_from, content, sender) = Foreign::decrypt_slate(self, in_slate, None)?;
 
 			if content != SlatePurpose::InvoiceResponse {
 				return Err(Error::SlatepackDecodeError(format!(
@@ -1009,7 +1018,11 @@ where
 
 			(slate_from, sender)
 		} else {
-			let slate_from = in_slate.into_slate_plain(false)?;
+			let context_id = {
+				wallet_lock!(self.wallet_inst, w);
+				w.get_context_id()
+			};
+			let slate_from = in_slate.into_slate_plain(context_id, false)?;
 			(slate_from, None)
 		};
 
@@ -1069,7 +1082,7 @@ pub fn run_doctest_foreign(
 	use mwc_wallet_util::mwc_util as util;
 
 	use std::sync::Arc;
-	use util::Mutex;
+	use std::sync::Mutex;
 
 	use std::fs;
 	use std::thread;
@@ -1078,6 +1091,7 @@ pub fn run_doctest_foreign(
 	let _ = fs::remove_dir_all(test_dir);
 	global::set_local_chain_type(ChainTypes::AutomatedTesting);
 	global::set_local_accept_fee_base(consensus::MILLI_MWC / 100);
+	global::set_local_nrd_enabled(true);
 
 	let tx_pool: Arc<Mutex<Vec<Transaction>>> = Arc::new(Mutex::new(Vec::new()));
 	let mut wallet_proxy: WalletProxy<
@@ -1093,27 +1107,31 @@ pub fn run_doctest_foreign(
 	);
 	let empty_string = util::ZeroingString::from("");
 	let client1 = LocalWalletClient::new("wallet1", wallet_proxy.tx.clone());
-	let mut wallet1 =
-		Box::new(DefaultWalletImpl::<LocalWalletClient>::new(client1.clone()).unwrap())
-			as Box<
-				dyn WalletInst<
-					'static,
-					DefaultLCProvider<LocalWalletClient, ExtKeychain>,
-					LocalWalletClient,
-					ExtKeychain,
-				>,
-			>;
+	let mut wallet1 = Box::new(DefaultWalletImpl::<LocalWalletClient>::new(
+		0,
+		client1.clone(),
+	))
+		as Box<
+			dyn WalletInst<
+				'static,
+				DefaultLCProvider<LocalWalletClient, ExtKeychain>,
+				LocalWalletClient,
+				ExtKeychain,
+			>,
+		>;
 	let lc = wallet1.lc_provider().unwrap();
 	let _ = lc.set_top_level_directory(&format!("{}/wallet1", test_dir));
-	lc.create_wallet(
-		None,
-		Some(rec_phrase_1),
-		32,
-		empty_string.clone(),
-		false,
-		None,
-	)
-	.unwrap();
+	let _ = lc
+		.create_wallet(
+			None,
+			Some(rec_phrase_1),
+			32,
+			empty_string.clone(),
+			false,
+			None,
+			true,
+		)
+		.unwrap();
 	let mask1 = lc
 		.open_wallet(None, empty_string.clone(), use_token, true, None)
 		.unwrap();
@@ -1135,27 +1153,31 @@ pub fn run_doctest_foreign(
      sell finish magic kid tiny wage stand panther inside settle feed song hole exile",
 	);
 	let client2 = LocalWalletClient::new("wallet2", wallet_proxy.tx.clone());
-	let mut wallet2 =
-		Box::new(DefaultWalletImpl::<LocalWalletClient>::new(client2.clone()).unwrap())
-			as Box<
-				dyn WalletInst<
-					'static,
-					DefaultLCProvider<LocalWalletClient, ExtKeychain>,
-					LocalWalletClient,
-					ExtKeychain,
-				>,
-			>;
+	let mut wallet2 = Box::new(DefaultWalletImpl::<LocalWalletClient>::new(
+		0,
+		client2.clone(),
+	))
+		as Box<
+			dyn WalletInst<
+				'static,
+				DefaultLCProvider<LocalWalletClient, ExtKeychain>,
+				LocalWalletClient,
+				ExtKeychain,
+			>,
+		>;
 	let lc = wallet2.lc_provider().unwrap();
 	let _ = lc.set_top_level_directory(&format!("{}/wallet2", test_dir));
-	lc.create_wallet(
-		None,
-		Some(rec_phrase_2),
-		32,
-		empty_string.clone(),
-		false,
-		None,
-	)
-	.unwrap();
+	let _ = lc
+		.create_wallet(
+			None,
+			Some(rec_phrase_2),
+			32,
+			empty_string.clone(),
+			false,
+			None,
+			true,
+		)
+		.unwrap();
 	let mask2 = lc
 		.open_wallet(None, empty_string, use_token, true, None)
 		.unwrap();
@@ -1184,7 +1206,7 @@ pub fn run_doctest_foreign(
 			(&mask1).as_ref(),
 			1 as usize,
 			false,
-			tx_pool.lock().deref_mut(),
+			tx_pool.lock().expect("Mutex failure").deref_mut(),
 		);
 		//update local outputs after each block, so transaction IDs stay consistent
 		let (wallet_refreshed, _) = api_impl::owner::retrieve_summary_info(
@@ -1199,20 +1221,20 @@ pub fn run_doctest_foreign(
 	}
 
 	let (w1_tor_secret, w1_tor_pubkey) = {
-		let mut w_lock = wallet1.lock();
+		let mut w_lock = wallet1.lock().expect("Mutex failure");
 		let w = w_lock.lc_provider().unwrap().wallet_inst().unwrap();
 		let k = w.keychain((&mask1).as_ref()).unwrap();
-		let secret = proofaddress::payment_proof_address_dalek_secret(&k, None).unwrap();
+		let secret = proofaddress::payment_proof_address_dalek_secret(0, &k, 0).unwrap();
 		let tor_pk = DalekPublicKey::from(&secret);
 		(secret, tor_pk)
 	};
 	let w1_slatepack_address = ProvableAddress::from_tor_pub_key(&w1_tor_pubkey);
 
 	let (w2_tor_secret, w2_tor_pubkey) = {
-		let mut w_lock = wallet2.lock();
+		let mut w_lock = wallet2.lock().expect("Mutex failure");
 		let w = w_lock.lc_provider().unwrap().wallet_inst().unwrap();
 		let k = w.keychain((&mask2).as_ref()).unwrap();
-		let secret = proofaddress::payment_proof_address_dalek_secret(&k, None).unwrap();
+		let secret = proofaddress::payment_proof_address_dalek_secret(0, &k, 0).unwrap();
 		let tor_pk = DalekPublicKey::from(&secret);
 		(secret, tor_pk)
 	};
@@ -1225,7 +1247,7 @@ pub fn run_doctest_foreign(
 		let tx_session1 = Some(RefCell::new(TxSession::new()));
 		let tx_session2 = Some(RefCell::new(TxSession::new()));
 		let mut slate = {
-			let mut w_lock = wallet2.lock();
+			let mut w_lock = wallet2.lock().expect("Mutex failure");
 			let w = w_lock.lc_provider().unwrap().wallet_inst().unwrap();
 			let mut args = IssueInvoiceTxArgs {
 				amount,
@@ -1259,7 +1281,7 @@ pub fn run_doctest_foreign(
 			api_impl::owner::update_wallet_state(&mut **w1, (&mask1).as_ref(), &None).unwrap();
 		}
 		slate = {
-			let mut w_lock = wallet1.lock();
+			let mut w_lock = wallet1.lock().expect("Mutex failure");
 			let w = w_lock.lc_provider().unwrap().wallet_inst().unwrap();
 			let args = InitTxArgs {
 				src_acct_name: None,
@@ -1290,10 +1312,18 @@ pub fn run_doctest_foreign(
 		};
 		println!("INIT INVOICE SLATE");
 		// Spit out slate for input to finalize_invoice_tx
-		println!("{}", serde_json::to_string_pretty(&slate).unwrap());
+		println!(
+			"{}",
+			serde_json::to_string_pretty(&SlateCtx {
+				slate: slate.clone(),
+				network_name: Some(global::get_network_name(0)),
+			})
+			.unwrap()
+		);
 
 		if compact_slate {
 			let vslate = VersionedSlate::into_version(
+				0,
 				slate,
 				SlateVersion::SP,
 				SlatePurpose::InvoiceResponse,
@@ -1317,7 +1347,7 @@ pub fn run_doctest_foreign(
 	}
 	if init_tx {
 		let amount = 2_000_000_000;
-		let mut w_lock = wallet1.lock();
+		let mut w_lock = wallet1.lock().expect("Mutex failure");
 		let w = w_lock.lc_provider().unwrap().wallet_inst().unwrap();
 		let mut args = InitTxArgs {
 			src_acct_name: None,
@@ -1339,10 +1369,18 @@ pub fn run_doctest_foreign(
 				.unwrap();
 		println!("INIT SLATE");
 		// Spit out slate for input to finalize_tx
-		println!("{}", serde_json::to_string_pretty(&slate).unwrap());
+		println!(
+			"{}",
+			serde_json::to_string_pretty(&SlateCtx {
+				slate: slate.clone(),
+				network_name: Some(global::get_network_name(0)),
+			})
+			.unwrap()
+		);
 
 		if compact_slate {
 			let vslate = VersionedSlate::into_version(
+				0,
 				slate,
 				SlateVersion::SP,
 				SlatePurpose::SendInitial,

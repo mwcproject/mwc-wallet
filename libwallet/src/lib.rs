@@ -71,7 +71,9 @@ pub use crate::slatepack::{SlatePurpose, Slatepack, SlatepackArmor, Slatepacker}
 pub use bitcoin::Address as BitcoinAddress;
 
 pub use crate::error::Error;
-pub use crate::slate::{ParticipantData, ParticipantMessageData, ParticipantMessages, Slate};
+pub use crate::slate::{
+	ParticipantData, ParticipantMessageData, ParticipantMessages, Slate, SlateCtx,
+};
 pub use crate::slate_versions::{
 	SlateVersion, VersionedCoinbase, VersionedSlate, CURRENT_SLATE_VERSION,
 	MWC_BLOCK_HEADER_VERSION,
@@ -114,7 +116,7 @@ pub use api_impl::owner_libp2p::IntegrityContext;
 macro_rules! wallet_lock {
 	($wallet_inst: expr, $wallet: ident) => {
 		let inst = $wallet_inst.clone();
-		let mut w_lock = inst.lock();
+		let mut w_lock = inst.lock().expect("Mutex failure");
 		let w_provider = w_lock.lc_provider()?;
 		let $wallet = w_provider.wallet_inst()?;
 	};
@@ -125,7 +127,7 @@ macro_rules! wallet_lock {
 macro_rules! wallet_lock_test {
 	($wallet_inst: expr, $wallet: ident) => {
 		let inst = $wallet_inst.clone();
-		let mut w_lock = inst.lock();
+		let mut w_lock = inst.lock().expect("Mutex failure");
 		let w_provider = w_lock.lc_provider().unwrap();
 		let $wallet = w_provider.wallet_inst().unwrap();
 	};

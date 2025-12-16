@@ -17,7 +17,7 @@
 //! implementation
 
 use super::swap::ethereum::EthereumWallet;
-use crate::config::{MQSConfig, TorConfig, WalletConfig};
+use crate::config::{MQSConfig, WalletConfig};
 use crate::error::Error;
 use crate::mwc_api::{Libp2pMessages, Libp2pPeers};
 use crate::mwc_core::core::hash::Hash;
@@ -38,13 +38,14 @@ use crate::IntegrityContext;
 use crate::Slate;
 use chrono::prelude::*;
 use mwc_wallet_util::mwc_core::core::{CommitWrapper, KernelFeatures};
-use mwc_wallet_util::mwc_util::RwLock;
+use mwc_wallet_util::mwc_p2p::TorConfig;
 use rand::rngs::mock::StepRng;
 use rand::thread_rng;
 use serde;
 use serde_json;
 use std::collections::HashMap;
 use std::fmt;
+use std::sync::RwLock;
 use std::sync::{Arc, Weak};
 use std::time::Duration;
 use uuid::Uuid;
@@ -85,7 +86,7 @@ where
 		mqs_config: Option<MQSConfig>,
 	) -> Result<(), Error>;
 
-	///
+	/// Create a new wallet, returns mnemonic phrase
 	fn create_wallet(
 		&mut self,
 		name: Option<&str>,
@@ -94,7 +95,8 @@ where
 		password: ZeroingString,
 		test_mode: bool,
 		wallet_data_dir: Option<&str>,
-	) -> Result<(), Error>;
+		show_seed: bool,
+	) -> Result<ZeroingString, Error>;
 
 	///
 	fn open_wallet(
@@ -150,6 +152,9 @@ where
 
 	/// return wallet instance
 	fn wallet_inst(&mut self) -> Result<&mut Box<dyn WalletBackend<'a, C, K> + 'a>, Error>;
+
+	/// Access to context_id
+	fn get_context_id(&self) -> u32;
 }
 
 /// TODO:
@@ -161,7 +166,10 @@ where
 	C: NodeClient + 'ck,
 	K: Keychain + 'ck,
 {
-	/// data file directory. mwc713 needs it
+	/// Wallet's context Id that defined wallet's open session. For example the blockchain.
+	fn get_context_id(&self) -> u32;
+
+	/// data file directory. tor & mwc713 needs it
 	fn get_data_file_dir(&self) -> &str;
 
 	/// Set the keychain, which should already be initialized
@@ -201,7 +209,7 @@ where
 	fn set_parent_key_id(&mut self, _: Identifier);
 
 	/// return the parent path
-	fn parent_key_id(&mut self) -> Identifier;
+	fn parent_key_id(&self) -> Identifier;
 
 	/// Iterate over all output data stored by the backend
 	fn iter<'a>(&'a self) -> Box<dyn Iterator<Item = OutputData> + 'a>;
@@ -284,6 +292,12 @@ pub const FLAG_CONTEXT_CLEARED: u64 = 2;
 /// Need to correct outputs root_key_id values to recover from prev bug
 pub const FLAG_OUTPUTS_ROOT_KEY_ID_CORRECTION: u64 = 3;
 
+/// Last working node data
+pub const U64_DATA_IDX_LAST_WORKING_NODE_INDEX: u64 = 1;
+
+/// Proof & MQS address index
+pub const U64_DATA_IDX_ADDRESS_INDEX: u64 = 2;
+
 /// Batch trait to update the output data backend atomically. Trying to use a
 /// batch after commit MAY result in a panic. Due to this being a trait, the
 /// commit method can't take ownership.
@@ -335,10 +349,10 @@ where
 	fn load_flag(&mut self, flag: u64, delete: bool) -> Result<bool, Error>;
 
 	/// Save the last used good node index
-	fn save_last_working_node_index(&mut self, node_index: u8) -> Result<(), Error>;
+	fn save_u64(&mut self, index: u64, value: u64) -> Result<(), Error>;
 
 	/// get the last used good node index
-	fn get_last_working_node_index(&mut self) -> Result<u8, Error>;
+	fn load_u64(&mut self, index: u64, default: u64) -> Result<u64, Error>;
 
 	/// get next tx log entry for the parent
 	fn next_tx_log_id(&mut self, parent_key_id: &Identifier) -> Result<u32, Error>;
@@ -412,26 +426,11 @@ where
 /// Encapsulate all wallet-node communication functions. No functions within libwallet
 /// should care about communication details
 pub trait NodeClient: Send + Sync + Clone {
-	///we have a list of nodes for failover, point the index to the next one.
-	fn increase_index(&self);
-
-	/// Return the URL of the check node
-	fn node_url(&self) -> Result<String, Error>;
-
-	/// Set the node URL
-	fn set_node_url(&mut self, node_url: Vec<String>);
-
 	/// Set the node index
 	fn set_node_index(&mut self, index: u8);
 
 	/// Set the node index
 	fn get_node_index(&self) -> u8;
-
-	/// Return the node api secret
-	fn node_api_secret(&self) -> &Option<String>;
-
-	/// Change the API secret
-	fn set_node_api_secret(&mut self, node_api_secret: Option<String>);
 
 	/// Reset cache data
 	fn reset_cache(&self);
@@ -1625,13 +1624,14 @@ pub struct TxSession {
 }
 
 lazy_static::lazy_static! {
+	// No need to have context_id because commits are unique. So any number of instances can share this collection
 	static ref TX_SESSIONS_USED_INPUTS: RwLock<HashMap<String, Weak<u8>>> = RwLock::new(HashMap::new());
 }
 
 /// Returns `true` if the given commitment is **not** taken
 /// (i.e. no live `TxSession` is using it).
 pub fn input_is_free(commit: &String) -> bool {
-	let mut map = TX_SESSIONS_USED_INPUTS.write();
+	let mut map = TX_SESSIONS_USED_INPUTS.write().expect("RwLock failure");
 	// Look up the commitment.
 	match map.get(commit) {
 		Some(weak) => {
@@ -1711,7 +1711,7 @@ impl TxSession {
 	/// Se locked inputs
 	pub fn set_input_commits(&mut self, inputs: Vec<(Identifier, Option<u64>, Commitment, u64)>) {
 		self.input_commits = inputs;
-		let mut used_inputs = TX_SESSIONS_USED_INPUTS.write();
+		let mut used_inputs = TX_SESSIONS_USED_INPUTS.write().expect("RwLock failure");
 		for (_id, _mmr, inp, _amount) in &self.input_commits {
 			used_inputs.insert(inp.to_hex(), Arc::downgrade(&self.exist));
 		}

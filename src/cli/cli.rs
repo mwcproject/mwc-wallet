@@ -15,16 +15,17 @@
 
 use crate::cmd::wallet_args;
 use crate::util::secp::key::SecretKey;
-use crate::util::Mutex;
 use clap::{App, AppSettings};
+use std::sync::Mutex;
 //use colored::Colorize;
 use mwc_wallet_api::Owner;
-use mwc_wallet_config::{MQSConfig, TorConfig, WalletConfig};
+use mwc_wallet_config::{MQSConfig, WalletConfig};
 use mwc_wallet_controller::command::GlobalArgs;
 use mwc_wallet_controller::Error;
 use mwc_wallet_impls::DefaultWalletImpl;
 use mwc_wallet_libwallet::{NodeClient, WalletInst, WalletLCProvider};
 use mwc_wallet_util::mwc_keychain as keychain;
+use mwc_wallet_util::mwc_p2p::TorConfig;
 use rustyline::completion::{Completer, FilenameCompleter, Pair};
 use rustyline::error::ReadlineError;
 use rustyline::highlight::{Highlighter, MatchingBracketHighlighter};
@@ -84,6 +85,7 @@ macro_rules! cli_message {
 }
 
 pub fn command_loop<L, C, K>(
+	context_id: u32,
 	wallet_inst: Arc<Mutex<Box<dyn WalletInst<'static, L, C, K>>>>,
 	keychain_mask: Option<SecretKey>,
 	wallet_config: &WalletConfig,
@@ -131,7 +133,7 @@ where
 
 	// catch updater messages
 	// mwc updater thread is better, it will be created for None
-	let mut owner_api = Owner::new(wallet_inst, None, None);
+	let mut owner_api = Owner::new(context_id, wallet_inst, None, None);
 
 	// start the automatic updater
 	owner_api.start_updater((&keychain_mask).as_ref(), Duration::from_secs(60))?;
@@ -150,7 +152,7 @@ where
 
 				// reset buffer
 				{
-					let mut contents = STDIN_CONTENTS.lock();
+					let mut contents = STDIN_CONTENTS.lock().expect("Mutex failure");
 					*contents = String::from("");
 				}
 
@@ -168,7 +170,8 @@ where
 						// handle opening /closing separately
 						keychain_mask = match args.subcommand() {
 							("open", Some(args)) => {
-								let mut wallet_lock = owner_api.wallet_inst.lock();
+								let mut wallet_lock =
+									owner_api.wallet_inst.lock().expect("Mutex failure");
 								let lc = wallet_lock.lc_provider().unwrap();
 
 								let mask = match lc.open_wallet(
@@ -191,6 +194,7 @@ where
 								let wallet_inst = lc.wallet_inst()?;
 
 								mwc_wallet_libwallet::swap::trades::init_swap_trade_backend(
+									wallet_inst.get_context_id(),
 									wallet_inst.get_data_file_dir(),
 									&wallet_config.swap_electrumx_addr,
 									&wallet_config.eth_swap_contract_address,
@@ -214,7 +218,8 @@ where
 								mask
 							}
 							("close", Some(_)) => {
-								let mut wallet_lock = owner_api.wallet_inst.lock();
+								let mut wallet_lock =
+									owner_api.wallet_inst.lock().expect("Mutex failure");
 								let lc = wallet_lock.lc_provider().unwrap();
 								lc.close_wallet(None)?;
 								None
@@ -281,7 +286,7 @@ impl Completer for EditorHelper {
 
 impl Hinter for EditorHelper {
 	fn hint(&self, line: &str, _pos: usize, _ctx: &Context<'_>) -> Option<String> {
-		let mut contents = STDIN_CONTENTS.lock();
+		let mut contents = STDIN_CONTENTS.lock().expect("Mutex failure");
 		*contents = line.into();
 		None
 	}

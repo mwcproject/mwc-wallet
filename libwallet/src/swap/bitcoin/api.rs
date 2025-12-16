@@ -19,7 +19,6 @@ use crate::mwc_keychain::{Identifier, Keychain, SwitchCommitmentType};
 use crate::mwc_util::secp::aggsig::export_secnonce_single as generate_nonce;
 use crate::mwc_util::secp::pedersen;
 use crate::mwc_util::secp::Message;
-use crate::mwc_util::Mutex;
 use crate::swap::bitcoin::types::BtcTtansaction;
 use crate::swap::bitcoin::Output;
 use crate::swap::ethereum::*;
@@ -36,6 +35,7 @@ use bitcoin::{Script, Txid};
 use mwc_wallet_util::mwc_util::secp::Secp256k1;
 use std::marker::PhantomData;
 use std::sync::Arc;
+use std::sync::Mutex;
 
 /// SwapApi trait implementation for BTC
 #[derive(Clone)]
@@ -44,6 +44,7 @@ where
 	C: NodeClient + 'a,
 	B: BtcNodeClient + 'a,
 {
+	context_id: u32,
 	/// Currency. BTC - it is a BTC family. There are some tweaks for different coins.
 	secondary_currency: Currency,
 	/// Client for MWC node
@@ -63,12 +64,14 @@ where
 {
 	/// Create BTC Swap API instance
 	pub fn new(
+		context_id: u32,
 		secondary_currency: Currency,
 		node_client: Arc<C>,
 		btc_node_client1: Arc<Mutex<B>>,
 		btc_node_client2: Arc<Mutex<B>>,
 	) -> Self {
 		Self {
+			context_id,
 			secondary_currency,
 			node_client,
 			btc_node_client1,
@@ -80,6 +83,7 @@ where
 	/// For tests doesn't make sense to use any failover
 	pub fn new_test(node_client: Arc<C>, btc_node_client: Arc<Mutex<B>>) -> Self {
 		Self {
+			context_id: 0,
 			secondary_currency: Currency::Btc,
 			node_client,
 			btc_node_client1: btc_node_client.clone(),
@@ -91,6 +95,7 @@ where
 	/// Clone instance
 	pub fn clone(&self) -> Self {
 		Self {
+			context_id: self.context_id.clone(),
 			secondary_currency: self.secondary_currency.clone(),
 			node_client: self.node_client.clone(),
 			btc_node_client1: self.btc_node_client1.clone(),
@@ -125,17 +130,28 @@ where
 		let outputs = match self
 			.btc_node_client1
 			.lock()
-			.unspent(self.secondary_currency, &address[0])
+			.expect("Mutex failure")
+			.unspent(self.context_id, self.secondary_currency, &address[0])
 		{
 			Ok(r) => r,
 			Err(_) => self
 				.btc_node_client2
 				.lock()
-				.unspent(self.secondary_currency, &address[0])?,
+				.expect("Mutex failure")
+				.unspent(self.context_id, self.secondary_currency, &address[0])?,
 		};
-		let height = match self.btc_node_client1.lock().height() {
+		let height = match self
+			.btc_node_client1
+			.lock()
+			.expect("Mutex failure")
+			.height()
+		{
 			Ok(r) => r,
-			Err(_) => self.btc_node_client2.lock().height()?,
+			Err(_) => self
+				.btc_node_client2
+				.lock()
+				.expect("Mutex failure")
+				.height()?,
 		};
 		let mut pending_amount = 0;
 		let mut confirmed_amount = 0;
@@ -189,7 +205,7 @@ where
 		let redeem_address_str = swap.unwrap_seller()?.0.clone();
 
 		self.secondary_currency
-			.validate_address(&redeem_address_str)?;
+			.validate_address(self.context_id, &redeem_address_str)?;
 
 		let cosign_secret = keychain.derive_key(0, cosign_id, SwitchCommitmentType::None)?;
 		let redeem_secret = SellApi::calculate_redeem_secret(keychain, swap)?;
@@ -218,6 +234,7 @@ where
 		};
 
 		let (btc_transaction, _, _, _) = BtcData::spend_lock_transaction(
+			self.context_id,
 			&self.secondary_currency,
 			&redeem_address_str,
 			&input_script,
@@ -268,6 +285,7 @@ where
 		};
 
 		let (refund_tx, _, _, _) = BtcData::spend_lock_transaction(
+			self.context_id,
 			&self.secondary_currency,
 			refund_address,
 			input_script,
@@ -279,8 +297,16 @@ where
 
 		let tx = refund_tx.tx.clone();
 		if post_tx {
-			if let Err(_) = self.btc_node_client1.lock().post_tx(tx.clone()) {
-				self.btc_node_client2.lock().post_tx(tx)?;
+			if let Err(_) = self
+				.btc_node_client1
+				.lock()
+				.expect("Mutex failure")
+				.post_tx(tx.clone())
+			{
+				self.btc_node_client2
+					.lock()
+					.expect("Mutex failure")
+					.post_tx(tx)?;
 			}
 		}
 
@@ -341,9 +367,18 @@ where
 		let result: Option<u64> = match tx_hash {
 			None => None,
 			Some(tx_hash) => {
-				let height = match self.btc_node_client1.lock().transaction(&tx_hash) {
+				let height = match self
+					.btc_node_client1
+					.lock()
+					.expect("Mutex failure")
+					.transaction(&tx_hash)
+				{
 					Ok(h) => h,
-					Err(_) => self.btc_node_client2.lock().transaction(&tx_hash)?,
+					Err(_) => self
+						.btc_node_client2
+						.lock()
+						.expect("Mutex failure")
+						.transaction(&tx_hash)?,
 				};
 				match height {
 					None => None,
@@ -455,7 +490,7 @@ where
 		// Checking if address is valid
 
 		secondary_currency
-			.validate_address(&secondary_redeem_address)
+			.validate_address(self.context_id, &secondary_redeem_address)
 			.map_err(|e| {
 				Error::Generic(format!(
 					"Unable to parse secondary currency redeem address {}, {}",
@@ -470,6 +505,7 @@ where
 
 		let height = self.node_client.get_chain_tip()?.0;
 		let mut swap = SellApi::create_swap_offer(
+			self.context_id,
 			keychain,
 			context,
 			primary_amount,
@@ -540,8 +576,16 @@ where
 		let btc_tx = self.seller_build_redeem_tx(keychain, swap, context, &input_script)?;
 
 		if post_tx {
-			if let Err(_) = self.btc_node_client1.lock().post_tx(btc_tx.tx.clone()) {
-				self.btc_node_client2.lock().post_tx(btc_tx.tx)?;
+			if let Err(_) = self
+				.btc_node_client1
+				.lock()
+				.expect("Mutex failure")
+				.post_tx(btc_tx.tx.clone())
+			{
+				self.btc_node_client2
+					.lock()
+					.expect("Mutex failure")
+					.post_tx(btc_tx.tx)?;
 			}
 		}
 
@@ -562,15 +606,24 @@ where
 		let is_seller = swap.is_seller();
 
 		let mwc_lock_conf =
-			self.get_slate_confirmation_number(&mwc_tip, &swap.lock_slate, !is_seller)?;
+			self.get_slate_confirmation_number(&mwc_tip, &swap.lock_slate.slate, !is_seller)?;
 		let mwc_redeem_conf =
-			self.get_slate_confirmation_number(&mwc_tip, &swap.redeem_slate, is_seller)?;
+			self.get_slate_confirmation_number(&mwc_tip, &swap.redeem_slate.slate, is_seller)?;
 		let mwc_refund_conf =
-			self.get_slate_confirmation_number(&mwc_tip, &swap.refund_slate, !is_seller)?;
+			self.get_slate_confirmation_number(&mwc_tip, &swap.refund_slate.slate, !is_seller)?;
 
-		let btc_tip = match self.btc_node_client1.lock().height() {
+		let btc_tip = match self
+			.btc_node_client1
+			.lock()
+			.expect("Mutex failure")
+			.height()
+		{
 			Ok(r) => r,
-			Err(_) => self.btc_node_client2.lock().height()?,
+			Err(_) => self
+				.btc_node_client2
+				.lock()
+				.expect("Mutex failure")
+				.height()?,
 		};
 		let btc_data = swap.secondary_data.unwrap_btc()?;
 		let secondary_redeem_conf = self.get_btc_confirmation_number(
@@ -595,13 +648,15 @@ where
 				let outputs = match self
 					.btc_node_client1
 					.lock()
-					.unspent(swap.secondary_currency, &address[0])
+					.expect("Mutex failure")
+					.unspent(self.context_id, swap.secondary_currency, &address[0])
 				{
 					Ok(r) => r,
 					Err(_) => self
 						.btc_node_client2
 						.lock()
-						.unspent(swap.secondary_currency, &address[0])?,
+						.expect("Mutex failure")
+						.unspent(self.context_id, swap.secondary_currency, &address[0])?,
 				};
 				for output in outputs {
 					secondary_lock_amount += output.value;
@@ -659,21 +714,28 @@ where
 			StateMachine::new(vec![
 				Box::new(seller_swap::SellerOfferCreated::new()),
 				Box::new(seller_swap::SellerSendingOffer::new(
+					self.context_id,
 					kc.clone(),
 					swap_api.clone(),
 				)),
 				Box::new(seller_swap::SellerWaitingForAcceptanceMessage::new(
+					self.context_id,
 					kc.clone(),
 				)),
 				Box::new(seller_swap::SellerWaitingForBuyerLock::new(
 					swap_api.clone(),
 				)),
-				Box::new(seller_swap::SellerPostingLockMwcSlate::new(nc.clone())),
+				Box::new(seller_swap::SellerPostingLockMwcSlate::new(
+					self.context_id,
+					nc.clone(),
+				)),
 				Box::new(seller_swap::SellerWaitingForLockConfirmations::new(
+					self.context_id,
 					kc.clone(),
 					swap_api.clone(),
 				)),
 				Box::new(seller_swap::SellerWaitingForInitRedeemMessage::new(
+					self.context_id,
 					kc.clone(),
 				)),
 				Box::new(seller_swap::SellerSendingInitRedeemMessage::new(nc.clone())),
@@ -681,17 +743,22 @@ where
 					nc.clone(),
 				)),
 				Box::new(seller_swap::SellerRedeemSecondaryCurrency::new(
+					self.context_id,
 					kc.clone(),
 					nc.clone(),
 					swap_api.clone(),
 				)),
 				Box::new(seller_swap::SellerWaitingForRedeemConfirmations::new(
+					self.context_id,
 					nc.clone(),
 					swap_api.clone(),
 				)),
 				Box::new(seller_swap::SellerSwapComplete::new()),
 				Box::new(seller_swap::SellerWaitingForRefundHeight::new(nc.clone())),
-				Box::new(seller_swap::SellerPostingRefundSlate::new(nc.clone())),
+				Box::new(seller_swap::SellerPostingRefundSlate::new(
+					self.context_id,
+					nc.clone(),
+				)),
 				Box::new(seller_swap::SellerWaitingForRefundConfirmations::new()),
 				Box::new(seller_swap::SellerCancelledRefunded::new()),
 				Box::new(seller_swap::SellerCancelled::new()),
@@ -708,14 +775,18 @@ where
 					swap_api.clone(),
 				)),
 				Box::new(buyer_swap::BuyerWaitingForLockConfirmations::new(
+					self.context_id,
 					kc.clone(),
 					swap_api.clone(),
 				)),
-				Box::new(buyer_swap::BuyerSendingInitRedeemMessage::new()),
+				Box::new(buyer_swap::BuyerSendingInitRedeemMessage::new(
+					self.context_id,
+				)),
 				Box::new(buyer_swap::BuyerWaitingForRespondRedeemMessage::new(
+					self.context_id,
 					kc.clone(),
 				)),
-				Box::new(buyer_swap::BuyerRedeemMwc::new(nc.clone())),
+				Box::new(buyer_swap::BuyerRedeemMwc::new(self.context_id, nc.clone())),
 				Box::new(buyer_swap::BuyerWaitForRedeemMwcConfirmations::new()),
 				Box::new(buyer_swap::BuyerSwapComplete::new()),
 				Box::new(buyer_swap::BuyerWaitingForRefundTime::new()),
@@ -768,7 +839,7 @@ where
 			refund_address.ok_or(Error::Generic("Please define refund address".to_string()))?;
 
 		swap.secondary_currency
-			.validate_address(&refund_address_str)?;
+			.validate_address(self.context_id, &refund_address_str)?;
 
 		let input_script = self.script(swap, keychain.secp())?;
 		self.buyer_refund(
@@ -795,7 +866,7 @@ where
 	/// Validate clients. We want to be sure that the clients able to acceess the servers
 	fn test_client_connections(&self) -> Result<(), Error> {
 		{
-			let mut c = self.btc_node_client1.lock();
+			let mut c = self.btc_node_client1.lock().expect("Mutex failure");
 			let name = c.name();
 			let _ = c.height().map_err(|e| {
 				Error::ElectrumNodeClient(format!(
@@ -805,7 +876,7 @@ where
 			})?;
 		}
 		{
-			let mut c = self.btc_node_client2.lock();
+			let mut c = self.btc_node_client2.lock().expect("Mutex failure");
 			let name = c.name();
 			let _ = c.height().map_err(|e| {
 				Error::ElectrumNodeClient(format!(

@@ -23,8 +23,9 @@ mod types;
 
 pub use self::file::{PathToSlateGetter, PathToSlatePutter};
 pub use self::http::HttpDataSender;
+use std::path::Path;
 
-use crate::config::{TorConfig, WalletConfig};
+use crate::config::WalletConfig;
 use crate::error::Error;
 use crate::libwallet::swap::message::Message;
 use crate::libwallet::Slate;
@@ -33,9 +34,11 @@ use crate::util::ZeroingString;
 use ed25519_dalek::{PublicKey as DalekPublicKey, SecretKey as DalekSecretKey};
 use mwc_wallet_libwallet::slatepack::SlatePurpose;
 use mwc_wallet_libwallet::{SlateVersion, Slatepacker};
+use mwc_wallet_util::mwc_p2p::TorConfig;
 use mwc_wallet_util::mwc_util::secp::Secp256k1;
 pub use mwcmq::{
-	get_mwcmqs_brocker, init_mwcmqs_access_data, MWCMQPublisher, MWCMQSubscriber, MwcMqsChannel,
+	get_mwcmqs_brocker, init_mwcmqs_access_data, reset_mwcmqs_brocker, MWCMQPublisher,
+	MWCMQSubscriber, MwcMqsChannel,
 };
 pub use types::{
 	Address, AddressType, CloseReason, HttpsAddress, MWCMQSAddress, Publisher, Subscriber,
@@ -165,10 +168,12 @@ impl SlateGetData {
 
 /// select a SlateSender based on method and dest fields from, e.g., SendArgs
 pub fn create_sender(
+	context_id: u32,
 	method: &str,
 	dest: &str,
 	apisecret: &Option<String>,
-	tor_config: Option<TorConfig>,
+	tor_config: Option<&TorConfig>,
+	base_dir: &Path,
 ) -> Result<Box<dyn SlateSender>, Error> {
 	let invalid = |e| {
 		Error::WalletComms(format!(
@@ -189,31 +194,26 @@ pub fn create_sender(
 	};
 
 	Ok(match method {
-		"http" => {
-			Box::new(HttpDataSender::plain_http(&dest, apisecret.clone()).map_err(|e| invalid(e))?)
-		}
+		"http" => Box::new(
+			HttpDataSender::plain_http(context_id, &dest, apisecret.clone())
+				.map_err(|e| invalid(e))?,
+		),
 		"tor" => match tor_config {
 			None => {
 				return Err(Error::WalletComms("Tor Configuration required".to_string()));
 			}
 			Some(tc) => {
 				let dest = validate_tor_address(dest)?;
-				Box::new(
-					HttpDataSender::tor_through_socks_proxy(
-						&dest,
-						apisecret.clone(),
-						&tc.socks_proxy_addr,
-						Some(tc.send_config_dir),
-						tc.socks_running,
-						&tc.tor_log_file,
-						&tc.bridge,
-						&tc.proxy,
-					)
-					.map_err(|e| invalid(e))?,
-				)
+				Box::new(HttpDataSender::tor_connection(
+					context_id,
+					&dest,
+					apisecret.clone(),
+					tc,
+					base_dir,
+				)?)
 			}
 		},
-		"mwcmqs" => Box::new(MwcMqsChannel::new(dest.to_string())),
+		"mwcmqs" => Box::new(MwcMqsChannel::new(context_id, dest.to_string())),
 		_ => {
 			return Err(handle_unsupported_types(method));
 		}
@@ -222,36 +222,25 @@ pub fn create_sender(
 
 /// create a Swap Message Sender
 pub fn create_swap_message_sender(
+	context_id: u32,
 	method: &str,
 	dest: &str,
 	apisecret: &Option<String>,
 	tor_config: &TorConfig,
+	base_dir: &Path,
 ) -> Result<Box<dyn SwapMessageSender>, Error> {
-	let invalid = |e| {
-		Error::WalletComms(format!(
-			"Invalid wallet comm type and destination. method: {}, dest: {}, error: {}",
-			method, dest, e
-		))
-	};
-
 	Ok(match method {
 		"tor" => {
 			let dest = validate_tor_address(dest)?;
-			Box::new(
-				HttpDataSender::tor_through_socks_proxy(
-					&dest,
-					apisecret.clone(),
-					&tor_config.socks_proxy_addr,
-					Some(tor_config.send_config_dir.clone()),
-					tor_config.socks_running,
-					&tor_config.tor_log_file,
-					&tor_config.bridge,
-					&tor_config.proxy,
-				)
-				.map_err(|e| invalid(e))?,
-			)
+			Box::new(HttpDataSender::tor_connection(
+				context_id,
+				&dest,
+				apisecret.clone(),
+				tor_config,
+				base_dir,
+			)?)
 		}
-		"mwcmqs" => Box::new(MwcMqsChannel::new(dest.to_string())),
+		"mwcmqs" => Box::new(MwcMqsChannel::new(context_id, dest.to_string())),
 		_ => {
 			return Err(handle_unsupported_types(method));
 		}
@@ -279,7 +268,7 @@ pub fn handle_unsupported_types(method: &str) -> Error {
 		}
 		_ => {
 			return Error::WalletComms(format!(
-				"Wallet comm method \"{}\" does not exist.",
+				"Wallet communication method \"{}\" does not exist.",
 				method
 			));
 		}

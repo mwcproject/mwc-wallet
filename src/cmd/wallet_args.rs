@@ -19,7 +19,8 @@ use crate::cmd::wallet_args::ParseError::ArgumentError;
 use crate::config::MWC_WALLET_DIR;
 use crate::util::file::get_first_line;
 use crate::util::secp::key::SecretKey;
-use crate::util::{Mutex, ZeroingString};
+use crate::util::ZeroingString;
+use std::sync::Mutex;
 
 use crate::cmd::wallet::MIN_COMPAT_NODE_VERSION;
 /// Argument parsing and error handling for wallet commands
@@ -28,21 +29,25 @@ use ed25519_dalek::SecretKey as DalekSecretKey;
 use linefeed::terminal::Signal;
 use linefeed::{Interface, ReadResult};
 use mwc_wallet_api::Owner;
-use mwc_wallet_config::parse_node_address_string;
-use mwc_wallet_config::{MQSConfig, TorConfig, WalletConfig};
+use mwc_wallet_config::{MQSConfig, WalletConfig};
+use mwc_wallet_controller::controller::stop_foreign_api_running;
 use mwc_wallet_controller::{command, Error};
 use mwc_wallet_impls::tor::config::is_tor_address;
 use mwc_wallet_impls::{DefaultLCProvider, DefaultWalletImpl};
 use mwc_wallet_impls::{PathToSlateGetter, SlateGetter};
 use mwc_wallet_libwallet::proof::proofaddress;
 use mwc_wallet_libwallet::proof::proofaddress::ProvableAddress;
+use mwc_wallet_libwallet::types::{
+	U64_DATA_IDX_ADDRESS_INDEX, U64_DATA_IDX_LAST_WORKING_NODE_INDEX,
+};
 use mwc_wallet_libwallet::{
-	swap::types::Currency, IssueInvoiceTxArgs, NodeClient, SwapStartArgs, WalletInst,
+	swap::types::Currency, wallet_lock, IssueInvoiceTxArgs, NodeClient, SwapStartArgs, WalletInst,
 	WalletLCProvider,
 };
 use mwc_wallet_libwallet::{Slate, SlatePurpose};
 use mwc_wallet_util::mwc_core::core::amount_to_hr_string;
 use mwc_wallet_util::mwc_keychain as keychain;
+use mwc_wallet_util::mwc_p2p::TorConfig;
 use mwc_wallet_util::mwc_util::secp::Secp256k1;
 use mwc_wallet_util::{mwc_core as core, OnionV3Address};
 use rpassword;
@@ -133,7 +138,7 @@ where
 				}
 			}
 			ReadResult::Input(line) => {
-				let mut w_lock = wallet.lock();
+				let mut w_lock = wallet.lock().expect("Mutex failure");
 				let p = w_lock.lc_provider().unwrap();
 				if p.validate_mnemonic(ZeroingString::from(line.clone()))
 					.is_ok()
@@ -211,7 +216,8 @@ fn prompt_pay_invoice(slate: &Slate, method: &str, dest: &str) -> Result<bool, P
 // instantiate wallet (needed by most functions)
 
 pub fn inst_wallet<L, C, K>(
-	config: WalletConfig,
+	context_id: u32,
+	config: &WalletConfig,
 	node_client: C,
 ) -> Result<Arc<Mutex<Box<dyn WalletInst<'static, L, C, K>>>>, ParseError>
 where
@@ -220,8 +226,10 @@ where
 	C: NodeClient + 'static,
 	K: keychain::Keychain + 'static,
 {
-	let mut wallet = Box::new(DefaultWalletImpl::<'static, C>::new(node_client.clone()).unwrap())
-		as Box<dyn WalletInst<'static, L, C, K>>;
+	let mut wallet = Box::new(DefaultWalletImpl::<'static, C>::new(
+		context_id,
+		node_client.clone(),
+	)) as Box<dyn WalletInst<'static, L, C, K>>;
 	let lc = wallet.lc_provider().unwrap();
 	let _ = lc.set_top_level_directory(&config.data_file_dir);
 	Ok(Arc::new(Mutex::new(wallet)))
@@ -398,18 +406,15 @@ pub fn parse_listen_args(
 	args: &ArgMatches,
 ) -> Result<command::ListenArgs, ParseError> {
 	if let Some(port) = args.value_of("port") {
-		config.api_listen_port = port.parse().unwrap();
+		config.api_listen_port = Some(port.parse().unwrap());
 	}
 	if let Some(port) = args.value_of("libp2p_port") {
 		config.libp2p_listen_port = Some(port.parse().unwrap());
 	}
-	if let Some(bridge) = args.value_of("bridge") {
-		tor_config.bridge.bridge_line = Some(bridge.into());
-	}
 
 	let method = parse_required(args, "method")?;
 	if args.is_present("no_tor") {
-		tor_config.use_tor_listener = false;
+		tor_config.tor_enabled = Some(false);
 	}
 	Ok(command::ListenArgs {
 		method: method.to_owned(),
@@ -454,7 +459,10 @@ pub fn parse_account_args(account_args: &ArgMatches) -> Result<command::AccountA
 	Ok(command::AccountArgs { create: create })
 }
 
-pub fn parse_send_args(args: &ArgMatches) -> Result<command::SendArgs, ParseError> {
+pub fn parse_send_args(
+	context_id: u32,
+	args: &ArgMatches,
+) -> Result<command::SendArgs, ParseError> {
 	// amount
 	let amount = parse_required(args, "amount")?;
 	let (amount, spend_max) = if amount.eq_ignore_ascii_case("max") {
@@ -574,13 +582,14 @@ pub fn parse_send_args(args: &ArgMatches) -> Result<command::SendArgs, ParseErro
 				// if the destination address is a TOR address, we don't need the address
 				// separately
 				let proof_dest = proofaddress::address_to_pubkey(dest.to_string());
-				match ProvableAddress::from_str(&proof_dest) {
+				match ProvableAddress::from_str(context_id, &proof_dest) {
 					Ok(a) => Some(a),
 					Err(_) => {
 						let addr = parse_required(args, "proof_address")?;
-						match ProvableAddress::from_str(&proofaddress::address_to_pubkey(
-							addr.to_string(),
-						)) {
+						match ProvableAddress::from_str(
+							context_id,
+							&proofaddress::address_to_pubkey(addr.to_string()),
+						) {
 							Ok(a) => Some(a),
 							Err(e) => {
 								if !estimate_selection_strategies {
@@ -620,7 +629,7 @@ pub fn parse_send_args(args: &ArgMatches) -> Result<command::SendArgs, ParseErro
 
 	let slatepack_recipient: Option<ProvableAddress> = match args.value_of("slatepack_recipient") {
 		Some(s) => {
-			let addr = ProvableAddress::from_str(s).map_err(|e| {
+			let addr = ProvableAddress::from_str(context_id, s).map_err(|e| {
 				ParseError::ArgumentError(format!("Unable to parse slatepack_recipient, {}", e))
 			})?;
 
@@ -644,11 +653,6 @@ pub fn parse_send_args(args: &ArgMatches) -> Result<command::SendArgs, ParseErro
 				)))
 			}
 		},
-		None => None,
-	};
-
-	let bridge = match args.value_of("bridge") {
-		Some(b) => Some(b.to_string()),
 		None => None,
 	};
 
@@ -681,7 +685,6 @@ pub fn parse_send_args(args: &ArgMatches) -> Result<command::SendArgs, ParseErro
 			slatepack_recipient,
 			late_lock,
 			min_fee,
-			bridge: bridge,
 			slatepack_qr: slatepack_qr,
 		})
 	}
@@ -762,6 +765,7 @@ pub fn parse_finalize_args(args: &ArgMatches) -> Result<command::FinalizeArgs, P
 }
 
 pub fn parse_issue_invoice_args(
+	context_id: u32,
 	args: &ArgMatches,
 ) -> Result<command::IssueInvoiceArgs, ParseError> {
 	let amount = parse_required(args, "amount")?;
@@ -794,7 +798,7 @@ pub fn parse_issue_invoice_args(
 
 	let slatepack_recipient: Option<ProvableAddress> = match args.value_of("slatepack_recipient") {
 		Some(s) => {
-			let addr = ProvableAddress::from_str(s).map_err(|e| {
+			let addr = ProvableAddress::from_str(context_id, s).map_err(|e| {
 				ParseError::ArgumentError(format!("Unable to parse slatepack_recipient, {}", e))
 			})?;
 
@@ -827,6 +831,7 @@ pub fn parse_issue_invoice_args(
 }
 
 pub fn parse_process_invoice_args(
+	context_id: u32,
 	args: &ArgMatches,
 	prompt: bool,
 	slatepack_secret: &DalekSecretKey,
@@ -879,7 +884,7 @@ pub fn parse_process_invoice_args(
 	let input_slatepack_message = args.value_of("content").map(|s| s.to_string());
 
 	let slate = match &tx_file {
-		Some(file_name) => PathToSlateGetter::build_form_path(file_name.into())
+		Some(file_name) => PathToSlateGetter::build_form_path(context_id, file_name.into())
 			.get_tx(Some(&slatepack_secret), &secp)
 			.map_err(|e| {
 				ParseError::IOError(format!(
@@ -888,7 +893,7 @@ pub fn parse_process_invoice_args(
 				))
 			})?,
 		None => match &input_slatepack_message {
-			Some(message) => PathToSlateGetter::build_form_str(message.clone())
+			Some(message) => PathToSlateGetter::build_form_str(context_id, message.clone())
 				.get_tx(Some(&slatepack_secret), &secp)
 				.map_err(|e| {
 					ParseError::IOError(format!(
@@ -948,8 +953,6 @@ pub fn parse_process_invoice_args(
 		prompt_pay_invoice(&slate, method, dest.as_ref().unwrap())?;
 	}
 
-	let bridge = parse_optional(args, "bridge")?;
-
 	let slatepack_qr = args.is_present("slatepack_qr");
 
 	Ok(command::ProcessInvoiceArgs {
@@ -963,7 +966,6 @@ pub fn parse_process_invoice_args(
 		input_slatepack_message,
 		input_file: tx_file,
 		ttl_blocks,
-		bridge,
 		slatepack_qr: slatepack_qr,
 	})
 }
@@ -1489,6 +1491,7 @@ pub fn parse_retrieve_ownership_proof(
 }
 
 pub fn wallet_command<C, F>(
+	context_id: u32,
 	wallet_args: &ArgMatches,
 	mut wallet_config: WalletConfig,
 	tor_config: Option<TorConfig>,
@@ -1515,7 +1518,7 @@ where
 	),
 {
 	if wallet_args.is_present("external") {
-		wallet_config.api_listen_interface = "0.0.0.0".to_string();
+		wallet_config.api_listen_interface = Some("0.0.0.0".to_string());
 	}
 
 	if let Some(dir) = wallet_args.value_of("top_level_dir") {
@@ -1523,17 +1526,10 @@ where
 	}
 
 	if let Some(sa) = wallet_args.value_of("api_server_address") {
-		wallet_config.check_node_api_http_addr = sa.to_string().clone();
+		wallet_config.check_node_api_http_addr = Some(sa.to_string().clone());
 	}
 
 	let mut global_wallet_args = arg_parse!(parse_global_args(&wallet_config, &wallet_args));
-
-	//parse the nodes address and put them in a vec
-	let node_list = parse_node_address_string(wallet_config.check_node_api_http_addr.clone());
-
-	node_client.set_node_url(node_list);
-	node_client.set_node_api_secret(global_wallet_args.node_api_secret.clone());
-	let node_client_index = node_client.get_node_index();
 
 	// legacy hack to avoid the need for changes in existing mwc-wallet.toml files
 	// remove `wallet_data` from end of path as
@@ -1546,14 +1542,7 @@ where
 
 	// for backwards compatibility: If tor config doesn't exist in the file, assume
 	// the top level directory for data
-	let tor_config = match tor_config {
-		Some(tc) => tc,
-		None => {
-			let mut tc = TorConfig::default();
-			tc.send_config_dir = wallet_config.data_file_dir.clone();
-			tc
-		}
-	};
+	let tor_config = tor_config.unwrap_or(TorConfig::default());
 
 	let mqs_config = match mqs_config {
 		Some(mqs) => mqs,
@@ -1579,19 +1568,14 @@ where
 	// Instantiate wallet (doesn't open the wallet)
 	let wallet =
 		inst_wallet::<DefaultLCProvider<C, keychain::ExtKeychain>, C, keychain::ExtKeychain>(
-			wallet_config.clone(),
+			context_id,
+			&wallet_config,
 			node_client.clone(),
 		)
 		.unwrap_or_else(|e| {
 			println!("{}", e);
 			std::process::exit(1);
 		});
-
-	{
-		let mut wallet_lock = wallet.lock();
-		let lc = wallet_lock.lc_provider().unwrap();
-		let _ = lc.set_top_level_directory(&wallet_config.data_file_dir);
-	}
 
 	// provide wallet instance back to the caller (handy for testing with
 	// local wallet proxy, etc)
@@ -1605,7 +1589,7 @@ where
 		("cli", _) => open_wallet = false,
 		("owner_api", _) => {
 			// If wallet exists and password is present then open it. Otherwise, that's fine too.
-			let mut wallet_lock = wallet.lock();
+			let mut wallet_lock = wallet.lock().expect("Mutex failure");
 			let lc = wallet_lock.lc_provider().unwrap();
 			open_wallet = (wallet_args.is_present("pass")
 				&& lc.wallet_exists(None, wallet_config.wallet_data_dir.as_deref())?)
@@ -1619,7 +1603,7 @@ where
 
 	let keychain_mask = match open_wallet {
 		true => {
-			let mut wallet_lock = wallet.lock();
+			let mut wallet_lock = wallet.lock().expect("Mutex failure");
 			let lc = wallet_lock.lc_provider().unwrap();
 			let mask = lc.open_wallet(
 				None,
@@ -1632,6 +1616,7 @@ where
 			let wallet_inst = lc.wallet_inst()?;
 
 			mwc_wallet_libwallet::swap::trades::init_swap_trade_backend(
+				context_id,
 				wallet_inst.get_data_file_dir(),
 				&wallet_config.swap_electrumx_addr,
 				&wallet_config.eth_swap_contract_address,
@@ -1642,10 +1627,8 @@ where
 			//read or save the node index(the good node)
 			{
 				let mut batch = wallet_inst.batch(mask.as_ref())?;
-				let index = batch.get_last_working_node_index()?;
-				if index == 0 {
-					let _ = batch.save_last_working_node_index(node_client_index + 1); //index stored in db start from 1. need to offset by +1
-				} else {
+				let index = batch.load_u64(U64_DATA_IDX_LAST_WORKING_NODE_INDEX, 0)? as u8;
+				if index > 0 {
 					node_client.set_node_index(index - 1); //index stored in db start from 1. need to offset by -1
 				}
 				batch.commit()?;
@@ -1661,6 +1644,7 @@ where
 
 	let res = match wallet_args.subcommand() {
 		("cli", Some(_)) => command_loop(
+			context_id,
 			wallet,
 			keychain_mask,
 			&wallet_config,
@@ -1670,7 +1654,7 @@ where
 			test_mode,
 		),
 		_ => {
-			let mut owner_api = Owner::new(wallet, None, Some(tor_config.clone()));
+			let mut owner_api = Owner::new(context_id, wallet, None, Some(tor_config.clone()));
 			parse_and_execute(
 				&mut owner_api,
 				keychain_mask,
@@ -1748,9 +1732,45 @@ where
 				&t,
 				&m,
 				&a,
-				&global_wallet_args.clone(),
 				cli_mode,
 			)
+		}
+		("stop_listen", _) => {
+			let context_id = {
+				wallet_lock!(owner_api.wallet_inst, w);
+				w.get_context_id()
+			};
+			stop_foreign_api_running(context_id);
+			Ok(())
+		}
+		("get_address_index", _) => {
+			wallet_lock!(owner_api.wallet_inst, w);
+			let address_index: u32 = {
+				let mut batch = w.batch(None)?;
+				let index = batch.load_u64(U64_DATA_IDX_ADDRESS_INDEX, 0u64)?;
+				index as u32
+			};
+			println!(
+				"Slatepack, MQS, tor addresses derivative index: {}",
+				address_index
+			);
+			Ok(())
+		}
+		("set_address_index", Some(args)) => {
+			let address_index = arg_parse!(parse_required(args, "index"));
+			let address_index = arg_parse!(parse_u64(address_index, "index"));
+
+			if address_index > 65535 {
+				return Err(Error::ArgumentError(
+					"index value range is 0 - 65535".into(),
+				));
+			}
+
+			wallet_lock!(owner_api.wallet_inst, w);
+			let mut batch = w.batch(None)?;
+			batch.save_u64(U64_DATA_IDX_ADDRESS_INDEX, address_index as u64)?;
+			batch.commit()?;
+			Ok(())
 		}
 		("owner_api", Some(args)) => {
 			let mut c = wallet_config.clone();
@@ -1782,18 +1802,20 @@ where
 			command::account(owner_api, km, a)
 		}
 		("send", Some(args)) => {
-			let a = arg_parse!(parse_send_args(&args));
-			command::send(
+			let context_id = {
+				wallet_lock!(owner_api.wallet_inst, w);
+				w.get_context_id()
+			};
+			let a = arg_parse!(parse_send_args(context_id, &args));
+			let _ = command::send(
 				owner_api,
-				&wallet_config,
 				km,
-				wallet_config.api_listen_addr(),
-				global_wallet_args.tls_conf.clone(),
 				Some(tor_config.clone()),
 				Some(mqs_config.clone()),
 				a,
 				wallet_config.dark_background_color_scheme.unwrap_or(true),
-			)
+			)?;
+			Ok(())
 		}
 		("unpack", Some(args)) => {
 			let a = arg_parse!(parse_receive_unpack_args(&args));
@@ -1812,20 +1834,33 @@ where
 			command::finalize(owner_api, km, a, true)
 		}
 		("invoice", Some(args)) => {
-			let a = arg_parse!(parse_issue_invoice_args(&args));
+			let context_id = {
+				wallet_lock!(owner_api.wallet_inst, w);
+				w.get_context_id()
+			};
+			let a = arg_parse!(parse_issue_invoice_args(context_id, &args));
 			command::issue_invoice_tx(owner_api, km, a)
 		}
 		("pay", Some(args)) => {
-			let (slatepack_secret, secp) = {
-				let mut w_lock = owner_api.wallet_inst.lock();
-				let w = w_lock.lc_provider()?.wallet_inst()?;
+			let (slatepack_secret, secp, context_id) = {
+				wallet_lock!(owner_api.wallet_inst, w);
 				let keychain = w.keychain(km)?;
-				let slatepack_secret =
-					proofaddress::payment_proof_address_dalek_secret(&keychain, None)?;
-				(slatepack_secret, keychain.secp().clone())
+				let context_id = w.get_context_id();
+				let address_index: u32 = {
+					let mut batch = w.batch(None)?;
+					let index = batch.load_u64(U64_DATA_IDX_ADDRESS_INDEX, 0u64)?;
+					index as u32
+				};
+				let slatepack_secret = proofaddress::payment_proof_address_dalek_secret(
+					context_id,
+					&keychain,
+					address_index,
+				)?;
+				(slatepack_secret, keychain.secp().clone(), context_id)
 			};
 
 			let a = arg_parse!(parse_process_invoice_args(
+				context_id,
 				&args,
 				!test_mode,
 				&slatepack_secret,
@@ -1914,7 +1949,8 @@ where
 		}
 		("swap_start", Some(args)) => {
 			let a = arg_parse!(parse_swap_start_args(&args));
-			command::swap_start(owner_api, km, &a)
+			let _ = command::swap_start(owner_api, km, &a)?;
+			Ok(())
 		}
 		("swap_create_from_offer", Some(args)) => {
 			let mwc_amount = arg_parse!(parse_required(args, "file"));
@@ -1925,10 +1961,11 @@ where
 			command::swap(
 				owner_api.wallet_inst.clone(),
 				km,
-				wallet_config.api_listen_addr(),
+				wallet_config.api_listen_addr().map_err(|e| {
+					Error::GenericError(format!("Wallet configuration error, {}", e))
+				})?,
 				mqs_config.clone(),
 				tor_config.clone(),
-				global_wallet_args.tls_conf.clone(),
 				a,
 				cli_mode,
 			)

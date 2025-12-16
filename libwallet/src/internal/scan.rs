@@ -27,15 +27,14 @@ use crate::mwc_core::core::Transaction;
 use crate::mwc_core::global;
 use crate::mwc_core::libtx::{proof, tx_fee};
 use crate::mwc_keychain::{ChildNumber, Identifier, Keychain, SwitchCommitmentType};
-use crate::mwc_util as util;
 use crate::mwc_util::secp::key::SecretKey;
 use crate::mwc_util::secp::pedersen;
 use crate::mwc_util::secp::{ContextFlag, Secp256k1};
-use crate::mwc_util::Mutex;
 use crate::mwc_util::{from_hex, ToHex};
 use crate::types::*;
 use crate::Error;
 use crate::ReplayMitigationConfig;
+use crate::{mwc_util as util, wallet_lock};
 use blake2_rfc::blake2b::blake2b;
 use chrono::{Duration, Utc};
 use mwc_wallet_util::mwc_chain::Chain;
@@ -44,6 +43,7 @@ use std::cell::RefCell;
 use std::cmp;
 use std::collections::{HashMap, HashSet};
 use std::sync::mpsc::Sender;
+use std::sync::{Arc, Mutex};
 use uuid::Uuid;
 // Wallet - node sync up strategy. We can request blocks from the node and analyze them. 1 week of blocks can be requested in theory.
 // Or we can validate tx kernels, outputs e.t.c
@@ -130,21 +130,35 @@ pub struct RestoredTxStats {
 }
 
 lazy_static! {
-
 	/// Global config in memory storage.
-	pub static ref REPLAY_MITIGATION_CONFIG: Mutex< ReplayMitigationConfig> = Mutex::new(ReplayMitigationConfig::default());
+	pub static ref REPLAY_MITIGATION_CONFIG: Mutex<HashMap<u32,ReplayMitigationConfig>> = Mutex::new(HashMap::new());
 }
+
+/// Clean up context
+pub fn scan_clean_context(context_id: u32) {
+	let _ = REPLAY_MITIGATION_CONFIG
+		.lock()
+		.expect("Mutex failure")
+		.remove(&context_id);
+}
+
 /// Set address derivative index
-pub fn set_replay_config(config: ReplayMitigationConfig) {
-	let mut lock = REPLAY_MITIGATION_CONFIG.lock();
-	*lock = config;
+pub fn set_replay_config(context_id: u32, config: ReplayMitigationConfig) {
+	let mut lock = REPLAY_MITIGATION_CONFIG.lock().expect("Mutex failure");
+	lock.insert(context_id, config);
 }
 /// Get address derivative index
-pub fn get_replay_config() -> ReplayMitigationConfig {
-	REPLAY_MITIGATION_CONFIG.lock().clone()
+pub fn get_replay_config(context_id: u32) -> ReplayMitigationConfig {
+	REPLAY_MITIGATION_CONFIG
+		.lock()
+		.expect("Mutex failure")
+		.get(&context_id)
+		.cloned()
+		.unwrap_or(ReplayMitigationConfig::default())
 }
 
 fn identify_utxo_outputs<'a, K>(
+	context_id: u32,
 	keychain: &K,
 	outputs: Vec<(pedersen::Commitment, pedersen::RangeProof, bool, u64, u64)>,
 	end_height: Option<u64>,
@@ -167,12 +181,15 @@ where
 		// will fail if it's not ours
 		let info = {
 			// Before HF+2wk, try legacy rewind first
-			let info_legacy =
-				if valid_header_version(height.saturating_sub(2 * WEEK_HEIGHT), legacy_version) {
-					proof::rewind(keychain.secp(), &legacy_builder, *commit, None, *proof)?
-				} else {
-					None
-				};
+			let info_legacy = if valid_header_version(
+				context_id,
+				height.saturating_sub(2 * WEEK_HEIGHT),
+				legacy_version,
+			) {
+				proof::rewind(keychain.secp(), &legacy_builder, *commit, None, *proof)?
+			} else {
+				None
+			};
 
 			// If legacy didn't work, try new rewind
 			if info_legacy.is_none() {
@@ -190,7 +207,7 @@ where
 		};
 
 		let lock_height = if *is_coinbase {
-			*height + global::coinbase_maturity()
+			*height + global::coinbase_maturity(context_id)
 		} else {
 			*height
 		};
@@ -264,6 +281,7 @@ where
 }
 
 fn collect_chain_outputs_rewind_hash<'a, C>(
+	context_id: u32,
 	client: C,
 	rewind_hash: String,
 	start_index: u64,
@@ -319,7 +337,7 @@ where
 			let info = info.unwrap();
 			vw.total_balance += info.value;
 			let lock_height = if *is_coinbase {
-				*height + global::coinbase_maturity()
+				*height + global::coinbase_maturity(context_id)
 			} else {
 				*height
 			};
@@ -346,6 +364,7 @@ where
 
 /// Scanning chain for the outputs. Shared with mwc713
 pub fn collect_chain_outputs<'a, C, K>(
+	context_id: u32,
 	keychain: &K,
 	client: C,
 	start_index: u64,
@@ -389,6 +408,7 @@ where
 			let _ = s.send(StatusMessage::Scanning(show_progress, msg, perc_complete));
 		}
 		let mut chain_outs_pair = identify_utxo_outputs(
+			context_id,
 			keychain,
 			outputs,
 			None,
@@ -872,6 +892,7 @@ where
 
 			// Parse all node_outputs from the blocks and check ours the new ones...
 			let output_pair = identify_utxo_outputs(
+				wallet.get_context_id(),
 				&keychain,
 				node_outputs,
 				Some(end_height),
@@ -930,6 +951,7 @@ where
 
 			// Getting outputs that are published on the chain.
 			let chain_outs_pair = collect_chain_outputs(
+				wallet.get_context_id(),
 				&keychain,
 				client,
 				pmmr_range.0,
@@ -1157,15 +1179,15 @@ where
 
 /// Scan outputs with a given rewind hash view wallet.
 /// Retrieve all outputs information that belongs to it.
-pub fn scan_rewind_hash<'a, T: ?Sized, C, K>(
-	wallet: &mut T,
+pub fn scan_rewind_hash<'a, L, C, K>(
+	wallet_inst: Arc<Mutex<Box<dyn WalletInst<'a, L, C, K>>>>,
 	rewind_hash: String,
 	start_height: u64,
 	end_height: u64,
 	status_send_channel: &Option<Sender<StatusMessage>>,
 ) -> Result<ViewWallet, Error>
 where
-	T: WalletBackend<'a, C, K>,
+	L: WalletLCProvider<'a, C, K>,
 	C: NodeClient + 'a,
 	K: Keychain + 'a,
 {
@@ -1176,12 +1198,18 @@ where
 			0,
 		));
 	}
-	let client = wallet.w2n_client().clone();
+
+	let (client, context_id) = {
+		wallet_lock!(wallet_inst, w);
+		let client = w.w2n_client().clone();
+		(client, w.get_context_id())
+	};
 
 	// Retrieve the actual PMMR index range we're looking for
 	let pmmr_range = client.height_range_to_pmmr_indices(start_height, Some(end_height))?;
 
 	let chain_outs = collect_chain_outputs_rewind_hash(
+		context_id,
 		client,
 		rewind_hash,
 		pmmr_range.0,
@@ -1233,7 +1261,7 @@ where
 	}
 
 	// Collect the data form the chain and from the wallet
-	let replay_config = get_replay_config();
+	let replay_config = get_replay_config(wallet.get_context_id());
 	let (mut outputs, chain_outs, mut transactions, last_output) = get_wallet_and_chain_data(
 		wallet,
 		keychain_mask.clone(),
@@ -1265,7 +1293,8 @@ where
 	}*/
 
 	// It is a safe height, we can't rollback there at node level
-	let archive_height = Chain::height_2_archive_height(tip_height).saturating_sub(DAY_HEIGHT * 2);
+	let archive_height = Chain::height_2_archive_height(wallet.get_context_id(), tip_height)
+		.saturating_sub(DAY_HEIGHT * 2);
 
 	// Validated outputs states against the chain
 	let mut found_parents: HashMap<Identifier, u32> = HashMap::new();
@@ -1376,7 +1405,7 @@ where
 					match tx::cancel_tx(
 						wallet,
 						keychain_mask,
-						&tx_log.parent_key_id,
+						Some(&tx_log.parent_key_id),
 						Some(tx_log.id),
 						None,
 					) {
@@ -1763,6 +1792,7 @@ fn validate_outputs_ownership<'a, T: ?Sized, C, K>(
 				}
 			} else {
 				report_transaction_collision(
+					wallet.get_context_id(),
 					status_send_channel,
 					&w_out.commit,
 					&w_out.tx_output_uuid,
@@ -1774,6 +1804,7 @@ fn validate_outputs_ownership<'a, T: ?Sized, C, K>(
 
 		if in_active > 1 {
 			report_transaction_collision(
+				wallet.get_context_id(),
 				status_send_channel,
 				&w_out.commit,
 				&w_out.tx_input_uuid,
@@ -2259,6 +2290,7 @@ where
 
 // Report to user about transactions that point to the same output.
 fn report_transaction_collision(
+	context_id: u32,
 	status_send_channel: &Option<Sender<StatusMessage>>,
 	commit: &String,
 	tx_uuid: &HashSet<String>,
@@ -2268,7 +2300,7 @@ fn report_transaction_collision(
 	// We don't want to report collision for old transactions. Migration could be a reason. Those messages
 	// are aknowledged and users didn't recreate the wallet to get rid of them.
 	// 4-5 month from now transaction should be valid. Expected that all users are migrated the wallet by that time
-	let height_limit = if global::is_mainnet() {
+	let height_limit = if global::is_mainnet(context_id) {
 		450_000
 	} else {
 		500_000
@@ -2389,8 +2421,7 @@ where
 	K: Keychain + 'a,
 {
 	//spend this output to the account itself.
-	let fee = tx_fee(1, 1, 1); //there is only one input and one output and one kernel
-							//let amount = output.eligible_to_spend(current_height, minimum_confirmations);
+	let fee = tx_fee(wallet.get_context_id(), 1, 1, 1); //there is only one input and one output and one kernel
 
 	let mut output_vec = HashSet::new();
 	output_vec.insert(commit_string);

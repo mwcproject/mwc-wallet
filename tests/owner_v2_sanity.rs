@@ -40,7 +40,7 @@ use common::{
 	setup,
 };
 use mwc_wallet_util::mwc_core::core::Transaction;
-use mwc_wallet_util::mwc_util::Mutex;
+use std::sync::Mutex;
 
 #[test]
 fn owner_v2_sanity() -> Result<(), mwc_wallet_controller::Error> {
@@ -54,7 +54,7 @@ fn owner_v2_sanity() -> Result<(), mwc_wallet_controller::Error> {
 	setup(test_dir);
 	global::set_local_chain_type(global::ChainTypes::AutomatedTesting);
 	// Running update thread, we can't set local to it...
-	global::init_global_chain_type(global::ChainTypes::AutomatedTesting);
+	global::init_global_chain_type(0, global::ChainTypes::AutomatedTesting);
 
 	let tx_pool: Arc<Mutex<Vec<Transaction>>> = Arc::new(Mutex::new(Vec::new()));
 	setup_proxy!(test_dir, tx_pool, chain, wallet1, client1, mask1, wallet2, client2, _mask2);
@@ -67,7 +67,7 @@ fn owner_v2_sanity() -> Result<(), mwc_wallet_controller::Error> {
 		mask1,
 		bh as usize,
 		false,
-		tx_pool.lock().deref_mut(),
+		tx_pool.lock().expect("Mutex failure").deref_mut(),
 	);
 	let client1_2 = client1.clone();
 

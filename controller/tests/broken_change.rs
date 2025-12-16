@@ -34,7 +34,7 @@ use std::time::Duration;
 mod common;
 use common::{clean_output_dir, create_wallet_proxy, setup};
 use mwc_wallet_util::mwc_core::core::Transaction;
-use mwc_wallet_util::mwc_util::Mutex;
+use std::sync::Mutex;
 
 fn broken_change_test_impl(
 	test_dir: &str,
@@ -83,7 +83,7 @@ fn broken_change_test_impl(
 	});
 
 	// few values to keep things shorter
-	let reward = core::consensus::reward(0, 1);
+	let reward = core::consensus::reward(0, 0, 1);
 
 	let inputs_num = 4;
 	let output_num = 5;
@@ -95,9 +95,9 @@ fn broken_change_test_impl(
 		mask1,
 		4 + 3,
 		false,
-		tx_pool.lock().deref_mut(),
+		tx_pool.lock().expect("Mutex failure").deref_mut(),
 	);
-	let fee = core::libtx::tx_fee(inputs_num, output_num + 1, 1);
+	let fee = core::libtx::tx_fee(0, inputs_num, output_num + 1, 1);
 
 	// send a single block's worth of transactions with minimal strategy
 	let mut slate = Slate::blank(2, false);
@@ -115,7 +115,7 @@ fn broken_change_test_impl(
 			slate = api.init_send_tx(m, &None, &args, 1)?;
 			slate = client1.send_tx_slate_direct("wallet2", &slate)?;
 			api.tx_lock_outputs(m, &None, &slate, None, 0)?;
-			slate = api.finalize_tx(m, &None, &slate)?;
+			slate = api.finalize_tx(m, &None, &slate, true)?;
 			assert!(slate.tx.clone().unwrap().body.inputs.len() == inputs_num);
 			assert!(slate.tx.clone().unwrap().body.outputs.len() == expected_outputs);
 			api.post_tx(m, slate.tx_or_err()?, false)?;

@@ -15,11 +15,11 @@
 //! Generic implementation of owner API eth functions
 
 use crate::mwc_keychain::Keychain;
-use crate::mwc_util::Mutex;
 use crate::types::NodeClient;
 use crate::{wallet_lock, WalletInst, WalletLCProvider};
 use mwc_wallet_util::mwc_core::global;
 use std::sync::Arc;
+use std::sync::Mutex;
 
 use crate::swap::ethereum::InfuraNodeClient;
 use crate::swap::ethereum::*;
@@ -40,8 +40,10 @@ where
 	wallet_lock!(wallet_inst, w);
 	let ethereum_wallet = w.get_ethereum_wallet()?;
 
-	let eth_infura_project_id = trades::get_eth_infura_projectid(&Currency::Ether, &None).unwrap();
-	let chain = if global::is_mainnet() {
+	let context_id = w.get_context_id();
+	let eth_infura_project_id =
+		trades::get_eth_infura_projectid(context_id, &Currency::Ether, &None).unwrap();
+	let chain = if global::is_mainnet(context_id) {
 		"mainnet".to_string()
 	} else {
 		"ropsten".to_string()
@@ -64,9 +66,10 @@ where
 }
 
 /// get eth balance
-pub fn get_eth_balance(ethereum_wallet: EthereumWallet) -> Result<u64, Error> {
-	let eth_infura_project_id = trades::get_eth_infura_projectid(&Currency::Ether, &None).unwrap();
-	let chain = if global::is_mainnet() {
+pub fn get_eth_balance(context_id: u32, ethereum_wallet: EthereumWallet) -> Result<u64, Error> {
+	let eth_infura_project_id =
+		trades::get_eth_infura_projectid(context_id, &Currency::Ether, &None).unwrap();
+	let chain = if global::is_mainnet(context_id) {
 		"mainnet".to_string()
 	} else {
 		"ropsten".to_string()
@@ -99,8 +102,9 @@ where
 	wallet_lock!(wallet_inst, w);
 	let ethereum_wallet = w.get_ethereum_wallet()?;
 
-	let eth_infura_project_id = trades::get_eth_infura_projectid(&Currency::Ether, &None).unwrap();
-	let chain = if global::is_mainnet() {
+	let eth_infura_project_id =
+		trades::get_eth_infura_projectid(w.get_context_id(), &Currency::Ether, &None).unwrap();
+	let chain = if global::is_mainnet(w.get_context_id()) {
 		"mainnet".to_string()
 	} else {
 		"ropsten".to_string()

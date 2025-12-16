@@ -20,13 +20,13 @@ mod framework;
 
 use self::core::global::{self, ChainTypes};
 use self::util::init_test_logger;
-use self::util::Mutex;
 use crate::framework::{LocalServerContainer, LocalServerContainerConfig};
 use mwc_api as api;
 use mwc_core as core;
 use mwc_p2p as p2p;
 use mwc_util as util;
 use std::sync::Arc;
+use std::sync::Mutex;
 use std::{thread, time};
 
 #[test]

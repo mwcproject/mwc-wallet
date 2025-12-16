@@ -31,8 +31,8 @@ use std::collections::HashMap;
 use std::fs::File;
 use std::io::{Read, Write};
 use std::path::Path;
+use std::sync::Mutex;
 use std::{fs, path};
-use util::Mutex;
 
 use crate::mwc_core::core::amount_to_hr_string;
 use crate::mwc_core::core::Committed;
@@ -45,19 +45,21 @@ use std::collections::HashSet;
 pub const TX_PROOF_SAVE_DIR: &'static str = "saved_proofs";
 
 lazy_static! {
-
 	/// Global proof in memory storage.
 	static ref SLATE_PROOFS: Mutex< HashMap<uuid::Uuid, TxProof> > = Mutex::new(HashMap::new());
 }
 
 /// Add a txProof into the mem storage
 pub fn push_proof_for_slate(uuid: &uuid::Uuid, proof: TxProof) {
-	SLATE_PROOFS.lock().insert(uuid.clone(), proof);
+	SLATE_PROOFS
+		.lock()
+		.expect("Mutex failure")
+		.insert(uuid.clone(), proof);
 }
 
 /// Get txProof form the mem storage. At step we suppose to Finalize
 pub fn pop_proof_for_slate(uuid: &uuid::Uuid) -> Option<TxProof> {
-	SLATE_PROOFS.lock().remove(uuid)
+	SLATE_PROOFS.lock().expect("Mutex failure").remove(uuid)
 }
 
 /// Tx Proof - the mwc713 based proof that can be made for any address that is a public key.
@@ -118,6 +120,7 @@ impl TxProof {
 	/// Return: To address, Slate
 	pub fn verify_extract(
 		&self,
+		context_id: u32,
 		secp: &Secp256k1,
 		expected_destination: Option<&ProvableAddress>,
 	) -> Result<(ProvableAddress, Slate, String), Error> {
@@ -162,7 +165,7 @@ impl TxProof {
 				};
 			}
 		} else {
-			let public_key = self.address.public_key().map_err(|e| {
+			let public_key = self.address.public_key(context_id).map_err(|e| {
 				Error::TxProofVerify(format!(
 					"Unable to build public key from address {}, {}",
 					self.address, e
@@ -226,15 +229,16 @@ impl TxProof {
 			decrypted_message.truncate(leng - 59); //remove the "tor" and tor_key from the elnd
 		}
 
-		let slate = Slate::deserialize_upgrade_plain(&decrypted_message).map_err(|e| {
-			Error::TxProofVerify(format!("Unable to build Slate form proof message, {}", e))
-		})?;
+		let slate =
+			Slate::deserialize_upgrade_plain(context_id, &decrypted_message).map_err(|e| {
+				Error::TxProofVerify(format!("Unable to build Slate form proof message, {}", e))
+			})?;
 		//for mwc713 display purpose. the destination needs to be onion address
 		if let Some(onion_addr) = self.tor_sender_address.clone() {
 			if tor_key != "tor" && tor_key != onion_addr {
 				return Err(Error::TxProofVerifySender(tor_key.to_string(), onion_addr));
 			}
-			let tor_sender = ProvableAddress::from_str(&onion_addr).map_err(|e| {
+			let tor_sender = ProvableAddress::from_str(context_id, &onion_addr).map_err(|e| {
 				Error::TxProofVerify(format!("Unable to create sender onion address, {}", e))
 			})?;
 			Ok((tor_sender, slate, decrypted_message))
@@ -245,6 +249,7 @@ impl TxProof {
 
 	/// Build proof data. message suppose to be slate.
 	pub fn from_response(
+		context_id: u32,
 		from: &ProvableAddress,
 		message: String,
 		challenge: String,
@@ -264,7 +269,7 @@ impl TxProof {
 		let signature = Signature::from_der(secp, &signature)
 			.map_err(|e| Error::TxProofVerify(format!("Unable to build signature, {}", e)))?;
 
-		let public_key = address.public_key().map_err(|e| {
+		let public_key = address.public_key(context_id).map_err(|e| {
 			Error::TxProofVerify(format!(
 				"Unable to build public key for address {}, {}",
 				address, e
@@ -297,13 +302,14 @@ impl TxProof {
 			tor_sender_address: None,
 		};
 
-		let (_, slate, _) = proof.verify_extract(secp, Some(expected_destination))?;
+		let (_, slate, _) = proof.verify_extract(context_id, secp, Some(expected_destination))?;
 
 		Ok((slate, proof))
 	}
 
 	/// Build proof data from slate
 	pub fn from_slate(
+		context_id: u32,
 		message: String,
 		slate: &Slate,
 		secret_key: &SecretKey,
@@ -329,7 +335,7 @@ impl TxProof {
 					//and generate the key.
 
 					let version = slate.lowest_version();
-					let slate = VersionedSlate::into_version_plain(slate.clone(), version)
+					let slate = VersionedSlate::into_version_plain(context_id, slate, version)
 						.map_err(|e| {
 							Error::TxProofVerify(format!("Slate serialization error, {}", e))
 						})?;
@@ -347,7 +353,7 @@ impl TxProof {
 					let encrypted_message = EncryptedMessage::new(
 						slate_json_with_tor,
 						expected_destination, //this is the sender address
-						&expected_destination.public_key().map_err(|e| {
+						&expected_destination.public_key(context_id).map_err(|e| {
 							Error::TxProofVerify(format!(
 								"Unable to build public key for address {}, {}",
 								address, e
@@ -367,7 +373,7 @@ impl TxProof {
 					})?;
 					let key = encrypted_message
 						.key(
-							&expected_destination.public_key().unwrap(),
+							&expected_destination.public_key(context_id).unwrap(),
 							secret_key,
 							secp,
 						)
@@ -392,7 +398,7 @@ impl TxProof {
 						tor_proof_signature: Some(signature),
 						tor_sender_address: tor_destination,
 					};
-					proof.verify_extract(secp, Some(expected_destination))?;
+					proof.verify_extract(context_id, secp, Some(expected_destination))?;
 					Ok(proof)
 				} else {
 					let address = p.receiver_address;
@@ -406,7 +412,7 @@ impl TxProof {
 						Error::TxProofVerify(format!("Unable to build signature, {}", e))
 					})?;
 
-					let _public_key = address.public_key().map_err(|e| {
+					let _public_key = address.public_key(context_id).map_err(|e| {
 						Error::TxProofVerify(format!(
 							"Unable to build public key for address {}, {}",
 							address, e
@@ -417,7 +423,7 @@ impl TxProof {
 					//and generate the key.
 
 					let version = slate.lowest_version();
-					let slate = VersionedSlate::into_version_plain(slate.clone(), version)
+					let slate = VersionedSlate::into_version_plain(context_id, slate, version)
 						.map_err(|e| {
 							Error::TxProofVerify(format!("Slate serialization error, {}", e))
 						})?;
@@ -430,7 +436,7 @@ impl TxProof {
 							))
 						})?,
 						expected_destination, //this is the sender address when receiver wallet sends the slate back
-						&expected_destination.public_key().map_err(|e| {
+						&expected_destination.public_key(context_id).map_err(|e| {
 							Error::TxProofVerify(format!(
 								"Unable to build public key for address {}, {}",
 								address, e
@@ -450,7 +456,7 @@ impl TxProof {
 					})?;
 					let key = encrypted_message
 						.key(
-							&expected_destination.public_key().unwrap(),
+							&expected_destination.public_key(context_id).unwrap(),
 							secret_key,
 							secp,
 						)
@@ -473,7 +479,7 @@ impl TxProof {
 						tor_proof_signature: None,
 						tor_sender_address: None,
 					};
-					proof.verify_extract(secp, Some(expected_destination))?;
+					proof.verify_extract(context_id, secp, Some(expected_destination))?;
 					Ok(proof)
 				}
 			} else {
@@ -544,7 +550,7 @@ impl TxProof {
 }
 
 ///support mwc713 payment proof message
-pub fn proof_ok(proof_result: &VerifyProofResult) {
+pub fn proof_ok(context_id: u32, proof_result: &VerifyProofResult) {
 	let sender_message = format!(" from [{}]", proof_result.sender_address.bright_green());
 
 	let tor_sender_message = format!(
@@ -576,7 +582,7 @@ pub fn proof_ok(proof_result: &VerifyProofResult) {
 	}
 
 	println!("\noutputs:");
-	if global::is_mainnet() {
+	if global::is_mainnet(context_id) {
 		for output in &proof_result.outputs {
 			println!(
 				"   {}: https://explorer.mwc.mw/#o{}",
@@ -614,6 +620,7 @@ pub fn proof_ok(proof_result: &VerifyProofResult) {
 
 ///to support mwc713 payment proof verification
 pub fn verify_tx_proof(
+	context_id: u32,
 	tx_proof: &TxProof,
 	secp: &Secp256k1,
 ) -> Result<
@@ -627,9 +634,11 @@ pub fn verify_tx_proof(
 	),
 	Error,
 > {
-	let (sender_address, slate, slate_str) = tx_proof.verify_extract(secp, None).map_err(|e| {
-		Error::TxProofVerify(format!("Unable to extract destination and slate, {}", e))
-	})?;
+	let (sender_address, slate, slate_str) = tx_proof
+		.verify_extract(context_id, secp, None)
+		.map_err(|e| {
+			Error::TxProofVerify(format!("Unable to extract destination and slate, {}", e))
+		})?;
 
 	if slate.fee != tx_proof.fee {
 		return Err(Error::TxProofVerify("fee value doesn't match slate".into()));
@@ -661,7 +670,7 @@ pub fn verify_tx_proof(
 							.message
 							.get(prefix.len()..(tx_proof.message.len() - postfix.len()))
 							.expect("substring must exist");
-						if PublicKey::from_base58_check(pk, version_bytes()).is_err() {
+						if PublicKey::from_base58_check(pk, version_bytes(context_id)).is_err() {
 							return Err(Error::TxProofVerify("Invalid message".into()));
 						}
 
@@ -765,11 +774,12 @@ pub fn verify_tx_proof(
 
 ///to support mwc713 payment proof verification
 pub fn verify_tx_proof_wrapper(
+	context_id: u32,
 	tx_proof: &TxProof,
 	secp: &Secp256k1,
 ) -> Result<VerifyProofResult, Error> {
 	let (sender, receiver, amount, outputs, excess_sum, slate_str) =
-		verify_tx_proof(tx_proof, secp)?;
+		verify_tx_proof(context_id, tx_proof, secp)?;
 
 	let outputs = outputs
 		.iter()

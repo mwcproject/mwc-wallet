@@ -25,15 +25,15 @@ use std::collections::HashMap;
 use std::env;
 use tokio::runtime::Builder;
 
-use crate::client_utils::Client;
 use crate::libwallet;
 use crate::util::secp::pedersen;
 use crate::util::ToHex;
 
 use super::resp_types::*;
 use crate::client_utils::json_rpc::*;
+use crate::client_utils::Client;
 use mwc_wallet_util::mwc_api::{Libp2pMessages, Libp2pPeers};
-use mwc_wallet_util::RUNTIME;
+use mwc_wallet_util::mwc_util;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
@@ -103,10 +103,11 @@ pub struct HTTPNodeClient {
 impl HTTPNodeClient {
 	/// Create a new client that will communicate with the given mwc node
 	pub fn new(
+		context_id: u32,
 		node_url_list: Vec<String>,
 		node_api_secret: Option<String>,
 	) -> Result<HTTPNodeClient, Error> {
-		let client = match Client::new() {
+		let client = match Client::new(context_id) {
 			Ok(client) => client,
 			Err(e) => {
 				return Err(Error::GenericError(format!(
@@ -315,7 +316,7 @@ impl HTTPNodeClient {
 			task.try_collect().await
 		};
 
-		let res: Result<Vec<_>, _> = RUNTIME.lock().unwrap().block_on(task);
+		let res: Result<Vec<_>, _> = mwc_util::run_global_async_block(task);
 
 		let results: Vec<OutputPrintable> = match res {
 			Ok(resps) => {
@@ -369,17 +370,16 @@ impl HTTPNodeClient {
 		}
 		Ok(api_outputs)
 	}
-}
 
-impl NodeClient for HTTPNodeClient {
-	fn increase_index(&self) {
+	pub fn increase_index(&self) {
 		if !self.node_url_list.is_empty() {
 			let index =
 				(self.current_node_index.load(Ordering::Relaxed) + 1) % self.node_url_list.len();
 			self.current_node_index.store(index, Ordering::Relaxed);
 		}
 	}
-	fn node_url(&self) -> Result<String, libwallet::Error> {
+
+	pub fn node_url(&self) -> Result<String, libwallet::Error> {
 		if self.node_url_list.is_empty() {
 			return Err(libwallet::Error::NodeUrlIsEmpty);
 		}
@@ -387,17 +387,20 @@ impl NodeClient for HTTPNodeClient {
 		Ok(self.node_url_list[index].clone())
 	}
 
-	fn node_api_secret(&self) -> &Option<String> {
+	pub fn node_api_secret(&self) -> &Option<String> {
 		&self.node_api_secret
 	}
 
-	fn set_node_url(&mut self, node_url_list: Vec<String>) {
+	pub fn set_node_url(&mut self, node_url_list: Vec<String>) {
 		self.node_url_list = node_url_list;
 	}
 
-	fn set_node_api_secret(&mut self, node_api_secret: Option<String>) {
+	pub fn set_node_api_secret(&mut self, node_api_secret: Option<String>) {
 		self.node_api_secret = node_api_secret;
 	}
+}
+
+impl NodeClient for HTTPNodeClient {
 	fn set_node_index(&mut self, node_index: u8) {
 		self.current_node_index
 			.store(node_index as usize, Ordering::Relaxed);
@@ -778,7 +781,7 @@ mod tests {
 
 			let node_list_clone = node_list.clone();
 			joins.push(thread::spawn(move || {
-				let client = HTTPNodeClient::new(node_list_clone, Some(api_secret.to_string()))
+				let client = HTTPNodeClient::new(0, node_list_clone, Some(api_secret.to_string()))
 					.map_err(|e| libwallet::Error::ClientCallback(format!("{}", e)))?;
 
 				let total_time = Instant::now();

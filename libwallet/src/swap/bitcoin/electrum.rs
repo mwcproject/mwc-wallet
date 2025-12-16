@@ -336,7 +336,12 @@ impl BtcNodeClient for ElectrumNodeClient {
 	}
 
 	/// Fetch a list of unspent outputs belonging to this address
-	fn unspent(&mut self, currency: Currency, address: &String) -> Result<Vec<Output>, Error> {
+	fn unspent(
+		&mut self,
+		context_id: u32,
+		currency: Currency,
+		address: &String,
+	) -> Result<Vec<Output>, Error> {
 		// A full SPV client should validate the Merkle proofs of the transactions
 		// that created these outputs
 		let client = self.client()?;
@@ -357,7 +362,7 @@ impl BtcNodeClient for ElectrumNodeClient {
 			})?;
 			Script::from(script_bin)
 		} else {
-			currency.address_2_script_pubkey(address)?
+			currency.address_2_script_pubkey(context_id, address)?
 		};
 
 		let utxos = client.unspent(&script)?;

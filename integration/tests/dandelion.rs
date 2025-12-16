@@ -18,11 +18,11 @@ extern crate log;
 
 mod framework;
 
-use self::util::Mutex;
 use crate::framework::{LocalServerContainer, LocalServerContainerConfig};
 use mwc_core as core;
 use mwc_util as util;
 use std::sync::Arc;
+use std::sync::Mutex;
 use std::{thread, time};
 
 /// Start 1 node mining, 1 non mining node and two wallets.

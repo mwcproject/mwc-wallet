@@ -14,19 +14,18 @@
 
 use crate::mwc_util::to_hex;
 use crate::swap::message::SecondaryUpdate;
-use crate::swap::ser::*;
 use crate::swap::types::SecondaryData;
 use crate::swap::Error;
 use mwc_web3::types::{Address, H256};
 use regex::Regex;
 
 /// ETH transaction ready to post (any type). Here it is a redeem tx
-#[derive(Serialize, Deserialize, Debug, Clone)]
+/*#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct EthTransaction {
 	pub txid: H256, // keep it is a hash for data compatibility.
 	#[serde(serialize_with = "bytes_to_hex", deserialize_with = "bytes_from_hex")]
 	pub tx: Vec<u8>,
-}
+}*/
 
 /// ETH operations context
 #[derive(Serialize, Deserialize, Debug, Clone)]

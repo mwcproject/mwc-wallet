@@ -30,6 +30,8 @@ use crate::{ParticipantData as TxParticipant, Slate, SlateVersion, VersionedSlat
 use chrono::{TimeZone, Utc};
 use rand::thread_rng;
 
+use crate::slate::SlateCtx;
+use mwc_wallet_util::mwc_core::global;
 #[cfg(test)]
 use uuid::Uuid;
 
@@ -44,6 +46,7 @@ impl SellApi {
 	/// It assumes that the Context has already been populated with
 	/// the correct values for key derivation paths and nonces
 	pub fn create_swap_offer<K: Keychain>(
+		context_id: u32,
 		keychain: &K,
 		context: &Context,
 		primary_amount: u64,
@@ -94,7 +97,7 @@ impl SellApi {
 		#[cfg(not(test))]
 		let id = ls.id.clone();
 
-		let network = Network::current_network()?;
+		let network = Network::current_network(context_id)?;
 		let secondary_fee = secondary_currency.get_default_fee(&network);
 
 		let mut swap = Swap {
@@ -114,9 +117,18 @@ impl SellApi {
 			redeem_public: None,
 			participant_id: 0,
 			multisig,
-			lock_slate: ls,
-			refund_slate: Slate::blank(2, false),
-			redeem_slate: Slate::blank(2, false),
+			lock_slate: SlateCtx {
+				slate: ls,
+				network_name: Some(global::get_network_name(context_id)),
+			},
+			refund_slate: SlateCtx {
+				slate: Slate::blank(2, false),
+				network_name: Some(global::get_network_name(context_id)),
+			},
+			redeem_slate: SlateCtx {
+				slate: Slate::blank(2, false),
+				network_name: Some(global::get_network_name(context_id)),
+			},
 			redeem_kernel_updated: false,
 			adaptor_signature: None,
 			mwc_confirmations,
@@ -152,24 +164,24 @@ impl SellApi {
 		let start_time = swap.get_time_start();
 
 		// Lock slate
-		let lock_slate = &mut swap.lock_slate;
+		let lock_slate = &mut swap.lock_slate.slate;
 
 		#[cfg(test)]
 		if test_mode {
 			lock_slate.id = Uuid::parse_str("55b79f54-c40d-45e1-9544-a52dcf426db2").unwrap();
 		}
 
-		lock_slate.fee = tx_fee(scontext.inputs.len(), 2, 1);
+		lock_slate.fee = tx_fee(context_id, scontext.inputs.len(), 2, 1);
 		lock_slate.amount = primary_amount;
 		lock_slate.height = height;
 
 		// Refund slate
-		let refund_slate = &mut swap.refund_slate;
+		let refund_slate = &mut swap.refund_slate.slate;
 		#[cfg(test)]
 		if test_mode {
 			refund_slate.id = Uuid::parse_str("703fac15-913c-4e66-a7c2-5f648ca4ca7d").unwrap();
 		}
-		refund_slate.fee = tx_fee(1, 1, 1);
+		refund_slate.fee = tx_fee(context_id, 1, 1, 1);
 		if !(dry_run && primary_amount == 0) {
 			if primary_amount <= refund_slate.fee {
 				return Err(Error::Generic(
@@ -193,7 +205,7 @@ impl SellApi {
 		}
 
 		// Redeem slate
-		let redeem_slate = &mut swap.redeem_slate;
+		let redeem_slate = &mut swap.redeem_slate.slate;
 		#[cfg(test)]
 		if test_mode {
 			redeem_slate.id = Uuid::parse_str("fc750aae-035f-4c6c-bb0c-05aabc764f8e").unwrap();
@@ -223,7 +235,7 @@ impl SellApi {
 		};
 
 		if secondary_currency.is_btc_family() {
-			secondary_currency.validate_address(&secondary_redeem_address)?;
+			secondary_currency.validate_address(context_id, &secondary_redeem_address)?;
 		}
 		swap.role = Role::Seller(secondary_redeem_address, change);
 
@@ -239,6 +251,7 @@ impl SellApi {
 
 	/// Process 'accepted offer' message from the buyer
 	pub fn accepted_offer<K: Keychain>(
+		context_id: u32,
 		keychain: &K,
 		swap: &mut Swap,
 		context: &Context,
@@ -252,6 +265,7 @@ impl SellApi {
 		// Update slates
 		let commit = swap.multisig.commit(keychain.secp())?;
 		Self::finalize_lock_slate(
+			context_id,
 			keychain,
 			swap,
 			context,
@@ -260,6 +274,7 @@ impl SellApi {
 			accept_offer.lock_participant,
 		)?;
 		Self::finalize_refund_slate(
+			context_id,
 			keychain,
 			swap,
 			context,
@@ -278,6 +293,7 @@ impl SellApi {
 	/// 	swap.redeem_slate
 	// 	 	swap.adaptor_signature
 	pub fn init_redeem<K: Keychain>(
+		context_id: u32,
 		keychain: &K,
 		swap: &mut Swap,
 		context: &Context,
@@ -292,7 +308,9 @@ impl SellApi {
 			));
 		}
 
-		let mut redeem_slate: Slate = init_redeem.redeem_slate.into_slate_plain(true)?;
+		let mut redeem_slate: Slate = init_redeem
+			.redeem_slate
+			.into_slate_plain(context_id, true)?;
 
 		// Validate adaptor signature
 		let (pub_nonce_sum, _, message) = swap.redeem_tx_fields(&redeem_slate, keychain.secp())?;
@@ -315,7 +333,7 @@ impl SellApi {
 			return Err(Error::InvalidAdaptorSignature);
 		}
 
-		swap.redeem_slate = redeem_slate;
+		swap.redeem_slate.slate = redeem_slate;
 		swap.adaptor_signature = Some(init_redeem.adaptor_signature);
 
 		Self::sign_redeem_slate(keychain, swap, context)?;
@@ -338,6 +356,7 @@ impl SellApi {
 		let signature = signature_as_secret( keychain.secp(),
 			&swap
 				.redeem_slate
+				.slate
 				.tx_or_err()?
 				.kernels()
 				.get(0)
@@ -347,6 +366,7 @@ impl SellApi {
 		let seller_signature = signature_as_secret( keychain.secp(),
 			&swap
 				.redeem_slate
+				.slate
 				.participant_data
 				.get(swap.participant_id)
 				.ok_or(Error::UnexpectedAction("Seller Fn calculate_redeem_secret() redeem slate is not initialized, participant not found".to_string()))?
@@ -370,7 +390,11 @@ impl SellApi {
 
 	/// Generate Offer message.
 	/// Note: from_address need to be update by the caller because only caller knows about communication layer.
-	pub fn offer_message(swap: &Swap, secondary_update: SecondaryUpdate) -> Result<Message, Error> {
+	pub fn offer_message(
+		context_id: u32,
+		swap: &Swap,
+		secondary_update: SecondaryUpdate,
+	) -> Result<Message, Error> {
 		assert!(swap.is_seller());
 		swap.message(
 			Update::Offer(OfferUpdate {
@@ -385,14 +409,17 @@ impl SellApi {
 				secondary_currency: swap.secondary_currency,
 				multisig: swap.multisig.export()?,
 				lock_slate: VersionedSlate::into_version_plain(
-					swap.lock_slate.clone(),
-					SlateVersion::V2, // V2 should satify our needs, dont adding extra
+					context_id,
+					&swap.lock_slate.slate,
+					SlateVersion::V2, // V2 should satisfy our needs, dont adding extra
 				)?,
 				refund_slate: VersionedSlate::into_version_plain(
-					swap.refund_slate.clone(),
-					SlateVersion::V2, // V2 should satify our needs, dont adding extra
+					context_id,
+					&swap.refund_slate.slate,
+					SlateVersion::V2, // V2 should satisfy our needs, dont adding extra
 				)?,
-				redeem_participant: swap.redeem_slate.participant_data[swap.participant_id].clone(),
+				redeem_participant: swap.redeem_slate.slate.participant_data[swap.participant_id]
+					.clone(),
 				mwc_confirmations: swap.mwc_confirmations,
 				secondary_confirmations: swap.secondary_confirmations,
 				message_exchange_time_sec: swap.message_exchange_time_sec,
@@ -407,7 +434,8 @@ impl SellApi {
 		assert!(swap.is_seller());
 		swap.message(
 			Update::Redeem(RedeemUpdate {
-				redeem_participant: swap.redeem_slate.participant_data[swap.participant_id].clone(),
+				redeem_participant: swap.redeem_slate.slate.participant_data[swap.participant_id]
+					.clone(),
 			}),
 			SecondaryUpdate::Empty,
 		)
@@ -478,7 +506,7 @@ impl SellApi {
 			.add_blinding_factor(BlindingFactor::from_secret_key(
 				swap.multisig_secret(keychain, context)?,
 			))
-			.sub_blinding_factor(swap.lock_slate.tx_or_err()?.offset.clone());
+			.sub_blinding_factor(swap.lock_slate.slate.tx_or_err()?.offset.clone());
 		let sec_key = keychain.blind_sum(&sum)?.secret_key(keychain.secp())?;
 
 		Ok(sec_key)
@@ -493,7 +521,7 @@ impl SellApi {
 		let scontext = context.unwrap_seller()?;
 
 		// This function should only be called once
-		let slate = &mut swap.lock_slate;
+		let slate = &mut swap.lock_slate.slate;
 		if slate.participant_data.len() > 0 {
 			return Err(Error::OneShot(
 				"Seller Fn build_lock_slate() lock slate is already initialized".to_string(),
@@ -520,7 +548,7 @@ impl SellApi {
 		}
 
 		let mut sec_key = Self::lock_tx_secret(keychain, swap, context)?;
-		let slate = &mut swap.lock_slate;
+		let slate = &mut swap.lock_slate.slate;
 
 		// Add participant to slate
 		slate.fill_round_1(
@@ -536,6 +564,7 @@ impl SellApi {
 	}
 
 	fn finalize_lock_slate<K: Keychain>(
+		context_id: u32,
 		keychain: &K,
 		swap: &mut Swap,
 		context: &Context,
@@ -546,7 +575,7 @@ impl SellApi {
 		let sec_key = Self::lock_tx_secret(keychain, swap, context)?;
 
 		// This function should only be called once
-		let slate = &mut swap.lock_slate;
+		let slate = &mut swap.lock_slate.slate;
 		if slate.participant_data.len() > 1 {
 			return Err(Error::OneShot(
 				"Seller Fn finalize_lock_slate() lock slate is already initialized".to_string(),
@@ -566,7 +595,7 @@ impl SellApi {
 			&context.lock_nonce,
 			swap.participant_id,
 		)?;
-		slate.finalize(keychain)?;
+		slate.finalize(context_id, keychain)?;
 
 		Ok(())
 	}
@@ -585,7 +614,7 @@ impl SellApi {
 				swap.multisig_secret(keychain, context)?,
 			))
 			.add_key_id(scontext.refund_output.to_value_path(swap.refund_amount()))
-			.sub_blinding_factor(swap.refund_slate.tx_or_err()?.offset.clone());
+			.sub_blinding_factor(swap.refund_slate.slate.tx_or_err()?.offset.clone());
 		let sec_key = keychain.blind_sum(&sum)?.secret_key(keychain.secp())?;
 
 		Ok(sec_key)
@@ -600,7 +629,7 @@ impl SellApi {
 		let refund_amount = swap.refund_amount();
 
 		// This function should only be called once
-		let slate = &mut swap.refund_slate;
+		let slate = &mut swap.refund_slate.slate;
 		if slate.participant_data.len() > 0 {
 			return Err(Error::OneShot(
 				"Seller Fn build_refund_slate() refund slate is already initialized".to_string(),
@@ -624,7 +653,7 @@ impl SellApi {
 		}
 
 		let mut sec_key = Self::refund_tx_secret(keychain, swap, context)?;
-		let slate = &mut swap.refund_slate;
+		let slate = &mut swap.refund_slate.slate;
 
 		// Add participant to slate
 		slate.fill_round_1(
@@ -640,6 +669,7 @@ impl SellApi {
 	}
 
 	fn finalize_refund_slate<K: Keychain>(
+		context_id: u32,
 		keychain: &K,
 		swap: &mut Swap,
 		context: &Context,
@@ -649,7 +679,7 @@ impl SellApi {
 		let sec_key = Self::refund_tx_secret(keychain, swap, context)?;
 
 		// This function should only be called once
-		let slate = &mut swap.refund_slate;
+		let slate = &mut swap.refund_slate.slate;
 		if slate.participant_data.len() > 1 {
 			return Err(Error::OneShot(
 				"Seller Fn finalize_refund_slate() refund slate is already initialized".to_string(),
@@ -669,7 +699,7 @@ impl SellApi {
 			&context.refund_nonce,
 			swap.participant_id,
 		)?;
-		slate.finalize(keychain)?;
+		slate.finalize(context_id, keychain)?;
 
 		Ok(())
 	}
@@ -697,7 +727,7 @@ impl SellApi {
 		let sec_key = Self::redeem_tx_secret(keychain, swap, context)?;
 
 		// This function should only be called once
-		let slate = &mut swap.redeem_slate;
+		let slate = &mut swap.redeem_slate.slate;
 		if slate.participant_data.len() > 0 {
 			return Err(Error::OneShot(
 				"Seller Fn build_redeem_participant() redeem slate is already initialized"
@@ -737,7 +767,7 @@ impl SellApi {
 		let sec_key = Self::redeem_tx_secret(keychain, swap, context)?;
 
 		// This function should only be called once
-		let slate = &mut swap.redeem_slate;
+		let slate = &mut swap.redeem_slate.slate;
 		if slate.participant_data[id].is_complete() {
 			return Err(Error::OneShot("Seller Fn sign_redeem_slate() redeem slate participant data is already initilaized".to_string()));
 		}

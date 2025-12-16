@@ -29,6 +29,7 @@ use std::path::PathBuf;
 
 #[derive(Clone)]
 pub struct PathToSlatePutter {
+	context_id: u32,
 	path_buf: Option<PathBuf>,
 	content: Option<SlatePurpose>,
 	sender: Option<DalekPublicKey>,
@@ -37,6 +38,7 @@ pub struct PathToSlatePutter {
 }
 
 pub struct PathToSlateGetter {
+	context_id: u32,
 	// Path to file
 	path_buf: Option<PathBuf>,
 	// Or the string to read from
@@ -46,6 +48,7 @@ pub struct PathToSlateGetter {
 impl PathToSlatePutter {
 	// Build sender that can save slatepacks
 	pub fn build_encrypted(
+		context_id: u32,
 		path_buf: Option<PathBuf>,
 		content: SlatePurpose,
 		sender: DalekPublicKey,
@@ -53,6 +56,7 @@ impl PathToSlatePutter {
 		slatepack_format: bool,
 	) -> Self {
 		Self {
+			context_id,
 			path_buf,
 			content: Some(content),
 			sender: Some(sender),
@@ -61,8 +65,9 @@ impl PathToSlatePutter {
 		}
 	}
 
-	pub fn build_plain(path_buf: Option<PathBuf>) -> Self {
+	pub fn build_plain(context_id: u32, path_buf: Option<PathBuf>) -> Self {
 		Self {
+			context_id,
 			path_buf,
 			content: None,
 			sender: None,
@@ -73,15 +78,17 @@ impl PathToSlatePutter {
 }
 
 impl PathToSlateGetter {
-	pub fn build_form_path(path_buf: PathBuf) -> Self {
+	pub fn build_form_path(context_id: u32, path_buf: PathBuf) -> Self {
 		Self {
+			context_id,
 			path_buf: Some(path_buf),
 			slate_str: None,
 		}
 	}
 
-	pub fn build_form_str(slate_str: String) -> Self {
+	pub fn build_form_str(context_id: u32, slate_str: String) -> Self {
 		Self {
+			context_id,
 			path_buf: None,
 			slate_str: Some(slate_str),
 		}
@@ -113,6 +120,7 @@ impl SlatePutter for PathToSlatePutter {
 
 				// Do the slatepack
 				VersionedSlate::into_version(
+					self.context_id,
 					slate.clone(),
 					SlateVersion::SP,
 					self.content.clone().unwrap(),
@@ -126,21 +134,23 @@ impl SlatePutter for PathToSlatePutter {
 			} else if slate.compact_slate {
 				warn!("Transaction contains features that require mwc-wallet 4.0.0 or later");
 				warn!("Please ensure the other party is running mwc-wallet v4.0.0 or later before sending");
-				VersionedSlate::into_version_plain(slate.clone(), SlateVersion::V3).map_err(
-					|e| Error::GenericError(format!("Failed convert Slate to Json, {}", e)),
-				)?
+				VersionedSlate::into_version_plain(self.context_id, slate, SlateVersion::V3)
+					.map_err(|e| {
+						Error::GenericError(format!("Failed convert Slate to Json, {}", e))
+					})?
 			} else if slate.payment_proof.is_some() || slate.ttl_cutoff_height.is_some() {
 				warn!("Transaction contains features that require mwc-wallet 3.0.0 or later");
 				warn!("Please ensure the other party is running mwc-wallet v3.0.0 or later before sending");
-				VersionedSlate::into_version_plain(slate.clone(), SlateVersion::V3).map_err(
-					|e| Error::GenericError(format!("Failed convert Slate to Json, {}", e)),
-				)?
+				VersionedSlate::into_version_plain(self.context_id, slate, SlateVersion::V3)
+					.map_err(|e| {
+						Error::GenericError(format!("Failed convert Slate to Json, {}", e))
+					})?
 			} else {
 				let mut s = slate.clone();
 				s.version_info.version = 2;
-				VersionedSlate::into_version_plain(s, SlateVersion::V2).map_err(|e| {
-					Error::GenericError(format!("Failed convert Slate to Json, {}", e))
-				})?
+				VersionedSlate::into_version_plain(self.context_id, &s, SlateVersion::V2).map_err(
+					|e| Error::GenericError(format!("Failed convert Slate to Json, {}", e)),
+				)?
 			}
 		};
 
@@ -181,7 +191,7 @@ impl SlateGetter for PathToSlateGetter {
 		let content = match &self.slate_str {
 			Some(str) => {
 				let min_len = slatepack::min_size();
-				let max_len = slatepack::max_size();
+				let max_len = slatepack::max_size(self.context_id);
 				let len = str.len() as u64;
 				if len < min_len || len > max_len {
 					return Err(Error::IO(format!(
@@ -203,7 +213,7 @@ impl SlateGetter for PathToSlateGetter {
 					})?;
 					let len = metadata.len();
 					let min_len = slatepack::min_size();
-					let max_len = slatepack::max_size();
+					let max_len = slatepack::max_size(self.context_id);
 
 					let file_name = path_buf.to_str().unwrap_or("INVALID PATH");
 
@@ -237,7 +247,7 @@ impl SlateGetter for PathToSlateGetter {
 		};
 
 		if Slate::deserialize_is_plain(&content) {
-			let slate = Slate::deserialize_upgrade_plain(&content)
+			let slate = Slate::deserialize_upgrade_plain(self.context_id, &content)
 				.map_err(|e| Error::IO(format!("Unable to build slate from the content, {}", e)))?;
 			Ok(SlateGetData::PlainSlate(slate))
 		} else {
@@ -246,11 +256,13 @@ impl SlateGetter for PathToSlateGetter {
 					"slatepack_secret is none for get encrypted slatepack".into(),
 				));
 			}
-			let sp =
-				Slate::deserialize_upgrade_slatepack(&content, slatepack_secret.unwrap(), secp)
-					.map_err(|e| {
-						Error::LibWallet(format!("Unable to deserialize slatepack, {}", e))
-					})?;
+			let sp = Slate::deserialize_upgrade_slatepack(
+				self.context_id,
+				&content,
+				slatepack_secret.unwrap(),
+				secp,
+			)
+			.map_err(|e| Error::LibWallet(format!("Unable to deserialize slatepack, {}", e)))?;
 			Ok(SlateGetData::Slatepack(sp))
 		}
 	}

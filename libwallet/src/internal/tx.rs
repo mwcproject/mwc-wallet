@@ -26,7 +26,6 @@ use crate::mwc_keychain::{Identifier, Keychain};
 use crate::mwc_util as util;
 use crate::mwc_util::secp::key::SecretKey;
 use crate::mwc_util::secp::{pedersen, Signature};
-use crate::mwc_util::Mutex;
 use crate::proof::crypto;
 use crate::proof::crypto::Hex;
 use crate::proof::proofaddress;
@@ -48,6 +47,7 @@ use ed25519_dalek::{Signer, Verifier};
 use mwc_wallet_util::mwc_util::secp::Secp256k1;
 use mwc_wallet_util::OnionV3Address;
 use std::convert::TryFrom;
+use std::sync::Mutex;
 
 // static for incrementing test UUIDs
 lazy_static! {
@@ -75,25 +75,24 @@ where
 		slate.ttl_cutoff_height = Some(current_height + b);
 	}
 	if use_test_rng {
-		{
-			let sc = SLATE_COUNTER.lock();
-			let bytes = [4, 54, 67, 12, 43, 2, 98, 76, 32, 50, 87, 5, 1, 33, 43, *sc];
-			slate.id = Uuid::from_slice(&bytes).unwrap();
-		}
-		*SLATE_COUNTER.lock() += 1;
+		let mut sc = SLATE_COUNTER.lock().expect("Mutex failure");
+		let bytes = [4, 54, 67, 12, 43, 2, 98, 76, 32, 50, 87, 5, 1, 33, 43, *sc];
+		slate.id = Uuid::from_slice(&bytes).unwrap();
+		*sc += 1;
 	}
 	slate.amount = amount;
 	slate.height = current_height;
 
-	if valid_header_version(current_height, HeaderVersion(1)) {
+	let context_id = wallet.get_context_id();
+	if valid_header_version(context_id, current_height, HeaderVersion(1)) {
 		slate.version_info.block_header_version = 1;
 	}
 
-	if valid_header_version(current_height, HeaderVersion(2)) {
+	if valid_header_version(context_id, current_height, HeaderVersion(2)) {
 		slate.version_info.block_header_version = 2;
 	}
 
-	if valid_header_version(current_height, HeaderVersion(3)) {
+	if valid_header_version(context_id, current_height, HeaderVersion(3)) {
 		slate.version_info.block_header_version = 3;
 	}
 
@@ -440,7 +439,7 @@ where
 
 	// Final transaction can be built by anyone at this stage
 	trace!("Slate to finalize is: {:?}", slate);
-	slate.finalize(&keychain)?;
+	slate.finalize(wallet.get_context_id(), &keychain)?;
 	Ok(())
 }
 
@@ -448,7 +447,7 @@ where
 pub fn cancel_tx<'a, T: ?Sized, C, K>(
 	wallet: &mut T,
 	keychain_mask: Option<&SecretKey>,
-	parent_key_id: &Identifier,
+	parent_key_id: Option<&Identifier>,
 	tx_id: Option<u32>,
 	tx_slate_id: Option<Uuid>,
 ) -> Result<(), Error>
@@ -473,7 +472,7 @@ where
 		tx_id,
 		tx_slate_id,
 		None,
-		Some(&parent_key_id),
+		parent_key_id,
 		false,
 		None,
 		None,
@@ -498,12 +497,13 @@ where
 			keychain_mask,
 			false,
 			Some(&tx),
-			&parent_key_id,
+			&tx.parent_key_id,
 			None,
 			None,
 		)?;
 		let outputs = res.iter().map(|m| m.output.clone()).collect();
-		updater::cancel_tx_and_outputs(wallet, keychain_mask, tx, outputs, parent_key_id)?;
+		let parent_key_id = tx.parent_key_id.clone();
+		updater::cancel_tx_and_outputs(wallet, keychain_mask, tx, outputs, &parent_key_id)?;
 	}
 	Ok(())
 }
@@ -797,6 +797,8 @@ where
 		}
 	}
 
+	let context_id = wallet.get_context_id();
+
 	if let Some(ref p) = slate.clone().payment_proof {
 		#[cfg(feature = "grin_proof")]
 		let orig_proof_info = match orig_proof_info {
@@ -818,6 +820,7 @@ where
 		};
 		// Normal public key is needed
 		let orig_sender_a = proofaddress::payment_proof_address_from_index(
+			context_id,
 			&keychain,
 			index,
 			proofaddress::ProofAddressType::MQS,
@@ -866,7 +869,7 @@ where
 				"the receiver pubkey is {}",
 				p.receiver_address.clone().public_key
 			);
-			let receiver_pubkey = p.receiver_address.public_key().map_err(|e| {
+			let receiver_pubkey = p.receiver_address.public_key(context_id).map_err(|e| {
 				Error::PaymentProof(format!("Unable to get receiver address, {}", e))
 			})?;
 			crypto::verify_signature(&msg, &signature, &receiver_pubkey, keychain.secp())
@@ -906,7 +909,7 @@ where
 		////add an extra step of generating and save proof.
 		//generate the sender secret key
 		let sender_address_secret_key =
-			proofaddress::payment_proof_address_secret(&keychain, Some(index))?;
+			proofaddress::payment_proof_address_secret(context_id, &keychain, index)?;
 		let mut onion_address_str = None;
 		if p.receiver_address.public_key.len() == 56 {
 			//this should be a tor sending
@@ -920,6 +923,7 @@ where
 			onion_address_str = Some(onion_address.to_ov3_str());
 		}
 		let tx_proof = TxProof::from_slate(
+			context_id,
 			msg,
 			slate,
 			&sender_address_secret_key,

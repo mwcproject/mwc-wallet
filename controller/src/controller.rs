@@ -21,14 +21,13 @@ use crate::libwallet::{
 	NodeClient, NodeVersionInfo, Slate, WalletInst, WalletLCProvider, MWC_BLOCK_HEADER_VERSION,
 };
 use crate::util::secp::key::SecretKey;
-use crate::util::{from_hex, to_base64, Mutex};
+use crate::util::{from_hex, to_base64};
 use crate::Error;
-use futures::channel::oneshot;
 use hyper::body;
 use hyper::header::HeaderValue;
 use hyper::{Body, Request, Response, StatusCode};
 use mwc_wallet_api::JsonId;
-use mwc_wallet_config::types::{TorBridgeConfig, TorProxyConfig};
+use mwc_wallet_util::mwc_p2p;
 use mwc_wallet_util::OnionV3Address;
 use qr_code::QrCode;
 use serde::{Deserialize, Serialize};
@@ -36,8 +35,8 @@ use serde_json;
 use std::cell::RefCell;
 
 use mwc_wallet_impls::{
-	Address, CloseReason, HttpDataSender, MWCMQPublisher, MWCMQSAddress, MWCMQSubscriber,
-	Publisher, SlateSender, Subscriber, SubscriptionHandler,
+	Address, CloseReason, MWCMQPublisher, MWCMQSAddress, MWCMQSubscriber, Publisher, Subscriber,
+	SubscriptionHandler,
 };
 use mwc_wallet_libwallet::swap::message::Message;
 use mwc_wallet_libwallet::wallet_lock;
@@ -47,112 +46,168 @@ use crate::apiwallet::{
 	EncryptedRequest, EncryptedResponse, EncryptionErrorResponse, Foreign,
 	ForeignCheckMiddlewareFn, ForeignRpc, Owner, OwnerRpcV2, OwnerRpcV3,
 };
-use crate::config::{MQSConfig, TorConfig};
+use crate::config::MQSConfig;
 use crate::core::global;
-use crate::impls::tor::config as tor_config;
-use crate::impls::tor::process as tor_process;
-use crate::impls::tor::{bridge as tor_bridge, proxy as tor_proxy};
+use crate::foreign::ForeignApiServer;
 use crate::keychain::Keychain;
 #[cfg(feature = "libp2p")]
 use chrono::Utc;
 use easy_jsonrpc_mwc::{Handler, MaybeReply};
-use ed25519_dalek::PublicKey as DalekPublicKey;
+use ed25519_dalek::{ExpandedSecretKey, PublicKey as DalekPublicKey};
 use log::Level;
 use mwc_wallet_impls::tor;
 use mwc_wallet_libwallet::proof::crypto;
 use mwc_wallet_libwallet::proof::proofaddress;
 use mwc_wallet_libwallet::proof::proofaddress::ProvableAddress;
-use mwc_wallet_libwallet::types::TxSession;
+use mwc_wallet_libwallet::types::{TxSession, U64_DATA_IDX_ADDRESS_INDEX};
 #[cfg(feature = "libp2p")]
 use mwc_wallet_util::mwc_core::core::TxKernel;
 #[cfg(feature = "libp2p")]
 use mwc_wallet_util::mwc_p2p;
 #[cfg(feature = "libp2p")]
 use mwc_wallet_util::mwc_p2p::libp2p_connection;
+use mwc_wallet_util::mwc_p2p::tor::tcp_data_stream::TcpDataStream;
+use mwc_wallet_util::mwc_p2p::{PeerAddr, TorConfig};
 #[cfg(feature = "libp2p")]
 use mwc_wallet_util::mwc_util::secp::pedersen::Commitment;
 use mwc_wallet_util::mwc_util::secp::{ContextFlag, Secp256k1};
 use mwc_wallet_util::mwc_util::static_secp_instance;
 use std::collections::HashMap;
-use std::convert::TryFrom;
 use std::net::SocketAddr;
 #[cfg(feature = "libp2p")]
 use std::net::SocketAddrV4;
 use std::pin::Pin;
+use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::mpsc::Sender;
-use std::sync::Arc;
-#[cfg(feature = "libp2p")]
 use std::sync::RwLock;
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::thread::JoinHandle;
-use std::time::{Duration, SystemTime};
+use std::time::Duration;
 
 lazy_static! {
 	pub static ref MWC_OWNER_BASIC_REALM: HeaderValue =
 		HeaderValue::from_str("Basic realm=MWC-OwnerAPI").unwrap();
 
 	// Pairs with API Server and optional thread to wait. Server need to send signal to stop, thread needed for waiting
-	static ref FOREIGN_API: Arc<Mutex<(Option<ApiServer>, Option<JoinHandle<()>>)>> = Arc::new(Mutex::new((None,None)));
-	static ref OWNER_API: Arc<Mutex<(Option<ApiServer>, Option<JoinHandle<()>>)>> = Arc::new(Mutex::new((None,None)));
+	static ref FOREIGN_API: RwLock<HashMap<u32, Arc<ForeignApiServer>>> = RwLock::new(HashMap::new());
+	static ref OWNER_API: RwLock<HashMap<u32, ApiServer>> = RwLock::new(HashMap::new());
+
+	static ref FOREIGN_API_HEALTH: RwLock<HashMap<u32, bool>> = RwLock::new(HashMap::new());
 }
 
-pub fn is_foreign_api_running() -> bool {
-	FOREIGN_API.lock().0.is_some()
+pub fn get_foreign_api_health(context_id: u32) -> bool {
+	FOREIGN_API_HEALTH
+		.read()
+		.expect("RwLock failure")
+		.get(&context_id)
+		.cloned()
+		.unwrap_or(false)
 }
 
-pub fn is_owner_api_running() -> bool {
-	OWNER_API.lock().0.is_some()
+pub fn set_foreign_api_health(context_id: u32, healthy: bool) {
+	FOREIGN_API_HEALTH
+		.write()
+		.expect("RwLock failure")
+		.insert(context_id, healthy);
 }
 
-pub fn set_foreign_api_server(api_server: Option<ApiServer>) {
-	set_api_server(&FOREIGN_API, api_server)
+pub fn reset_foreign_api_health(context_id: u32) {
+	FOREIGN_API_HEALTH
+		.write()
+		.expect("RwLock failure")
+		.remove(&context_id);
 }
 
-pub fn set_foreign_api_thread(thread: JoinHandle<()>) {
-	set_api_thread(&FOREIGN_API, thread)
+pub fn foreign_owner_api_clean_context(context_id: u32) {
+	stop_foreign_api_running(context_id);
+
+	let prev_owner_api = {
+		OWNER_API
+			.write()
+			.expect("RwLock failure")
+			.remove(&context_id)
+	};
+
+	if let Some(mut api) = prev_owner_api {
+		api.stop();
+	}
 }
 
-pub fn set_owner_api_server(api_server: Option<ApiServer>) {
-	set_api_server(&OWNER_API, api_server)
+pub fn is_foreign_api_running(context_id: u32) -> bool {
+	FOREIGN_API
+		.read()
+		.expect("RwLock failure")
+		.contains_key(&context_id)
 }
 
-pub fn set_owner_api_thread(thread: JoinHandle<()>) {
-	set_api_thread(&OWNER_API, thread)
+pub fn is_owner_api_running(context_id: u32) -> bool {
+	OWNER_API
+		.read()
+		.expect("RwLock failure")
+		.contains_key(&context_id)
 }
 
-fn set_api_server(
-	api: &Arc<Mutex<(Option<ApiServer>, Option<JoinHandle<()>>)>>,
-	api_server: Option<ApiServer>,
-) {
+pub fn stop_foreign_api_running(context_id: u32) {
+	let prev_foreign_api = {
+		FOREIGN_API
+			.write()
+			.expect("RwLock failure")
+			.remove(&context_id)
+	};
+
+	if let Some(api) = prev_foreign_api {
+		api.stop();
+	}
+}
+
+pub fn set_foreign_api_server(context_id: u32, api_server: Option<Arc<ForeignApiServer>>) {
 	// Stopping prev server. That is a point to store it this way
 	{
-		let mut lock = api.lock();
-		let (ref mut prev_server, ref mut prev_thread) = &mut *lock;
-		if let Some(mut prev_server) = prev_server.take() {
-			prev_server.stop();
-		}
-		if let Some(prev_thread) = prev_thread.take() {
-			let _ = prev_thread.join();
+		let mut lock = FOREIGN_API.write().expect("RwLock failure");
+		if let Some(server) = lock.remove(&context_id) {
+			server.stop();
 		}
 	}
 
 	if let Some(new_server) = api_server {
-		let mut lock = api.lock();
-		let (ref mut server, ref mut thread) = &mut *lock;
-
-		server.replace(new_server);
-		let _ = thread.take(); // thread just removed, no waiting even if it exist
+		let mut lock = FOREIGN_API.write().expect("RwLock failure");
+		lock.insert(context_id, new_server);
 	}
 }
 
-fn set_api_thread(
-	api: &Arc<Mutex<(Option<ApiServer>, Option<JoinHandle<()>>)>>,
-	thread: JoinHandle<()>,
-) {
-	api.lock().1.replace(thread);
+pub fn take_foreign_api_listener_thread(context_id: u32) -> Option<JoinHandle<()>> {
+	match FOREIGN_API
+		.write()
+		.expect("RwLock failure")
+		.get_mut(&context_id)
+	{
+		Some(server) => server.take_listener_thread(),
+		None => None,
+	}
 }
 
-// This function has to use libwallet errots because of callback and runs on libwallet side
+pub fn set_owner_api_server(context_id: u32, api_server: Option<ApiServer>) {
+	let prev_owner_api = {
+		OWNER_API
+			.write()
+			.expect("RwLock failure")
+			.remove(&context_id)
+	};
+
+	if let Some(mut api) = prev_owner_api {
+		api.stop();
+	}
+
+	if let Some(new_server) = api_server {
+		OWNER_API
+			.write()
+			.expect("RwLock failure")
+			.insert(context_id, new_server);
+	}
+}
+
+// This function has to use libwallet errors because of callback and runs on libwallet side
 fn check_middleware(
 	name: ForeignCheckMiddlewareFn,
 	node_version_info: Option<NodeVersionInfo>,
@@ -190,123 +245,43 @@ where
 	C: NodeClient + 'static,
 	K: Keychain + 'static,
 {
-	let mask = keychain_mask.lock();
+	let mask = keychain_mask.lock().expect("Mutex failure");
 	// eventually want to read a list of service config keys
-	let mut w_lock = wallet.lock();
-	let lc = w_lock.lc_provider()?;
-	let w_inst = lc.wallet_inst()?;
+
+	wallet_lock!(wallet, w_inst);
+
 	let k = w_inst.keychain((&mask).as_ref())?;
-	let sec_key = proofaddress::payment_proof_address_dalek_secret(&k, None)
-		.map_err(|e| Error::TorConfig(format!("Unable to build key for onion address, {}", e)))?;
+	let context_id = w_inst.get_context_id();
+	let address_index: u32 = {
+		let mut batch = w_inst.batch((&mask).as_ref())?;
+		let index = batch.load_u64(U64_DATA_IDX_ADDRESS_INDEX, 0u64)?;
+		index as u32
+	};
+
+	let sec_key = proofaddress::payment_proof_address_dalek_secret(context_id, &k, address_index)
+		.map_err(|e| {
+		Error::TorConfig(format!("Unable to build key for onion address, {}", e))
+	})?;
 	let onion_addr = OnionV3Address::from_private(sec_key.as_bytes())
 		.map_err(|e| Error::GenericError(format!("Unable to build Onion address, {}", e)))?;
 	Ok(format!("{}", onion_addr))
 }
 
-/// initiate the tor listener
-pub fn init_tor_listener<L, C, K>(
-	wallet: Arc<Mutex<Box<dyn WalletInst<'static, L, C, K> + 'static>>>,
-	keychain_mask: Arc<Mutex<Option<SecretKey>>>,
-	addr: &str,
-	socks_listener_addr: &str,
-	libp2p_listener_port: &Option<u16>,
-	tor_base: Option<&str>,
-	tor_log_file: &Option<String>,
-	bridge: &TorBridgeConfig,
-	tor_proxy: &TorProxyConfig,
-	show_messages: bool,
-) -> Result<(tor_process::TorProcess, SecretKey), Error>
-where
-	L: WalletLCProvider<'static, C, K> + 'static,
-	C: NodeClient + 'static,
-	K: Keychain + 'static,
-{
-	let mut process = tor_process::TorProcess::new();
-	let mask = keychain_mask.lock();
-	// eventually want to read a list of service config keys
-	let mut w_lock = wallet.lock();
-	let lc = w_lock.lc_provider()?;
-	let w_inst = lc.wallet_inst()?;
-	let k = w_inst.keychain((&mask).as_ref())?;
-	let tor_dir = if tor_base.is_some() {
-		format!("{}/tor/listener", tor_base.unwrap())
-	} else {
-		format!("{}/tor/listener", lc.get_top_level_directory()?)
-	};
-
-	let sec_key = proofaddress::payment_proof_address_secret(&k, None)
-		.map_err(|e| Error::TorConfig(format!("Unable to build key for onion address, {}", e)))?;
-	let onion_address = OnionV3Address::from_private(&sec_key.0)
-		.map_err(|e| Error::TorConfig(format!("Unable to build onion address, {}", e)))?;
-
-	let mut hm_tor_bridge: HashMap<String, String> = HashMap::new();
-	let mut tor_timeout = 60;
-	if bridge.bridge_line.is_some() {
-		tor_timeout = 120;
-		let bridge_config = tor_bridge::TorBridge::try_from(bridge.clone())
-			.map_err(|e| Error::TorConfig(format!("{}", e)))?;
-		hm_tor_bridge = bridge_config
-			.to_hashmap()
-			.map_err(|e| Error::TorConfig(format!("{}", e)))?;
-	}
-
-	let mut hm_tor_poxy: HashMap<String, String> = HashMap::new();
-	if tor_proxy.transport.is_some() || tor_proxy.allowed_port.is_some() {
-		let proxy_config = tor_proxy::TorProxy::try_from(tor_proxy.clone())
-			.map_err(|e| Error::TorConfig(format!("{}", e)))?;
-		hm_tor_poxy = proxy_config
-			.to_hashmap()
-			.map_err(|e| Error::TorConfig(format!("{}", e)))?;
-	}
-
-	if show_messages {
-		warn!(
-			"Starting TOR Hidden Service for API listener at address {}, binding to {}",
-			onion_address, addr
-		);
-	}
-
-	tor_config::output_tor_listener_config(
-		&tor_dir,
-		socks_listener_addr,
-		addr,
-		libp2p_listener_port,
-		&vec![sec_key.clone()],
-		tor_log_file,
-		hm_tor_bridge,
-		hm_tor_poxy,
-	)
-	.map_err(|e| Error::TorConfig(format!("Failed to configure tor, {}", e)))?;
-	// Start TOR process
-	let tor_path = format!("{}/torrc", tor_dir);
-	process
-		.torrc_path(&tor_path)
-		.working_dir(&tor_dir)
-		.timeout(tor_timeout)
-		.completion_percent(100)
-		.launch()
-		.map_err(|e| Error::TorProcess(format!("Unable to start tor at {}, {}", tor_path, e)))?;
-
-	tor::status::set_tor_address(Some(format!("{}", onion_address)));
-
-	Ok((process, sec_key))
-}
-
 /// Instantiate wallet Owner API for a single-use (command line) call
 /// Return a function containing a loaded API context to call
-pub fn owner_single_use<L, F, C, K>(
+pub fn owner_single_use<L, F, C, K, R>(
 	wallet: Option<Arc<Mutex<Box<dyn WalletInst<'static, L, C, K>>>>>,
 	keychain_mask: Option<&SecretKey>,
 	api_context: Option<&mut Owner<L, C, K>>,
 	f: F,
-) -> Result<(), Error>
+) -> Result<R, Error>
 where
 	L: WalletLCProvider<'static, C, K> + 'static,
-	F: FnOnce(&mut Owner<L, C, K>, Option<&SecretKey>) -> Result<(), Error>,
+	F: FnOnce(&mut Owner<L, C, K>, Option<&SecretKey>) -> Result<R, Error>,
 	C: NodeClient + 'static,
 	K: Keychain + 'static,
 {
-	match api_context {
+	let res = match api_context {
 		Some(c) => f(c, keychain_mask)?,
 		None => {
 			let wallet = match wallet {
@@ -317,10 +292,17 @@ where
 					)))
 				}
 			};
-			f(&mut Owner::new(wallet, None, None), keychain_mask)?
+			let context_id = {
+				wallet_lock!(wallet, w);
+				w.get_context_id()
+			};
+			f(
+				&mut Owner::new(context_id, wallet, None, None),
+				keychain_mask,
+			)?
 		}
-	}
-	Ok(())
+	};
+	Ok(res)
 }
 
 /// Instantiate wallet Foreign API for a single-use (command line) call
@@ -357,7 +339,14 @@ where
 {
 	wallet_lock!(wallet, w);
 	let k = w.keychain(keychain_mask)?;
-	let sec_addr_key = proofaddress::payment_proof_address_secret(&k, None)?;
+	let address_index: u32 = {
+		let mut batch = w.batch(keychain_mask)?;
+		let index = batch.load_u64(U64_DATA_IDX_ADDRESS_INDEX, 0u64)?;
+		index as u32
+	};
+
+	let sec_addr_key =
+		proofaddress::payment_proof_address_secret(w.get_context_id(), &k, address_index)?;
 	Ok(sec_addr_key)
 }
 
@@ -369,6 +358,7 @@ where
 	K: Keychain + 'static,
 {
 	/// Wallet instance
+	context_id: u32,
 	name: String,
 	wallet: Arc<Mutex<Box<dyn WalletInst<'static, L, C, K> + 'static>>>,
 
@@ -396,17 +386,23 @@ where
 		keychain_mask: Arc<Mutex<Option<SecretKey>>>,
 		max_auto_accept_invoice: Option<u64>,
 		print_to_log: bool,
-	) -> Self
+	) -> Result<Self, Error>
 	where
 		L: WalletLCProvider<'static, C, K>,
 		C: NodeClient + 'static,
 		K: Keychain + 'static,
 	{
-		if max_auto_accept_invoice.is_some() && global::is_mainnet() {
+		let context_id = {
+			wallet_lock!(wallet, w);
+			w.get_context_id()
+		};
+
+		if max_auto_accept_invoice.is_some() && global::is_mainnet(context_id) {
 			panic!("Auto invoicing must be disabled for the mainnet");
 		}
 
-		Self {
+		Ok(Self {
+			context_id,
 			name: name.to_string(),
 			wallet,
 			publisher: Arc::new(Mutex::new(None)),
@@ -414,11 +410,12 @@ where
 			slate_send_channel: Arc::new(Mutex::new(HashMap::new())),
 			keychain_mask,
 			print_to_log,
-		}
+		})
 	}
 
 	pub fn clone(&self) -> Self {
 		Self {
+			context_id: self.context_id,
 			name: self.name.clone(),
 			wallet: self.wallet.clone(),
 			publisher: self.publisher.clone(),
@@ -430,7 +427,10 @@ where
 	}
 
 	pub fn set_publisher(&self, publisher: Box<dyn Publisher + Send>) {
-		self.publisher.lock().replace(publisher);
+		self.publisher
+			.lock()
+			.expect("Mutext failure")
+			.replace(publisher);
 	}
 
 	fn process_incoming_slate(
@@ -539,6 +539,7 @@ where
 			// Send slate back
 			self.publisher
 				.lock()
+				.expect("Mutex failure")
 				.as_ref()
 				.expect("call set_publisher() method!!!")
 				.post_slate(slate, from, secp)
@@ -571,7 +572,12 @@ where
 		} else {
 			//request may come to here from owner api or send command
 
-			if let Some(slate_sender) = self.slate_send_channel.lock().get(&slate.id) {
+			if let Some(slate_sender) = self
+				.slate_send_channel
+				.lock()
+				.expect("Mutext failure")
+				.get(&slate.id)
+			{
 				//this happens when the request is from sender. Sender just want have a respond back
 				let slate_immutable = slate.clone();
 				let _ = slate_sender.send(slate_immutable);
@@ -591,8 +597,8 @@ where
 		&self,
 		swapmessage: Message,
 	) -> Result<Option<Message>, Error> {
-		let owner_api = Owner::new(self.wallet.clone(), None, None);
-		let mask = self.keychain_mask.lock().clone();
+		let owner_api = Owner::new(self.context_id, self.wallet.clone(), None, None);
+		let mask = self.keychain_mask.lock().expect("Mutext failure").clone();
 
 		let msg_str = serde_json::to_string(&swapmessage).map_err(|e| {
 			Error::ProcessSwapMessageError(format!(
@@ -656,7 +662,7 @@ where
 
 		let secp = {
 			let secp_inst = static_secp_instance();
-			let secp = secp_inst.lock().clone();
+			let secp = secp_inst.lock().expect("Mutext failure").clone();
 			secp
 		};
 
@@ -705,11 +711,16 @@ where
 	fn set_notification_channels(&self, slate_id: &uuid::Uuid, slate_send_channel: Sender<Slate>) {
 		self.slate_send_channel
 			.lock()
+			.expect("Mutex failure")
 			.insert(slate_id.clone(), slate_send_channel);
 	}
 
 	fn reset_notification_channels(&self, slate_id: &uuid::Uuid) {
-		let _ = self.slate_send_channel.lock().remove(slate_id);
+		let _ = self
+			.slate_send_channel
+			.lock()
+			.expect("Mutex failure")
+			.remove(slate_id);
 	}
 }
 
@@ -718,7 +729,7 @@ pub fn init_start_mwcmqs_listener<L, C, K>(
 	mqs_config: MQSConfig,
 	keychain_mask: Arc<Mutex<Option<SecretKey>>>,
 	wait_for_thread: bool,
-) -> Result<(MWCMQPublisher, MWCMQSubscriber), Error>
+) -> Result<(), Error>
 where
 	L: WalletLCProvider<'static, C, K> + 'static,
 	C: NodeClient + 'static,
@@ -738,13 +749,18 @@ pub fn start_mwcmqs_listener<L, C, K>(
 	wait_for_thread: bool,
 	keychain_mask: Arc<Mutex<Option<SecretKey>>>,
 	print_to_log: bool,
-) -> Result<(MWCMQPublisher, MWCMQSubscriber), Error>
+) -> Result<(), Error>
 where
 	L: WalletLCProvider<'static, C, K> + 'static,
 	C: NodeClient + 'static,
 	K: Keychain + 'static,
 {
-	if mwc_wallet_impls::adapters::get_mwcmqs_brocker().is_some() {
+	let context_id = {
+		wallet_lock!(wallet, w);
+		w.get_context_id()
+	};
+
+	if mwc_wallet_impls::adapters::get_mwcmqs_brocker(context_id).is_some() {
 		return Err(Error::GenericError(
 			"mwcmqs listener is already running".to_string(),
 		));
@@ -756,22 +772,20 @@ where
 		"starting mwcmqs listener for {}:{}...",
 		mqs_config.mwcmqs_domain, mqs_config.mwcmqs_port
 	);
-	info!(
-		"the addres index is {}... ",
-		proofaddress::get_address_index()
-	);
 
 	let mwcmqs_domain = mqs_config.mwcmqs_domain;
 	let mwcmqs_port = mqs_config.mwcmqs_port;
 
-	let mwcmqs_secret_key =
-		controller_derive_address_key(wallet.clone(), keychain_mask.lock().as_ref())?;
+	let mwcmqs_secret_key = controller_derive_address_key(
+		wallet.clone(),
+		keychain_mask.lock().expect("Mutex failure").as_ref(),
+	)?;
 
 	let secp = Secp256k1::with_caps(ContextFlag::Full);
 	let mwc_pub_key = crypto::public_key_from_secret_key(&secp, &mwcmqs_secret_key)?;
 
 	let mwcmqs_address = MWCMQSAddress::new(
-		proofaddress::ProvableAddress::from_pub_key(&mwc_pub_key),
+		proofaddress::ProvableAddress::from_pub_key(context_id, &mwc_pub_key),
 		Some(mwcmqs_domain.clone()),
 		Some(mwcmqs_port),
 	);
@@ -782,9 +796,10 @@ where
 		keychain_mask,
 		None,
 		print_to_log,
-	);
+	)?;
 
 	let mwcmqs_publisher = MWCMQPublisher::new(
+		context_id,
 		mwcmqs_address.clone(),
 		&mwcmqs_secret_key,
 		mwcmqs_domain,
@@ -795,29 +810,30 @@ where
 	// Cross reference, need to setup the secondary pointer
 	controller.set_publisher(Box::new(mwcmqs_publisher.clone()));
 
-	let mwcmqs_subscriber = MWCMQSubscriber::new(&mwcmqs_publisher);
+	let mut mwcmqs_subscriber = MWCMQSubscriber::new(&mwcmqs_publisher);
 
-	let mut cloned_subscriber = mwcmqs_subscriber.clone();
-
-	let thread = thread::Builder::new()
-		.name("mwcmqs-broker".to_string())
-		.spawn(move || {
-			if let Err(e) = cloned_subscriber.start(&secp) {
-				let err_str = format!("Unable to start mwcmqs controller, {}", e);
-				error!("{}", err_str);
-				panic!("{}", err_str);
-			}
-		})
-		.map_err(|e| Error::GenericError(format!("Unable to start mwcmqs broker, {}", e)))?;
-
-	// Publishing this running MQS service
-	crate::impls::init_mwcmqs_access_data(mwcmqs_publisher.clone(), mwcmqs_subscriber.clone());
-
-	if wait_for_thread {
-		let _ = thread.join();
+	if let Err(e) = mwcmqs_subscriber.start(secp) {
+		error!("Unable to start mwcmqs controller, {}", e);
+		return Err(Error::GenericError(format!(
+			"Unable to start mwcmqs broker, {}",
+			e
+		)));
 	}
 
-	Ok((mwcmqs_publisher, mwcmqs_subscriber))
+	let thr = if wait_for_thread {
+		mwcmqs_subscriber.take_subscribe_thread()
+	} else {
+		None
+	};
+
+	// Publishing this running MQS service
+	crate::impls::init_mwcmqs_access_data(context_id, mwcmqs_publisher, mwcmqs_subscriber);
+
+	if let Some(thr) = thr {
+		let _ = thr.join();
+	}
+
+	Ok(())
 }
 
 /// Listener version, providing same API but listening for requests on a
@@ -843,12 +859,20 @@ where
 		running_foreign = true;
 	}
 
-	if is_owner_api_running() {
+	let context_id = {
+		wallet
+			.lock()
+			.expect("Mutex failure")
+			.lc_provider()?
+			.get_context_id()
+	};
+
+	if is_owner_api_running(context_id) {
 		return Err(Error::GenericError(
 			"Owner API is already up and running".to_string(),
 		));
 	}
-	if running_foreign && is_foreign_api_running() {
+	if running_foreign && is_foreign_api_running(context_id) {
 		return Err(Error::GenericError(
 			"Foreign API is already up and running".to_string(),
 		));
@@ -870,6 +894,7 @@ where
 
 	let api_handler_v2 = OwnerAPIHandlerV2::new(wallet.clone(), tor_config.clone());
 	let api_handler_v3 = OwnerAPIHandlerV3::new(
+		context_id,
 		wallet.clone(),
 		keychain_mask.clone(),
 		tor_config,
@@ -894,28 +919,29 @@ where
 				Error::GenericError(format!("Router failed to add route /v2/foreign, {}", e))
 			})?;
 	}
-	let api_chan: &'static mut (oneshot::Sender<()>, oneshot::Receiver<()>) =
-		Box::leak(Box::new(oneshot::channel::<()>()));
 	let mut apis = ApiServer::new();
 	warn!("Starting HTTP Owner API server at {}.", addr);
 	let socket_addr: SocketAddr = addr.parse().expect("unable to parse socket address");
 	let api_thread = apis
-		.start(socket_addr, router, tls_config, api_chan)
+		.start(socket_addr, router, tls_config)
 		.map_err(|e| Error::GenericError(format!("API thread failed to start, {}", e)))?;
 	warn!("HTTP Owner listener started.");
 
-	set_owner_api_server(Some(apis));
+	set_owner_api_server(context_id, Some(apis));
 	if running_foreign {
-		set_foreign_api_server(Some(ApiServer::new()));
+		set_foreign_api_server(
+			context_id,
+			Some(Arc::new(ForeignApiServer::new(Router::new()))),
+		);
 	}
 
 	let res = api_thread
 		.join()
 		.map_err(|e| Error::GenericError(format!("API thread panicked :{:?}", e)));
 
-	set_owner_api_server(None);
+	set_owner_api_server(context_id, None);
 	if running_foreign {
-		set_foreign_api_server(None);
+		set_foreign_api_server(context_id, None);
 	}
 
 	res
@@ -1060,237 +1086,170 @@ pub fn foreign_listener<L, C, K>(
 	wallet: Arc<Mutex<Box<dyn WalletInst<'static, L, C, K> + 'static>>>,
 	keychain_mask: Arc<Mutex<Option<SecretKey>>>,
 	addr: &str,
-	tls_config: Option<TLSConfig>,
-	use_tor: bool,
-	socks_proxy_addr: &str,
-	libp2p_listen_port: &Option<u16>,
-	tor_log_file: &Option<String>,
-	tor_bridge: &TorBridgeConfig,
-	tor_proxy: &TorProxyConfig,
+	tor_config: &TorConfig,
+	_libp2p_listen_port: &Option<u16>,
 ) -> Result<(), Error>
 where
 	L: WalletLCProvider<'static, C, K> + 'static,
 	C: NodeClient + 'static,
 	K: Keychain + 'static,
 {
-	if is_foreign_api_running() {
+	// Check if wallet has been opened first, get slatepack public key
+	let (slatepack_secret, slatepack_pk, context_id) = {
+		wallet_lock!(wallet, w);
+		let mask = keychain_mask.lock().expect("Mutex failure").clone();
+		let keychain = w.keychain(mask.as_ref())?;
+		let context_id = w.get_context_id();
+		let address_index: u32 = {
+			let mut batch = w.batch(mask.as_ref())?;
+			let index = batch.load_u64(U64_DATA_IDX_ADDRESS_INDEX, 0u64)?;
+			index as u32
+		};
+		let slatepack_secret =
+			proofaddress::payment_proof_address_dalek_secret(context_id, &keychain, address_index)?;
+		let slatepack_pk = DalekPublicKey::from(&slatepack_secret);
+		(slatepack_secret, slatepack_pk, context_id)
+	};
+
+	if is_foreign_api_running(context_id) {
 		return Err(Error::GenericError(
 			"Foreign API is already up and running".to_string(),
 		));
 	}
 
-	// Check if wallet has been opened first, get slatepack public key
-	let slatepack_pk = {
-		let mut w_lock = wallet.lock();
-		let w = w_lock.lc_provider()?.wallet_inst()?;
-		let keychain = w.keychain(keychain_mask.lock().as_ref())?;
-		let slatepack_secret = proofaddress::payment_proof_address_dalek_secret(&keychain, None)?;
-		let slatepack_pk = DalekPublicKey::from(&slatepack_secret);
-		slatepack_pk
-	};
-
 	warn!("Starting HTTP Foreign listener API server at {}.", addr);
 	let socket_addr: SocketAddr = addr.parse().expect("unable to parse socket address");
 
-	let address = ProvableAddress::from_tor_pub_key(&slatepack_pk);
-	let qr_string = match QrCode::new(address.public_key.clone()) {
-		Ok(qr) => qr.to_string(false, 3),
-		Err(_) => "Failed to generate QR code!".to_string(),
+	if mwc_wallet_util::mwc_util::is_console_output_enabled() {
+		let address = ProvableAddress::from_tor_pub_key(&slatepack_pk);
+		let qr_string = match QrCode::new(address.public_key.clone()) {
+			Ok(qr) => qr.to_string(false, 3),
+			Err(_) => "Failed to generate QR code!".to_string(),
+		};
+		warn!(
+			"Slatepack Address is: {}\n{}",
+			address.public_key, qr_string
+		);
+	}
+
+	let onion_expanded_key = ExpandedSecretKey::from(&slatepack_secret).to_bytes();
+	let service_started_callback = move |onion_address: Option<String>| {
+		tor::status::set_tor_address(context_id, onion_address.clone());
+		match onion_address {
+			Some(addr) => info!("Foreign API is started at {}", addr),
+			None => info!("Foreign API is started"),
+		}
 	};
-	warn!(
-		"Slatepack Address is: {}\n{}",
-		address.public_key, qr_string
-	);
 
-	let mut running = false;
-	let mut restarting = true;
-	let mut retries = 0;
+	let is_arti_running = tor_config.is_tor_internal_arti();
 
-	while restarting {
-		restarting = false;
+	let service_failed_callback = move |e: &mwc_wallet_util::mwc_p2p::Error| {
+		if is_arti_running {
+			// not exiting for embedded Tor
+			warn!(
+				"Unable to start foreign listener, will retry soon. Error: {}",
+				e
+			);
+			false
+		} else {
+			// Exiting for socket based listener
+			warn!("Unable to start foreign listener. Error: {}", e);
+			true
+		}
+	};
 
-		// need to keep in scope while the main listener is running
-		let tor_info = match use_tor {
-			true => match init_tor_listener(
-				wallet.clone(),
-				keychain_mask.clone(),
-				addr,
-				socks_proxy_addr,
-				libp2p_listen_port,
-				None,
-				tor_log_file,
-				tor_bridge,
-				tor_proxy,
-				retries == 0,
-			) {
-				Ok((tp, tor_secret)) => Some((tp, tor_secret)),
-				Err(e) => {
-					if retries == 0 {
-						warn!("Unable to start TOR listener; Check that TOR executable is installed and on your path");
-						error!("Tor Error: {}", e);
-						warn!("Listener will be available via HTTP only");
-					} else {
-						error!("Tor Error: {}", e);
-						restarting = true;
-						continue;
-					}
-					None
-				}
-			},
-			false => None,
+	let mut router = Router::new();
+	let api_handler_v2 = ForeignAPIHandlerV2::new(wallet.clone(), keychain_mask.clone());
+	router
+		.add_route("/v2/foreign", Arc::new(api_handler_v2))
+		.map_err(|e| {
+			Error::GenericError(format!("Router failed to add route /v2/foreign, {}", e))
+		})?;
+
+	let server = Arc::new(ForeignApiServer::new(router));
+
+	let connection_counter = AtomicI64::new(0);
+	let stop_state = server.stop_state.clone();
+	let server2 = server.clone();
+	let handle_new_connection_callback =
+		move |stream: TcpDataStream, _peer_address: Option<PeerAddr>| {
+			let mut stream = stream;
+			stream.set_read_timeout(Duration::from_secs(30)); // 30 seconds to match the request client.
+			stream.set_write_timeout(Duration::from_secs(30));
+			let connection_name = format!(
+				"Foreign_connection_{}",
+				connection_counter.fetch_add(1, Ordering::Relaxed)
+			);
+			server2.accept_connection(connection_name, stream);
 		};
 
-		let mut apis = ApiServer::new();
+	let context_id2 = context_id;
+	let service_status_callback = move |healthy: bool| {
+		set_foreign_api_health(context_id2, healthy);
+	};
 
-		let api_chan: &'static mut (oneshot::Sender<()>, oneshot::Receiver<()>) =
-			Box::leak(Box::new(oneshot::channel::<()>()));
+	let tor_config = tor_config.clone();
+	let api_thread = thread::Builder::new()
+		.name(format!("wallet-foreign-listener-{}", context_id))
+		.spawn(move || {
+			let res = mwc_p2p::listen(
+				context_id,
+				stop_state,
+				Some(tor_config),
+				Some(socket_addr),
+				Some(onion_expanded_key),
+				Some(service_started_callback),
+				Some(service_failed_callback),
+				Some(service_status_callback),
+				handle_new_connection_callback,
+			);
 
-		let mut router = Router::new();
-
-		let api_handler_v2 = ForeignAPIHandlerV2::new(wallet.clone(), keychain_mask.clone());
-		router
-			.add_route("/v2/foreign", Arc::new(api_handler_v2))
-			.map_err(|e| {
-				Error::GenericError(format!("Router failed to add route /v2/foreign, {}", e))
-			})?;
-
-		let api_thread = apis
-			// Assuming you have a variable `channel_pair` of the required type
-			.start(socket_addr, router, tls_config.clone(), api_chan)
-			.map_err(|e| Error::GenericError(format!("API thread failed to start, {}", e)))?;
-
-		set_foreign_api_server(Some(apis));
-
-		let check_tor_connection = tor_info.is_some();
-
-		#[cfg(feature = "libp2p")]
-		let libp2p_stop = Arc::new(std::sync::Mutex::new(1));
-
-		// Starting libp2p listener
-		#[cfg(feature = "libp2p")]
-		let tor_process = if tor_info.is_some() && libp2p_listen_port.is_some() {
-			let tor_info = tor_info.unwrap();
-			let libp2p_listen_port = libp2p_listen_port.unwrap();
-			let libp2p_handle = start_libp2p_listener(
-				wallet.clone(),
-				tor_info.1 .0,
-				socks_proxy_addr,
-				libp2p_listen_port,
-				libp2p_stop.clone(), // passing new obj, because we never will stop the libp2p process
-				retries == 0,
-			)?;
-			Some((tor_info.0, Some(libp2p_handle)))
-		} else if tor_info.is_some() {
-			let tor_info = tor_info.unwrap();
-			Some((tor_info.0, None))
-		} else {
-			None
-		};
-
-		#[cfg(not(feature = "libp2p"))]
-		let tor_process = if tor_info.is_some() {
-			let tor_info = tor_info.unwrap();
-			Some(tor_info.0)
-		} else {
-			None
-		};
-
-		// checking connection every minute until the thread is running
-		if check_tor_connection {
-			// After first restart no waiting, in most case it is a fix, so let's validata and report asap.
-			if retries > 1 {
-				// let's wait for some time.
-				for _ in 1..(60 * 2) {
-					if api_thread.is_finished() {
-						break;
-					}
-					thread::sleep(Duration::from_millis(500));
-				}
+			if let Err(e) = res {
+				error!("Error starting foreign listener: {}", e);
 			}
 
-			let this_tor_address = address.to_string();
-			let this_wallet_dest = format!("http://{}.onion", this_tor_address);
+			set_foreign_api_server(context_id, None);
+			tor::status::set_tor_address(context_id, None);
+		})
+		.map_err(|e| {
+			Error::ListenerError(format!("Failed to start foreign listener thread, {}", e))
+		})?;
 
-			let sender = HttpDataSender::tor_through_socks_proxy(
-				&this_wallet_dest,
-				None,
-				socks_proxy_addr,
-				None,
-				true,
-				&None,
-				tor_bridge,
-				tor_proxy,
-			)?;
+	server.set_listener_thread(api_thread);
+	set_foreign_api_server(context_id, Some(server.clone()));
 
-			while !restarting && !api_thread.is_finished() {
-				// waiting for a minute
-				// And check. That should trigger refresh on tor is something was changed
-				let ping_start = SystemTime::now();
-				match sender.check_other_wallet_version(&this_wallet_dest, false) {
-					Ok(_) => {
-						let ping_call_duration = SystemTime::now()
-							.duration_since(ping_start)
-							.unwrap_or(Duration::from_millis(0));
-						debug!(
-							"Tor listener is healthy, ping time: {}",
-							ping_call_duration.as_millis()
-						);
-						if !running {
-							warn!("Foreign Listener is running...");
-							running = true;
-						}
-						retries = 0;
-					}
-					Err(e) => {
-						debug!("Tor listener is NOT healthy, ping error: {}", e);
-						restarting = true;
-						if running {
-							warn!("Foreign Listener TOR proxy is not healthy, restarting it...");
-							running = false;
-						}
-						set_foreign_api_server(None);
-						retries += 1;
-					}
-				}
-				// waiting for a minute
-				if !restarting {
-					for _ in 1..(60 * 2) {
-						if api_thread.is_finished() {
-							break;
-						}
-						thread::sleep(Duration::from_millis(500));
-					}
-				}
-			}
-		} else {
-			warn!("Foreign Listener is running...");
-		}
+	#[cfg(feature = "libp2p")]
+	let libp2p_stop = Arc::new(std::sync::Mutex::new(1));
 
-		let res = api_thread
-			.join()
-			.map_err(|e| Error::GenericError(format!("API thread panicked :{:?}", e)));
+	// Starting libp2p listener
+	#[cfg(feature = "libp2p")]
+	let tor_process = if tor_info.is_some() && libp2p_listen_port.is_some() {
+		let tor_info = tor_info.unwrap();
+		let libp2p_listen_port = libp2p_listen_port.unwrap();
+		let libp2p_handle = start_libp2p_listener(
+			wallet.clone(),
+			tor_info.1 .0,
+			socks_proxy_addr,
+			libp2p_listen_port,
+			libp2p_stop.clone(), // passing new obj, because we never will stop the libp2p process
+			retries == 0,
+		)?;
+		Some((tor_info.0, Some(libp2p_handle)))
+	} else if tor_info.is_some() {
+		let tor_info = tor_info.unwrap();
+		Some((tor_info.0, None))
+	} else {
+		None
+	};
 
-		set_foreign_api_server(None);
-		tor::status::set_tor_address(None);
-
-		// Stopping tor, we failed to start in any case
-		#[cfg(feature = "libp2p")]
-		if let Some((mut tor_process, libp2p_handle)) = tor_process {
-			let _ = tor_process.kill();
-			// stopping libp2p listener first
-			if let Some(libp2p_handle) = libp2p_handle {
-				*libp2p_stop.lock().unwrap() = 0;
-				let _ = libp2p_handle.join();
-			}
-		}
-
-		#[cfg(not(feature = "libp2p"))]
-		if let Some(mut tor_process) = tor_process {
-			let _ = tor_process.kill();
-		}
-
-		if res.is_err() {
-			return res;
+	// Stopping tor, we failed to start in any case
+	#[cfg(feature = "libp2p")]
+	if let Some((mut tor_process, libp2p_handle)) = tor_process {
+		let _ = tor_process.kill();
+		// stopping libp2p listener first
+		if let Some(libp2p_handle) = libp2p_handle {
+			*libp2p_stop.lock().unwrap() = 0;
+			let _ = libp2p_handle.join();
 		}
 	}
 
@@ -1350,7 +1309,12 @@ where
 		wallet: Arc<Mutex<Box<dyn WalletInst<'static, L, C, K> + 'static>>>,
 		tor_config: Option<TorConfig>,
 	) -> Result<Response<Body>, Error> {
-		let api = Owner::new(wallet, None, tor_config);
+		let context_id = {
+			wallet_lock!(wallet, w);
+			w.get_context_id()
+		};
+
+		let api = Owner::new(context_id, wallet, None, tor_config);
 
 		//Here is a wrapper to call future from that.
 		// Issue that we can't call future form future
@@ -1434,7 +1398,7 @@ impl OwnerV3Helpers {
 
 	/// whether encryption is enabled
 	pub fn encryption_enabled(key: Arc<Mutex<Option<SecretKey>>>) -> bool {
-		let share_key_ref = key.lock();
+		let share_key_ref = key.lock().expect("Mutex failure");
 		share_key_ref.is_some()
 	}
 
@@ -1461,7 +1425,7 @@ impl OwnerV3Helpers {
 		new_key: Option<SecretKey>,
 	) {
 		if let Some(_) = val["result"]["Ok"].as_str() {
-			let mut share_key_ref = key.lock();
+			let mut share_key_ref = key.lock().expect("Mutex failure");
 			*share_key_ref = new_key;
 		}
 	}
@@ -1479,7 +1443,7 @@ impl OwnerV3Helpers {
 				Err(_) => return,
 			};
 
-			let mut shared_mask_ref = mask.lock();
+			let mut shared_mask_ref = mask.lock().expect("Mutext failure");
 			*shared_mask_ref = Some(sk);
 		}
 	}
@@ -1489,7 +1453,7 @@ impl OwnerV3Helpers {
 		key: Arc<Mutex<Option<SecretKey>>>,
 		req: &serde_json::Value,
 	) -> Result<(JsonId, serde_json::Value), serde_json::Value> {
-		let share_key_ref = key.lock();
+		let share_key_ref = key.lock().expect("Mutex failure");
 		if share_key_ref.is_none() {
 			return Err(EncryptionErrorResponse::new(
 				1,
@@ -1521,7 +1485,7 @@ impl OwnerV3Helpers {
 		id: &JsonId,
 		res: &serde_json::Value,
 	) -> Result<serde_json::Value, serde_json::Value> {
-		let share_key_ref = key.lock();
+		let share_key_ref = key.lock().expect("Mutex failure");
 		if share_key_ref.is_none() {
 			return Err(EncryptionErrorResponse::new(
 				1,
@@ -1623,12 +1587,13 @@ where
 {
 	/// Create a new owner API handler for GET methods
 	pub fn new(
+		context_id: u32,
 		wallet: Arc<Mutex<Box<dyn WalletInst<'static, L, C, K> + 'static>>>,
 		keychain_mask: Arc<Mutex<Option<SecretKey>>>,
 		tor_config: Option<TorConfig>,
 		running_foreign: bool,
 	) -> OwnerAPIHandlerV3<L, C, K> {
-		let owner_api = Owner::new(wallet.clone(), None, tor_config.clone());
+		let owner_api = Owner::new(context_id, wallet.clone(), None, tor_config.clone());
 		owner_api.set_tor_config(tor_config);
 		let owner_api = Arc::new(owner_api);
 		OwnerAPIHandlerV3 {
@@ -1693,7 +1658,7 @@ where
 					OwnerV3Helpers::update_owner_api_shared_key(
 						key.clone(),
 						&unencrypted_intercept,
-						api.shared_key.lock().clone(),
+						api.shared_key.lock().expect("Mutex failure").clone(),
 					);
 				}
 				Ok(r)
@@ -1714,7 +1679,7 @@ where
 		api: Arc<Owner<L, C, K>>,
 	) -> Result<Response<Body>, Error> {
 		//Here is a wrapper to call future from that.
-		// Issue that we can't call future form future
+		// Problem that we can't call future from future
 		let handler = move || -> Pin<Box<dyn std::future::Future<Output=Result<serde_json::Value, Error>>>> {
 		let future = Self::call_api(req, key, mask, running_foreign, api);
 		Box::pin(future)
@@ -1833,7 +1798,7 @@ where
 	K: Keychain + 'static,
 {
 	fn post(&self, req: Request<Body>) -> ResponseFuture {
-		let mask = self.keychain_mask.lock().clone();
+		let mask = self.keychain_mask.lock().expect("Mutext failure").clone();
 		let wallet = self.wallet.clone();
 
 		Box::pin(async move {

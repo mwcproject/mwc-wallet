@@ -106,8 +106,8 @@ pub enum Error {
 	TorConfig(String),
 
 	/// Tor Process error
-	#[error("Tor Process Error: {0}")]
-	TorProcess(String),
+	#[error("Tor (Arti) Error: {0}")]
+	Arti(String),
 
 	/// Error contacting wallet API
 	#[error("Wallet Communication Error: {0}")]
@@ -132,6 +132,10 @@ pub enum Error {
 	/// Other
 	#[error("Generic error: {0}")]
 	GenericError(String),
+
+	/// Other
+	#[error("Connection error: {0}")]
+	ConnectionError(String),
 
 	#[error("unknown address!, {0}")]
 	UnknownAddressType(String),

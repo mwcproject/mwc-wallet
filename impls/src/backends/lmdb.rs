@@ -58,7 +58,8 @@ const TX_ARCHIVE_LOG_ENTRY_PREFIX: u8 = b'T';
 const TX_LOG_ID_PREFIX: u8 = b'i';
 const ACCOUNT_PATH_MAPPING_PREFIX: u8 = b'a';
 const LAST_SCANNED_BLOCK: u8 = b'm'; // pre v3.0 was l
-const LAST_WORKING_NODE_INDEX: u8 = b'n';
+									 // Single u64 values. See U64_DATA_IDX_ for available indexes
+const U64_DATA: u8 = b'n';
 #[cfg(feature = "libp2p")]
 const INTEGRITY_CONTEXT_PREFIX: u8 = b'g';
 const FLAGS: u8 = b'f'; // pre v3.0 was l
@@ -108,6 +109,7 @@ where
 	C: NodeClient + 'ck,
 	K: Keychain + 'ck,
 {
+	context_id: u32,
 	db: store::Store,
 	data_file_dir: String,
 	/// Keychain
@@ -129,7 +131,7 @@ where
 	C: NodeClient + 'ck,
 	K: Keychain + 'ck,
 {
-	pub fn new(data_file_dir: &str, n_client: C) -> Result<Self, Error> {
+	pub fn new(context_id: u32, data_file_dir: &str, n_client: C) -> Result<Self, Error> {
 		let db_path = path::Path::new(data_file_dir).join(DB_DIR);
 		fs::create_dir_all(&db_path).expect("Couldn't create wallet backend directory!");
 
@@ -140,7 +142,13 @@ where
 		fs::create_dir_all(&stored_tx_path)
 			.expect("Couldn't create wallet backend tx storage directory!");
 
-		let store = store::Store::new(db_path.to_str().unwrap(), None, Some(DB_DIR), None)?;
+		let store = store::Store::new(
+			context_id,
+			db_path.to_str().unwrap(),
+			None,
+			Some(DB_DIR),
+			None,
+		)?;
 
 		// Make sure default wallet derivation path always exists
 		// as well as path (so it can be retrieved by batches to know where to store
@@ -163,6 +171,7 @@ where
 		TxProof::init_proof_backend(data_file_dir)?;
 
 		let res = LMDBBackend {
+			context_id,
 			db: store,
 			data_file_dir: data_file_dir.to_owned(),
 			keychain: None,
@@ -195,6 +204,7 @@ where
 			ser::deserialize(
 				&mut v,
 				protocol_version,
+				self.context_id,
 				ser::DeserializationMode::default(),
 			)
 			.map_err(From::from)
@@ -235,6 +245,10 @@ where
 	C: NodeClient + 'ck,
 	K: Keychain + 'ck,
 {
+	fn get_context_id(&self) -> u32 {
+		self.context_id
+	}
+
 	/// data file directory. mwc713 needs it
 	fn get_data_file_dir(&self) -> &str {
 		&self.data_file_dir
@@ -340,7 +354,7 @@ where
 		self.parent_key_id = id;
 	}
 
-	fn parent_key_id(&mut self) -> Identifier {
+	fn parent_key_id(&self) -> Identifier {
 		self.parent_key_id.clone()
 	}
 
@@ -403,6 +417,7 @@ where
 				ser::deserialize(
 					&mut v,
 					protocol_version,
+					self.context_id,
 					ser::DeserializationMode::default(),
 				)
 				.map_err(From::from)
@@ -504,6 +519,7 @@ where
 		Ok(ser::deserialize(
 			&mut &tx_bin[..],
 			ser::ProtocolVersion(1),
+			self.context_id,
 			ser::DeserializationMode::default(),
 		)
 		.map_err(|e| {
@@ -587,11 +603,17 @@ where
 	fn last_scanned_blocks<'a>(&mut self) -> Result<Vec<ScannedBlockInfo>, Error> {
 		let batch = self.db.batch_read()?;
 		let protocol_version = self.db.protocol_version();
+		let context_id = self.context_id;
 		let mut blocks: Vec<ScannedBlockInfo> = batch
 			.iter(&[LAST_SCANNED_BLOCK], move |k, mut v| {
-				ser::deserialize(&mut v, protocol_version, DeserializationMode::default())
-					.map(|pos| (k.to_vec(), pos))
-					.map_err(From::from)
+				ser::deserialize(
+					&mut v,
+					protocol_version,
+					context_id,
+					DeserializationMode::default(),
+				)
+				.map(|pos| (k.to_vec(), pos))
+				.map_err(From::from)
 			})?
 			.map(|o| o.1)
 			.collect();
@@ -646,10 +668,12 @@ where
 		let db = self.db.borrow();
 		let db = db.as_ref().unwrap();
 		let protocol_version = db.protocol_version();
+		let context_id = self.store.get_context_id();
 		let prefix_iter = db.iter(&[prefix], move |_, mut v| {
 			ser::deserialize(
 				&mut v,
 				protocol_version,
+				context_id,
 				ser::DeserializationMode::default(),
 			)
 			.map_err(From::from)
@@ -806,13 +830,19 @@ where
 		let br = self.db.borrow();
 		let db = br.as_ref().unwrap();
 		let protocol_version = db.protocol_version();
+		let context_id = self.store.get_context_id();
 
 		// Cleaning up the head blocks...
 		let mut heights: Vec<u64> = db
 			.iter(&[LAST_SCANNED_BLOCK], move |k, mut v| {
-				ser::deserialize(&mut v, protocol_version, DeserializationMode::default())
-					.map(|pos| (k.to_vec(), pos))
-					.map_err(From::from)
+				ser::deserialize(
+					&mut v,
+					protocol_version,
+					context_id,
+					DeserializationMode::default(),
+				)
+				.map(|pos| (k.to_vec(), pos))
+				.map_err(From::from)
 			})?
 			.map(|o: (Vec<u8>, ScannedBlockInfo)| o.1.height)
 			.collect();
@@ -876,29 +906,29 @@ where
 	}
 
 	/// Save the last used good node index
-	fn save_last_working_node_index(&mut self, node_index: u8) -> Result<(), Error> {
-		let node_index_key = u64_to_key(LAST_WORKING_NODE_INDEX, 0 as u64);
+	fn save_u64(&mut self, index: u64, value: u64) -> Result<(), Error> {
+		let node_index_key = u64_to_key(U64_DATA, index);
 		self.db
 			.borrow()
 			.as_ref()
 			.unwrap()
-			.put_ser(&node_index_key, &node_index)?;
+			.put_ser(&node_index_key, &value)?;
 		Ok(())
 	}
 
 	/// Save the last used good node index
-	fn get_last_working_node_index(&mut self) -> Result<u8, Error> {
-		let node_index_key = u64_to_key(LAST_WORKING_NODE_INDEX, 0 as u64);
+	fn load_u64(&mut self, index: u64, default: u64) -> Result<u64, Error> {
+		let node_index_key = u64_to_key(U64_DATA, index);
 
-		let index: Option<u8> = self
+		let index: Option<u64> = self
 			.db
 			.borrow()
 			.as_ref()
 			.unwrap()
 			.get_ser(&node_index_key, None)?;
 		let last_working_node_index = match index {
-			Some(ind) => ind as u8, //the normal index started from 1. 0 is error
-			None => 0,
+			Some(ind) => ind, //the normal index started from 1. 0 is error
+			None => default,
 		};
 		Ok(last_working_node_index)
 	}
@@ -981,7 +1011,9 @@ where
 				break;
 			}
 		}
-		println!("rename acct from '{}' to '{}'", old_name, new_name);
+		if mwc_wallet_util::mwc_util::is_console_output_enabled() {
+			println!("rename acct from '{}' to '{}'", old_name, new_name);
+		}
 		Ok(())
 	}
 
@@ -1002,10 +1034,13 @@ where
 		let db = self.db.borrow();
 		let db = db.as_ref().unwrap();
 		let protocol_version = db.protocol_version();
+		let context_id = self.store.get_context_id();
+
 		let prefix_iter = db.iter(&[ACCOUNT_PATH_MAPPING_PREFIX], move |_, mut v| {
 			ser::deserialize(
 				&mut v,
 				protocol_version,
+				context_id,
 				ser::DeserializationMode::default(),
 			)
 			.map_err(From::from)
@@ -1068,6 +1103,8 @@ where
 		let db = self.db.borrow();
 		let db = db.as_ref().unwrap();
 		let protocol_version = db.protocol_version();
+		let context_id = self.store.get_context_id();
+
 		let prefix_iter = db.iter(&[PRIVATE_TX_CONTEXT_PREFIX], move |ctx_key, mut v| {
 			let prefix_len = 2;
 			let slate_id_len = ctx_key.len() - prefix_len - 8;
@@ -1076,6 +1113,7 @@ where
 			let context = ser::deserialize(
 				&mut v,
 				protocol_version,
+				context_id,
 				ser::DeserializationMode::default(),
 			)?;
 			Ok((slate_id, context))

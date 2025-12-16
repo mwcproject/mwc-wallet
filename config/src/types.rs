@@ -15,7 +15,6 @@
 
 //! Public types for config modules
 
-use std::fmt;
 use std::io;
 use std::path::PathBuf;
 
@@ -23,6 +22,7 @@ use crate::config::MWC_WALLET_DIR;
 use crate::core::global::ChainTypes;
 use crate::util::logger::LoggingConfig;
 use mwc_wallet_util::mwc_core::global;
+use mwc_wallet_util::mwc_p2p::TorConfig;
 use std::collections::BTreeMap;
 
 /// Command-line wallet configuration
@@ -32,9 +32,9 @@ pub struct WalletConfig {
 	pub chain_type: Option<ChainTypes>,
 	/// The api interface/ip_address that this api server (i.e. this wallet) will run
 	/// by default this is 127.0.0.1 (and will not accept connections from external clients)
-	pub api_listen_interface: String,
+	pub api_listen_interface: Option<String>,
 	/// The port this wallet will run on
-	pub api_listen_port: u16,
+	pub api_listen_port: Option<u16>,
 	/// The port for libp2p socks listener to run. If None, libp2p will not be enabled.
 	/// libp2p works only with TOR. If tor is not activated, libp2p will not work
 	pub libp2p_listen_port: Option<u16>,
@@ -46,18 +46,13 @@ pub struct WalletConfig {
 	pub node_api_secret_path: Option<String>,
 	/// The api address of a running server node against which transaction inputs
 	/// will be checked during send; could be multiple nodes separated by semicolon
-	pub check_node_api_http_addr: String,
+	pub check_node_api_http_addr: Option<String>,
 	/// Whether to include foreign API endpoints on the Owner API
 	pub owner_api_include_foreign: Option<bool>,
 	/// Whether to include the mwcmqs listener
 	pub owner_api_include_mqs_listener: Option<bool>,
-	///Index used to derive address
-	pub mwcbox_address_index: Option<u32>,
 	/// The directory in which wallet files are stored
 	pub data_file_dir: String,
-	/// If Some(true), don't cache commits alongside output data
-	/// speed improvement, but your commits are in the database
-	pub no_commit_cache: Option<bool>,
 	/// TLS certificate file
 	pub tls_certificate_file: Option<String>,
 	/// TLS certificate private key file
@@ -86,18 +81,16 @@ impl Default for WalletConfig {
 	fn default() -> WalletConfig {
 		WalletConfig {
 			chain_type: Some(ChainTypes::Mainnet),
-			api_listen_interface: "127.0.0.1".to_string(),
-			api_listen_port: 3415,
+			api_listen_interface: Some("127.0.0.1".to_string()),
+			api_listen_port: Some(3415),
 			libp2p_listen_port: None, //Some(3418),
 			owner_api_listen_port: Some(WalletConfig::default_owner_api_listen_port()),
 			api_secret_path: Some(".owner_api_secret".to_string()),
 			node_api_secret_path: Some(".api_secret".to_string()),
-			check_node_api_http_addr: "http://127.0.0.1:3413".to_string(),
+			check_node_api_http_addr: Some("http://127.0.0.1:3413".to_string()),
 			owner_api_include_foreign: Some(false),
 			owner_api_include_mqs_listener: Some(false),
 			data_file_dir: ".".to_string(),
-			mwcbox_address_index: None,
-			no_commit_cache: Some(false),
 			tls_certificate_file: None,
 			tls_certificate_key: None,
 			dark_background_color_scheme: Some(true),
@@ -146,8 +139,21 @@ impl Default for WalletConfig {
 
 impl WalletConfig {
 	/// API Listen address
-	pub fn api_listen_addr(&self) -> String {
-		format!("{}:{}", self.api_listen_interface, self.api_listen_port)
+	pub fn api_listen_addr(&self) -> Result<String, ConfigError> {
+		let api_listen_interface =
+			self.api_listen_interface
+				.as_ref()
+				.ok_or(crate::types::ConfigError::InvalidConfig(
+					"api_listen_interface expected to be defined".into(),
+				))?;
+		let api_listen_port =
+			self.api_listen_port
+				.as_ref()
+				.ok_or(crate::types::ConfigError::InvalidConfig(
+					"api_listen_port expected to be defined".into(),
+				))?;
+
+		Ok(format!("{}:{}", api_listen_interface, api_listen_port))
 	}
 
 	/// Default listener port
@@ -174,9 +180,9 @@ impl WalletConfig {
 	}
 
 	/// Accept fee base
-	pub fn tx_fee_base(&self) -> u64 {
+	pub fn tx_fee_base(&self, context_id: u32) -> u64 {
 		self.tx_fee_base
-			.unwrap_or_else(|| global::get_accept_fee_base())
+			.unwrap_or_else(|| global::get_accept_fee_base(context_id))
 	}
 }
 
@@ -203,98 +209,10 @@ pub enum ConfigError {
 	/// Path doesn't exist
 	#[error("Not found expected path {0}")]
 	PathNotFoundError(String),
-}
 
-/// Tor configuration
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct TorConfig {
-	/// Whether to start tor listener on listener startup (default true)
-	pub use_tor_listener: bool,
-	/// Just the address of the socks proxy for now
-	pub socks_proxy_addr: String,
-	/// Send configuration directory
-	pub send_config_dir: String,
-	/// Whether or not the socks5 proxy is already running
-	pub socks_running: bool,
-	/// Optional log file for tor. Default is None
-	pub tor_log_file: Option<String>,
-	/// tor bridge config
-	#[serde(default)]
-	pub bridge: TorBridgeConfig,
-	/// tor proxy config
-	#[serde(default)]
-	pub proxy: TorProxyConfig,
-}
-
-impl Default for TorConfig {
-	fn default() -> TorConfig {
-		TorConfig {
-			use_tor_listener: true,
-			socks_proxy_addr: "127.0.0.1:59050".to_owned(),
-			send_config_dir: ".".into(),
-			socks_running: false,
-			tor_log_file: None,
-			bridge: TorBridgeConfig::default(),
-			proxy: TorProxyConfig::default(),
-		}
-	}
-}
-
-/// Tor Bridge Config
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct TorBridgeConfig {
-	/// Bridge Line
-	pub bridge_line: Option<String>,
-	/// Client Option
-	pub client_option: Option<String>,
-}
-
-impl Default for TorBridgeConfig {
-	fn default() -> TorBridgeConfig {
-		TorBridgeConfig {
-			bridge_line: None,
-			client_option: None,
-		}
-	}
-}
-
-impl fmt::Display for TorBridgeConfig {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "{:?}", self)
-	}
-}
-
-/// Tor Proxy configuration (useful for protocols such as shadowsocks)
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct TorProxyConfig {
-	/// socks4 |socks5 | http(s)
-	pub transport: Option<String>,
-	/// ip or dns
-	pub address: Option<String>,
-	/// user for auth - socks5|https(s)
-	pub username: Option<String>,
-	/// pass for auth - socks5|https(s)
-	pub password: Option<String>,
-	/// allowed port - proxy
-	pub allowed_port: Option<Vec<u16>>,
-}
-
-impl Default for TorProxyConfig {
-	fn default() -> TorProxyConfig {
-		TorProxyConfig {
-			transport: None,
-			address: None,
-			username: None,
-			password: None,
-			allowed_port: None,
-		}
-	}
-}
-
-impl fmt::Display for TorProxyConfig {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "{:?}", self)
-	}
+	/// Config mismatch
+	#[error("Invalid config {0}")]
+	InvalidConfig(String),
 }
 
 /// MQS configuration

@@ -1,3 +1,18 @@
+// Copyright 2025 The MWC Developers
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+#[allow(deprecated)]
 use digest::generic_array::GenericArray;
 use hmac::{Hmac, Mac, NewMac};
 use ripemd160::Ripemd160;
@@ -25,6 +40,7 @@ impl BIP32MwcboxHasher {
 	pub fn new(is_floonet: bool) -> Self {
 		Self {
 			is_floonet,
+			#[allow(deprecated)]
 			hmac_sha512: HmacSha512::new(GenericArray::from_slice(&[0u8; 128])),
 		}
 	}
@@ -54,6 +70,7 @@ impl BIP32Hasher for BIP32MwcboxHasher {
 	}
 	fn result_sha512(&mut self) -> [u8; 64] {
 		let mut result = [0; 64];
+		#[allow(deprecated)]
 		result.copy_from_slice(self.hmac_sha512.clone().finalize().into_bytes().as_slice());
 		result
 	}
@@ -61,6 +78,7 @@ impl BIP32Hasher for BIP32MwcboxHasher {
 		let mut sha2_res = [0; 32];
 		let mut sha2 = Sha256::new();
 		sha2.update(input);
+		#[allow(deprecated)]
 		sha2_res.copy_from_slice(sha2.finalize().as_slice());
 		sha2_res
 	}
@@ -68,17 +86,22 @@ impl BIP32Hasher for BIP32MwcboxHasher {
 		let mut ripemd_res = [0; 20];
 		let mut ripemd = Ripemd160::new();
 		ripemd.update(input);
+		#[allow(deprecated)]
 		ripemd_res.copy_from_slice(ripemd.finalize().as_slice());
 		ripemd_res
 	}
 }
 
 ///this derive_address_key will used in both mwc-wallet and wallet713 to derive the key.
-pub fn derive_address_key<K: Keychain>(keychain: &K, index: u32) -> Result<SecretKey, Error> {
+pub fn derive_address_key<K: Keychain>(
+	context_id: u32,
+	keychain: &K,
+	index: u32,
+) -> Result<SecretKey, Error> {
 	let root = keychain
 		.derive_key(713, &K::root_key_id(), SwitchCommitmentType::Regular)
 		.map_err(|e| Error::DeriveKeyError(format!("Derive key error, {}", e)))?;
-	let mut hasher = BIP32MwcboxHasher::new(is_floonet());
+	let mut hasher = BIP32MwcboxHasher::new(is_floonet(context_id));
 	let secp = keychain.secp();
 	let master = ExtendedPrivKey::new_master(secp, &mut hasher, &root.0)
 		.map_err(|e| Error::DeriveKeyError(format!("Derive key error, {}", e)))?;

@@ -40,6 +40,7 @@ pub fn verify_signature(
 ) -> Result<(), Error> {
 	let mut hasher = Sha256::new();
 	hasher.update(challenge.as_bytes());
+	#[allow(deprecated)]
 	let message = Message::from_slice(hasher.finalize().as_slice())?;
 	secp.verify(&message, signature, public_key)
 		.map_err(|e| Error::from(e))?;
@@ -54,6 +55,7 @@ pub fn sign_challenge(
 ) -> Result<Signature, Error> {
 	let mut hasher = Sha256::new();
 	hasher.update(challenge.as_bytes());
+	#[allow(deprecated)]
 	let message = Message::from_slice(hasher.finalize().as_slice())?;
 	secp.sign(&message, secret_key).map_err(|e| Error::from(e))
 }

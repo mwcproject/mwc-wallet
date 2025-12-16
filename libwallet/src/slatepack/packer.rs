@@ -48,6 +48,7 @@ impl Slatepacker {
 
 	/// Pack everything into the armored slatepack
 	pub fn encrypt_to_send(
+		context_id: u32,
 		slate: Slate,
 		slate_version: SlateVersion,
 		content: SlatePurpose,
@@ -64,20 +65,22 @@ impl Slatepacker {
 			slate: slate,
 		};
 
-		let (slate_bin, encrypted) = pack.to_binary(slate_version, secret, use_test_rng, secp)?;
+		let (slate_bin, encrypted) =
+			pack.to_binary(context_id, slate_version, secret, use_test_rng, secp)?;
 
 		SlatepackArmor::encode(&slate_bin, encrypted)
 	}
 
 	/// return slatepack
 	pub fn decrypt_slatepack(
+		context_id: u32,
 		data: &[u8],
 		dec_key: &DalekSecretKey,
 		secp: &Secp256k1,
 	) -> Result<Self, Error> {
 		let (slate_bytes, encrypted) = SlatepackArmor::decode(data)?;
 
-		let slatepack = Slatepack::from_binary(&slate_bytes, encrypted, dec_key, secp)?;
+		let slatepack = Slatepack::from_binary(context_id, &slate_bytes, encrypted, dec_key, secp)?;
 
 		let Slatepack {
 			sender,
@@ -221,8 +224,8 @@ fn slatepack_io_test() {
 			}
 		],
 		Some(PaymentInfo {
-			sender_address: ProvableAddress::from_str("a5ib4b2l5snzdgxzpdzouwxwvn4c3setpp5t5j2tr37n3uy3665qwnqd").unwrap(),
-			receiver_address: ProvableAddress::from_str("a5ib4b2l5snzdgxzpdzouwxwvn4c3setpp5t5j2tr37n3uy3665qwnqd").unwrap(),
+			sender_address: ProvableAddress::from_str(0, "a5ib4b2l5snzdgxzpdzouwxwvn4c3setpp5t5j2tr37n3uy3665qwnqd").unwrap(),
+			receiver_address: ProvableAddress::from_str(0, "a5ib4b2l5snzdgxzpdzouwxwvn4c3setpp5t5j2tr37n3uy3665qwnqd").unwrap(),
 			receiver_signature: Some( util::to_hex(&bytes_64) ),
 		}),
 		BlindingFactor::from_slice(&bytes_32)).unwrap();
@@ -236,6 +239,7 @@ fn slatepack_io_test() {
 
 	// Not encoded, just want to review the data...
 	let slatepack_string_encrypted = Slatepacker::encrypt_to_send(
+		0,
 		slate_enc.clone(),
 		SlateVersion::SP,
 		SlatePurpose::FullSlate,
@@ -250,6 +254,7 @@ fn slatepack_io_test() {
 
 	// Not encoded, just want to review the data...
 	let slatepack_string_binary = Slatepacker::encrypt_to_send(
+		0,
 		slate_enc.clone(),
 		SlateVersion::SP,
 		SlatePurpose::FullSlate,
@@ -266,7 +271,7 @@ fn slatepack_io_test() {
 
 	// Testing if can open from a backup
 	let slatepack =
-		Slatepacker::decrypt_slatepack(slatepack_string_encrypted.as_bytes(), &dalek_sk, &secp)
+		Slatepacker::decrypt_slatepack(0, slatepack_string_encrypted.as_bytes(), &dalek_sk, &secp)
 			.unwrap();
 	let res_slate = slatepack.to_result_slate();
 	let slate2_str = format!("{:?}", res_slate);
@@ -276,7 +281,7 @@ fn slatepack_io_test() {
 
 	// Testing if another party can open it
 	let slatepack =
-		Slatepacker::decrypt_slatepack(slatepack_string_encrypted.as_bytes(), &dalek_sk2, &secp)
+		Slatepacker::decrypt_slatepack(0, slatepack_string_encrypted.as_bytes(), &dalek_sk2, &secp)
 			.unwrap();
 	let res_slate = slatepack.to_result_slate();
 	let slate2_str = format!("{:?}", res_slate);
@@ -286,6 +291,7 @@ fn slatepack_io_test() {
 
 	// Testing if can decode form the binary
 	let slatepack = Slatepacker::decrypt_slatepack(
+		0,
 		slatepack_string_binary.as_bytes(),
 		&DalekSecretKey::from_bytes(&[1; 32]).unwrap(),
 		&secp,
@@ -308,6 +314,7 @@ fn slatepack_io_test() {
 	slate_enc.height = 1234567;
 
 	let slatepack_string_encrypted = Slatepacker::encrypt_to_send(
+		0,
 		slate_enc.clone(),
 		SlateVersion::SP,
 		SlatePurpose::FullSlate,
@@ -320,7 +327,7 @@ fn slatepack_io_test() {
 	.unwrap();
 
 	let slatepack =
-		Slatepacker::decrypt_slatepack(slatepack_string_encrypted.as_bytes(), &dalek_sk, &secp)
+		Slatepacker::decrypt_slatepack(0, slatepack_string_encrypted.as_bytes(), &dalek_sk, &secp)
 			.unwrap();
 
 	assert_eq!(
@@ -339,6 +346,7 @@ fn slatepack_io_test() {
 	assert!(slate_enc.set_lock_height(1234567 - 123).is_err());
 
 	let slatepack_string_encrypted = Slatepacker::encrypt_to_send(
+		0,
 		slate_enc.clone(),
 		SlateVersion::SP,
 		SlatePurpose::FullSlate,
@@ -351,7 +359,7 @@ fn slatepack_io_test() {
 	.unwrap();
 
 	let slatepack =
-		Slatepacker::decrypt_slatepack(slatepack_string_encrypted.as_bytes(), &dalek_sk, &secp)
+		Slatepacker::decrypt_slatepack(0, slatepack_string_encrypted.as_bytes(), &dalek_sk, &secp)
 			.unwrap();
 
 	assert_eq!(
@@ -370,6 +378,7 @@ fn slatepack_io_test() {
 	slate_enc.height = 1234567;
 
 	let slatepack_string_encrypted = Slatepacker::encrypt_to_send(
+		0,
 		slate_enc.clone(),
 		SlateVersion::SP,
 		SlatePurpose::FullSlate,
@@ -382,7 +391,7 @@ fn slatepack_io_test() {
 	.unwrap();
 
 	let slatepack =
-		Slatepacker::decrypt_slatepack(slatepack_string_encrypted.as_bytes(), &dalek_sk, &secp)
+		Slatepacker::decrypt_slatepack(0, slatepack_string_encrypted.as_bytes(), &dalek_sk, &secp)
 			.unwrap();
 
 	assert_eq!(

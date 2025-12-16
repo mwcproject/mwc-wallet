@@ -35,7 +35,7 @@ use std::time::Duration;
 mod common;
 use common::{clean_output_dir, create_wallet_proxy, setup, setup_global_chain_type};
 use mwc_wallet_util::mwc_core::core::Transaction;
-use mwc_wallet_util::mwc_util::Mutex;
+use std::sync::Mutex;
 
 /// updater thread test impl
 fn updater_thread_test_impl(test_dir: &str) -> Result<(), wallet::Error> {
@@ -105,10 +105,10 @@ fn updater_thread_test_impl(test_dir: &str) -> Result<(), wallet::Error> {
 		mask1,
 		bh as usize,
 		false,
-		tx_pool.lock().deref_mut(),
+		tx_pool.lock().expect("Mutex failure").deref_mut(),
 	);
 
-	let owner_api = api::Owner::new(wallet1, None, None);
+	let owner_api = api::Owner::new(0, wallet1, None, None);
 	owner_api.start_updater(mask1, Duration::from_secs(5))?;
 
 	// let updater thread run a bit

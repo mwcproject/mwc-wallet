@@ -104,8 +104,8 @@ pub enum Error {
 	GenericError(String),
 
 	/// Listener error
-	#[error("Listener Startup Error")]
-	ListenerError,
+	#[error("Listener Startup Error: {0}")]
+	ListenerError(String),
 
 	/// Tor Configuration Error
 	#[error("Tor Config Error: {0}")]

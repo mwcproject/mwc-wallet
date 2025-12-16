@@ -38,7 +38,7 @@ use mwc_wallet_controller::controller;
 use mwc_wallet_libwallet::proof::proofaddress::ProvableAddress;
 use mwc_wallet_util::mwc_core::consensus::calc_mwc_block_reward;
 use mwc_wallet_util::mwc_core::core::Transaction;
-use mwc_wallet_util::mwc_util::Mutex;
+use std::sync::Mutex;
 
 /// command line tests
 fn command_line_test_impl(test_dir: &str) -> Result<(), mwc_wallet_controller::Error> {
@@ -178,7 +178,7 @@ fn command_line_test_impl(test_dir: &str) -> Result<(), mwc_wallet_controller::E
 		mask1,
 		bh as usize,
 		false,
-		tx_pool.lock().deref_mut(),
+		tx_pool.lock().expect("Mutex failure").deref_mut(),
 	);
 
 	let very_long_message = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef\
@@ -252,7 +252,7 @@ fn command_line_test_impl(test_dir: &str) -> Result<(), mwc_wallet_controller::E
 		mask1,
 		1,
 		false,
-		tx_pool.lock().deref_mut(),
+		tx_pool.lock().expect("Mutex failure").deref_mut(),
 	);
 	bh += 1;
 
@@ -288,7 +288,7 @@ fn command_line_test_impl(test_dir: &str) -> Result<(), mwc_wallet_controller::E
 		mask1,
 		10,
 		false,
-		tx_pool.lock().deref_mut(),
+		tx_pool.lock().expect("Mutex failure").deref_mut(),
 	);
 	bh += 10;
 
@@ -397,7 +397,7 @@ fn command_line_test_impl(test_dir: &str) -> Result<(), mwc_wallet_controller::E
 		mask1,
 		10,
 		false,
-		tx_pool.lock().deref_mut(),
+		tx_pool.lock().expect("Mutex failure").deref_mut(),
 	);
 	bh += 10;
 
@@ -423,7 +423,7 @@ fn command_line_test_impl(test_dir: &str) -> Result<(), mwc_wallet_controller::E
 			let (_, wallet1_info) = api.retrieve_summary_info(m, true, 1)?;
 			// make sure the new balance is exactly equal to the old balance - the tx amount + the amount mined since then
 			// Problem that ffes are still collected back, that is why we have 8_000_000 difference here
-			let amt_mined = 10 * calc_mwc_block_reward(1);
+			let amt_mined = 10 * calc_mwc_block_reward(0, 1);
 			assert_eq!(
 				wallet1_info.amount_currently_spendable + (250_000_000 - 8_000_000 / 100),
 				old_balance + amt_mined
@@ -541,7 +541,7 @@ fn command_line_test_impl(test_dir: &str) -> Result<(), mwc_wallet_controller::E
 		mask1,
 		1,
 		false,
-		tx_pool.lock().deref_mut(),
+		tx_pool.lock().expect("Mutex failure").deref_mut(),
 	);
 
 	// Check our transaction log, should have bh entries
@@ -594,7 +594,7 @@ fn command_line_test_impl(test_dir: &str) -> Result<(), mwc_wallet_controller::E
 		mask1,
 		1,
 		false,
-		tx_pool.lock().deref_mut(),
+		tx_pool.lock().expect("Mutex failure").deref_mut(),
 	);
 
 	// Check our transaction log, should have bh entries + 1 for self-seld
@@ -772,7 +772,7 @@ fn command_line_test_impl(test_dir: &str) -> Result<(), mwc_wallet_controller::E
 		mask1,
 		5,
 		false,
-		tx_pool.lock().deref_mut(),
+		tx_pool.lock().expect("Mutex failure").deref_mut(),
 	);
 	bh += 5;
 	let _ = bh;
@@ -845,7 +845,7 @@ fn command_line_test_impl(test_dir: &str) -> Result<(), mwc_wallet_controller::E
 		mask1,
 		10,
 		false,
-		tx_pool.lock().deref_mut(),
+		tx_pool.lock().expect("Mutex failure").deref_mut(),
 	);
 
 	// Now let's check a balance at wallet2
@@ -912,7 +912,7 @@ fn command_line_test_impl(test_dir: &str) -> Result<(), mwc_wallet_controller::E
 		mask1,
 		10,
 		false,
-		tx_pool.lock().deref_mut(),
+		tx_pool.lock().expect("Mutex failure").deref_mut(),
 	);
 
 	// Check wallet 1 is now empty, except for immature coinbase outputs from recent mining),
@@ -928,7 +928,7 @@ fn command_line_test_impl(test_dir: &str) -> Result<(), mwc_wallet_controller::E
 			// Entire 'spendable' wallet balance should have been swept, except the coinbase outputs
 			// which matured in the last batch of mining. Check that the new spendable balance is
 			// exactly equal to those matured coins.
-			let amt_mined = 10 * calc_mwc_block_reward(1) + 1_000_000 / 100; // plus fee that was mined
+			let amt_mined = 10 * calc_mwc_block_reward(0, 1) + 1_000_000 / 100; // plus fee that was mined
 			assert_eq!(wallet1_info.amount_currently_spendable, amt_mined);
 			Ok(())
 		},

@@ -34,7 +34,7 @@ use std::time::Duration;
 mod common;
 use common::{clean_output_dir, create_wallet_proxy, setup};
 use mwc_wallet_util::mwc_core::core::Transaction;
-use mwc_wallet_util::mwc_util::Mutex;
+use std::sync::Mutex;
 
 fn no_change_test_impl(test_dir: &str, inputs_num: usize) -> Result<(), wallet::Error> {
 	global::set_local_chain_type(global::ChainTypes::AutomatedTesting);
@@ -78,7 +78,7 @@ fn no_change_test_impl(test_dir: &str, inputs_num: usize) -> Result<(), wallet::
 	});
 
 	// few values to keep things shorter
-	let reward = core::consensus::reward(0, 1);
+	let reward = core::consensus::reward(0, 0, 1);
 
 	// Mine into wallet 1
 	let _ = test_framework::award_blocks_to_wallet(
@@ -87,9 +87,9 @@ fn no_change_test_impl(test_dir: &str, inputs_num: usize) -> Result<(), wallet::
 		mask1,
 		4,
 		false,
-		tx_pool.lock().deref_mut(),
+		tx_pool.lock().expect("Mutex failure").deref_mut(),
 	);
-	let fee = core::libtx::tx_fee(inputs_num, 1, 1);
+	let fee = core::libtx::tx_fee(0, inputs_num, 1, 1);
 
 	// send a single block's worth of transactions with minimal strategy
 	let mut slate = Slate::blank(2, false);
@@ -106,7 +106,7 @@ fn no_change_test_impl(test_dir: &str, inputs_num: usize) -> Result<(), wallet::
 		slate = api.init_send_tx(m, &None, &args, 1)?;
 		slate = client1.send_tx_slate_direct("wallet2", &slate)?;
 		api.tx_lock_outputs(m, &None, &slate, None, 0)?;
-		slate = api.finalize_tx(m, &None, &slate)?;
+		slate = api.finalize_tx(m, &None, &slate, true)?;
 		assert!(slate.tx.clone().unwrap().body.inputs.len() == inputs_num);
 		assert!(slate.tx.clone().unwrap().body.outputs.len() == 1); // only destination output is expected, no change outputs
 		api.post_tx(m, slate.tx_or_err()?, false)?;
@@ -120,7 +120,7 @@ fn no_change_test_impl(test_dir: &str, inputs_num: usize) -> Result<(), wallet::
 		mask1,
 		1,
 		false,
-		tx_pool.lock().deref_mut(),
+		tx_pool.lock().expect("Mutex failure").deref_mut(),
 	);
 
 	// Refresh and check transaction log for wallet 1
@@ -183,7 +183,7 @@ fn no_change_test_impl(test_dir: &str, inputs_num: usize) -> Result<(), wallet::
 		mask1,
 		1,
 		false,
-		tx_pool.lock().deref_mut(),
+		tx_pool.lock().expect("Mutex failure").deref_mut(),
 	);
 
 	// Refresh and check transaction log for wallet 1

@@ -251,6 +251,7 @@ pub struct SwapMessage {
 impl SwapMessage {
 	/// decrypt a received message
 	pub fn from_received(
+		context_id: u32,
 		from: &ProvableAddress,
 		message: String,
 		_challenge: String,
@@ -258,7 +259,7 @@ impl SwapMessage {
 		secret_key: &SecretKey,
 		secp: &Secp256k1,
 	) -> Result<Message, Error> {
-		let public_key = from.public_key().map_err(|e| {
+		let public_key = from.public_key(context_id).map_err(|e| {
 			Error::TradeEncDecError(format!(
 				"Unable to build public key for address {}, {}",
 				from, e

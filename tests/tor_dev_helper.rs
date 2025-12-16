@@ -37,7 +37,7 @@ use mwc_wallet_util::mwc_util as util;
 mod common;
 use common::{execute_command, initial_setup_wallet, instantiate_wallet, setup_global_chain_type};
 use mwc_wallet_util::mwc_core::core::Transaction;
-use mwc_wallet_util::mwc_util::Mutex;
+use std::sync::Mutex;
 // Development testing helper for tor/socks investigation.
 // Not (yet) to be run as part of automated testing
 
@@ -96,7 +96,7 @@ fn socks_tor() -> Result<(), mwc_wallet_controller::Error> {
 		mask1,
 		bh as usize,
 		false,
-		tx_pool.lock().deref_mut(),
+		tx_pool.lock().expect("Mutex failure").deref_mut(),
 	);
 
 	// now, test send from wallet 1 over tor

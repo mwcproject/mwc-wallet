@@ -22,8 +22,9 @@ use mwc_wallet_util::mwc_util as util;
 use clap::{App, ArgMatches};
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::Mutex;
 use std::{env, fs};
-use util::{Mutex, ZeroingString};
+use util::ZeroingString;
 
 use mwc_wallet_api::{EncryptedRequest, EncryptedResponse, JsonId};
 use mwc_wallet_config::{GlobalWalletConfig, WalletConfig, MWC_WALLET_DIR};
@@ -37,6 +38,7 @@ use util::secp::key::{PublicKey, SecretKey};
 use mwc_wallet::cmd::wallet_args;
 use mwc_wallet_util::mwc_api as api;
 
+use mwc_wallet_util::mwc_api::client::HttpClient;
 use mwc_wallet_util::mwc_core::consensus;
 use mwc_wallet_util::mwc_util::secp::Secp256k1;
 use serde::de::DeserializeOwned;
@@ -139,6 +141,7 @@ pub fn setup(test_dir: &str) {
 	clean_output_dir(test_dir);
 	global::set_local_chain_type(global::ChainTypes::AutomatedTesting);
 	global::set_local_accept_fee_base(consensus::MILLI_MWC / 100);
+	global::set_local_nrd_enabled(true);
 }
 
 /// Some tests require the global chain_type to be configured.
@@ -148,7 +151,9 @@ pub fn setup(test_dir: &str) {
 /// leaks across multiple tests and will likely have unintended consequences.
 #[allow(dead_code)]
 pub fn setup_global_chain_type() {
-	global::init_global_chain_type(global::ChainTypes::AutomatedTesting);
+	global::init_global_chain_type(0, global::ChainTypes::AutomatedTesting);
+	global::init_global_nrd_enabled(0, false);
+	global::init_global_accept_fee_base(0, global::DEFAULT_ACCEPT_FEE_BASE);
 }
 
 /// Create a wallet config file in the given current directory
@@ -245,7 +250,7 @@ pub fn instantiate_wallet(
 	mwc_wallet_controller::Error,
 > {
 	wallet_config.chain_type = None;
-	let mut wallet = Box::new(DefaultWalletImpl::<LocalWalletClient>::new(node_client).unwrap())
+	let mut wallet = Box::new(DefaultWalletImpl::<LocalWalletClient>::new(0, node_client))
 		as Box<
 			dyn WalletInst<
 				DefaultLCProvider<'static, LocalWalletClient, ExtKeychain>,
@@ -294,6 +299,7 @@ pub fn execute_command(
 	//unset chain type so it doesn't get reset
 	wallet_config.chain_type = None;
 	wallet_args::wallet_command(
+		0,
 		&args,
 		wallet_config.clone(),
 		tor_config,
@@ -342,6 +348,7 @@ where
 	let tor_config = config.clone().members.unwrap().tor.clone();
 	let mqs_config = config.members.unwrap().mqs;
 	wallet_args::wallet_command(
+		0,
 		&args,
 		wallet_config,
 		tor_config,
@@ -352,13 +359,9 @@ where
 	)
 }
 
-pub fn post<IN>(url: &Url, api_secret: Option<String>, input: &IN) -> Result<String, api::Error>
-where
-	IN: Serialize,
-{
-	// TODO: change create_post_request to accept a url instead of a &str
-	let req = api::client::create_post_request(url.as_str(), api_secret, input)?;
-	let res = api::client::send_request(req, api::client::TimeOut::default())?;
+pub fn post(url: &Url, api_secret: Option<String>, input: &Value) -> Result<Value, api::Error> {
+	let client = HttpClient::new(0, Duration::from_secs(10), api_secret);
+	let res = client.post_request(url.as_str(), input)?;
 	Ok(res)
 }
 
@@ -373,14 +376,13 @@ where
 {
 	let url = Url::parse(dest).unwrap();
 	let req_val: Value = serde_json::from_str(req).unwrap();
-	let res = post(&url, None, &req_val).map_err(|e| {
+	let res_val = post(&url, None, &req_val).map_err(|e| {
 		let err_string = format!("{}", e);
 		println!("{}", err_string);
 		thread::sleep(Duration::from_millis(200));
 		e
 	})?;
 
-	let res_val: Value = serde_json::from_str(&res).unwrap();
 	// encryption error, just return the string
 	if res_val["error"] != json!(null) {
 		return Ok(Err(WalletAPIReturnError {
@@ -389,7 +391,7 @@ where
 		}));
 	}
 
-	let res = serde_json::from_str(&res).unwrap();
+	let res = res_val;
 	let res = easy_jsonrpc_mwc::Response::from_json_response(res).unwrap();
 	let res = res.outputs.get(&id).unwrap().clone().unwrap();
 	if res["Err"] != json!(null) {
@@ -418,14 +420,13 @@ where
 	let url = Url::parse(dest).unwrap();
 	let req_val: Value = serde_json::from_str(req).unwrap();
 	let req = EncryptedRequest::from_json(sec_req_id, &req_val, &shared_key).unwrap();
-	let res = post(&url, None, &req).map_err(|e| {
+	let res_val = post(&url, None, &serde_json::to_value(&req).unwrap()).map_err(|e| {
 		let err_string = format!("{}", e);
 		println!("{}", err_string);
 		thread::sleep(Duration::from_millis(200));
 		e
 	})?;
 
-	let res_val: Value = serde_json::from_str(&res).unwrap();
 	//println!("RES_VAL: {}", res_val);
 	// encryption error, just return the string
 	if res_val["error"] != json!(null) {
@@ -435,7 +436,7 @@ where
 		}));
 	}
 
-	let enc_resp: EncryptedResponse = serde_json::from_str(&res).unwrap();
+	let enc_resp: EncryptedResponse = serde_json::from_value(res_val.clone()).unwrap();
 	let res = enc_resp.decrypt(shared_key).unwrap();
 	if res["error"] != json!(null) {
 		return Ok(Err(WalletAPIReturnError {
@@ -511,5 +512,6 @@ impl From<mwc_wallet_controller::Error> for WalletAPIReturnError {
 	}
 }
 
+#[allow(dead_code)]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct RetrieveSummaryInfoResp(pub bool, pub WalletInfo);

@@ -35,7 +35,7 @@ use common::{clean_output_dir, create_wallet_proxy, setup};
 use mwc_wallet_libwallet::proof::proofaddress::ProvableAddress;
 use mwc_wallet_util::mwc_core::core::Transaction;
 use mwc_wallet_util::mwc_core::global;
-use mwc_wallet_util::mwc_util::Mutex;
+use std::sync::Mutex;
 
 /// Various tests on accounts within the same wallet
 fn payment_proofs_test_impl(test_dir: &str) -> Result<(), wallet::Error> {
@@ -90,7 +90,7 @@ fn payment_proofs_test_impl(test_dir: &str) -> Result<(), wallet::Error> {
 		mask1,
 		bh as usize,
 		false,
-		tx_pool.lock().deref_mut(),
+		tx_pool.lock().expect("Mutex failure").deref_mut(),
 	);
 
 	let mut address = None;
@@ -99,7 +99,7 @@ fn payment_proofs_test_impl(test_dir: &str) -> Result<(), wallet::Error> {
 		Ok(())
 	})?;
 
-	let address = ProvableAddress::from_pub_key(&address.unwrap());
+	let address = ProvableAddress::from_pub_key(0, &address.unwrap());
 	println!("Public address is: {:?}", address);
 	let amount = 2_000_000_000; // mwc value: 60_000_000_000
 	let mut slate = Slate::blank(1, false);
@@ -167,7 +167,7 @@ fn payment_proofs_test_impl(test_dir: &str) -> Result<(), wallet::Error> {
 			assert!(pp.is_err());
 		}
 
-		slate = sender_api.finalize_tx(m, &None, &slate)?;
+		slate = sender_api.finalize_tx(m, &None, &slate, true)?;
 		sender_api.post_tx(m, slate.tx_or_err()?, true)?;
 		Ok(())
 	})?;
@@ -242,7 +242,7 @@ fn payment_proofs_test_impl(test_dir: &str) -> Result<(), wallet::Error> {
 		mask1,
 		2,
 		false,
-		tx_pool.lock().deref_mut(),
+		tx_pool.lock().expect("Mutex failure").deref_mut(),
 	);
 
 	#[cfg(feature = "grin_proof")]

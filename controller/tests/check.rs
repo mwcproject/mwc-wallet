@@ -39,7 +39,7 @@ mod common;
 use common::{clean_output_dir, create_wallet_proxy, setup};
 use mwc_wallet_util::mwc_core::core::Transaction;
 use mwc_wallet_util::mwc_util::secp::Secp256k1;
-use mwc_wallet_util::mwc_util::Mutex;
+use std::sync::Mutex;
 
 macro_rules! send_to_dest {
 	($a:expr, $m: expr, $b:expr, $c:expr, $d:expr) => {
@@ -98,7 +98,7 @@ fn scan_impl(test_dir: &str) {
 
 	// few values to keep things shorter
 	let reward = core::consensus::MWC_FIRST_GROUP_REWARD;
-	let cm = global::coinbase_maturity() as u64; // assume all testing precedes soft fork height
+	let cm = global::coinbase_maturity(0) as u64; // assume all testing precedes soft fork height
 
 	// add some accounts
 	wallet::controller::owner_single_use(Some(wallet1.clone()), mask1, None, |api, m| {
@@ -126,7 +126,7 @@ fn scan_impl(test_dir: &str) {
 		mask1,
 		bh as usize,
 		false,
-		tx_pool.lock().deref_mut(),
+		tx_pool.lock().expect("Mutex failure").deref_mut(),
 	);
 
 	// Sanity check contents
@@ -215,7 +215,8 @@ fn scan_impl(test_dir: &str) {
 
 		// output tx file
 		let send_file = format!("{}/part_tx_1.tx", test_dir);
-		PathToSlatePutter::build_plain(Some(send_file.into())).put_tx(&slate, None, true, &secp)?;
+		PathToSlatePutter::build_plain(0, Some(send_file.into()))
+			.put_tx(&slate, None, true, &secp)?;
 		api.tx_lock_outputs(m, &None, &slate, None, 0)?;
 		Ok(())
 	})
@@ -405,7 +406,7 @@ fn two_wallets_one_seed_impl(test_dir: &str) {
 
 	// few values to keep things shorter
 	let _reward = core::consensus::MWC_FIRST_GROUP_REWARD;
-	let cm = global::coinbase_maturity() as usize; // assume all testing precedes soft fork height
+	let cm = global::coinbase_maturity(0) as usize; // assume all testing precedes soft fork height
 
 	// Do some mining
 	let mut bh = 20u64;
@@ -416,7 +417,7 @@ fn two_wallets_one_seed_impl(test_dir: &str) {
 		miner_mask,
 		bh as usize,
 		false,
-		tx_pool.lock().deref_mut(),
+		tx_pool.lock().expect("Mutex failure").deref_mut(),
 	);
 
 	// send some funds to wallets 1
@@ -434,7 +435,7 @@ fn two_wallets_one_seed_impl(test_dir: &str) {
 		miner_mask,
 		1,
 		false,
-		tx_pool.lock().deref_mut(),
+		tx_pool.lock().expect("Mutex failure").deref_mut(),
 	);
 	send_to_dest!(
 		miner.clone(),
@@ -450,7 +451,7 @@ fn two_wallets_one_seed_impl(test_dir: &str) {
 		miner_mask,
 		1,
 		false,
-		tx_pool.lock().deref_mut(),
+		tx_pool.lock().expect("Mutex failure").deref_mut(),
 	);
 	send_to_dest!(
 		miner.clone(),
@@ -466,7 +467,7 @@ fn two_wallets_one_seed_impl(test_dir: &str) {
 		miner_mask,
 		1,
 		false,
-		tx_pool.lock().deref_mut(),
+		tx_pool.lock().expect("Mutex failure").deref_mut(),
 	);
 	bh += 3;
 
@@ -495,7 +496,7 @@ fn two_wallets_one_seed_impl(test_dir: &str) {
 		miner_mask,
 		1,
 		false,
-		tx_pool.lock().deref_mut(),
+		tx_pool.lock().expect("Mutex failure").deref_mut(),
 	);
 	send_to_dest!(
 		miner.clone(),
@@ -511,7 +512,7 @@ fn two_wallets_one_seed_impl(test_dir: &str) {
 		miner_mask,
 		1,
 		false,
-		tx_pool.lock().deref_mut(),
+		tx_pool.lock().expect("Mutex failure").deref_mut(),
 	);
 	send_to_dest!(
 		miner.clone(),
@@ -527,7 +528,7 @@ fn two_wallets_one_seed_impl(test_dir: &str) {
 		miner_mask,
 		1,
 		false,
-		tx_pool.lock().deref_mut(),
+		tx_pool.lock().expect("Mutex failure").deref_mut(),
 	);
 	bh += 3;
 
@@ -537,7 +538,7 @@ fn two_wallets_one_seed_impl(test_dir: &str) {
 		miner_mask,
 		cm,
 		false,
-		tx_pool.lock().deref_mut(),
+		tx_pool.lock().expect("Mutex failure").deref_mut(),
 	);
 	bh += cm as u64;
 
@@ -606,7 +607,7 @@ fn two_wallets_one_seed_impl(test_dir: &str) {
 		miner_mask,
 		1,
 		false,
-		tx_pool.lock().deref_mut(),
+		tx_pool.lock().expect("Mutex failure").deref_mut(),
 	);
 	send_to_dest!(
 		miner.clone(),
@@ -622,7 +623,7 @@ fn two_wallets_one_seed_impl(test_dir: &str) {
 		miner_mask,
 		1,
 		false,
-		tx_pool.lock().deref_mut(),
+		tx_pool.lock().expect("Mutex failure").deref_mut(),
 	);
 	send_to_dest!(
 		miner.clone(),
@@ -638,7 +639,7 @@ fn two_wallets_one_seed_impl(test_dir: &str) {
 		miner_mask,
 		1,
 		false,
-		tx_pool.lock().deref_mut(),
+		tx_pool.lock().expect("Mutex failure").deref_mut(),
 	);
 	bh += 3;
 
@@ -648,7 +649,7 @@ fn two_wallets_one_seed_impl(test_dir: &str) {
 		miner_mask,
 		cm,
 		false,
-		tx_pool.lock().deref_mut(),
+		tx_pool.lock().expect("Mutex failure").deref_mut(),
 	);
 	bh += cm as u64;
 
@@ -692,7 +693,7 @@ fn two_wallets_one_seed_impl(test_dir: &str) {
 		miner_mask,
 		1,
 		false,
-		tx_pool.lock().deref_mut(),
+		tx_pool.lock().expect("Mutex failure").deref_mut(),
 	);
 	send_to_dest!(
 		miner.clone(),
@@ -708,7 +709,7 @@ fn two_wallets_one_seed_impl(test_dir: &str) {
 		miner_mask,
 		1,
 		false,
-		tx_pool.lock().deref_mut(),
+		tx_pool.lock().expect("Mutex failure").deref_mut(),
 	);
 	send_to_dest!(
 		miner.clone(),
@@ -724,7 +725,7 @@ fn two_wallets_one_seed_impl(test_dir: &str) {
 		miner_mask,
 		1,
 		false,
-		tx_pool.lock().deref_mut(),
+		tx_pool.lock().expect("Mutex failure").deref_mut(),
 	);
 	bh += 3;
 
@@ -734,7 +735,7 @@ fn two_wallets_one_seed_impl(test_dir: &str) {
 		miner_mask,
 		cm,
 		false,
-		tx_pool.lock().deref_mut(),
+		tx_pool.lock().expect("Mutex failure").deref_mut(),
 	);
 	bh += cm as u64;
 
@@ -779,7 +780,7 @@ fn two_wallets_one_seed_impl(test_dir: &str) {
 		miner_mask,
 		1,
 		false,
-		tx_pool.lock().deref_mut(),
+		tx_pool.lock().expect("Mutex failure").deref_mut(),
 	);
 	send_to_dest!(
 		miner.clone(),
@@ -795,7 +796,7 @@ fn two_wallets_one_seed_impl(test_dir: &str) {
 		miner_mask,
 		1,
 		false,
-		tx_pool.lock().deref_mut(),
+		tx_pool.lock().expect("Mutex failure").deref_mut(),
 	);
 	send_to_dest!(
 		miner.clone(),
@@ -811,7 +812,7 @@ fn two_wallets_one_seed_impl(test_dir: &str) {
 		miner_mask,
 		1,
 		false,
-		tx_pool.lock().deref_mut(),
+		tx_pool.lock().expect("Mutex failure").deref_mut(),
 	);
 	bh += 3;
 
@@ -837,7 +838,7 @@ fn two_wallets_one_seed_impl(test_dir: &str) {
 		miner_mask,
 		1,
 		false,
-		tx_pool.lock().deref_mut(),
+		tx_pool.lock().expect("Mutex failure").deref_mut(),
 	);
 	send_to_dest!(
 		miner.clone(),
@@ -853,7 +854,7 @@ fn two_wallets_one_seed_impl(test_dir: &str) {
 		miner_mask,
 		1,
 		false,
-		tx_pool.lock().deref_mut(),
+		tx_pool.lock().expect("Mutex failure").deref_mut(),
 	);
 	send_to_dest!(
 		miner.clone(),
@@ -869,7 +870,7 @@ fn two_wallets_one_seed_impl(test_dir: &str) {
 		miner_mask,
 		1,
 		false,
-		tx_pool.lock().deref_mut(),
+		tx_pool.lock().expect("Mutex failure").deref_mut(),
 	);
 	bh += 3;
 
@@ -880,7 +881,7 @@ fn two_wallets_one_seed_impl(test_dir: &str) {
 		miner_mask,
 		cm,
 		false,
-		tx_pool.lock().deref_mut(),
+		tx_pool.lock().expect("Mutex failure").deref_mut(),
 	);
 	bh += cm as u64;
 
@@ -938,7 +939,7 @@ fn two_wallets_one_seed_impl(test_dir: &str) {
 		miner_mask,
 		1,
 		false,
-		tx_pool.lock().deref_mut(),
+		tx_pool.lock().expect("Mutex failure").deref_mut(),
 	);
 	send_to_dest!(
 		miner.clone(),
@@ -954,7 +955,7 @@ fn two_wallets_one_seed_impl(test_dir: &str) {
 		miner_mask,
 		1,
 		false,
-		tx_pool.lock().deref_mut(),
+		tx_pool.lock().expect("Mutex failure").deref_mut(),
 	);
 	send_to_dest!(
 		miner.clone(),
@@ -970,7 +971,7 @@ fn two_wallets_one_seed_impl(test_dir: &str) {
 		miner_mask,
 		1,
 		false,
-		tx_pool.lock().deref_mut(),
+		tx_pool.lock().expect("Mutex failure").deref_mut(),
 	);
 	bh += 3;
 	let _bh = bh;
@@ -1001,7 +1002,7 @@ fn two_wallets_one_seed_impl(test_dir: &str) {
 		miner_mask,
 		cm,
 		false,
-		tx_pool.lock().deref_mut(),
+		tx_pool.lock().expect("Mutex failure").deref_mut(),
 	);
 
 	// 7) Ensure scan creates missing accounts
@@ -1063,7 +1064,7 @@ fn output_scanning_impl(test_dir: &str) -> Result<(), wallet::Error> {
 		mask1,
 		bh as usize,
 		false,
-		tx_pool.lock().deref_mut(),
+		tx_pool.lock().expect("Mutex failure").deref_mut(),
 	);
 
 	// Now some chain scanning

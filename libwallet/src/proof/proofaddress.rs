@@ -27,27 +27,12 @@ use serde::{Deserialize, Deserializer, Serializer};
 use sha2::{Digest, Sha512};
 use std::convert::TryFrom;
 use std::fmt::{self, Display};
-use std::sync::atomic::{AtomicU32, Ordering};
 use x25519_dalek::{PublicKey as xDalekPublicKey, StaticSecret as xDalekSecretKey};
 
 /// Address prefixes for mainnet
 pub const PROOFABLE_ADDRESS_VERSION_MAINNET: [u8; 2] = [1, 69];
 /// Address prefixes for floonet
 pub const PROOFABLE_ADDRESS_VERSION_TESTNET: [u8; 2] = [1, 121];
-
-lazy_static! {
-	/// Wallet address derive index
-	static ref ADDRESS_INDEX: AtomicU32 = AtomicU32::new(0);
-}
-
-/// Set address derivative index
-pub fn set_address_index(addr_idx: u32) {
-	ADDRESS_INDEX.store(addr_idx, Ordering::Relaxed);
-}
-/// Get address derivative index
-pub fn get_address_index() -> u32 {
-	ADDRESS_INDEX.load(Ordering::Relaxed)
-}
 
 /// Address that can have a proof. Such address need to be able to convertable to
 /// the public key
@@ -80,11 +65,11 @@ impl ProvableAddress {
 	}
 
 	/// new instance
-	pub fn from_str(public_key: &str) -> Result<Self, Error> {
+	pub fn from_str(context_id: u32, public_key: &str) -> Result<Self, Error> {
 		// Just check if it works
 		//this can be either PublicKey or DalekPublicKey
 		if public_key.len() != 56 {
-			PublicKey::from_base58_check(public_key, version_bytes())?;
+			PublicKey::from_base58_check(public_key, version_bytes(context_id))?;
 		}
 
 		Ok(Self {
@@ -95,17 +80,17 @@ impl ProvableAddress {
 	}
 
 	/// Create address from public key
-	pub fn from_pub_key(public_key: &PublicKey) -> Self {
+	pub fn from_pub_key(context_id: u32, public_key: &PublicKey) -> Self {
 		Self {
-			public_key: public_key.to_base58_check(version_bytes()),
+			public_key: public_key.to_base58_check(version_bytes(context_id)),
 			domain: String::new(),
 			port: None,
 		}
 	}
 
 	/// Get public key that represent this address
-	pub fn public_key(&self) -> Result<PublicKey, Error> {
-		PublicKey::from_base58_check(&self.public_key, version_bytes())
+	pub fn public_key(&self, context_id: u32) -> Result<PublicKey, Error> {
+		PublicKey::from_base58_check(&self.public_key, version_bytes(context_id))
 	}
 	/// Create address from public key
 	pub fn from_tor_pub_key(public_key: &DalekPublicKey) -> Self {
@@ -195,8 +180,8 @@ impl<'de> Deserialize<'de> for ProvableAddress {
 }
 
 /// provable address prefix.
-pub fn version_bytes() -> Vec<u8> {
-	if global::is_mainnet() {
+pub fn version_bytes(context_id: u32) -> Vec<u8> {
+	if global::is_mainnet(context_id) {
 		PROOFABLE_ADDRESS_VERSION_MAINNET.to_vec()
 	} else {
 		PROOFABLE_ADDRESS_VERSION_TESTNET.to_vec()
@@ -241,17 +226,20 @@ pub enum ProofAddressType {
 
 /// provable address public key
 pub fn payment_proof_address<K>(
+	context_id: u32,
 	keychain: &K,
 	addr_type: ProofAddressType,
+	address_index: u32,
 ) -> Result<ProvableAddress, Error>
 where
 	K: Keychain,
 {
-	payment_proof_address_from_index(keychain, get_address_index(), addr_type)
+	payment_proof_address_from_index(context_id, keychain, address_index, addr_type)
 }
 
 /// provable address public key
 pub fn payment_proof_address_from_index<K>(
+	context_id: u32,
 	keychain: &K,
 	index: u32,
 	addr_type: ProofAddressType,
@@ -259,43 +247,47 @@ pub fn payment_proof_address_from_index<K>(
 where
 	K: Keychain,
 {
-	let secret_key = payment_proof_address_secret(keychain, Some(index))?;
+	let secret_key = payment_proof_address_secret(context_id, keychain, index)?;
 
 	match addr_type {
 		ProofAddressType::MQS => {
 			let sender_address_pub_key =
 				crypto::public_key_from_secret_key(keychain.secp(), &secret_key)?;
-			Ok(ProvableAddress::from_pub_key(&sender_address_pub_key))
+			Ok(ProvableAddress::from_pub_key(
+				context_id,
+				&sender_address_pub_key,
+			))
 		}
 		ProofAddressType::Onion => {
 			let onion_address = OnionV3Address::from_private(&secret_key.0)?;
 			let dalek_pubkey = onion_address.to_ov3_str();
-			Ok(ProvableAddress::from_str(&dalek_pubkey)?)
+			Ok(ProvableAddress::from_str(context_id, &dalek_pubkey)?)
 		}
 	}
 }
 
 /// Current secret that is used for public wallet address
 pub fn payment_proof_address_secret<K>(
+	context_id: u32,
 	keychain: &K,
-	address_index: Option<u32>,
+	address_index: u32,
 ) -> Result<SecretKey, Error>
 where
 	K: Keychain,
 {
-	let index = address_index.unwrap_or(get_address_index());
-	hasher::derive_address_key(keychain, index).map_err(|e| e.into())
+	hasher::derive_address_key(context_id, keychain, address_index).map_err(|e| e.into())
 }
 
 /// Current secret that is used for public wallet address, DalekSecret type
 pub fn payment_proof_address_dalek_secret<K>(
+	context_id: u32,
 	keychain: &K,
-	address_index: Option<u32>,
+	address_index: u32,
 ) -> Result<DalekSecretKey, Error>
 where
 	K: Keychain,
 {
-	let sk = payment_proof_address_secret(keychain, address_index)?;
+	let sk = payment_proof_address_secret(context_id, keychain, address_index)?;
 	let dalek_sk = DalekSecretKey::from_bytes(&sk.0).map_err(|e| {
 		Error::SlatepackDecodeError(format!("Unable to convert key to decrypt, {}", e))
 	})?;
@@ -303,11 +295,16 @@ where
 }
 
 /// Get a payment address as secp Public Key (for MQS)
-pub fn payment_proof_address_pubkey<K>(keychain: &K) -> Result<PublicKey, Error>
+pub fn payment_proof_address_pubkey<K>(
+	context_id: u32,
+	keychain: &K,
+	address_index: u32,
+) -> Result<PublicKey, Error>
 where
 	K: Keychain,
 {
-	let sender_address_secret_key = payment_proof_address_secret(keychain, None)?;
+	let sender_address_secret_key =
+		payment_proof_address_secret(context_id, keychain, address_index)?;
 	crypto::public_key_from_secret_key(keychain.secp(), &sender_address_secret_key)
 }
 

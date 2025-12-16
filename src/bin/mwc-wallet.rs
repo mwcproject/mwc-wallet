@@ -23,19 +23,15 @@ extern crate mwc_wallet_util;
 extern crate log;
 use crate::config::ConfigError;
 use crate::core::global;
-use crate::util::init_logger;
 use clap::{App, AppSettings};
 use mwc_wallet_config as config;
 use mwc_wallet_impls::HTTPNodeClient;
-use mwc_wallet_util::mwc_core as core;
-use mwc_wallet_util::mwc_util as util;
+use mwc_wallet_util::{mwc_core as core, mwc_node_workflow};
 use std::env;
 use std::path::PathBuf;
 
 use mwc_wallet::cmd;
 use mwc_wallet_config::parse_node_address_string;
-use mwc_wallet_controller::controller::{set_foreign_api_server, set_owner_api_server};
-use mwc_wallet_libwallet::proof::proofaddress;
 
 // include build information
 pub mod built_info {
@@ -141,13 +137,41 @@ fn real_main() -> i32 {
 		("cli", _) => l.log_to_stdout = true,
 		_ => {}
 	};
-	init_logger(Some(l), None);
+	let logs_rx = mwc_node_workflow::logging::init_bin_logs(&l);
+	if logs_rx.is_some() {
+		println!("Invalid logs configuration. Looks like config from node was used");
+		return 0;
+	}
+
 	info!(
 		"Using wallet configuration file at {}",
 		config.config_file_path.as_ref().unwrap().to_str().unwrap()
 	);
 
 	log_build_info();
+
+	let context_id = match mwc_node_workflow::context::allocate_new_context(
+		*config
+			.members
+			.as_ref()
+			.unwrap()
+			.wallet
+			.chain_type
+			.as_ref()
+			.unwrap(),
+		config.members.as_ref().unwrap().wallet.tx_fee_base.clone(),
+		None,
+		&None,
+	) {
+		Ok(c_id) => c_id,
+		Err(e) => {
+			println!("Unable to allocate the context. {}", e);
+			error!("Unable to allocate the context. {}", e);
+			return -1;
+		}
+	};
+
+	mwc_wallet_workflow::wallet::init_wallet_context(context_id);
 
 	// Let's validate config for Windows, api_listen_interface & tor.tor_enabled
 	#[cfg(target_os = "windows")]
@@ -173,35 +197,26 @@ fn real_main() -> i32 {
 		}
 	}
 
-	global::init_global_chain_type(
-		config
-			.members
-			.as_ref()
-			.unwrap()
-			.wallet
-			.chain_type
-			.as_ref()
-			.unwrap()
-			.clone(),
-	);
-
-	global::init_global_accept_fee_base(config.members.as_ref().unwrap().wallet.tx_fee_base());
-
 	let wallet_config = config.clone().members.unwrap().wallet;
 
-	// Default derive index is 1 to match what mwc713 has by default...
-	proofaddress::set_address_index(wallet_config.mwcbox_address_index.unwrap_or(0));
+	let check_node_api_http_addr = match &wallet_config.check_node_api_http_addr {
+		Some(s) => s.clone(),
+		None => {
+			println!("Invalid wallet configuration. check_node_api_http_addr is not defined");
+			return 0;
+		}
+	};
 
 	//parse the nodes address and put them in a vec
-	let node_list = parse_node_address_string(wallet_config.check_node_api_http_addr.clone());
-	let node_client = HTTPNodeClient::new(node_list, None)
+	let node_list = parse_node_address_string(check_node_api_http_addr);
+	let node_client = HTTPNodeClient::new(context_id, node_list, None)
 		.expect("Unable create HTTP client for mwc-node connection");
 
-	let res = cmd::wallet_command(&args, config, node_client);
+	let res = cmd::wallet_command(context_id, &args, config, node_client);
 
-	// stopping AI threads if they exist. We need to be clean
-	set_foreign_api_server(None);
-	set_owner_api_server(None);
+	// stopping all threads if they exist. We need to be clean them. Currently it is context, enough to release
+	mwc_wallet_workflow::wallet::release_wallet_context(context_id);
+	let _ = mwc_node_workflow::context::release_context(context_id);
 
 	res
 }

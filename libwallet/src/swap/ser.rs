@@ -16,23 +16,10 @@ use crate::mwc_util::secp::key::{PublicKey, SecretKey};
 use crate::mwc_util::secp::pedersen::Commitment;
 use crate::mwc_util::secp::Signature;
 use crate::swap::Error;
-use crate::{Slate, VersionedSlate};
 use hex::{self, FromHex};
 use mwc_wallet_util::mwc_util::secp::{ContextFlag, Secp256k1};
 use mwc_wallet_util::mwc_util::ToHex;
 use serde::{Deserialize, Deserializer, Serializer};
-
-/// Slate deserialization
-pub fn slate_deser<'a, D>(deserializer: D) -> Result<Slate, D::Error>
-where
-	D: Deserializer<'a>,
-{
-	use serde::de::Error;
-	let s = VersionedSlate::deserialize(deserializer)?;
-	// Swaps are not using the slatepacks.
-	s.into_slate_plain(true)
-		.map_err(|e| D::Error::custom(format!("{}", e)))
-}
 
 /// Serialize Vec<u8> as HEX
 pub fn bytes_to_hex<S>(key: &Vec<u8>, serializer: S) -> Result<S::Ok, S::Error>

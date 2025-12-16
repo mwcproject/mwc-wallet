@@ -16,7 +16,6 @@ use super::Error;
 use crate::mwc_core::global;
 use crate::mwc_util::secp::key::SecretKey;
 use crate::mwc_util::{from_hex, to_hex};
-use crate::mwc_util::{Mutex, RwLock};
 use crate::swap::types::{Context, Currency};
 use crate::swap::Swap;
 use base64;
@@ -29,6 +28,7 @@ use std::io::{Read, Write};
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::{Mutex, RwLock};
 
 /// Location of the swaps states
 pub const SWAP_DEAL_SAVE_DIR: &'static str = "saved_swap_deal";
@@ -38,17 +38,43 @@ pub const SWAP_DEAL_DELETED_DIR: &'static str = "deleted";
 pub const SWAP_DEAL_MKT_DELETED_DIR: &'static str = "deleted_mkt";
 
 lazy_static! {
-	static ref TRADE_DEALS_PATH: RwLock<Option<PathBuf>> = RwLock::new(None);
-	static ref ELECTRUM_X_URI: RwLock<Option<BTreeMap<String, String>>> = RwLock::new( Some(BTreeMap::new()));
-	static ref ETH_SWAP_CONTRACT_ADDR: RwLock<Option<String>> = RwLock::new(None);
-	static ref ERC20_SWAP_CONTRACT_ADDR: RwLock<Option<String>> = RwLock::new(None);
-	static ref ETH_INFURA_PROJECTID: RwLock<Option<String>> = RwLock::new(None);
+	static ref TRADE_DEALS_PATH: RwLock<HashMap<u32,PathBuf>> = RwLock::new(HashMap::new());
+	static ref ELECTRUM_X_URI: RwLock<HashMap<u32,BTreeMap<String, String>>> = RwLock::new(HashMap::new());
+	static ref ETH_SWAP_CONTRACT_ADDR: RwLock<HashMap<u32,String>> = RwLock::new(HashMap::new());
+	static ref ERC20_SWAP_CONTRACT_ADDR: RwLock<HashMap<u32,String>> = RwLock::new(HashMap::new());
+	static ref ETH_INFURA_PROJECTID: RwLock<HashMap<u32,String>> = RwLock::new(HashMap::new());
 	// Locks for the swap reads. Note, all instances are in the memory, we don't expect too many of them
+	// No needs for context id, the key is a swap id which is suppose to be unique
 	static ref SWAP_LOCKS: RwLock<HashMap< String, Arc<Mutex<()>>>> = RwLock::new(HashMap::new());
+}
+
+/// Context clean up
+pub fn trades_clean_context(context_id: u32) {
+	let _ = TRADE_DEALS_PATH
+		.write()
+		.expect("RwLock failure")
+		.remove(&context_id);
+	let _ = ELECTRUM_X_URI
+		.write()
+		.expect("RwLock failure")
+		.remove(&context_id);
+	let _ = ETH_SWAP_CONTRACT_ADDR
+		.write()
+		.expect("RwLock failure")
+		.remove(&context_id);
+	let _ = ERC20_SWAP_CONTRACT_ADDR
+		.write()
+		.expect("RwLock failure")
+		.remove(&context_id);
+	let _ = ETH_INFURA_PROJECTID
+		.write()
+		.expect("RwLock failure")
+		.remove(&context_id);
 }
 
 /// Init for file storage for saving swap deals
 pub fn init_swap_trade_backend(
+	context_id: u32,
 	data_file_dir: &str,
 	electrumx_config_uri: &Option<BTreeMap<String, String>>,
 	eth_swap_contract_addr: &Option<String>,
@@ -65,59 +91,72 @@ pub fn init_swap_trade_backend(
 	let deleted_mkts = stored_swap_deal_path.join(SWAP_DEAL_MKT_DELETED_DIR);
 	fs::create_dir_all(&deleted_mkts).expect("Could not create swap deal storage directory!");
 
-	TRADE_DEALS_PATH.write().replace(stored_swap_deal_path);
+	TRADE_DEALS_PATH
+		.write()
+		.expect("RwLock failure")
+		.insert(context_id, stored_swap_deal_path);
 	if electrumx_config_uri.is_some() {
 		ELECTRUM_X_URI
 			.write()
-			.replace(electrumx_config_uri.clone().unwrap());
+			.expect("RwLock failure")
+			.insert(context_id, electrumx_config_uri.clone().unwrap());
 	}
 
 	if eth_swap_contract_addr.is_some() {
 		ETH_SWAP_CONTRACT_ADDR
 			.write()
-			.replace(eth_swap_contract_addr.clone().unwrap());
+			.expect("RwLock failure")
+			.insert(context_id, eth_swap_contract_addr.clone().unwrap());
 	}
 
 	if erc20_swap_contract_addr.is_some() {
 		ERC20_SWAP_CONTRACT_ADDR
 			.write()
-			.replace(erc20_swap_contract_addr.clone().unwrap());
+			.expect("RwLock failure")
+			.insert(context_id, erc20_swap_contract_addr.clone().unwrap());
 	}
 
 	if eth_infura_projectid.is_some() {
 		ETH_INFURA_PROJECTID
 			.write()
-			.replace(eth_infura_projectid.clone().unwrap());
+			.expect("RwLock failure")
+			.insert(context_id, eth_infura_projectid.clone().unwrap());
 	}
 }
 
 /// Get ElextrumX URL.
 pub fn get_electrumx_uri(
+	context_id: u32,
 	currency: &Currency,
 	swap_electrum_node_uri1: &Option<String>,
 	swap_electrum_node_uri2: &Option<String>,
 ) -> Result<(String, String), Error> {
-	let network = if global::is_mainnet() { "main" } else { "test" };
+	let network = if global::is_mainnet(context_id) {
+		"main"
+	} else {
+		"test"
+	};
 
-	let map = ELECTRUM_X_URI.read();
+	let map = ELECTRUM_X_URI.read().expect("RwLock failure");
 	let sec_coin = currency.to_string().to_lowercase();
 
 	// unwrap_or/unwrap_or_else  doesn't work because we don't wanle evaluate else part and else part can report error.
 	let uri1 = match swap_electrum_node_uri1.clone() {
 		Some(s) => s,
 		None => map
-			.as_ref()
-			.unwrap()
-			.get(&format!("{}_{}_1", sec_coin, network))
+			.get(&context_id)
+			.map(|uri_map| uri_map.get(&format!("{}_{}_1", sec_coin, network)))
+			.ok_or(Error::UndefinedElectrumXURI("primary".to_string()))?
 			.ok_or(Error::UndefinedElectrumXURI("primary".to_string()))?
 			.clone(),
 	};
 	let uri2 = match swap_electrum_node_uri2.clone() {
 		Some(s) => s,
 		None => map
+			.get(&context_id)
 			.as_ref()
-			.unwrap()
-			.get(&format!("{}_{}_2", sec_coin, network))
+			.map(|uri_map| uri_map.get(&format!("{}_{}_2", sec_coin, network)))
+			.ok_or(Error::UndefinedElectrumXURI("secondary".to_string()))?
 			.ok_or(Error::UndefinedElectrumXURI("secondary".to_string()))?
 			.clone(),
 	};
@@ -127,10 +166,15 @@ pub fn get_electrumx_uri(
 
 /// Get etherum contract addr.
 pub fn get_eth_swap_contract_address(
+	context_id: u32,
 	_currency: &Currency,
 	eth_swap_contract_addr: &Option<String>,
 ) -> Result<String, Error> {
-	let swap_contract_addresss = ETH_SWAP_CONTRACT_ADDR.read().clone();
+	let swap_contract_addresss = ETH_SWAP_CONTRACT_ADDR
+		.read()
+		.expect("RwLock failure")
+		.get(&context_id)
+		.cloned();
 
 	match eth_swap_contract_addr.clone() {
 		Some(s) => Ok(s),
@@ -143,10 +187,15 @@ pub fn get_eth_swap_contract_address(
 
 /// Get erc20 contract addr.
 pub fn get_erc20_swap_contract_address(
+	context_id: u32,
 	_currency: &Currency,
 	erc20_swap_contract_addr: &Option<String>,
 ) -> Result<String, Error> {
-	let swap_contract_addresss = ERC20_SWAP_CONTRACT_ADDR.read().clone();
+	let swap_contract_addresss = ERC20_SWAP_CONTRACT_ADDR
+		.read()
+		.expect("RwLock failure")
+		.get(&context_id)
+		.cloned();
 
 	match erc20_swap_contract_addr.clone() {
 		Some(s) => Ok(s),
@@ -159,10 +208,15 @@ pub fn get_erc20_swap_contract_address(
 
 /// Get etherum infura project id.
 pub fn get_eth_infura_projectid(
+	context_id: u32,
 	_currency: &Currency,
 	eth_infura_projectid: &Option<String>,
 ) -> Result<String, Error> {
-	let infura_project_id = ETH_INFURA_PROJECTID.read().clone();
+	let infura_project_id = ETH_INFURA_PROJECTID
+		.read()
+		.expect("RwLock failure")
+		.get(&context_id)
+		.cloned();
 
 	match eth_infura_projectid.clone() {
 		Some(s) => Ok(s),
@@ -174,10 +228,17 @@ pub fn get_eth_infura_projectid(
 }
 
 /// List available swap trades.
-pub fn list_swap_trades() -> Result<Vec<String>, Error> {
+pub fn list_swap_trades(context_id: u32) -> Result<Vec<String>, Error> {
 	let mut result: Vec<String> = Vec::new();
 
-	for entry in fs::read_dir(TRADE_DEALS_PATH.read().clone().unwrap())? {
+	let path = TRADE_DEALS_PATH
+		.read()
+		.expect("RwLock failure")
+		.get(&context_id)
+		.cloned()
+		.ok_or(Error::UndefinedTradeDealsPath)?;
+
+	for entry in fs::read_dir(path)? {
 		let entry = entry?;
 		if let Some(name) = entry.file_name().to_str() {
 			if name.ends_with(".swap") {
@@ -191,7 +252,7 @@ pub fn list_swap_trades() -> Result<Vec<String>, Error> {
 
 /// Caller suppose to lock the swap object first before call other swap related functions.
 pub fn get_swap_lock(swap_id: &String) -> Arc<Mutex<()>> {
-	let mut swap_lock_hash = SWAP_LOCKS.write();
+	let mut swap_lock_hash = SWAP_LOCKS.write().expect("RwLock failure");
 	match swap_lock_hash.get(swap_id) {
 		Some(l) => l.clone(),
 		None => {
@@ -205,18 +266,19 @@ pub fn get_swap_lock(swap_id: &String) -> Arc<Mutex<()>> {
 /// Remove swap trade record.
 /// Note! You don't want to remove the non compelete deal. You can loose funds because of that.
 pub fn delete_swap_trade(
+	context_id: u32,
 	swap_id: &str,
 	dec_key: &SecretKey,
 	lock: &Mutex<()>,
 ) -> Result<(), Error> {
-	if lock.try_lock().is_some() {
+	if lock.try_lock().is_ok() {
 		return Err(Error::Generic(format!(
 			"delete_swap_trade processing unlocked instance {}",
 			swap_id
 		)));
 	}
 
-	let (_context, swap) = get_swap_trade(swap_id, dec_key, lock)?;
+	let (_context, swap) = get_swap_trade(context_id, swap_id, dec_key, lock)?;
 	if !swap.state.is_final_state() {
 		return Err(Error::Generic(format!(
 			"Swap {} is still in the progress. Please finish or cancel this trade",
@@ -226,8 +288,10 @@ pub fn delete_swap_trade(
 
 	let target_path = TRADE_DEALS_PATH
 		.read()
-		.clone()
-		.unwrap()
+		.expect("RwLock failure")
+		.get(&context_id)
+		.cloned()
+		.ok_or(Error::UndefinedTradeDealsPath)?
 		.join(format!("{}.swap", swap_id));
 
 	let del_dir = if swap.tag.is_some()
@@ -240,8 +304,10 @@ pub fn delete_swap_trade(
 
 	let deleted_path = TRADE_DEALS_PATH
 		.read()
-		.clone()
-		.unwrap()
+		.expect("RwLock failure")
+		.get(&context_id)
+		.cloned()
+		.ok_or(Error::UndefinedTradeDealsPath)?
 		.join(del_dir)
 		.join(format!("{}.swap.del", swap_id));
 
@@ -254,11 +320,12 @@ pub fn delete_swap_trade(
 /// Get swap trade from the storage.
 /// Mutex is provided for the locking. We want to restrict an access to it
 pub fn get_swap_trade(
+	context_id: u32,
 	swap_id: &str,
 	dec_key: &SecretKey,
 	lock: &Mutex<()>,
 ) -> Result<(Context, Swap), Error> {
-	if lock.try_lock().is_some() {
+	if lock.try_lock().is_ok() {
 		return Err(Error::Generic(format!(
 			"get_swap_trade processing unlocked instance {}",
 			swap_id
@@ -267,14 +334,16 @@ pub fn get_swap_trade(
 
 	let path = TRADE_DEALS_PATH
 		.read()
-		.clone()
-		.unwrap()
+		.expect("RwLock failure")
+		.get(&context_id)
+		.cloned()
+		.ok_or(Error::UndefinedTradeDealsPath)?
 		.join(format!("{}.swap", swap_id));
 	if !path.exists() {
 		return Err(Error::TradeNotFound(swap_id.to_string()));
 	}
 
-	read_swap_data_from_file(path.as_path(), dec_key)
+	read_swap_data_from_file(context_id, path.as_path(), dec_key)
 }
 
 fn read_swap_content(path: &Path, dec_key: &SecretKey) -> Result<String, Error> {
@@ -299,7 +368,11 @@ fn read_swap_content(path: &Path, dec_key: &SecretKey) -> Result<String, Error> 
 	Ok(dec_swap_content)
 }
 
-fn read_swap_data_from_file(path: &Path, dec_key: &SecretKey) -> Result<(Context, Swap), Error> {
+fn read_swap_data_from_file(
+	context_id: u32,
+	path: &Path,
+	dec_key: &SecretKey,
+) -> Result<(Context, Swap), Error> {
 	let dec_swap_content = read_swap_content(path, dec_key)?;
 
 	let mut split = dec_swap_content.split("<#>");
@@ -329,17 +402,20 @@ fn read_swap_data_from_file(path: &Path, dec_key: &SecretKey) -> Result<(Context
 		))
 	})?;
 
+	swap.validate_network(context_id)?;
+
 	Ok((context, swap))
 }
 
 /// Store swap deal to a file
 pub fn store_swap_trade(
+	context_id: u32,
 	context: &Context,
 	swap: &Swap,
 	enc_key: &SecretKey,
 	lock: &Mutex<()>,
 ) -> Result<(), Error> {
-	if lock.try_lock().is_some() {
+	if lock.try_lock().is_ok() {
 		return Err(Error::Generic(format!(
 			"store_swap_trade processing unlocked instance {}",
 			swap.id
@@ -352,8 +428,10 @@ pub fn store_swap_trade(
 	let r: u64 = rng.gen();
 	let path = TRADE_DEALS_PATH
 		.read()
-		.clone()
-		.unwrap()
+		.expect("RwLock failure")
+		.get(&context_id)
+		.cloned()
+		.ok_or(Error::UndefinedTradeDealsPath)?
 		.join(format!("{}.swap_{}.bak", swap_id, r));
 	{
 		let mut stored_swap = File::create(path.clone()).map_err(|e| {
@@ -411,8 +489,10 @@ pub fn store_swap_trade(
 
 	let path_target = TRADE_DEALS_PATH
 		.read()
-		.clone()
-		.unwrap()
+		.expect("RwLock failure")
+		.get(&context_id)
+		.cloned()
+		.ok_or(Error::UndefinedTradeDealsPath)?
 		.join(format!("{}.swap", swap.id.to_string()));
 	fs::rename(path, path_target).map_err(|e| {
 		Error::TradeIoError(
@@ -426,11 +506,12 @@ pub fn store_swap_trade(
 
 /// Dump the content of swap file
 pub fn dump_swap_trade(
+	context_id: u32,
 	swap_id: &str,
 	dec_key: &SecretKey,
 	lock: &Mutex<()>,
 ) -> Result<String, Error> {
-	if lock.try_lock().is_some() {
+	if lock.try_lock().is_ok() {
 		return Err(Error::Generic(format!(
 			"dump_swap_trade processing unlocked instance {}",
 			swap_id
@@ -439,8 +520,10 @@ pub fn dump_swap_trade(
 
 	let path = TRADE_DEALS_PATH
 		.read()
-		.clone()
-		.unwrap()
+		.expect("RwLock failure")
+		.get(&context_id)
+		.cloned()
+		.ok_or(Error::UndefinedTradeDealsPath)?
 		.join(format!("{}.swap", swap_id));
 	if !path.exists() {
 		return Err(Error::TradeNotFound(swap_id.to_string()));
@@ -450,11 +533,13 @@ pub fn dump_swap_trade(
 }
 
 /// Export encrypted trade data into the file
-pub fn export_trade(swap_id: &str, export_file_name: &str) -> Result<(), Error> {
+pub fn export_trade(context_id: u32, swap_id: &str, export_file_name: &str) -> Result<(), Error> {
 	let path = TRADE_DEALS_PATH
 		.read()
-		.clone()
-		.unwrap()
+		.expect("RwLock failure")
+		.get(&context_id)
+		.cloned()
+		.ok_or(Error::UndefinedTradeDealsPath)?
 		.join(format!("{}.swap", swap_id));
 
 	if !path.exists() {
@@ -474,11 +559,12 @@ pub fn export_trade(swap_id: &str, export_file_name: &str) -> Result<(), Error> 
 /// Import the trade data
 /// return: swap Id
 pub fn import_trade(
+	context_id: u32,
 	trade_file_name: &str,
 	dec_key: &SecretKey,
 	lock: &Mutex<()>,
 ) -> Result<String, Error> {
-	if lock.try_lock().is_some() {
+	if lock.try_lock().is_ok() {
 		return Err(Error::Generic(format!(
 			"import_trade processing unlocked instance"
 		)));
@@ -489,9 +575,9 @@ pub fn import_trade(
 		return Err(Error::IO(format!("Not found file {}", trade_file_name)));
 	}
 
-	let (context, swap) = read_swap_data_from_file(src_path, dec_key)?;
+	let (context, swap) = read_swap_data_from_file(context_id, src_path, dec_key)?;
 
-	store_swap_trade(&context, &swap, dec_key, lock)?;
+	store_swap_trade(context_id, &context, &swap, dec_key, lock)?;
 
 	Ok(format!("{}", swap.id))
 }

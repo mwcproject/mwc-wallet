@@ -24,10 +24,11 @@ use mwc_wallet_util::mwc_core::core::{OutputFeatures, Transaction};
 use mwc_wallet_util::mwc_keychain::{
 	mnemonic, BlindingFactor, ExtKeychain, ExtKeychainPath, Keychain, SwitchCommitmentType,
 };
-use mwc_wallet_util::mwc_util::{secp, Mutex, ZeroingString};
+use mwc_wallet_util::mwc_util::{secp, ZeroingString};
 use rand::{thread_rng, Rng};
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
+use std::sync::Mutex;
 use std::thread;
 use std::time::Duration;
 

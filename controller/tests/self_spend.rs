@@ -34,7 +34,7 @@ use std::time::Duration;
 mod common;
 use common::{clean_output_dir, create_wallet_proxy, setup};
 use mwc_wallet_util::mwc_core::core::Transaction;
-use mwc_wallet_util::mwc_util::Mutex;
+use std::sync::Mutex;
 
 /// self send impl
 fn self_spend_impl(test_dir: &str) -> Result<(), wallet::Error> {
@@ -87,7 +87,7 @@ fn self_spend_impl(test_dir: &str) -> Result<(), wallet::Error> {
 		mask1,
 		bh as usize,
 		false,
-		tx_pool.lock().deref_mut(),
+		tx_pool.lock().expect("Mutex failure").deref_mut(),
 	);
 
 	// Check wallet 1 contents are as expected
@@ -144,10 +144,10 @@ fn self_spend_impl(test_dir: &str) -> Result<(), wallet::Error> {
 		mask1,
 		2,
 		false,
-		tx_pool.lock().deref_mut(),
+		tx_pool.lock().expect("Mutex failure").deref_mut(),
 	);
 
-	let _fee = core::libtx::tx_fee(1, 1, 1); //there is only one input and one output and one kernel
+	let _fee = core::libtx::tx_fee(0, 1, 1, 1); //there is only one input and one output and one kernel
 
 	//after the self spend, make sure the scan is done to update the status.
 	wallet::controller::owner_single_use(Some(wallet1.clone()), mask1, None, |api, m| {

@@ -33,11 +33,11 @@ use mwc_wallet_util::mwc_core::global;
 use mwc_wallet_util::mwc_keychain::ExtKeychain;
 use mwc_wallet_util::mwc_util::secp::key::SecretKey;
 use mwc_wallet_util::mwc_util::secp::Secp256k1;
-use mwc_wallet_util::mwc_util::Mutex;
 use std::ops::DerefMut;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::Mutex;
 use std::thread;
 use std::time::Duration;
 
@@ -123,8 +123,8 @@ fn revert(
 		Ok(())
 	})?;
 
-	let reward = core::consensus::reward(0, 1);
-	let cm = global::coinbase_maturity() as u64;
+	let reward = core::consensus::reward(0, 0, 1);
+	let cm = global::coinbase_maturity(0) as u64;
 	let sent = reward * 2;
 
 	// Mine some blocks
@@ -135,7 +135,7 @@ fn revert(
 		mask1,
 		bh as usize,
 		false,
-		tx_pool.lock().deref_mut(),
+		tx_pool.lock().expect("Mutex failure").deref_mut(),
 	)?;
 
 	// Sanity check contents
@@ -183,11 +183,11 @@ fn revert(
 		let slate = api.init_send_tx(m, &None, &args, 1)?;
 		// output tx file
 		let send_file = format!("{}/part_tx_1.tx", test_dir);
-		PathToSlatePutter::build_plain(Some(PathBuf::from(send_file)))
+		PathToSlatePutter::build_plain(0, Some(PathBuf::from(send_file)))
 			.put_tx(&slate, None, false, &secp)?;
 		api.tx_lock_outputs(m, &None, &slate, None, 0)?;
 		let slate = client1.send_tx_slate_direct("wallet2", &slate)?;
-		let slate = api.finalize_tx(m, &None, &slate)?;
+		let slate = api.finalize_tx(m, &None, &slate, true)?;
 		tx = slate.tx;
 
 		Ok(())
@@ -376,7 +376,6 @@ fn revert_cancel_impl(test_dir: &'static str) -> Result<(), Error> {
 #[test]
 fn tx_revert_reconfirm() {
 	let test_dir = "test_output/revert_tx";
-	global::set_global_chain_type(global::ChainTypes::AutomatedTesting);
 	setup(test_dir);
 	if let Err(e) = revert_reconfirm_impl(test_dir) {
 		panic!("Libwallet Error: {}", e);
@@ -387,7 +386,6 @@ fn tx_revert_reconfirm() {
 #[test]
 fn tx_revert_cancel() {
 	let test_dir = "test_output/revert_tx_cancel";
-	global::set_global_chain_type(global::ChainTypes::AutomatedTesting);
 	setup(test_dir);
 	if let Err(e) = revert_cancel_impl(test_dir) {
 		panic!("Libwallet Error: {}", e);

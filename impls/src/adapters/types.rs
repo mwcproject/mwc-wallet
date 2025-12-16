@@ -43,8 +43,8 @@ pub trait Publisher {
 }
 
 pub trait Subscriber {
-	fn start(&mut self, secp: &Secp256k1) -> Result<(), Error>;
-	fn stop(&mut self) -> bool;
+	fn start(&mut self, secp: Secp256k1) -> Result<(), Error>;
+	fn stop(&mut self, call_reset_mwcmqs_brocker: bool) -> bool;
 	fn is_running(&self) -> bool;
 
 	fn set_notification_channels(&self, slate_id: &uuid::Uuid, slate_send_channel: Sender<Slate>);
@@ -67,7 +67,7 @@ pub trait SubscriptionHandler: Send {
 //The following is support mqs usage in mwc713
 
 pub trait Address: Debug + Display {
-	fn from_str(s: &str) -> Result<Self, Error>
+	fn from_str(context_id: u32, s: &str) -> Result<Self, Error>
 	where
 		Self: Sized;
 	fn address_type(&self) -> AddressType;
@@ -115,7 +115,7 @@ impl Display for MWCMQSAddress {
 
 impl Address for MWCMQSAddress {
 	/// Extract the address plus additional data
-	fn from_str(s: &str) -> Result<Self, Error> {
+	fn from_str(context_id: u32, s: &str) -> Result<Self, Error> {
 		let re = Regex::new(MWCMQ_ADDRESS_REGEX).unwrap();
 		let captures = re.captures(s);
 		if captures.is_none() {
@@ -144,7 +144,7 @@ impl Address for MWCMQSAddress {
 		};
 
 		Ok(MWCMQSAddress::new(
-			ProvableAddress::from_str(&public_key)
+			ProvableAddress::from_str(context_id, &public_key)
 				.map_err(|e| Error::MqsGenericError(format!("Invalid MQS address {}, {}", s, e)))?,
 			domain,
 			port,
@@ -170,7 +170,7 @@ pub struct HttpsAddress {
 }
 
 impl Address for HttpsAddress {
-	fn from_str(s: &str) -> Result<Self, Error> {
+	fn from_str(_context_id: u32, s: &str) -> Result<Self, Error> {
 		Url::parse(s).map_err(|_| Error::HttpsAddressParsingError(s.to_string()))?;
 
 		Ok(Self { uri: s.to_string() })
@@ -197,21 +197,21 @@ impl Display for HttpsAddress {
 }
 
 impl dyn Address {
-	pub fn parse(address: &str) -> Result<Box<dyn Address>, Error> {
+	pub fn parse(context_id: u32, address: &str) -> Result<Box<dyn Address>, Error> {
 		let re = Regex::new(ADDRESS_REGEX).map_err(|e| {
 			Error::AddressGenericError(format!("Unable to construct address parser, {}", e))
 		})?;
 		let captures = re.captures(address);
 		if captures.is_none() {
-			return Ok(Box::new(MWCMQSAddress::from_str(address)?));
+			return Ok(Box::new(MWCMQSAddress::from_str(context_id, address)?));
 		}
 
 		let captures = captures.unwrap();
 		let address_type = captures.name("address_type").unwrap().as_str().to_string();
 		let address: Box<dyn Address> = match address_type.as_ref() {
-			"mwcmqs" => Box::new(MWCMQSAddress::from_str(address)?),
-			"https" => Box::new(HttpsAddress::from_str(address)?),
-			"http" => Box::new(HttpsAddress::from_str(address)?),
+			"mwcmqs" => Box::new(MWCMQSAddress::from_str(context_id, address)?),
+			"https" => Box::new(HttpsAddress::from_str(context_id, address)?),
+			"http" => Box::new(HttpsAddress::from_str(context_id, address)?),
 			x => Err(Error::UnknownAddressType(x.to_string()))?,
 		};
 		Ok(address)

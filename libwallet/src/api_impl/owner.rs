@@ -22,8 +22,8 @@ use crate::mwc_core::core::{Output, OutputFeatures, Transaction};
 use crate::mwc_core::libtx::proof;
 use crate::mwc_keychain::ViewKey;
 use crate::mwc_util::secp::key::SecretKey;
-use crate::mwc_util::Mutex;
 use crate::proof::crypto::Hex;
+use std::sync::Mutex;
 
 use crate::api_impl::owner_updater::StatusMessage;
 use crate::mwc_keychain::{BlindingFactor, Identifier, Keychain, SwitchCommitmentType};
@@ -36,7 +36,7 @@ use crate::internal::{keys, scan, selection, tx, updater};
 use crate::slate::{PaymentInfo, Slate};
 use crate::types::{
 	AcctPathMapping, Context, NodeClient, OutputData, TxLogEntry, TxSession, WalletBackend,
-	WalletInfo, FLAG_NEW_WALLET,
+	WalletInfo, FLAG_NEW_WALLET, U64_DATA_IDX_ADDRESS_INDEX,
 };
 use crate::Error;
 #[cfg(feature = "grin_proof")]
@@ -135,7 +135,15 @@ where
 {
 	wallet_lock!(wallet_inst, w);
 	let k = w.keychain(keychain_mask)?;
-	let pub_key = proofaddress::payment_proof_address_pubkey(&k)?;
+
+	let address_index: u32 = {
+		let mut batch = w.batch(keychain_mask)?;
+		let index = batch.load_u64(U64_DATA_IDX_ADDRESS_INDEX, 0u64)?;
+		index as u32
+	};
+
+	let pub_key =
+		proofaddress::payment_proof_address_pubkey(w.get_context_id(), &k, address_index)?;
 	Ok(pub_key)
 }
 
@@ -151,25 +159,16 @@ where
 {
 	wallet_lock!(wallet_inst, w);
 	let k = w.keychain(keychain_mask)?;
-	let secret = proofaddress::payment_proof_address_secret(&k, None)?;
+
+	let address_index: u32 = {
+		let mut batch = w.batch(keychain_mask)?;
+		let index = batch.load_u64(U64_DATA_IDX_ADDRESS_INDEX, 0u64)?;
+		index as u32
+	};
+
+	let secret = proofaddress::payment_proof_address_secret(w.get_context_id(), &k, address_index)?;
 	let tor_pk = proofaddress::secret_2_tor_pub(&secret)?;
 	Ok(tor_pk)
-}
-
-/// Refresh outputs/tx states of the wallet. Resync with a blockchain data
-pub fn perform_refresh_from_node<'a, T: ?Sized, C, K>(
-	wallet: &mut T,
-	keychain_mask: Option<&SecretKey>,
-	status_send_channel: &Option<Sender<StatusMessage>>,
-) -> Result<bool, Error>
-where
-	T: WalletBackend<'a, C, K>,
-	C: NodeClient + 'a,
-	K: Keychain + 'a,
-{
-	let validated = update_wallet_state(wallet, keychain_mask, status_send_channel)?;
-
-	Ok(validated)
 }
 
 /// retrieve outputs
@@ -190,7 +189,7 @@ where
 
 	let mut validated = false;
 	if refresh_from_node {
-		validated = perform_refresh_from_node(&mut **w, keychain_mask, status_send_channel)?;
+		validated = update_wallet_state(&mut **w, keychain_mask, status_send_channel)?.0;
 	}
 
 	let parent_key_id = w.parent_key_id();
@@ -249,7 +248,7 @@ where
 
 	let mut validated = false;
 	if refresh_from_node {
-		validated = perform_refresh_from_node(&mut **w, keychain_mask, status_send_channel)?;
+		validated = update_wallet_state(&mut **w, keychain_mask, status_send_channel)?.0;
 	}
 
 	let parent_key_id = w.parent_key_id();
@@ -286,7 +285,7 @@ where
 
 	let mut validated = false;
 	if refresh_from_node {
-		validated = perform_refresh_from_node(&mut **w, keychain_mask, status_send_channel)?;
+		validated = update_wallet_state(&mut **w, keychain_mask, status_send_channel)?.0;
 	}
 
 	let parent_key_id = w.parent_key_id();
@@ -398,14 +397,13 @@ where
 		));
 	}
 	wallet_lock!(wallet_inst, w);
-	let parent_key_id = w.parent_key_id();
 	let txs: Vec<TxLogEntry> = updater::retrieve_txs(
 		&mut **w,
 		None,
 		id,
 		tx_slate_id,
 		None,
-		Some(&parent_key_id),
+		None,
 		false,
 		None,
 		None,
@@ -551,12 +549,23 @@ where
 		)?
 	};
 
+	let address_index: u32 = {
+		let mut batch = w.batch(keychain_mask)?;
+		let index = batch.load_u64(U64_DATA_IDX_ADDRESS_INDEX, 0u64)?;
+		index as u32
+	};
+
 	// Payment Proof, add addresses to slate and save address
 	// TODO: Note we only use single derivation path for now,
 	// probably want to allow sender to specify which one
 	// sender_a has to in MQS format because we need Normal public key to sign, dalek will not work
 	let k = w.keychain(keychain_mask)?;
-	let sender_a = proofaddress::payment_proof_address(&k, proofaddress::ProofAddressType::MQS)?;
+	let sender_a = proofaddress::payment_proof_address(
+		w.get_context_id(),
+		&k,
+		proofaddress::ProofAddressType::MQS,
+		address_index,
+	)?;
 
 	if let Some(a) = &args.address {
 		if a.eq("file_proof") {
@@ -568,7 +577,9 @@ where
 				receiver_signature: None,
 			});
 
-			context.payment_proof_derivation_index = Some(proofaddress::get_address_index());
+			let mut batch = w.batch(keychain_mask)?;
+			let index = batch.load_u64(U64_DATA_IDX_ADDRESS_INDEX, 0u64)?;
+			context.payment_proof_derivation_index = Some(index as u32);
 		}
 	}
 
@@ -579,7 +590,9 @@ where
 			receiver_signature: None,
 		});
 
-		context.payment_proof_derivation_index = Some(proofaddress::get_address_index());
+		let mut batch = w.batch(keychain_mask)?;
+		let index = batch.load_u64(U64_DATA_IDX_ADDRESS_INDEX, 0u64)?;
+		context.payment_proof_derivation_index = Some(index as u32);
 	} else {
 		debug!("There is no payment proof recipient address");
 	}
@@ -725,7 +738,7 @@ where
 	C: NodeClient + 'a,
 	K: Keychain + 'a,
 {
-	if global::is_mainnet() {
+	if global::is_mainnet(w.get_context_id()) {
 		return Err(Error::FaucetRequestInvalidNetwork);
 	}
 
@@ -1164,13 +1177,19 @@ where
 	K: Keychain + 'a,
 {
 	wallet_lock!(wallet_inst, w);
-	if !perform_refresh_from_node(&mut **w, keychain_mask, status_send_channel)? {
+	if !update_wallet_state(&mut **w, keychain_mask, status_send_channel)?.0 {
 		return Err(Error::TransactionCancellationError(
 			"Can't contact running MWC node. Not Cancelling.",
 		))?;
 	}
 	let parent_key_id = w.parent_key_id();
-	tx::cancel_tx(&mut **w, keychain_mask, &parent_key_id, tx_id, tx_slate_id)
+	tx::cancel_tx(
+		&mut **w,
+		keychain_mask,
+		Some(&parent_key_id),
+		tx_id,
+		tx_slate_id,
+	)
 }
 
 /// get stored tx
@@ -1241,9 +1260,10 @@ where
 		return Err(Error::RewindHash(msg));
 	}
 
-	wallet_lock!(wallet_inst, w);
-
-	let tip = w.w2n_client().get_chain_tip()?;
+	let tip = {
+		wallet_lock!(wallet_inst, w);
+		w.w2n_client().get_chain_tip()?
+	};
 
 	let start_height = match start_height {
 		Some(h) => h,
@@ -1251,7 +1271,7 @@ where
 	};
 
 	let info = scan::scan_rewind_hash(
-		&mut **w,
+		wallet_inst,
 		rewind_hash,
 		start_height,
 		tip.0,
@@ -1270,7 +1290,7 @@ pub fn scan<'a, L, C, K>(
 	delete_unconfirmed: bool,
 	status_send_channel: &Option<Sender<StatusMessage>>,
 	do_full_outputs_refresh: bool,
-) -> Result<(), Error>
+) -> Result<u64, Error>
 where
 	L: WalletLCProvider<'a, C, K>,
 	C: NodeClient + 'a,
@@ -1333,7 +1353,7 @@ where
 	batch.save_last_scanned_blocks(start_height, &blocks)?;
 	batch.commit()?;
 
-	Ok(())
+	Ok(tip_height)
 }
 
 /// node height
@@ -1595,7 +1615,7 @@ pub fn update_wallet_state<'a, T: ?Sized, C, K>(
 	wallet: &mut T,
 	keychain_mask: Option<&SecretKey>,
 	status_send_channel: &Option<Sender<StatusMessage>>,
-) -> Result<bool, Error>
+) -> Result<(bool, u64), Error>
 where
 	T: WalletBackend<'a, C, K>,
 	C: NodeClient + 'a,
@@ -1606,7 +1626,7 @@ where
 		get_last_detect_last_scanned_block(wallet, keychain_mask, status_send_channel)?;
 
 	if tip_height == 0 {
-		return Ok(false);
+		return Ok((false, tip_height));
 	}
 
 	if has_reorg {
@@ -1624,7 +1644,7 @@ where
 
 	if last_scanned_block.height == tip_height {
 		debug!("update_wallet_state is skipped because data is already recently updated");
-		return Ok(true);
+		return Ok((true, tip_height));
 	}
 
 	let show_progress =
@@ -1674,11 +1694,11 @@ where
 				batch.save_last_scanned_blocks(last_scanned_block.height, &blocks)?;
 				batch.commit()?;
 			}
-			return Ok(true);
+			return Ok((true, tip_height));
 		}
 	}
 
-	Ok(false)
+	Ok((false, tip_height))
 }
 
 /// Check TTL
@@ -1799,7 +1819,9 @@ where
 		));
 	}
 
-	let network = if global::is_mainnet() {
+	wallet_lock!(wallet_inst, w);
+
+	let network = if global::is_mainnet(w.get_context_id()) {
 		"mainnet"
 	} else {
 		"floonet"
@@ -1809,7 +1831,6 @@ where
 	message2sign.push('|');
 	message2sign.push_str(message.as_str());
 
-	wallet_lock!(wallet_inst, w);
 	let keychain = w.keychain(keychain_mask)?;
 	let secp = keychain.secp();
 
@@ -1820,8 +1841,18 @@ where
 		message2sign.push_str(root_public_key.as_str());
 	}
 
+	let address_index: u32 = {
+		let mut batch = w.batch(keychain_mask)?;
+		let index = batch.load_u64(U64_DATA_IDX_ADDRESS_INDEX, 0u64)?;
+		index as u32
+	};
+
 	if include_tor_address {
-		let secret = proofaddress::payment_proof_address_secret(&keychain, None)?;
+		let secret = proofaddress::payment_proof_address_secret(
+			w.get_context_id(),
+			&keychain,
+			address_index,
+		)?;
 		let tor_pk = proofaddress::secret_2_tor_pub(&secret)?;
 		let tor_pk = tor_pk.to_hex();
 		message2sign.push('|');
@@ -1829,7 +1860,11 @@ where
 	}
 
 	if include_mqs_address {
-		let mqs_pub_key: PublicKey = proofaddress::payment_proof_address_pubkey(&keychain)?;
+		let mqs_pub_key: PublicKey = proofaddress::payment_proof_address_pubkey(
+			w.get_context_id(),
+			&keychain,
+			address_index,
+		)?;
 		let mqs_pub_key = mqs_pub_key.to_hex();
 		message2sign.push('|');
 		message2sign.push_str(mqs_pub_key.as_str());
@@ -1845,6 +1880,7 @@ where
 		let secret = keychain.private_root_key();
 		let signature = secp
 			.sign(
+				#[allow(deprecated)]
 				&Message::from_slice(message_hash.as_slice()).map_err(|e| {
 					Error::GenericError(format!("Unable to build a message, {}", e))
 				})?,
@@ -1860,11 +1896,16 @@ where
 	};
 
 	let tor_address = if include_tor_address {
-		let secret = proofaddress::payment_proof_address_secret(&keychain, None)?;
+		let secret = proofaddress::payment_proof_address_secret(
+			w.get_context_id(),
+			&keychain,
+			address_index,
+		)?;
 		let secret = DalekSecretKey::from_bytes(&secret.0)
 			.map_err(|e| Error::GenericError(format!("Unable build dalek public key, {}", e)))?;
 		let public = DalekPublicKey::from(&secret);
 		let keypair = DalekKeypair { secret, public };
+		#[allow(deprecated)]
 		let signature = keypair
 			.try_sign(message_hash.as_slice())
 			.map_err(|e| Error::GenericError(format!("Unable build dalek signature, {}", e)))?;
@@ -1877,9 +1918,14 @@ where
 	};
 
 	let mqs_address = if include_mqs_address {
-		let secret = proofaddress::payment_proof_address_secret(&keychain, None)?;
+		let secret = proofaddress::payment_proof_address_secret(
+			w.get_context_id(),
+			&keychain,
+			address_index,
+		)?;
 		let signature = secp
 			.sign(
+				#[allow(deprecated)]
 				&Message::from_slice(message_hash.as_slice()).map_err(|e| {
 					Error::GenericError(format!("Unable to build a message, {}", e))
 				})?,
@@ -1905,7 +1951,10 @@ where
 }
 
 /// Generate signatures for root public keym tor address PK and MQS PK.
-pub fn validate_ownership_proof(proof: OwnershipProof) -> Result<OwnershipProofValidation, Error>
+pub fn validate_ownership_proof(
+	context_id: u32,
+	proof: OwnershipProof,
+) -> Result<OwnershipProofValidation, Error>
 where
 {
 	if proof.message.is_empty() {
@@ -1916,7 +1965,7 @@ where
 
 	let mut result = OwnershipProofValidation::empty(proof.message.clone());
 
-	let network = if global::is_mainnet() {
+	let network = if global::is_mainnet(context_id) {
 		"mainnet"
 	} else {
 		"floonet"
@@ -1964,6 +2013,7 @@ where
 			Error::InvalidOwnershipProof(format!("Unable to decode wallet root signature, {}", e))
 		})?;
 		secp.verify(
+			#[allow(deprecated)]
 			&Message::from_slice(message_hash.as_slice())
 				.map_err(|e| Error::GenericError(format!("Unable to build a message, {}", e)))?,
 			&signature,
@@ -1986,6 +2036,7 @@ where
 			Error::InvalidOwnershipProof(format!("Unable to decode mqs address signature, {}", e))
 		})?;
 		secp.verify(
+			#[allow(deprecated)]
 			&Message::from_slice(message_hash.as_slice())
 				.map_err(|e| Error::GenericError(format!("Unable to build a message, {}", e)))?,
 			&signature,
@@ -1996,7 +2047,7 @@ where
 		})?;
 
 		// we are good so far, reporting mwqs address
-		let mqs_address = ProvableAddress::from_pub_key(&public_key);
+		let mqs_address = ProvableAddress::from_pub_key(context_id, &public_key);
 		result.mqs_address = Some(mqs_address.public_key);
 	}
 
@@ -2016,6 +2067,7 @@ where
 			Error::InvalidOwnershipProof(format!("Unable to decode tor address signature, {}", e))
 		})?;
 
+		#[allow(deprecated)]
 		public_key
 			.verify(message_hash.as_slice(), &signature)
 			.map_err(|e| {

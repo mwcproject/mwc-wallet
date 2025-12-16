@@ -387,7 +387,6 @@ where
 			i = i + 1;
 		}
 		if sum != slate.amount {
-			println!("mismatch sum = {}, amount = {}", sum, slate.amount);
 			return Err(Error::AmountMismatch {
 				amount: slate.amount,
 				sum: sum,
@@ -562,12 +561,13 @@ where
 }
 
 fn calc_fees(
+	context_id: u32,
 	input_num: usize,
 	output_num: usize,
 	min_fee: &Option<u64>,
 	fixed_fee: &Option<u64>, // Max fee to limit fee for late_lock case
 ) -> Result<u64, Error> {
-	let mut fee = tx_fee(input_num, output_num, 1);
+	let mut fee = tx_fee(context_id, input_num, output_num, 1);
 	if let Some(min_fee) = min_fee {
 		fee = std::cmp::max(*min_fee, fee);
 	}
@@ -649,12 +649,13 @@ where
 
 // return:  (optimal_outputs_num, min_outputs_num)
 fn calculate_optimal_min_optputs(
+	context_id: u32,
 	fixed_fee: &Option<u64>,
 	outputs_num: usize,
 ) -> (usize, Option<usize>) {
 	match fixed_fee {
 		Some(fixed_fee) => {
-			let need_inputs_min = inputs_for_fee_points(*fixed_fee, outputs_num, 1);
+			let need_inputs_min = inputs_for_fee_points(context_id, *fixed_fee, outputs_num, 1);
 			(need_inputs_min, Some(need_inputs_min))
 		}
 		None => (inputs_for_minimal_fee(outputs_num, 1), None),
@@ -693,9 +694,11 @@ where
 	C: NodeClient + 'a,
 	K: Keychain + 'a,
 {
+	let context_id = wallet.get_context_id();
+
 	// First attempt to spend without change
 	let (optimal_outputs_num, min_outputs_num) =
-		calculate_optimal_min_optputs(&fixed_fee, routputs);
+		calculate_optimal_min_optputs(context_id, &fixed_fee, routputs);
 
 	// select some spendable coins from the wallet
 	let mut coins = select_coins(
@@ -720,7 +723,7 @@ where
 	// First attempt to spend without change
 	assert!(routputs >= 1); // Normally it is 1
 
-	let mut fee = calc_fees(coins.len(), routputs, min_fee, &fixed_fee)?;
+	let mut fee = calc_fees(context_id, coins.len(), routputs, min_fee, &fixed_fee)?;
 	let mut total: u64 = coins.iter().map(|c| c.value).sum();
 	let mut amount_with_fee = match amount_includes_fee {
 		true => amount,
@@ -737,11 +740,11 @@ where
 		// Here fixed fee ignored with purpose, it is not a case here, fixed can be broken
 		amount_with_fee = match amount_includes_fee {
 			true => amount,
-			false => amount + calc_fees(coins.len(), num_outputs, min_fee, &None)?,
+			false => amount + calc_fees(context_id, coins.len(), num_outputs, min_fee, &None)?,
 		};
 
 		let (optimal_outputs_num, min_outputs_num) =
-			calculate_optimal_min_optputs(&fixed_fee, num_outputs);
+			calculate_optimal_min_optputs(context_id, &fixed_fee, num_outputs);
 
 		// Here check if we have enough outputs for the amount including fee otherwise
 		// look for other outputs and check again
@@ -770,7 +773,7 @@ where
 				return Err(Error::TooLargeSlate(max_outputs))?;
 			}
 
-			fee = calc_fees(coins.len(), num_outputs, min_fee, &fixed_fee)?;
+			fee = calc_fees(context_id, coins.len(), num_outputs, min_fee, &fixed_fee)?;
 
 			total = coins.iter().map(|c| c.value).sum();
 			let prev_amount_with_fee = amount_with_fee;

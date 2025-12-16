@@ -24,7 +24,6 @@ use crate::mwc_core::core::transaction::{
 	Input, KernelFeatures, Output, OutputFeatures, Transaction, TransactionBody, TxKernel,
 	Weighting,
 };
-use crate::mwc_core::global;
 use crate::mwc_core::libtx::{aggsig, build, proof::ProofBuild, secp_ser, tx_fee};
 use crate::mwc_core::map_vec;
 use crate::mwc_keychain::{BlindSum, BlindingFactor, Keychain, SwitchCommitmentType};
@@ -33,7 +32,7 @@ use crate::mwc_util::secp::key::{PublicKey, SecretKey};
 use crate::mwc_util::secp::pedersen::Commitment;
 use crate::mwc_util::secp::Signature;
 use crate::mwc_util::ToHex;
-use crate::Context;
+use crate::{Context, VersionedSlate};
 use serde::ser::{Serialize, Serializer};
 use serde_json;
 use std::convert::{TryFrom, TryInto};
@@ -56,10 +55,12 @@ use crate::types::CbData;
 use crate::{SlateVersion, Slatepacker, CURRENT_SLATE_VERSION};
 use ed25519_dalek::SecretKey as DalekSecretKey;
 use mwc_wallet_util::mwc_core::core::FeeFields;
+use mwc_wallet_util::mwc_core::global;
 use mwc_wallet_util::mwc_util::secp::ContextFlag;
 use mwc_wallet_util::mwc_util::secp::Secp256k1;
 use rand::rngs::mock::StepRng;
 use rand::thread_rng;
+use serde::{Deserialize, Deserializer};
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct PaymentInfo {
@@ -212,6 +213,15 @@ pub struct Slate {
 	/// 	2: height_locked
 	/// 	3: NRD
 	kernel_features: u8,
+}
+
+/// Slate with a network from the context
+#[derive(Debug, Clone)]
+pub struct SlateCtx {
+	/// Slate
+	pub slate: Slate,
+	/// Network name form the context
+	pub network_name: Option<String>,
 }
 
 /// Versioning and compatibility info about this slate
@@ -379,16 +389,17 @@ impl Slate {
 
 	/// Recieve a slate, upgrade it to the latest version internally
 	pub fn deserialize_upgrade_slatepack(
+		context_id: u32,
 		slate_str: &str,
 		dec_key: &DalekSecretKey,
 		secp: &Secp256k1,
 	) -> Result<Slatepacker, Error> {
-		let sp = Slatepacker::decrypt_slatepack(slate_str.as_bytes(), dec_key, secp)?;
+		let sp = Slatepacker::decrypt_slatepack(context_id, slate_str.as_bytes(), dec_key, secp)?;
 		Ok(sp)
 	}
 
 	/// Recieve a slate, upgrade it to the latest version internally
-	pub fn deserialize_upgrade_plain(slate_json: &str) -> Result<Slate, Error> {
+	pub fn deserialize_upgrade_plain(context_id: u32, slate_json: &str) -> Result<Slate, Error> {
 		let version = Slate::parse_slate_version(slate_json)?;
 
 		//I don't think we need to do this for coin_type and network_type, the slate containing these two
@@ -425,7 +436,7 @@ impl Slate {
 			}
 			_ => return Err(Error::SlateVersion(version)),
 		};
-		Ok(v3.to_slate(true)?)
+		Ok(v3.to_slate(Some(global::get_network_name(context_id)), true)?)
 	}
 
 	/// Create a new slate
@@ -667,12 +678,12 @@ impl Slate {
 
 	/// Creates the final signature, callable by either the sender or recipient
 	/// (after phase 3: sender confirmation)
-	pub fn finalize<K>(&mut self, keychain: &K) -> Result<(), Error>
+	pub fn finalize<K>(&mut self, context_id: u32, keychain: &K) -> Result<(), Error>
 	where
 		K: Keychain,
 	{
 		let final_sig = self.finalize_signature(keychain.secp())?;
-		self.finalize_transaction(keychain, &final_sig)
+		self.finalize_transaction(context_id, keychain, &final_sig)
 	}
 
 	/// Return the participant with the given id
@@ -887,12 +898,17 @@ impl Slate {
 	}
 
 	/// Checks the fees in the transaction in the given slate are valid
-	fn check_fees(&self) -> Result<(), Error> {
+	fn check_fees(&self, context_id: u32) -> Result<(), Error> {
 		let tx = self.tx_or_err()?;
 		// double check the fee amount included in the partial tx
 		// we don't necessarily want to just trust the sender
 		// we could just overwrite the fee here (but we won't) due to the sig
-		let fee = tx_fee(tx.inputs().len(), tx.outputs().len(), tx.kernels().len());
+		let fee = tx_fee(
+			context_id,
+			tx.inputs().len(),
+			tx.outputs().len(),
+			tx.kernels().len(),
+		);
 
 		if fee > tx.fee() {
 			return Err(Error::Fee(format!(
@@ -1037,13 +1053,14 @@ impl Slate {
 	/// builds a final transaction after the aggregated sig exchange
 	fn finalize_transaction<K>(
 		&mut self,
+		context_id: u32,
 		keychain: &K,
 		final_sig: &secp::Signature,
 	) -> Result<(), Error>
 	where
 		K: Keychain,
 	{
-		self.check_fees()?;
+		self.check_fees(context_id)?;
 		// build the final excess based on final tx and offset
 		let secp = keychain.secp();
 		let final_excess = self.calc_excess(secp)?;
@@ -1075,7 +1092,7 @@ impl Slate {
 
 		// confirm the overall transaction is valid (including the updated kernel)
 		// accounting for tx weight limits
-		final_tx.validate(Weighting::AsTransaction, secp)?;
+		final_tx.validate(context_id, Weighting::AsTransaction, secp)?;
 
 		// replace our slate tx with the new one with updated kernel
 		self.tx = Some(final_tx);
@@ -1084,7 +1101,7 @@ impl Slate {
 	}
 }
 
-impl Serialize for Slate {
+impl Serialize for SlateCtx {
 	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
 	where
 		S: Serializer,
@@ -1092,7 +1109,7 @@ impl Serialize for Slate {
 		use serde::ser::Error;
 
 		let v3 = SlateV3::from(self);
-		match self.version_info.version {
+		match self.slate.version_info.version {
 			3 => v3.serialize(serializer),
 			// left as a reminder
 			2 => {
@@ -1103,6 +1120,39 @@ impl Serialize for Slate {
 				v2.serialize(serializer)
 			}
 			v => Err(S::Error::custom(format!("Unknown slate version {}", v))),
+		}
+	}
+}
+
+impl<'de> Deserialize<'de> for SlateCtx {
+	fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+	where
+		D: Deserializer<'de>,
+	{
+		let s = VersionedSlate::deserialize(deserializer)?;
+		// Swaps are not using the slatepacks.
+
+		match s {
+			VersionedSlate::SP(_) => {
+				return Err(serde::de::Error::custom("Slate is encrypted".to_string()));
+			}
+			VersionedSlate::V3(s) => Ok(SlateCtx {
+				network_name: s.network_type.clone(),
+				slate: s
+					.clone()
+					.to_slate(None, true)
+					.map_err(|e| serde::de::Error::custom(format!("Slate parsing error, {}", e)))?,
+			}),
+			VersionedSlate::V2(s) => {
+				let s = SlateV3::from(s.clone());
+
+				Ok(SlateCtx {
+					network_name: s.network_type.clone(),
+					slate: s.to_slate(None, false).map_err(|e| {
+						serde::de::Error::custom(format!("Slate parsing error, {}", e))
+					})?,
+				})
+			}
 		}
 	}
 }
@@ -1139,10 +1189,8 @@ impl From<CbData> for CoinbaseV3 {
 }
 
 // Current slate version to versioned conversions
-
-// Slate to versioned
-impl From<Slate> for SlateV3 {
-	fn from(slate: Slate) -> SlateV3 {
+impl From<&SlateCtx> for SlateV3 {
+	fn from(slate_with_ctx: &SlateCtx) -> SlateV3 {
 		let Slate {
 			compact_slate,
 			num_participants,
@@ -1158,62 +1206,7 @@ impl From<Slate> for SlateV3 {
 			payment_proof,
 			offset: tx_offset,
 			kernel_features,
-		} = slate;
-		let participant_data = map_vec!(participant_data, |data| ParticipantDataV3::from(data));
-		let version_info = VersionCompatInfoV3::from(&version_info);
-		let payment_proof = match payment_proof {
-			Some(p) => Some(PaymentInfoV3::from(&p)),
-			None => None,
-		};
-		let tx = match tx {
-			Some(t) => {
-				let mut t = TransactionV3::from(t);
-				if compact_slate {
-					// for compact the Slate offset is dominate
-					t.offset = tx_offset;
-				}
-				Some(t)
-			}
-			None => None,
-		};
-		SlateV3 {
-			num_participants,
-			id,
-			tx: tx,
-			amount,
-			fee,
-			height,
-			lock_height,
-			ttl_cutoff_height,
-			coin_type: Some("mwc".to_string()),
-			network_type: Some(global::get_network_name()),
-			participant_data,
-			version_info,
-			payment_proof,
-			compact_slate: if compact_slate { Some(true) } else { None },
-			kernel_features,
-		}
-	}
-}
-
-impl From<&Slate> for SlateV3 {
-	fn from(slate: &Slate) -> SlateV3 {
-		let Slate {
-			compact_slate,
-			num_participants,
-			id,
-			tx,
-			amount,
-			fee,
-			height,
-			lock_height,
-			ttl_cutoff_height,
-			participant_data,
-			version_info,
-			payment_proof,
-			offset: tx_offset,
-			kernel_features,
-		} = slate;
+		} = &slate_with_ctx.slate;
 		let num_participants = *num_participants;
 		let id = *id;
 		let amount = *amount;
@@ -1249,7 +1242,7 @@ impl From<&Slate> for SlateV3 {
 			lock_height,
 			ttl_cutoff_height,
 			coin_type: Some("mwc".to_string()),
-			network_type: Some(global::get_network_name()),
+			network_type: slate_with_ctx.network_name.clone(),
 			participant_data,
 			version_info,
 			payment_proof,

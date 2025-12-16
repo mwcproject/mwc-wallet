@@ -22,36 +22,72 @@ use crate::internal::{tx, updater};
 use crate::mwc_core::core::amount_to_hr_string;
 use crate::mwc_keychain::Keychain;
 use crate::mwc_util::secp::key::SecretKey;
-use crate::mwc_util::Mutex;
 use crate::proof::crypto::Hex;
 use crate::proof::proofaddress;
 use crate::proof::proofaddress::ProofAddressType;
 use crate::proof::proofaddress::ProvableAddress;
 use crate::slate_versions::SlateVersion;
-use crate::types::TxSession;
+use crate::types::{TxSession, U64_DATA_IDX_ADDRESS_INDEX};
 use crate::Context;
 use crate::{
 	BlockFees, CbData, Error, NodeClient, Slate, SlatePurpose, TxLogEntryType, VersionInfo,
 	VersionedSlate, WalletBackend, WalletInst, WalletLCProvider,
 };
 use ed25519_dalek::PublicKey as DalekPublicKey;
+use mwc_wallet_util::mwc_keychain::Identifier;
 use mwc_wallet_util::OnionV3Address;
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::sync::Arc;
+use std::sync::Mutex;
 use std::sync::RwLock;
 use strum::IntoEnumIterator;
 
 const FOREIGN_API_VERSION: u16 = 2;
 const USER_MESSAGE_MAX_LEN: usize = 256;
 
+/// Data about received transaciton
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReceiveData {
+	context_id: u32,
+	tx_uuid: String,
+	from: String,
+	amount: u64,
+	message: Option<String>,
+}
+
 lazy_static! {
 	/// Recieve account can be specified separately and must be allpy to ALL receive operations
-	static ref RECV_ACCOUNT:   RwLock<Option<String>>  = RwLock::new(None);
+	static ref RECV_ACCOUNT:   RwLock< HashMap<u32,Identifier>> = RwLock::new(HashMap::new());
+
+	static ref RECEIVE_CALLBACK: RwLock< Option<Box<dyn Fn(ReceiveData) + Send + Sync>>> = RwLock::new(None);
+}
+
+/// Clean up context
+pub fn foreign_clean_context(context_id: u32) {
+	let _ = RECV_ACCOUNT
+		.write()
+		.expect("Mutex failure")
+		.remove(&context_id);
 }
 
 /// get current receive account name
-pub fn get_receive_account() -> Option<String> {
-	RECV_ACCOUNT.read().unwrap().clone()
+pub fn get_receive_account(context_id: u32) -> Option<Identifier> {
+	RECV_ACCOUNT
+		.read()
+		.expect("Mutex failure")
+		.get(&context_id)
+		.cloned()
+}
+
+/// Set receive tx callback. Used in library mode
+pub fn set_receive_callback(cb: Box<dyn Fn(ReceiveData) + Send + Sync>) {
+	*RECEIVE_CALLBACK.write().expect("RwLock failure") = Some(cb);
+}
+
+/// Clean the callback
+pub fn clean_receive_callback() {
+	*RECEIVE_CALLBACK.write().expect("RwLock failure") = None;
 }
 
 /// get tor proof address
@@ -65,19 +101,34 @@ where
 	K: Keychain + 'a,
 {
 	let keychain = w.keychain(keychain_mask)?;
-	let provable_address = proofaddress::payment_proof_address(&keychain, ProofAddressType::Onion)
-		.map_err(|e| {
-			Error::PaymentProofAddress(format!(
-				"Error occurred in getting payment proof address, {}",
-				e
-			))
-		})?;
+
+	let index: u32 = {
+		let mut batch = w.batch(keychain_mask)?;
+		let index = batch.load_u64(U64_DATA_IDX_ADDRESS_INDEX, 0u64)?;
+		index as u32
+	};
+
+	let provable_address = proofaddress::payment_proof_address(
+		w.get_context_id(),
+		&keychain,
+		ProofAddressType::Onion,
+		index,
+	)
+	.map_err(|e| {
+		Error::PaymentProofAddress(format!(
+			"Error occurred in getting payment proof address, {}",
+			e
+		))
+	})?;
 	Ok(provable_address.public_key)
 }
 
 ///
-pub fn set_receive_account(account: String) {
-	RECV_ACCOUNT.write().unwrap().replace(account.to_string());
+pub fn set_receive_account(context_id: u32, account_path: Identifier) {
+	let _ = RECV_ACCOUNT
+		.write()
+		.expect("Mutex failure")
+		.insert(context_id, account_path);
 }
 
 /// Return the version info
@@ -133,43 +184,16 @@ where
 	let slate_message = &slate.participant_data[0].message;
 	let address_for_logging = address.clone().unwrap_or("http".to_string());
 
-	// that means it's not mqs so need to print it
-	if slate_message.is_some() {
-		println!(
-			"slate [{}] received from [{}] for [{}] MWCs. Message: [\"{}\"]",
-			slate.id.to_string(),
-			display_from,
-			amount_to_hr_string(slate.amount, false),
-			slate_message.clone().unwrap()
-		);
-	} else {
-		println!(
-			"slate [{}] received from [{}] for [{}] MWCs.",
-			slate.id.to_string(),
-			display_from,
-			amount_to_hr_string(slate.amount, false)
-		);
-	}
-
 	debug!("foreign just received_tx just got slate = {:?}", slate);
 	let mut ret_slate = slate.clone();
 	check_ttl(w, &ret_slate, refresh_from_node)?;
 
-	let mut dest_acct_name = dest_acct_name.clone();
-	if dest_acct_name.is_none() {
-		dest_acct_name = get_receive_account();
-	}
-
-	let parent_key_id = match dest_acct_name {
-		Some(d) => {
-			let pm = w.get_acct_path(d.to_owned())?;
-			match pm {
-				Some(p) => p.path,
-				None => w.parent_key_id(),
-			}
+	let mut parent_key_id = get_receive_account(w.get_context_id()).unwrap_or(w.parent_key_id());
+	if let Some(dest_acct_name) = dest_acct_name {
+		if let Some(path) = w.get_acct_path(dest_acct_name.clone())? {
+			parent_key_id = path.path;
 		}
-		None => w.parent_key_id(),
-	};
+	}
 
 	// Don't do this multiple times
 	let tx = updater::retrieve_txs(
@@ -245,27 +269,92 @@ where
 	let excess = ret_slate.calc_excess(keychain.secp())?;
 
 	if let Some(ref mut p) = ret_slate.payment_proof {
+		let address_index: u32 = {
+			let mut batch = w.batch(keychain_mask)?;
+			let index = batch.load_u64(U64_DATA_IDX_ADDRESS_INDEX, 0u64)?;
+			index as u32
+		};
+
 		if p.sender_address
 			.public_key
 			.eq(&p.receiver_address.public_key)
 		{
 			debug!("file proof, replace the receiver address with its address");
-			let sec_key = proofaddress::payment_proof_address_secret(&keychain, None)?;
+			let sec_key = proofaddress::payment_proof_address_secret(
+				w.get_context_id(),
+				&keychain,
+				address_index,
+			)?;
 			let onion_address = OnionV3Address::from_private(&sec_key.0)?;
 			let dalek_pubkey = onion_address.to_ov3_str();
-			p.receiver_address = ProvableAddress::from_str(&dalek_pubkey)?;
+			p.receiver_address = ProvableAddress::from_str(w.get_context_id(), &dalek_pubkey)?;
 		}
 		let sig = tx::create_payment_proof_signature(
 			ret_slate.amount,
 			&excess,
 			p.sender_address.clone(),
 			p.receiver_address.clone(),
-			proofaddress::payment_proof_address_secret(&keychain, None)?,
+			proofaddress::payment_proof_address_secret(
+				w.get_context_id(),
+				&keychain,
+				address_index,
+			)?,
 			keychain.secp(),
 		)?;
 
 		p.receiver_signature = Some(sig);
 	}
+
+	// that means it's not mqs so need to print it
+	if slate_message.is_some() {
+		if mwc_wallet_util::mwc_util::is_console_output_enabled() {
+			println!(
+				"slate [{}] received from [{}] for [{}] MWCs. Message: [\"{}\"]",
+				slate.id.to_string(),
+				display_from,
+				amount_to_hr_string(slate.amount, false),
+				slate_message.clone().unwrap()
+			);
+		} else {
+			info!(
+				"slate [{}] received from [{}] for [{}] MWCs. Message: [\"{}\"]",
+				slate.id.to_string(),
+				display_from,
+				amount_to_hr_string(slate.amount, false),
+				slate_message.clone().unwrap()
+			);
+		}
+	} else {
+		if mwc_wallet_util::mwc_util::is_console_output_enabled() {
+			println!(
+				"slate [{}] received from [{}] for [{}] MWCs.",
+				slate.id.to_string(),
+				display_from,
+				amount_to_hr_string(slate.amount, false)
+			);
+		} else {
+			info!(
+				"slate [{}] received from [{}] for [{}] MWCs.",
+				slate.id.to_string(),
+				display_from,
+				amount_to_hr_string(slate.amount, false)
+			);
+		}
+	}
+
+	RECEIVE_CALLBACK
+		.read()
+		.expect("RwLock failure")
+		.as_ref()
+		.map(|cb| {
+			cb(ReceiveData {
+				context_id: w.get_context_id(),
+				tx_uuid: slate.id.to_string(),
+				from: display_from,
+				amount: slate.amount,
+				message: slate_message.clone(),
+			})
+		});
 
 	Ok((ret_slate, context))
 }
@@ -315,18 +404,35 @@ where
 
 	// that means it's not mqs so need to print it
 	if !slate_message.is_empty() {
-		println!(
-			"Get invoice slate [{}] to finalize for [{}] MWCs. Message: [\"{}\"], processing...",
-			slate.id.to_string(),
-			amount_to_hr_string(slate.amount, false),
-			slate_message
-		);
+		if mwc_wallet_util::mwc_util::is_console_output_enabled() {
+			println!(
+				"Get invoice slate [{}] to finalize for [{}] MWCs. Message: [\"{}\"], processing...",
+				slate.id.to_string(),
+				amount_to_hr_string(slate.amount, false),
+				slate_message
+			);
+		} else {
+			info!(
+				"Get invoice slate [{}] to finalize for [{}] MWCs. Message: [\"{}\"], processing...",
+				slate.id.to_string(),
+				amount_to_hr_string(slate.amount, false),
+				slate_message
+			);
+		}
 	} else {
-		println!(
-			"Get invoice finalize slate [{}] for [{}] MWCs, processing...",
-			slate.id.to_string(),
-			amount_to_hr_string(slate.amount, false)
-		);
+		if mwc_wallet_util::mwc_util::is_console_output_enabled() {
+			println!(
+				"Get invoice finalize slate [{}] for [{}] MWCs, processing...",
+				slate.id.to_string(),
+				amount_to_hr_string(slate.amount, false)
+			);
+		} else {
+			info!(
+				"Get invoice finalize slate [{}] for [{}] MWCs, processing...",
+				slate.id.to_string(),
+				amount_to_hr_string(slate.amount, false)
+			);
+		}
 	}
 
 	debug!(
@@ -376,11 +482,19 @@ where
 		}
 	}
 
-	println!(
-		"Invoice slate [{}] for [{}] MWCs was processed and sent back for posting.",
-		slate.id.to_string(),
-		amount_to_hr_string(slate.amount, false)
-	);
+	if mwc_wallet_util::mwc_util::is_console_output_enabled() {
+		println!(
+			"Invoice slate [{}] for [{}] MWCs was processed and sent back for posting.",
+			slate.id.to_string(),
+			amount_to_hr_string(slate.amount, false)
+		);
+	} else {
+		info!(
+			"Invoice slate [{}] for [{}] MWCs was processed and sent back for posting.",
+			slate.id.to_string(),
+			amount_to_hr_string(slate.amount, false)
+		);
+	}
 
 	Ok(sl)
 }
@@ -439,11 +553,22 @@ where
 {
 	let keychain = w.keychain(keychain_mask)?;
 
-	let sec_key = proofaddress::payment_proof_address_dalek_secret(&keychain, address_index)
-		.map_err(|e| {
-			Error::SlatepackDecodeError(format!("Unable to build key to decrypt, {}", e))
-		})?;
-	let sp = encrypted_slate.into_slatepack(&sec_key, keychain.secp())?;
+	let address_index: u32 = match address_index {
+		Some(n) => n,
+		None => {
+			let mut batch = w.batch(keychain_mask)?;
+			let index = batch.load_u64(U64_DATA_IDX_ADDRESS_INDEX, 0u64)?;
+			index as u32
+		}
+	};
+
+	let sec_key = proofaddress::payment_proof_address_dalek_secret(
+		w.get_context_id(),
+		&keychain,
+		address_index,
+	)
+	.map_err(|e| Error::SlatepackDecodeError(format!("Unable to build key to decrypt, {}", e)))?;
+	let sp = encrypted_slate.into_slatepack(w.get_context_id(), &sec_key, keychain.secp())?;
 	let sender = sp.get_sender();
 	let recipient = sp.get_recipient();
 	let content = sp.get_content();
@@ -470,11 +595,23 @@ where
 	let slatepack_format = slatepack_recipient.is_some() || version == Some(SlateVersion::SP);
 
 	if slatepack_format {
+		let address_index: u32 = match address_index {
+			Some(n) => n,
+			None => {
+				let mut batch = w.batch(keychain_mask)?;
+				let index = batch.load_u64(U64_DATA_IDX_ADDRESS_INDEX, 0u64)?;
+				index as u32
+			}
+		};
+
 		// Can be not encrypted slate binary if slatepack_recipient is_none
 		let (slatepack_secret, slatepack_pk) = {
 			let keychain = w.keychain(keychain_mask)?;
-			let slatepack_secret =
-				proofaddress::payment_proof_address_dalek_secret(&keychain, address_index)?;
+			let slatepack_secret = proofaddress::payment_proof_address_dalek_secret(
+				w.get_context_id(),
+				&keychain,
+				address_index,
+			)?;
 			let slatepack_pk = DalekPublicKey::from(&slatepack_secret);
 			(slatepack_secret, slatepack_pk)
 		};
@@ -482,6 +619,7 @@ where
 		let keychain = w.keychain(keychain_mask)?;
 
 		Ok(VersionedSlate::into_version(
+			w.get_context_id(),
 			slate.clone(),
 			version.unwrap_or(SlateVersion::SP),
 			content,
@@ -494,7 +632,10 @@ where
 	} else {
 		// Plain slate format
 		let version = version.unwrap_or(slate.lowest_version());
-		Ok(VersionedSlate::into_version_plain(slate.clone(), version)
-			.map_err(|e| Error::SlatepackEncodeError(format!("Unable to build a slate, {}", e)))?)
+		Ok(
+			VersionedSlate::into_version_plain(w.get_context_id(), slate, version).map_err(
+				|e| Error::SlatepackEncodeError(format!("Unable to build a slate, {}", e)),
+			)?,
+		)
 	}
 }

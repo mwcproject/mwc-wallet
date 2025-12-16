@@ -22,12 +22,12 @@ use crate::libwallet::{
 	VersionInfo, VersionedSlate, WalletInst, WalletLCProvider,
 };
 use crate::util::secp::key::SecretKey;
-use crate::util::Mutex;
 use ed25519_dalek::PublicKey as DalekPublicKey;
 use libwallet::types::TxSession;
 use libwallet::wallet_lock;
 use std::cell::RefCell;
 use std::sync::Arc;
+use std::sync::Mutex;
 
 /// ForeignAPI Middleware Check callback
 pub type ForeignCheckMiddleware =
@@ -117,7 +117,8 @@ where
 	/// use tempfile::tempdir;
 	///
 	/// use std::sync::Arc;
-	/// use util::{Mutex, ZeroingString};
+	/// use util::ZeroingString;
+	/// use std::sync::Mutex;
 	///
 	/// use mwc_core::global;
 	///
@@ -140,15 +141,15 @@ where
 	///
 	/// // A NodeClient must first be created to handle communication between
 	/// // the wallet and the node.
-	/// let node_list = parse_node_address_string(wallet_config.check_node_api_http_addr.clone());
-	/// let node_client = HTTPNodeClient::new(node_list, None).unwrap();
+	/// let node_list = parse_node_address_string(wallet_config.check_node_api_http_addr.clone().unwrap_or("http://127.0.0.1:13413".to_owned()));
+	/// let node_client = HTTPNodeClient::new(0, node_list, None).unwrap();
 	///
 	/// // impls::DefaultWalletImpl is provided for convenience in instantiating the wallet
 	/// // It contains the LMDBBackend, DefaultLCProvider (lifecycle) and ExtKeychain used
 	/// // by the reference wallet implementation.
 	/// // These traits can be replaced with alternative implementations if desired
 	///
-	/// let mut wallet = Box::new(DefaultWalletImpl::<'static, HTTPNodeClient>::new(node_client.clone()).unwrap())
+	/// let mut wallet = Box::new(DefaultWalletImpl::<'static, HTTPNodeClient>::new(0, node_client.clone()))
 	///     as Box<dyn WalletInst<'static, DefaultLCProvider<HTTPNodeClient, ExtKeychain>, HTTPNodeClient, ExtKeychain>>;
 	///
 	/// // Wallet LifeCycle Provider provides all functions init wallet and work with seeds, etc...
@@ -163,7 +164,7 @@ where
 	/// lc.open_wallet(None, pw, false, false, None);
 	///
 	/// // All wallet functions operate on an Arc::Mutex to allow multithreading where needed
-	/// let mut wallet = Arc::new(Mutex::new(wallet));
+	/// let wallet = Arc::new(Mutex::new(wallet));
 	///
 	/// let api_foreign = Foreign::new(wallet.clone(), None, None);
 	/// // .. perform wallet operations
@@ -461,7 +462,7 @@ where
 	/// ```
 	/// # mwc_wallet_api::doctest_helper_setup_doc_env_foreign!(wallet, wallet_config);
 	///
-	/// let mut api_owner = Owner::new(wallet.clone(), None, None);
+	/// let mut api_owner = Owner::new(0, wallet.clone(), None, None);
 	/// let mut api_foreign = Foreign::new(wallet.clone(), None, None);
 	///
 	/// // . . .
@@ -526,13 +527,14 @@ where
 	pub fn decrypt_slate(
 		&self,
 		encrypted_slate: VersionedSlate,
+		address_index: Option<u32>,
 	) -> Result<(Slate, SlatePurpose, Option<DalekPublicKey>), Error> {
 		wallet_lock!(self.wallet_inst, w);
 		let (slate, content, sender, _receiver) = foreign::decrypt_slate(
 			&mut **w,
 			(&self.keychain_mask).as_ref(),
 			encrypted_slate,
-			None,
+			address_index,
 		)?;
 		Ok((slate, content, sender))
 	}
@@ -579,7 +581,8 @@ macro_rules! doctest_helper_setup_doc_env_foreign {
 		use tempfile::tempdir;
 
 		use std::sync::Arc;
-		use util::{Mutex, ZeroingString};
+		use std::sync::Mutex;
+		use util::ZeroingString;
 
 		use api::{Foreign, Owner};
 		use config::{parse_node_address_string, WalletConfig};
@@ -593,6 +596,8 @@ macro_rules! doctest_helper_setup_doc_env_foreign {
 
 		// Set our local chain_type for testing.
 		global::set_local_chain_type(global::ChainTypes::AutomatedTesting);
+		global::set_local_nrd_enabled(true);
+		global::set_local_accept_fee_base(global::DEFAULT_ACCEPT_FEE_BASE);
 
 		// don't run on windows CI, which gives very inconsistent results
 		if cfg!(windows) {
@@ -609,11 +614,17 @@ macro_rules! doctest_helper_setup_doc_env_foreign {
 		wallet_config.data_file_dir = dir.to_owned();
 		let pw = ZeroingString::from("");
 
-		let node_list = parse_node_address_string(wallet_config.check_node_api_http_addr.clone());
-		let node_client = HTTPNodeClient::new(node_list, None).unwrap();
-		let mut wallet = Box::new(
-			DefaultWalletImpl::<'static, HTTPNodeClient>::new(node_client.clone()).unwrap(),
-		)
+		let node_list = parse_node_address_string(
+			wallet_config
+				.check_node_api_http_addr
+				.clone()
+				.unwrap_or("http://127.0.0.1:13413".into()),
+		);
+		let node_client = HTTPNodeClient::new(0, node_list, None).unwrap();
+		let mut wallet = Box::new(DefaultWalletImpl::<'static, HTTPNodeClient>::new(
+			0,
+			node_client.clone(),
+		))
 			as Box<
 				WalletInst<
 					'static,
@@ -625,6 +636,11 @@ macro_rules! doctest_helper_setup_doc_env_foreign {
 		let lc = wallet.lc_provider().unwrap();
 		let _ = lc.set_top_level_directory(&wallet_config.data_file_dir);
 		lc.open_wallet(None, pw, false, false, None);
-		let mut $wallet = Arc::new(Mutex::new(wallet));
+		let $wallet = Arc::new(Mutex::new(wallet));
 	};
 }
+
+//#[test]
+//fn foreign_doc_test() {
+//	use crate as mwc_wallet_api;
+//}
