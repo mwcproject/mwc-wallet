@@ -39,24 +39,24 @@ fn comments() -> HashMap<String, String> {
 	);
 
 	retval.insert(
-		"api_listen_interface".to_string(),
-		"
-#host IP for wallet listener, change to \"0.0.0.0\" to receive mwc coins
-"
-		.to_string(),
-	);
-
-	retval.insert(
-		"api_listen_port".to_string(),
-		"
-#path of TLS certificate file, self-signed certificates are not supported
+		"[wallet]_END".to_string(),
+		"#path of TLS certificate file, self-signed certificates are not supported
 #tls_certificate_file = \"\"
 #private key for the TLS certificate
 #tls_certificate_key = \"\"
 
+#host IP for wallet listener, change to \"0.0.0.0\" to receive mwc coins through http. Use 127.0.0.1 to listen on external tor service or some other proxy
+#api_listen_interface = \"127.0.0.1\"
+
 #port for wallet listener
+#api_listen_port = 13415
+
+# Minimum acceptable fee per unit of transaction weight. Please note that fee can't be lower than
+# network has, otherwise your transactions will be rejected.
+# If you are running fresh wallet, there is no needs to adjust this value.
+# tx_fee_base = 1000
 "
-		.to_string(),
+			.to_string(),
 	);
 
 	retval.insert(
@@ -124,11 +124,6 @@ fn comments() -> HashMap<String, String> {
 	retval.insert(
 		"eth_swap_contract_address".to_string(),
 		"
-# Minimum acceptable fee per unit of transaction weight. Please note that fee can't be lower than
-# network has, otherwise your transactions will be rejected.
-# If you are running fresh wallet, there is no needs to adjust this value.
-# tx_fee_base = 1000
-
 #ethereum atomic swap contract address
 "
 		.to_string(),
@@ -172,22 +167,6 @@ fn comments() -> HashMap<String, String> {
 	retval.insert(
 		"[logging]".to_string(),
 		"
-#Type of proxy, eg \"socks4\", \"socks5\", \"http\", \"https\"
-#transport = \"https\"
-
-#Proxy address, eg IP:PORT or Hostname
-#server = \"\"
-
-#Username for the proxy server authentification
-#user = \"\"
-
-#Password for the proxy server authentification
-#pass = \"\"
-
-#This computer goes through a firewall that only allows connections to certain ports (Optional)
-#allowed_port = [80, 443]
-
-
 #########################################
 ### LOGGING CONFIGURATION             ###
 #########################################
@@ -253,19 +232,42 @@ fn comments() -> HashMap<String, String> {
 	);
 
 	retval.insert(
+		"log_max_files".to_string(),
+		"
+#Maximum log files in rotation
+"
+		.to_string(),
+	);
+
+	retval.insert(
 		"[tor]".to_string(),
 		"
 #########################################
-### TOR CONFIGURATION (Experimental) ###
+### TOR CONFIGURATION                 ###
 #########################################
 "
 		.to_string(),
 	);
 
 	retval.insert(
-		"use_tor_listener".to_string(),
-		"
-#Whether to start tor listener on listener startup (default true)
+		"[tor]_END".to_string(),
+		"#Enable tor for http method listening. Default is true
+#tor_enabled = true
+
+#Use external Tor daemon instead of embedded Atri client.
+#Note, mwc-wallet does expect that external Tor listening address will match the slatepack address.
+#tor_external = false
+
+#External Tor wallet listening address
+#Note, mwc-wallet does expect that external Tor listening address will match the slatepack address.
+#onion_address =
+
+# Webtunnel bridge for internal tor (Arti client). Webtunnel will be used for Tor connection in the
+# regions/networks where Tor usage is blocked by firewall.
+# If you are using such network, you might consider install your own for extra privacy. Otherwise
+# public webtunnels will be used.
+# https://community.torproject.org/relay/setup/webtunnel/source/
+# webtunnel_bridge =
 "
 		.to_string(),
 	);
@@ -276,55 +278,6 @@ fn comments() -> HashMap<String, String> {
 #Address of the running TOR (SOCKS) server
 "
 		.to_string(),
-	);
-
-	retval.insert(
-		"send_config_dir".to_string(),
-		"
-#Directory to output TOR configuration to when sending
-"
-		.to_string(),
-	);
-
-	retval.insert(
-		"socks_running".to_string(),
-		"
-# To use an external Tor SOCKS proxy for 'send', set this parameter to true. For 'listen', the
-# wallet will run its own Tor instance, which is shared for 'send' calls. If your wallet primarily
-# sends and doesn't listen, we recommend using your own Tor instance.
-"
-		.to_string(),
-	);
-
-	retval.insert(
-		"[tor.bridge]".to_string(),
-		"
-#########################################
-### TOR BRIDGE                        ###
-#########################################
-"
-		.to_string(),
-	);
-
-	retval.insert(
-		"[tor.proxy]".to_string(),
-		"
-#Tor bridge relay: allow to send and receive via TOR in a country where it is censored.
-#Enable it by entering a single bridge line. To disable it, you must comment it.
-#Support of the transport: obfs4, meek and snowflake.
-#obfs4proxy or snowflake client binary must be installed and on your path.
-#For example, the bridge line must be in the following format for obfs4 transport: \"obfs4 [IP:PORT] [FINGERPRINT] cert=[CERT] iat-mode=[IAT-MODE]\"
-#bridge_line = \"\"
-
-#Plugging client option, needed only for snowflake (let it empty if you want to use the default option of tor) or debugging purpose
-#client_option = \"\"
-
-
-#########################################
-### TOR PROXY                         ###
-#########################################
-"
-			.to_string(),
 	);
 
 	retval.insert(
@@ -370,14 +323,33 @@ pub fn insert_comments(orig: String) -> String {
 	let comments = comments();
 	let lines: Vec<&str> = orig.split('\n').collect();
 	let mut out_lines = vec![];
+	let mut section_ended_comments = None;
+
 	for l in lines {
 		let key = get_key(l);
+
+		if key.starts_with('[') {
+			if let Some(ln) = section_ended_comments {
+				out_lines.push(ln);
+				out_lines.push("\n".to_owned());
+			}
+
+			let end_key = key.clone() + "_END";
+			section_ended_comments = comments.get(&end_key).map(|s| s.clone());
+		}
+
 		if let Some(v) = comments.get(&key) {
 			out_lines.push(v.to_owned());
 		}
 		out_lines.push(l.to_owned());
 		out_lines.push("\n".to_owned());
 	}
+
+	if let Some(ln) = section_ended_comments {
+		out_lines.push(ln);
+		out_lines.push("\n".to_owned());
+	}
+
 	let mut ret_val = String::from("");
 	for l in out_lines {
 		ret_val.push_str(&l);

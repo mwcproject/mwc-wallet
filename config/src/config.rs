@@ -217,12 +217,12 @@ impl GlobalWalletConfig {
 		match *chain_type {
 			global::ChainTypes::Mainnet => {}
 			global::ChainTypes::Floonet => {
-				defaults.api_listen_port = Some(13415);
+				defaults.api_listen_port = None; //Some(13415);
 				defaults.libp2p_listen_port = None; // Some(13418);
 				defaults.check_node_api_http_addr = Some("http://127.0.0.1:13413".to_owned());
 			}
 			global::ChainTypes::UserTesting => {
-				defaults.api_listen_port = Some(23415);
+				defaults.api_listen_port = None; //Some(23415);
 				defaults.libp2p_listen_port = None; // Some(23418);
 				defaults.check_node_api_http_addr = Some("http://127.0.0.1:23413".to_owned());
 			}

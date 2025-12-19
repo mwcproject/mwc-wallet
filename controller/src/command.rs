@@ -466,9 +466,7 @@ where
 			controller::foreign_listener(
 				owner_api.wallet_inst.clone(),
 				keychain_mask,
-				&config
-					.api_listen_addr()
-					.map_err(|e| Error::ListenerError(format!("Config is incomplete, {}", e)))?,
+				config.api_listen_addr(),
 				tor_config,
 				&config.libp2p_listen_port,
 			)?;
@@ -2819,7 +2817,7 @@ fn notify_about_cancelled_swaps<L, C, K>(
 pub fn swap<L, C, K>(
 	wallet_inst: Arc<Mutex<Box<dyn WalletInst<'static, L, C, K>>>>,
 	keychain_mask: Option<&SecretKey>,
-	api_listen_addr: String,
+	api_listen_addr: Option<String>,
 	mqs_config: MQSConfig,
 	tor_config: TorConfig,
 	args: SwapArgs,
@@ -3242,7 +3240,7 @@ where
 							controller::foreign_listener(
 								wallet_inst2,
 								Arc::new(Mutex::new(km)),
-								&api_listen_addr,
+								api_listen_addr.clone(),
 								&tor_config2,
 								&None,
 							)
@@ -3405,7 +3403,7 @@ where
 						controller::foreign_listener(
 							wallet_inst,
 							Arc::new(Mutex::new(km)),
-							&api_listen_addr,
+							api_listen_addr.clone(),
 							&tor_config,
 							&None,
 						)?;
