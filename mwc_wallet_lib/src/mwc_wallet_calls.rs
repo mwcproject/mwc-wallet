@@ -442,7 +442,7 @@ fn process_request(input: String) -> Result<Value, String> {
 			controller::foreign_listener(
 				wallet,
 				Arc::new(Mutex::new(None)),
-				"127.0.0.1:1234", // Will not be used
+				None,
 				&tor_config,
 				&None,
 			)

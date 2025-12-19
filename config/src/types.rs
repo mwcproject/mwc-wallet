@@ -81,9 +81,9 @@ impl Default for WalletConfig {
 	fn default() -> WalletConfig {
 		WalletConfig {
 			chain_type: Some(ChainTypes::Mainnet),
-			api_listen_interface: Some("127.0.0.1".to_string()),
-			api_listen_port: Some(3415),
-			libp2p_listen_port: None, //Some(3418),
+			api_listen_interface: None, // Some("127.0.0.1".to_string()),
+			api_listen_port: None,      // Some(3415),
+			libp2p_listen_port: None,   //Some(3418),
 			owner_api_listen_port: Some(WalletConfig::default_owner_api_listen_port()),
 			api_secret_path: Some(".owner_api_secret".to_string()),
 			node_api_secret_path: Some(".api_secret".to_string()),
@@ -139,21 +139,16 @@ impl Default for WalletConfig {
 
 impl WalletConfig {
 	/// API Listen address
-	pub fn api_listen_addr(&self) -> Result<String, ConfigError> {
-		let api_listen_interface =
-			self.api_listen_interface
-				.as_ref()
-				.ok_or(crate::types::ConfigError::InvalidConfig(
-					"api_listen_interface expected to be defined".into(),
-				))?;
-		let api_listen_port =
-			self.api_listen_port
-				.as_ref()
-				.ok_or(crate::types::ConfigError::InvalidConfig(
-					"api_listen_port expected to be defined".into(),
-				))?;
-
-		Ok(format!("{}:{}", api_listen_interface, api_listen_port))
+	pub fn api_listen_addr(&self) -> Option<String> {
+		if self.api_listen_interface.is_some() && self.api_listen_port.is_some() {
+			Some(format!(
+				"{}:{}",
+				self.api_listen_interface.clone().unwrap(),
+				self.api_listen_port.clone().unwrap()
+			))
+		} else {
+			None
+		}
 	}
 
 	/// Default listener port

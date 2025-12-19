@@ -161,6 +161,13 @@ pub fn stop_foreign_api_running(context_id: u32) {
 	}
 }
 
+pub fn reset_foreign_api_server(context_id: u32) {
+	FOREIGN_API
+		.write()
+		.expect("RwLock failure")
+		.remove(&context_id);
+}
+
 pub fn set_foreign_api_server(context_id: u32, api_server: Option<Arc<ForeignApiServer>>) {
 	// Stopping prev server. That is a point to store it this way
 	{
@@ -1085,7 +1092,7 @@ where
 pub fn foreign_listener<L, C, K>(
 	wallet: Arc<Mutex<Box<dyn WalletInst<'static, L, C, K> + 'static>>>,
 	keychain_mask: Arc<Mutex<Option<SecretKey>>>,
-	addr: &str,
+	addr: Option<String>,
 	tor_config: &TorConfig,
 	_libp2p_listen_port: &Option<u16>,
 ) -> Result<(), Error>
@@ -1117,8 +1124,7 @@ where
 		));
 	}
 
-	warn!("Starting HTTP Foreign listener API server at {}.", addr);
-	let socket_addr: SocketAddr = addr.parse().expect("unable to parse socket address");
+	warn!("Starting HTTP Foreign listener API server.");
 
 	if mwc_wallet_util::mwc_util::is_console_output_enabled() {
 		let address = ProvableAddress::from_tor_pub_key(&slatepack_pk);
@@ -1192,11 +1198,19 @@ where
 	let api_thread = thread::Builder::new()
 		.name(format!("wallet-foreign-listener-{}", context_id))
 		.spawn(move || {
+			let socket_addr: Option<SocketAddr> = match addr {
+				Some(addr) => Some(
+					addr.parse()
+						.expect(&format!("Unable to parse socket address {}", addr)),
+				),
+				None => None,
+			};
+
 			let res = mwc_p2p::listen(
 				context_id,
 				stop_state,
 				Some(tor_config),
-				Some(socket_addr),
+				socket_addr,
 				Some(onion_expanded_key),
 				Some(service_started_callback),
 				Some(service_failed_callback),
@@ -1206,6 +1220,7 @@ where
 
 			if let Err(e) = res {
 				error!("Error starting foreign listener: {}", e);
+				reset_foreign_api_server(context_id);
 			}
 
 			set_foreign_api_server(context_id, None);
