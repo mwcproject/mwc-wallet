@@ -63,7 +63,7 @@ where
 
 	// Return none is cached value not set of epired
 	fn get_value(&self, key: &K) -> Option<T> {
-		match self.data.write().unwrap().get(key) {
+		match self.data.write().expect("RwLock failure").get(key) {
 			Some((data, time)) => {
 				if time.elapsed().as_millis() > CACHE_VALID_TIME_MS {
 					return None;
@@ -77,12 +77,12 @@ where
 	fn set_value(&self, key: K, value: T) {
 		self.data
 			.write()
-			.unwrap()
+			.expect("RwLock failure")
 			.insert(key, (value, Instant::now()));
 	}
 
 	fn clean(&self) {
-		self.data.write().unwrap().clear();
+		self.data.write().expect("RwLock failure").clear();
 	}
 }
 
