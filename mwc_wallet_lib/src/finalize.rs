@@ -74,7 +74,7 @@ pub fn finalize(
 		wallet_lock!(wallet, w);
 		let (slate_res, _context) =
 			owner::finalize_tx(&mut **w, None, &None, &slate, true, false, true)
-				.map_err(|e| format!("Unable to finalze, {}", e))?;
+				.map_err(|e| format!("Unable to finalize, {}", e))?;
 		slate_res
 	};
 

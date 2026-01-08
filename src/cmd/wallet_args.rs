@@ -407,6 +407,9 @@ pub fn parse_listen_args(
 ) -> Result<command::ListenArgs, ParseError> {
 	if let Some(port) = args.value_of("port") {
 		config.api_listen_port = Some(port.parse().unwrap());
+		if config.api_listen_interface.is_none() {
+			config.api_listen_interface = Some("127.0.0.1".to_string());
+		}
 	}
 	if let Some(port) = args.value_of("libp2p_port") {
 		config.libp2p_listen_port = Some(port.parse().unwrap());
@@ -415,6 +418,9 @@ pub fn parse_listen_args(
 	let method = parse_required(args, "method")?;
 	if args.is_present("no_tor") {
 		tor_config.tor_enabled = Some(false);
+		if config.api_listen_interface.is_none() {
+			config.api_listen_interface = Some("127.0.0.1".to_string());
+		}
 	}
 	Ok(command::ListenArgs {
 		method: method.to_owned(),
@@ -1961,9 +1967,7 @@ where
 			command::swap(
 				owner_api.wallet_inst.clone(),
 				km,
-				wallet_config.api_listen_addr().map_err(|e| {
-					Error::GenericError(format!("Wallet configuration error, {}", e))
-				})?,
+				wallet_config.api_listen_addr(),
 				mqs_config.clone(),
 				tor_config.clone(),
 				a,

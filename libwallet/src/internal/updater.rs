@@ -562,6 +562,7 @@ pub fn retrieve_info<'a, T: ?Sized, C, K>(
 	wallet: &mut T,
 	parent_key_id: &Identifier,
 	minimum_confirmations: u64,
+	manually_locked_outputs: Vec<String>,
 ) -> Result<WalletInfo, Error>
 where
 	T: WalletBackend<'a, C, K>,
@@ -590,6 +591,8 @@ where
 	let mut locked_total = 0;
 	let mut reverted_total = 0;
 
+	let manually_locked_outputs: HashSet<String> = manually_locked_outputs.into_iter().collect();
+
 	for out in outputs {
 		match out.status {
 			OutputStatus::Unspent => {
@@ -599,7 +602,13 @@ where
 					// Treat anything less than minimum confirmations as "unconfirmed".
 					unconfirmed_total += out.value;
 				} else {
-					unspent_total += out.value;
+					if manually_locked_outputs
+						.contains(out.commit.as_ref().unwrap_or(&String::new()))
+					{
+						locked_total += out.value;
+					} else {
+						unspent_total += out.value;
+					}
 				}
 			}
 			OutputStatus::Unconfirmed => {

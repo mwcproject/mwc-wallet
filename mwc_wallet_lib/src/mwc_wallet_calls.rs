@@ -442,7 +442,7 @@ fn process_request(input: String) -> Result<Value, String> {
 			controller::foreign_listener(
 				wallet,
 				Arc::new(Mutex::new(None)),
-				"127.0.0.1:1234", // Will not be used
+				None,
 				&tor_config,
 				&None,
 			)
@@ -608,8 +608,10 @@ fn process_request(input: String) -> Result<Value, String> {
 			let context_id: u32 = get_param(&params, "context_id")?;
 			let wallet = get_wallet_instance(context_id)?;
 			wallet_lock!(wallet, w);
-			let acc_res =
+			let mut acc_res =
 				keys::accounts(&mut **w).map_err(|e| format!("Accounts request failed, {}", e))?;
+
+			acc_res.sort_by_key(|a| a.path.clone());
 
 			let accounts = serde_json::to_value(&acc_res)
 				.map_err(|e| format!("Unable convert result into json, {}", e))?;
@@ -625,8 +627,19 @@ fn process_request(input: String) -> Result<Value, String> {
 			let wallet = get_wallet_instance(context_id)?;
 
 			wallet_lock!(wallet, w);
-			keys::set_acct_path(&mut **w, None, account_name.as_str(), &account_path)
-				.map_err(|e| format!("Failed to rename account, {}", e))?;
+
+			let accounts =
+				keys::accounts(&mut **w).map_err(|e| format!("Accounts request failed, {}", e))?;
+
+			let old_acc_name = accounts
+				.iter()
+				.find(|a| a.path == account_path)
+				.map(|a| a.label.clone())
+				.ok_or("Not found account to rename")?;
+
+			keys::rename_acct_path(&mut **w, None, accounts, &old_acc_name, &account_name)
+				.map_err(|e| format!("Unable to rename account, {}", e))?;
+
 			json!({})
 		}
 		// Get current account path
@@ -777,11 +790,14 @@ fn process_request(input: String) -> Result<Value, String> {
 			let context_id: u32 = get_param(&params, "context_id")?;
 			let confirmations: u64 = get_param(&params, "confirmations")?;
 			let account: Identifier = get_param(&params, "account_path")?;
+			let manually_locked_outputs: Vec<String> =
+				get_param(&params, "manually_locked_outputs")?;
 
 			let wallet = get_wallet_instance(context_id)?;
 			wallet_lock!(wallet, w);
-			let wallet_info = updater::retrieve_info(&mut **w, &account, confirmations)
-				.map_err(|e| format!("Inable to retrieve wallet summary, {}", e))?;
+			let wallet_info =
+				updater::retrieve_info(&mut **w, &account, confirmations, manually_locked_outputs)
+					.map_err(|e| format!("Inable to retrieve wallet summary, {}", e))?;
 
 			serde_json::to_value(&wallet_info)
 				.map_err(|e| format!("Unable convert result into json, {}", e))?

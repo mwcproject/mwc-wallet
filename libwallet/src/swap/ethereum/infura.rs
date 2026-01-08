@@ -1559,7 +1559,7 @@ mod tests {
 			generate_ethereum_wallet(CHAIN, REDEEM_MNMENOIC, PASSWORD, WALLET_PATH).unwrap();
 		REDEEM_WALLET
 			.write()
-			.unwrap()
+			.expect("RwLock failure")
 			.replace(redeem_wallet.clone());
 
 		//initiate swap offer

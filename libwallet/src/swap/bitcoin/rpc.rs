@@ -126,29 +126,19 @@ impl LineStream {
 		let res = match &mut self.reader {
 			StreamReader::SSLReader(reader) => {
 				let mut stream = reader.take().unwrap().into_inner();
-				let res = stream.write(&bytes);
+				let res = stream.write_all(&bytes);
 				reader.replace(BufReader::new(stream));
 				res
 			}
 			StreamReader::PlainReader(reader) => {
 				let mut stream = reader.take().unwrap().into_inner();
-				let res = stream.write(&bytes);
+				let res = stream.write_all(&bytes);
 				reader.replace(BufReader::new(stream));
 				res
 			}
 		};
-
-		match res {
-			Err(e) => {
-				self.connected = false;
-				Err(e.into())
-			}
-			Ok(c) if c == 0 => {
-				self.connected = false;
-				Err(Error::Generic("Connection closed".into()))
-			}
-			Ok(_) => Ok(()),
-		}
+		res?;
+		Ok(())
 	}
 }
 

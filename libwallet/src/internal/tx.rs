@@ -667,7 +667,7 @@ where
 			}
 			let mut batch = wallet.batch(keychain_mask)?;
 			for mut tx in tx_vec.into_iter() {
-				tx.messages = Some(slate.participant_messages());
+				tx.update_messages(&slate.participant_messages());
 				let parent_key = tx.parent_key_id.clone();
 				batch.save_tx_log_entry(tx, &parent_key)?;
 			}

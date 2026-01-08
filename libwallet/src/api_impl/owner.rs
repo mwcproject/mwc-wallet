@@ -289,7 +289,8 @@ where
 	}
 
 	let parent_key_id = w.parent_key_id();
-	let wallet_info = updater::retrieve_info(&mut **w, &parent_key_id, minimum_confirmations)?;
+	let wallet_info =
+		updater::retrieve_info(&mut **w, &parent_key_id, minimum_confirmations, vec![])?;
 	Ok((validated, wallet_info))
 }
 
@@ -626,6 +627,7 @@ where
 	t.num_outputs = 0;
 	t.output_commits = vec![];
 	t.amount_credited = 0;
+	t.update_messages(&slate.participant_messages());
 
 	match tx_session {
 		Some(tx_ses) => {
@@ -1407,7 +1409,7 @@ fn write_info(
 	};
 }
 
-/// Print wallet status into send channel. This data suppose to be used for troubleshouting only
+/// Print wallet status into send channel. This data suppose to be used for troubleshooting only
 pub fn dump_wallet_data<'a, L, C, K>(
 	wallet_inst: Arc<Mutex<Box<dyn WalletInst<'a, L, C, K>>>>,
 	status_send_channel: &Sender<StatusMessage>,
