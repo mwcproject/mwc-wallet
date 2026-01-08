@@ -9,6 +9,14 @@ steps:
     displayName: Build MacOS Release
     condition: and(succeeded(), eq( variables['Agent.OS'], 'Darwin' ))
   - script: |
+      git clone --depth 1 https://gitlab.torproject.org/tpo/anti-censorship/pluggable-transports/webtunnel
+      cd webtunnel/main/client
+      go build
+      mv client webtunnelclient
+      cp webtunnelclient $(Build.SourcesDirectory)/target/release/
+    displayName: Build WebTunnel client
+    condition: and(succeeded(), eq( variables['CI_JOB'], 'release' ), or(eq( variables['Agent.OS'], 'Linux' ), eq( variables['Agent.OS'], 'Darwin' )))
+  - script: |
       MY_TAG="$(Build.SourceBranch)"
       MY_TAG=${MY_TAG#refs/tags/}
       echo $MY_TAG
@@ -21,7 +29,9 @@ steps:
     condition:  and(succeeded(), contains(variables['Build.SourceBranch'], 'refs/tags/'), eq(variables['CI_JOB'], 'release' ))
     inputs:
       sourceFolder: '$(Build.SourcesDirectory)/target/release'
-      contents: 'mwc-wallet'
+      contents: |
+        mwc-wallet
+        webtunnelclient
       targetFolder: '$(Build.BinariesDirectory)/mwc-wallet'
   - task: ArchiveFiles@2
     displayName: Gather assets

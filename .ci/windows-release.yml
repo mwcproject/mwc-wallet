@@ -13,6 +13,14 @@ steps:
       ROARING_ARCH: x86-64-v2
     displayName: Build Release
   - script: |
+      git clone --depth 1 https://gitlab.torproject.org/tpo/anti-censorship/pluggable-transports/webtunnel
+      cd webtunnel\main\client
+      go build
+      ren client.exe webtunnelclient.exe
+      copy /y webtunnelclient.exe $(Build.SourcesDirectory)\target\release\
+    displayName: Build WebTunnel client
+    condition:  and(succeeded(), eq(variables['CI_JOB'], 'release' ))
+  - script: |
       SET MY_TAG=$(Build.SourceBranch)
       SET MY_TAG=%MY_TAG:~10%
       echo %MY_TAG%
@@ -26,7 +34,9 @@ steps:
     condition:  and(succeeded(), contains(variables['Build.SourceBranch'], 'refs/tags/'), eq(variables['CI_JOB'], 'release' ))
     inputs:
       sourceFolder: '$(Build.SourcesDirectory)\target\release'
-      contents: 'mwc-wallet.exe'
+      contents: |
+        mwc-wallet.exe
+        webtunnelclient.exe
       targetFolder: '$(Build.BinariesDirectory)\mwc-wallet'
   - task: ArchiveFiles@2
     displayName: Gather assets
