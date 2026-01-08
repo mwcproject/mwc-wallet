@@ -473,7 +473,7 @@ impl HttpDataSender {
 		if close {
 			if let Some(strm) = stream.take() {
 				if let Err(e) = strm.shutdown() {
-					info!("Connection shoutdown error: {}", e);
+					info!("Connection shutdown error: {}", e);
 				}
 			}
 		} else {

@@ -431,8 +431,8 @@ fn restore_missing_output<'a, T: ?Sized, C, K>(
 	wallet: &mut T,
 	keychain_mask: Option<&SecretKey>,
 	output: OutputResult,
-	commit2transactionuuid: &HashMap<String, String>,
-	transaction: &HashMap<String, WalletTxInfo>,
+	commit2transactionuuid: &HashMap<String, TxUuidPlus>,
+	transaction: &HashMap<TxUuidPlus, WalletTxInfo>,
 	found_parents: &mut HashMap<Identifier, u32>,
 ) -> Result<(), Error>
 where
@@ -507,9 +507,9 @@ struct WalletOutputInfo {
 	updated: bool,  // true if data was updated, we need push it into DB
 	at_chain: bool, // true if this Output was founf at the Chain
 	output: OutputData,
-	commit: String,                  // commit as a string. output.output value
-	tx_input_uuid: HashSet<String>,  // transactions where this commit is input
-	tx_output_uuid: HashSet<String>, // transactions where this commit is output
+	commit: String,                      // commit as a string. output.output value
+	tx_input_uuid: HashSet<TxUuidPlus>,  // transactions where this commit is input
+	tx_output_uuid: HashSet<TxUuidPlus>, // transactions where this commit is output
 }
 
 impl WalletOutputInfo {
@@ -525,12 +525,12 @@ impl WalletOutputInfo {
 		}
 	}
 
-	pub fn add_tx_input_uuid(&mut self, uuid: &str) {
-		self.tx_input_uuid.insert(String::from(uuid));
+	pub fn add_tx_input_uuid(&mut self, uuid: &TxUuidPlus) {
+		self.tx_input_uuid.insert(uuid.clone());
 	}
 
-	pub fn add_tx_output_uuid(&mut self, uuid: &str) {
-		self.tx_output_uuid.insert(String::from(uuid));
+	pub fn add_tx_output_uuid(&mut self, uuid: &TxUuidPlus) {
+		self.tx_output_uuid.insert(uuid.clone());
 	}
 
 	// Output that is not active and not mapped to any transaction.
@@ -541,10 +541,31 @@ impl WalletOutputInfo {
 	}
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct TxUuidPlus {
+	uuid_str: String,
+	id: u32,
+	parent_key_id: String,
+}
+
+impl TxUuidPlus {
+	fn new(uuid_str: String, id: u32, parent_key_id: String) -> TxUuidPlus {
+		TxUuidPlus {
+			uuid_str,
+			id,
+			parent_key_id,
+		}
+	}
+
+	fn tx_id(&self) -> String {
+		format!("{}/{}", self.id, self.parent_key_id)
+	}
+}
+
 #[derive(Debug)]
 struct WalletTxInfo {
-	updated: bool,   // true if data was updated, we need push it into DB
-	tx_uuid: String, // transaction uuid++. Foramt:  "{}/{}/{}", uuid_str, tx.id, tx.parent_key_id.to_hex()
+	updated: bool,       // true if data was updated, we need push it into DB
+	tx_uuid: TxUuidPlus, // transaction uuid++. Format:  "{}/{}/{}", uuid_str, tx.id, tx.parent_key_id.to_hex()
 	tx_log: TxLogEntry,
 	input_commit: HashSet<String>,   // Commits from input (if found)
 	output_commit: HashSet<String>,  // Commits from output (if found)
@@ -552,7 +573,7 @@ struct WalletTxInfo {
 }
 
 impl WalletTxInfo {
-	pub fn new(tx_uuid: String, tx_log: TxLogEntry) -> WalletTxInfo {
+	pub fn new(tx_uuid: TxUuidPlus, tx_log: TxLogEntry) -> WalletTxInfo {
 		WalletTxInfo {
 			updated: false,
 			tx_uuid,
@@ -618,7 +639,7 @@ fn get_wallet_and_chain_data<'a, T: ?Sized, C, K>(
 	(
 		HashMap<String, WalletOutputInfo>, // Outputs. Key: Commit
 		Vec<OutputResult>,                 // Chain outputs
-		HashMap<String, WalletTxInfo>,     // Slate based Transaction. Key: tx uuid
+		HashMap<TxUuidPlus, WalletTxInfo>, // Slate based Transaction. Key: tx uuid
 		String,                            // Commit of the last output in the sequence
 	),
 	Error,
@@ -644,7 +665,7 @@ where
 
 	// Wallet's transactions with extended info
 	// Key: transaction uuid
-	let mut transactions: HashMap<String, WalletTxInfo> = HashMap::new();
+	let mut transactions: HashMap<TxUuidPlus, WalletTxInfo> = HashMap::new();
 	let chain_outs: Vec<OutputResult>;
 	{
 		// First, reading data from the wallet
@@ -661,7 +682,7 @@ where
 		}
 
 		// Key: id + tx.parent_key_id
-		let mut transactions_id2uuid: HashMap<String, String> = HashMap::new();
+		let mut transactions_id2uuid: HashMap<String, TxUuidPlus> = HashMap::new();
 		let mut not_confirmed_txs = 0;
 
 		let mut non_uuid_tx_counter: u32 = 0;
@@ -691,22 +712,18 @@ where
 
 			// uuid must include tx uuid, id for transaction to handle self send with same account,
 			//    parent_key_id  to handle senf send to different accounts
-			let uuid_str = format!(
-				"{}/{}/{}",
-				tx_uuid_str,
+			let uuid_plus = TxUuidPlus::new(
+				tx_uuid_str.clone(),
 				tx.id,
-				util::to_hex(&tx.parent_key_id.to_bytes())
+				util::to_hex(&tx.parent_key_id.to_bytes()),
 			);
 
-			let mut wtx = WalletTxInfo::new(uuid_str, tx.clone());
+			let mut wtx = WalletTxInfo::new(uuid_plus, tx.clone());
 
 			if let Ok(transaction) = wallet.get_stored_tx_by_uuid(&tx_uuid_str, false) {
 				wtx.add_transaction(transaction);
 			};
-			transactions_id2uuid.insert(
-				format!("{}/{}", tx.id, util::to_hex(&tx.parent_key_id.to_bytes())),
-				wtx.tx_uuid.clone(),
-			);
+			transactions_id2uuid.insert(wtx.tx_uuid.tx_id(), wtx.tx_uuid.clone());
 
 			input_commits.extend(wtx.input_commit.iter().map(|s| s.clone()));
 			output_commits.extend(wtx.output_commit.iter().map(|s| s.clone()));
@@ -741,7 +758,7 @@ where
 
 			// Validate kernels from transaction. Kernel are a source of truth
 			// Because of account transfer we might have 2 transactions with same kernel from the both sides.
-			let mut txkernel_to_txuuid: HashMap<String, Vec<String>> = HashMap::new();
+			let mut txkernel_to_txuuid: HashMap<String, Vec<TxUuidPlus>> = HashMap::new();
 
 			for (tx_uuid, tx) in &mut transactions {
 				if tx.tx_log.kernel_excess.is_some() {
@@ -1468,7 +1485,7 @@ fn validate_outputs<'a, T: ?Sized, C, K>(
 	start_height: u64,
 	chain_outs: &Vec<OutputResult>,
 	outputs: &mut HashMap<String, WalletOutputInfo>,
-	transaction: &HashMap<String, WalletTxInfo>,
+	transaction: &HashMap<TxUuidPlus, WalletTxInfo>,
 	status_send_channel: &Option<Sender<StatusMessage>>,
 	found_parents: &mut HashMap<Identifier, u32>,
 ) -> Result<Vec<OutputData>, Error>
@@ -1477,7 +1494,7 @@ where
 	C: NodeClient + 'a,
 	K: Keychain + 'a,
 {
-	let mut commit2transactionuuid: HashMap<String, String> = HashMap::new();
+	let mut commit2transactionuuid: HashMap<String, TxUuidPlus> = HashMap::new();
 	for tx in transaction.values() {
 		for out in &tx.output_commit {
 			commit2transactionuuid.insert(out.clone(), tx.tx_uuid.clone());
@@ -1598,7 +1615,7 @@ where
 fn validate_transactions<'a, T: ?Sized, C, K>(
 	wallet: &mut T,
 	_keychain_mask: Option<&SecretKey>,
-	transactions: &mut HashMap<String, WalletTxInfo>,
+	transactions: &mut HashMap<TxUuidPlus, WalletTxInfo>,
 	outputs: &HashMap<String, WalletOutputInfo>,
 	status_send_channel: &Option<Sender<StatusMessage>>,
 ) -> Result<(), Error>
@@ -1612,6 +1629,7 @@ where
 		if tx_info.kernel_validation.is_some() {
 			if tx_info.kernel_validation.clone().unwrap() {
 				// transaction is valid
+				let mut change_update_sent = false;
 				if tx_info.tx_log.is_cancelled_reverted() {
 					tx_info.tx_log.uncancel_unrevert();
 					tx_info.updated = true;
@@ -1619,8 +1637,9 @@ where
 					if let Some(ref s) = status_send_channel {
 						let _ = s.send(StatusMessage::Warning(format!(
 							"Changing transaction {} from Canceled to active and confirmed",
-							tx_info.tx_uuid.split('/').next().unwrap_or("????")
+							tx_info.tx_uuid.uuid_str
 						)));
+						change_update_sent = true;
 					}
 				}
 
@@ -1637,11 +1656,13 @@ where
 					}
 					tx_info.updated = true;
 
-					if let Some(ref s) = status_send_channel {
-						let _ = s.send(StatusMessage::Info(format!(
-							"Changing transaction {} state to confirmed",
-							tx_info.tx_uuid.split('/').next().unwrap_or("????")
-						)));
+					if !change_update_sent {
+						if let Some(ref s) = status_send_channel {
+							let _ = s.send(StatusMessage::Info(format!(
+								"Changing transaction {} state to confirmed",
+								tx_info.tx_uuid.uuid_str
+							)));
+						}
 					}
 				}
 			} else {
@@ -1661,9 +1682,9 @@ where
 							t => t.clone(),
 						};
 						if let Some(ref s) = status_send_channel {
-							let _ = s.send(StatusMessage::Info(format!(
-								"Changing transaction {} state to NOT confirmed",
-								tx_info.tx_uuid.split('/').next().unwrap_or("????")
+							let _ = s.send(StatusMessage::Warning(format!(
+								"Changing transaction {} state to reverted (unconfirmed)",
+								tx_info.tx_uuid.uuid_str
 							)));
 						}
 					}
@@ -1714,7 +1735,7 @@ fn validate_outputs_ownership<'a, T: ?Sized, C, K>(
 	wallet: &mut T,
 	keychain_mask: Option<&SecretKey>,
 	outputs: &mut HashMap<String, WalletOutputInfo>,
-	transactions: &mut HashMap<String, WalletTxInfo>,
+	transactions: &mut HashMap<TxUuidPlus, WalletTxInfo>,
 	status_send_channel: &Option<Sender<StatusMessage>>,
 ) where
 	T: WalletBackend<'a, C, K>,
@@ -1736,13 +1757,13 @@ fn validate_outputs_ownership<'a, T: ?Sized, C, K>(
 					.map(|tx| tx.tx_log.is_cancelled_reverted())
 					.unwrap_or(false)
 			})
-			.map(|tx_uuid| format!("{}", tx_uuid.split('/').next().unwrap_or("????")))
+			.map(|tx_uuid| format!("{}", tx_uuid.uuid_str))
 			.collect();
 
 		let in_all_uuid: HashSet<String> = w_out
 			.tx_input_uuid
 			.iter()
-			.map(|tx_uuid| format!("{}", tx_uuid.split('/').next().unwrap_or("????")))
+			.map(|tx_uuid| format!("{}", tx_uuid.uuid_str))
 			.collect();
 
 		let in_active = in_all_uuid.len() - in_cancelled_uuid.len();
@@ -1756,13 +1777,13 @@ fn validate_outputs_ownership<'a, T: ?Sized, C, K>(
 					.map(|tx| tx.tx_log.is_cancelled_reverted())
 					.unwrap_or(false)
 			})
-			.map(|tx_uuid| format!("{}", tx_uuid.split('/').next().unwrap_or("????")))
+			.map(|tx_uuid| format!("{}", tx_uuid.uuid_str))
 			.collect();
 
 		let out_all_uuid: HashSet<String> = w_out
 			.tx_output_uuid
 			.iter()
-			.map(|tx_uuid| format!("{}", tx_uuid.split('/').next().unwrap_or("????")))
+			.map(|tx_uuid| format!("{}", tx_uuid.uuid_str))
 			.collect();
 
 		let out_active = out_all_uuid.len() - out_cancelled_uuid.len();
@@ -1898,10 +1919,10 @@ fn validate_outputs_ownership<'a, T: ?Sized, C, K>(
 // Delete any unconfirmed outputs (requested by user), unlock any locked outputs and delete (cancel) associated transactions
 fn delete_unconfirmed(
 	outputs: &mut HashMap<String, WalletOutputInfo>,
-	transactions: &mut HashMap<String, WalletTxInfo>,
+	transactions: &mut HashMap<TxUuidPlus, WalletTxInfo>,
 	status_send_channel: &Option<Sender<StatusMessage>>,
 ) {
-	let mut transaction2cancel: HashSet<String> = HashSet::new();
+	let mut transaction2cancel: HashSet<TxUuidPlus> = HashSet::new();
 
 	for w_out in outputs.values_mut() {
 		match w_out.output.status {
@@ -1927,21 +1948,29 @@ fn delete_unconfirmed(
 		}
 	}
 
+	// Cancelling non confirmed transactions without outputs (possible for SP that was never finalized)
+	for (uuid, tx) in transactions.iter() {
+		if tx.tx_log.tx_type == TxLogEntryType::TxReverted
+			|| (!tx.updated && !tx.tx_log.confirmed && !tx.tx_log.is_cancelled())
+		{
+			transaction2cancel.insert(uuid.clone());
+		}
+	}
+
 	for tx_uuid in &transaction2cancel {
 		if let Some(tx) = transactions.get_mut(tx_uuid) {
-			if !tx.tx_log.is_cancelled_reverted() {
+			if !tx.tx_log.is_cancelled() {
 				// let's cancell transaction
 				match tx.tx_log.tx_type {
+					TxLogEntryType::TxReverted => {
+						tx.tx_log.tx_type = TxLogEntryType::TxReceivedCancelled;
+					}
 					TxLogEntryType::TxSent => {
 						tx.tx_log.tx_type = TxLogEntryType::TxSentCancelled;
 					}
 					TxLogEntryType::TxReceived => {
-						tx.tx_log.reverted_after =
-							tx.tx_log.confirmation_ts.clone().and_then(|t| {
-								let now = chrono::Utc::now();
-								(now - t).to_std().ok()
-							});
-						tx.tx_log.tx_type = TxLogEntryType::TxReverted;
+						// Note, no reverted because it is a full scan with delete flag. Reverted is not a deleted
+						tx.tx_log.tx_type = TxLogEntryType::TxReceivedCancelled;
 					}
 					TxLogEntryType::ConfirmedCoinbase => {
 						// coinbased not confirmed are filtered out. That is why there no needs to change the status
@@ -1953,7 +1982,7 @@ fn delete_unconfirmed(
 				if let Some(ref s) = status_send_channel {
 					let _ = s.send(StatusMessage::Warning(format!(
 						"Cancelling transaction {}",
-						tx_uuid.split('/').next().unwrap_or("????")
+						tx_uuid.uuid_str
 					)));
 				}
 			}
@@ -1965,7 +1994,7 @@ fn delete_unconfirmed(
 // Here not much what we can do because full node scan or restore from the seed is required.
 fn validate_consistancy(
 	outputs: &mut HashMap<String, WalletOutputInfo>,
-	transactions: &mut HashMap<String, WalletTxInfo>,
+	transactions: &mut HashMap<TxUuidPlus, WalletTxInfo>,
 ) {
 	for tx_info in transactions.values_mut() {
 		if tx_info.tx_log.is_cancelled_reverted() {
@@ -2019,7 +2048,7 @@ fn store_transactions_outputs<'a, T: ?Sized, C, K>(
 	outputs: &mut HashMap<String, WalletOutputInfo>,
 	tip_height: u64, // tip
 	last_output: &String,
-	transactions: &HashMap<String, WalletTxInfo>,
+	transactions: &HashMap<TxUuidPlus, WalletTxInfo>,
 	status_send_channel: &Option<Sender<StatusMessage>>,
 	archive_height: u64,
 ) -> Result<(), Error>
@@ -2293,8 +2322,8 @@ fn report_transaction_collision(
 	context_id: u32,
 	status_send_channel: &Option<Sender<StatusMessage>>,
 	commit: &String,
-	tx_uuid: &HashSet<String>,
-	transactions: &HashMap<String, WalletTxInfo>,
+	tx_uuid: &HashSet<TxUuidPlus>,
+	transactions: &HashMap<TxUuidPlus, WalletTxInfo>,
 	inputs: bool,
 ) {
 	// We don't want to report collision for old transactions. Migration could be a reason. Those messages
@@ -2334,10 +2363,7 @@ fn report_transaction_collision(
 					cancelled_tx.push_str(", ");
 				}
 				let tx = wtx.unwrap();
-				cancelled_tx.push_str(&format!(
-					"{}",
-					tx.tx_uuid.split('/').next().unwrap_or("????")
-				));
+				cancelled_tx.push_str(&format!("{}", tx.tx_uuid.uuid_str));
 			});
 
 		let inputs = if inputs { "inputs" } else { "outputs" };
@@ -2355,8 +2381,8 @@ fn report_transaction_collision(
 fn recover_first_cancelled<'a, T: ?Sized, C, K>(
 	wallet: &mut T,
 	status_send_channel: &Option<Sender<StatusMessage>>,
-	tx_uuid: &HashSet<String>,
-	transactions: &mut HashMap<String, WalletTxInfo>,
+	tx_uuid: &HashSet<TxUuidPlus>,
+	transactions: &mut HashMap<TxUuidPlus, WalletTxInfo>,
 ) -> Result<(), Error>
 where
 	T: WalletBackend<'a, C, K>,
@@ -2389,9 +2415,7 @@ where
 				if let Some(ref s) = status_send_channel {
 					let _ = s.send(StatusMessage::Warning(format!(
 						"Changing transaction {} state from {:?} to {:?}",
-						wtx.tx_uuid.split('/').next().unwrap_or("????"),
-						prev_tx_state,
-						wtx.tx_log.tx_type
+						wtx.tx_uuid.uuid_str, prev_tx_state, wtx.tx_log.tx_type
 					)));
 				}
 

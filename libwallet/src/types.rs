@@ -1408,6 +1408,27 @@ impl TxLogEntry {
 		};
 		self.ttl_cutoff_height = None;
 	}
+
+	/// Append message from the slate.
+	pub fn update_messages(&mut self, messages: &ParticipantMessages) {
+		if self.messages.is_none() {
+			self.messages = Some(messages.clone())
+		} else {
+			let exist_messages = self.messages.clone().unwrap().messages;
+			let mut messages = messages.clone();
+			for msg in exist_messages {
+				if !messages
+					.messages
+					.iter()
+					.any(|m| m.message.as_ref().map(|m| m.len()).unwrap_or(0) > 0 && m.id == msg.id)
+				{
+					messages.messages.push(msg.clone());
+				}
+			}
+			messages.messages.sort_by_key(|m| m.id);
+			self.messages = Some(messages.clone());
+		}
+	}
 }
 
 /// Payment proof information. Differs from what is sent via
