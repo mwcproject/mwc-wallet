@@ -8,3 +8,4 @@ export OPENSSL_STATIC=yes
 ROARING_ARCH=x86-64-v2
 
 cargo build --release
+cargo build --package mwc_wallet_lib --lib --release
