@@ -126,8 +126,7 @@ where
 		let c = self.eth_node_client.lock().expect("Mutex failure");
 		let eth_data = swap.secondary_data.unwrap_eth()?;
 		let redeem_secret = SellApi::calculate_redeem_secret(keychain, swap)?;
-		let secret_key: secp256k1::SecretKey =
-			secp256k1::SecretKey::from_slice(&redeem_secret.0).unwrap();
+		let secret_key = mwc_web3::signing::SecretKey::from_slice(&redeem_secret.0).unwrap();
 		c.redeem(
 			swap.secondary_currency,
 			eth_data.address_from_secret.clone().unwrap(),

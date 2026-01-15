@@ -39,7 +39,8 @@ hex = "0.3"
 base64 = "0.12"
 colored ="1.6"
 serial_test = "0.4.0"
-native-tls = "0.2"
+rustls = "0.23"
+rustls-native-certs = "0.6"
 smaz = "0.1"
 bitstream-io = "0.9"
 bs58 = "0.3"
@@ -68,7 +69,7 @@ mwc-bitcoin = { git = "https://github.com/mwcproject/rust-bitcoin",  version = "
 #bch = { path = "../../rust-bch" }
 mwc-bch = { git = "https://github.com/mwcproject/rust-bch", version = "0.2.0", branch = "master" }
 #web3 = { version = "0.15.0", default-features = false, features = ["ws-tls-async-std", "signing"] }
-mwc-web3 = { git = "https://github.com/mwcproject/rust-web3", version = "0.15.0", branch = "master",  default-features = false, features = ["ws-tls-async-std", "signing"] }
+mwc-web3 = { git = "https://github.com/mwcproject/rust-web3", version = "0.20.0", branch = "master",  default-features = false, features = ["ws-rustls-tokio", "signing"] }
 mwc-wagyu-ethereum = { git = "https://github.com/mwcproject/wagyu-ethereum", version = "0.6.3", branch = "master" }
 mwc-wagyu-model = { git = "https://github.com/mwcproject/wagyu-model",version = "0.6.3",  branch = "master" }
 mwc-zcash_primitives = { git = "https://github.com/mwcproject/librustzcash", version = "0.4.0", branch = "master", features = ["transparent-inputs"] }
