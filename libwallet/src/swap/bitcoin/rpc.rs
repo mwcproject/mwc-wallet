@@ -13,15 +13,19 @@
 // limitations under the License.
 
 use crate::swap::Error;
-use native_tls::{TlsConnector, TlsStream};
+use rustls::pki_types::{CertificateDer, ServerName};
+use rustls::{ClientConfig, ClientConnection, RootCertStore, StreamOwned};
+use rustls_native_certs::load_native_certs;
 use serde::Serialize;
 use serde_json::Value;
+use std::convert::TryFrom;
 use std::io::{BufRead, BufReader, Write};
-use std::net::{TcpStream, ToSocketAddrs};
+use std::net::{IpAddr, TcpStream, ToSocketAddrs};
+use std::sync::Arc;
 use std::time::Duration;
 
 enum StreamReader {
-	SSLReader(Option<BufReader<TlsStream<TcpStream>>>),
+	SSLReader(Option<BufReader<StreamOwned<ClientConnection, TcpStream>>>),
 	PlainReader(Option<BufReader<TcpStream>>),
 }
 
@@ -57,17 +61,31 @@ impl LineStream {
 		let host: Vec<&str> = address.split(':').collect();
 		let host = host[0];
 
-		let connector = TlsConnector::new().map_err(|e| {
-			Error::ElectrumNodeClient(format!("Unable to create TLS connector, {}", e))
+		let mut root_store = RootCertStore::empty();
+		let certs = load_native_certs().map_err(|e| {
+			Error::ElectrumNodeClient(format!("Unable to load native certs, {}", e))
 		})?;
+		for cert in certs {
+			let der = CertificateDer::from(cert.0);
+			root_store.add(der).map_err(|e| {
+				Error::ElectrumNodeClient(format!("Unable to add native cert, {}", e))
+			})?;
+		}
+		let config = ClientConfig::builder()
+			.with_root_certificates(root_store)
+			.with_no_client_auth();
+		let server_name = match host.parse::<IpAddr>() {
+			Ok(ip) => ServerName::IpAddress(ip.into()),
+			Err(_) => ServerName::try_from(String::from(host)).map_err(|_| {
+				Error::ElectrumNodeClient(format!("Unable to parse server name {}", host))
+			})?,
+		};
 
 		let stream = Self::create_tcp_stream(address)?;
-		let tls_stream = connector.connect(host, stream.try_clone()?).map_err(|e| {
-			Error::ElectrumNodeClient(format!(
-				"Unable to establesh SSL connection with host {}, {}",
-				host, e
-			))
+		let connection = ClientConnection::new(Arc::new(config), server_name).map_err(|e| {
+			Error::ElectrumNodeClient(format!("Unable to create TLS connection, {}", e))
 		})?;
+		let tls_stream = StreamOwned::new(connection, stream);
 
 		Ok(Self {
 			reader: StreamReader::SSLReader(Some(BufReader::new(tls_stream))),

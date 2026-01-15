@@ -15,7 +15,6 @@
 use crate::swap::types::Currency;
 use crate::swap::Error;
 use mwc_web3::types::{Address, TransactionReceipt, H256};
-use secp256k1::SecretKey;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::{collections::HashMap, u64};
@@ -51,7 +50,7 @@ pub trait EthNodeClient: Sync + Send + 'static {
 		&self,
 		currency: Currency,
 		address_from_secret: Address,
-		secret_key: SecretKey,
+		secret_key: mwc_web3::signing::SecretKey,
 		gas: f32,
 	) -> Result<H256, Error>;
 	/// refund ether
@@ -199,7 +198,7 @@ impl EthNodeClient for TestEthNodeClient {
 		&self,
 		_currency: Currency,
 		address_from_secret: Address,
-		_secret_key: SecretKey,
+		_secret_key: mwc_web3::signing::SecretKey,
 		_gas: f32,
 	) -> Result<H256, Error> {
 		let mut store = self.swap_store.lock().expect("Mutex failure");

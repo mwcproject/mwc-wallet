@@ -23,7 +23,7 @@ tokio = { version = "1", features = ["full"] }
 uuid = { version = "0.8", features = ["serde", "v4"] }
 chrono = { version = "0.4.11", features = ["serde"] }
 lazy_static = "1.4"
-reqwest = { version = "0.12", features = ["rustls-tls", "socks", "blocking"] }
+reqwest = { version = "0.13", default-features = false, features = ["http2", "system-proxy", "default-tls", "rustls", "socks", "blocking", "json", "form"] }
 hyper = "0.14"
 
 nanoid = "0.1.3"

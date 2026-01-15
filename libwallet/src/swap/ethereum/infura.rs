@@ -29,8 +29,6 @@ use mwc_web3::{
 	signing::SecretKeyRef,
 	types::{Address, Bytes, SignedData, TransactionParameters, TransactionReceipt, H256, U256},
 };
-use rand::thread_rng;
-use secp256k1::SecretKey;
 #[cfg(test)]
 use std::sync::RwLock;
 use std::u64;
@@ -220,7 +218,7 @@ impl InfuraNodeClient {
 			match transport {
 				Ok(tx_socket) => {
 					let mwc_web3 = mwc_web3::Web3::new(tx_socket);
-					let key = secp256k1::SecretKey::from_slice(
+					let key = mwc_web3::signing::SecretKey::from_slice(
 						&from_hex(self.wallet.private_key.clone().unwrap().as_str()).unwrap(),
 					)
 					.unwrap();
@@ -242,6 +240,10 @@ impl InfuraNodeClient {
 						value,
 						data: Bytes::default(),
 						chain_id: None,
+						transaction_type: None,
+						access_list: None,
+						max_fee_per_gas: None,
+						max_priority_fee_per_gas: None,
 					};
 					let signed = accounts_sign.sign_transaction(tx, &key).await.unwrap();
 					mwc_web3
@@ -327,7 +329,7 @@ impl InfuraNodeClient {
 					options.gas = Some(gas_limit / gas_price);
 					options.nonce = Some(nonce);
 
-					let key = secp256k1::SecretKey::from_slice(
+					let key = mwc_web3::signing::SecretKey::from_slice(
 						&from_hex(self.wallet.private_key.clone().unwrap().as_str()).unwrap(),
 					)
 					.unwrap();
@@ -410,7 +412,7 @@ impl InfuraNodeClient {
 					options.gas = Some(gas_limit / gas_price);
 					options.nonce = Some(nonce);
 
-					let key = secp256k1::SecretKey::from_slice(
+					let key = mwc_web3::signing::SecretKey::from_slice(
 						&from_hex(self.wallet.private_key.clone().unwrap().as_str()).unwrap(),
 					)
 					.unwrap();
@@ -500,7 +502,7 @@ impl InfuraNodeClient {
 					options.gas = Some(gas_limit / gas_price);
 					options.nonce = Some(nonce);
 
-					let key = secp256k1::SecretKey::from_slice(
+					let key = mwc_web3::signing::SecretKey::from_slice(
 						&from_hex(self.wallet.private_key.clone().unwrap().as_str()).unwrap(),
 					)
 					.unwrap();
@@ -562,7 +564,7 @@ impl InfuraNodeClient {
 	fn ether_redeem(
 		&self,
 		address_from_secret: Address,
-		secret_key: SecretKey,
+		secret_key: mwc_web3::signing::SecretKey,
 		gas_limit: U256,
 	) -> Result<H256, Error> {
 		let task = async move {
@@ -620,9 +622,8 @@ impl InfuraNodeClient {
 					let hashed_message = signing::keccak256(&address_bytes);
 					let signed_data: SignedData = accounts_sign.sign(hashed_message, &secret_key);
 
-					#[allow(unused_assignments)]
-					let mut key = secp256k1::SecretKey::new(&mut thread_rng());
-					key = secp256k1::SecretKey::from_slice(
+					#[allow(unused_mut)]
+					let mut key = mwc_web3::signing::SecretKey::from_slice(
 						&from_hex(self.wallet.private_key.clone().unwrap().as_str()).unwrap(),
 					)
 					.unwrap();
@@ -631,7 +632,7 @@ impl InfuraNodeClient {
 					{
 						let test_mode = is_test_mode();
 						if test_mode {
-							key = secp256k1::SecretKey::from_slice(
+							key = mwc_web3::signing::SecretKey::from_slice(
 								&from_hex(
 									REDEEM_WALLET
 										.read()
@@ -702,7 +703,7 @@ impl InfuraNodeClient {
 	fn erc20_redeem(
 		&self,
 		address_from_secret: Address,
-		secret_key: SecretKey,
+		secret_key: mwc_web3::signing::SecretKey,
 		gas_limit: U256,
 	) -> Result<H256, Error> {
 		// let token_address = currency.erc20_token_address()?;
@@ -761,9 +762,8 @@ impl InfuraNodeClient {
 					let hashed_message = signing::keccak256(&address_bytes);
 					let signed_data: SignedData = accounts_sign.sign(hashed_message, &secret_key);
 
-					#[allow(unused_assignments)]
-					let mut key = secp256k1::SecretKey::new(&mut thread_rng());
-					key = secp256k1::SecretKey::from_slice(
+					#[allow(unused_mut)]
+					let mut key = mwc_web3::signing::SecretKey::from_slice(
 						&from_hex(self.wallet.private_key.clone().unwrap().as_str()).unwrap(),
 					)
 					.unwrap();
@@ -772,7 +772,7 @@ impl InfuraNodeClient {
 					{
 						let test_mode = is_test_mode();
 						if test_mode {
-							key = secp256k1::SecretKey::from_slice(
+							key = mwc_web3::signing::SecretKey::from_slice(
 								&from_hex(
 									REDEEM_WALLET
 										.read()
@@ -1034,7 +1034,7 @@ impl EthNodeClient for InfuraNodeClient {
 					options.gas = Some(gas_limit / gas_price);
 					options.nonce = Some(nonce);
 
-					let key = secp256k1::SecretKey::from_slice(
+					let key = mwc_web3::signing::SecretKey::from_slice(
 						&from_hex(self.wallet.private_key.clone().unwrap().as_str()).unwrap(),
 					)
 					.unwrap();
@@ -1140,7 +1140,7 @@ impl EthNodeClient for InfuraNodeClient {
 		&self,
 		currency: Currency,
 		address_from_secret: Address,
-		secret_key: SecretKey,
+		secret_key: mwc_web3::signing::SecretKey,
 		gas_limit: f32,
 	) -> Result<H256, Error> {
 		let gas_limit = U256::from(gas_limit as u64) * 1000_000_000u64;
@@ -1225,7 +1225,7 @@ impl EthNodeClient for InfuraNodeClient {
 					options.gas = Some(gas_limit / gas_price);
 					options.nonce = Some(nonce);
 
-					let key = secp256k1::SecretKey::from_slice(
+					let key = mwc_web3::signing::SecretKey::from_slice(
 						&from_hex(self.wallet.private_key.clone().unwrap().as_str()).unwrap(),
 					)
 					.unwrap();
@@ -1501,7 +1501,7 @@ mod tests {
 			CONTRACT_ADDR,
 			ERC20_CONTRACT_ADDR
 		);
-		let wallet_rand = EthereumWallet::new(&mut thread_rng()).unwrap();
+		let wallet_rand = EthereumWallet::new(&mut rand::thread_rng()).unwrap();
 		let address_from_secret = to_eth_address(wallet_rand.address.clone().unwrap()).unwrap();
 		let height = nc.height().unwrap();
 		let res = nc.initiate(
@@ -1551,7 +1551,7 @@ mod tests {
 		);
 
 		//generate rand address for swap index
-		let wallet_rand = EthereumWallet::new(&mut thread_rng()).unwrap();
+		let wallet_rand = EthereumWallet::new(&mut rand::thread_rng()).unwrap();
 		let address_from_secret = to_eth_address(wallet_rand.address.clone().unwrap()).unwrap();
 
 		//generate participant wallet
@@ -1579,7 +1579,7 @@ mod tests {
 
 		// redeem now
 		//call redeem function
-		let key = secp256k1::SecretKey::from_slice(
+		let key = mwc_web3::signing::SecretKey::from_slice(
 			&from_hex(wallet_rand.private_key.clone().unwrap().as_str()).unwrap(),
 		)
 		.unwrap();
