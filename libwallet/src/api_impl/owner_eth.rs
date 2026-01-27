@@ -42,7 +42,7 @@ where
 
 	let context_id = w.get_context_id();
 	let eth_infura_project_id =
-		trades::get_eth_infura_projectid(context_id, &Currency::Ether, &None).unwrap();
+		trades::get_eth_infura_projectid(context_id, &Currency::Ether, &None)?;
 	let chain = if global::is_mainnet(context_id) {
 		"mainnet".to_string()
 	} else {
@@ -59,7 +59,9 @@ where
 	let balance = eth_node_client.balance(currency)?;
 
 	Ok((
-		ethereum_wallet.address.clone().unwrap(),
+		ethereum_wallet.address.clone().ok_or(Error::Generic(
+			"Eth internal error, ethereum_wallet.address is empty".into(),
+		))?,
 		format!("{}", height),
 		balance.0,
 	))
@@ -68,7 +70,7 @@ where
 /// get eth balance
 pub fn get_eth_balance(context_id: u32, ethereum_wallet: EthereumWallet) -> Result<u64, Error> {
 	let eth_infura_project_id =
-		trades::get_eth_infura_projectid(context_id, &Currency::Ether, &None).unwrap();
+		trades::get_eth_infura_projectid(context_id, &Currency::Ether, &None)?;
 	let chain = if global::is_mainnet(context_id) {
 		"mainnet".to_string()
 	} else {
@@ -91,8 +93,8 @@ pub fn get_eth_balance(context_id: u32, ethereum_wallet: EthereumWallet) -> Resu
 pub fn transfer<'a, L, C, K>(
 	wallet_inst: Arc<Mutex<Box<dyn WalletInst<'a, L, C, K>>>>,
 	currency: Currency,
-	dest: Option<String>,
-	amount: Option<String>,
+	dest: String,
+	amount: &String,
 ) -> Result<(), Error>
 where
 	L: WalletLCProvider<'a, C, K>,
@@ -103,7 +105,7 @@ where
 	let ethereum_wallet = w.get_ethereum_wallet()?;
 
 	let eth_infura_project_id =
-		trades::get_eth_infura_projectid(w.get_context_id(), &Currency::Ether, &None).unwrap();
+		trades::get_eth_infura_projectid(w.get_context_id(), &Currency::Ether, &None)?;
 	let chain = if global::is_mainnet(w.get_context_id()) {
 		"mainnet".to_string()
 	} else {
@@ -117,18 +119,18 @@ where
 		"".to_string(),
 	)?;
 
-	let to = to_eth_address(dest.unwrap())?;
-	let amounts = to_gnorm(amount.unwrap().as_str(), "1");
-	let amounts_u64 = amounts.parse::<u64>();
+	let to = to_eth_address(dest)?;
+	let amounts = to_gnorm(amount.as_str(), "1")
+		.map_err(|e| Error::Generic(format!("Invalid amount value {}, {}", amount, e)))?;
+	let amounts_u64 = amounts
+		.parse::<u64>()
+		.map_err(|e| Error::Generic(format!("Invalid amount value {}, {}", amount, e)))?;
 	info!(
 		"currency: {}, to: {}, amounts: {}, amounts_u64: {}",
-		currency,
-		to,
-		amounts,
-		amounts_u64.clone().unwrap()
+		currency, to, amounts, amounts_u64,
 	);
 
-	let result = eth_node_client.transfer(currency, to, amounts_u64.unwrap());
+	let result = eth_node_client.transfer(currency, to, amounts_u64);
 	match result {
 		Ok(_tx_hash) => Ok(()),
 		Err(e) => Err(e),

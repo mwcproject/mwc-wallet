@@ -15,7 +15,6 @@
 
 //! Transaction building functions
 
-use std::cell::RefCell;
 use std::collections::HashSet;
 use uuid::Uuid;
 
@@ -75,7 +74,7 @@ where
 		slate.ttl_cutoff_height = Some(current_height + b);
 	}
 	if use_test_rng {
-		let mut sc = SLATE_COUNTER.lock().expect("Mutex failure");
+		let mut sc = SLATE_COUNTER.lock().unwrap_or_else(|e| e.into_inner());
 		let bytes = [4, 54, 67, 12, 43, 2, 98, 76, 32, 50, 87, 5, 1, 33, 43, *sc];
 		slate.id = Uuid::from_slice(&bytes).unwrap();
 		*sc += 1;
@@ -254,7 +253,7 @@ where
 pub fn add_output_to_slate<'a, T: ?Sized, C, K>(
 	wallet: &mut T,
 	keychain_mask: Option<&SecretKey>,
-	tx_session: &Option<RefCell<TxSession>>,
+	tx_session: &mut Option<&mut TxSession>,
 	slate: &mut Slate,
 	current_height: u64,
 	address: Option<String>,
@@ -318,7 +317,7 @@ where
 
 		match tx_session {
 			Some(tx_ses) => {
-				tx_ses.borrow_mut().set_tx_log_entry(tx);
+				tx_ses.set_tx_log_entry(tx);
 			}
 			None => {
 				let mut batch = wallet.batch(keychain_mask)?;
@@ -388,7 +387,7 @@ where
 		0 as u8,
 		slate.ttl_cutoff_height.clone(),
 		true, // late lock works only for compact slate, so hardcoding as true
-	);
+	)?;
 	context.late_lock_args = Some(init_tx_args.clone());
 
 	// Generate a blinding factor for the tx and add
@@ -512,7 +511,7 @@ where
 pub fn update_stored_tx<'a, T: ?Sized, C, K>(
 	wallet: &mut T,
 	keychain_mask: Option<&SecretKey>,
-	tx_session: &Option<RefCell<TxSession>>,
+	tx_session: &mut Option<&mut TxSession>,
 	#[cfg(feature = "grin_proof")] context: &Context,
 	slate: &Slate,
 	is_invoiced: bool,
@@ -525,7 +524,6 @@ where
 	// Reading saved TxLogEntry
 	let mut tx = match tx_session {
 		Some(tx_ses) => tx_ses
-			.borrow()
 			.get_tx_log_entry()
 			.clone()
 			.ok_or(Error::TransactionDoesntExist(slate.id.to_string()))?,
@@ -612,7 +610,6 @@ where
 
 	match tx_session {
 		Some(tx_ses) => {
-			let mut tx_ses = tx_ses.borrow_mut();
 			tx_ses.set_tx_log_entry(tx);
 			tx_ses.set_transaction(slate.tx_or_err()?.clone());
 		}
@@ -632,7 +629,7 @@ where
 pub fn update_message<'a, T: ?Sized, C, K>(
 	wallet: &mut T,
 	keychain_mask: Option<&SecretKey>,
-	tx_session: &Option<RefCell<TxSession>>,
+	tx_session: &mut Option<&mut TxSession>,
 	slate: &Slate,
 ) -> Result<(), Error>
 where
@@ -643,7 +640,6 @@ where
 	match tx_session {
 		Some(tx_ses) => {
 			tx_ses
-				.borrow_mut()
 				.get_mut_tx_log_entry()
 				.as_mut()
 				.ok_or(Error::TransactionDoesntExist(slate.id.to_string()))?
@@ -768,7 +764,7 @@ where
 {
 	#[cfg(feature = "grin_proof")]
 	{
-		// TODO need to pass tx_session: &Option<RefCell<TxSession>> and read TxLogEntry from there
+		// TODO need to pass tx_session: &Option<&mut TxSession> and read TxLogEntry from there
 		debug_assert!(false);
 		let tx_vec = updater::retrieve_txs(
 			wallet,
@@ -954,8 +950,8 @@ mod test {
 	// based on the public key and amount begin spent
 	fn output_commitment_equals_input_commitment_on_spend() {
 		let keychain = ExtKeychain::from_random_seed(false).unwrap();
-		let builder = ProofBuilder::new(&keychain);
-		let key_id1 = ExtKeychainPath::new(1, 1, 0, 0, 0).to_identifier();
+		let builder = ProofBuilder::new(&keychain).unwrap();
+		let key_id1 = ExtKeychainPath::new(1, 1, 0, 0, 0).to_identifier().unwrap();
 
 		let tx1 = build::transaction(
 			KernelFeatures::Plain {

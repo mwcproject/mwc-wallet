@@ -101,7 +101,10 @@ fn build_chain(test_dir: &str, block_height: usize) -> Result<(), libwallet::Err
 		mask1,
 		3,
 		false,
-		tx_pool.lock().expect("Mutex failure").deref_mut(),
+		tx_pool
+			.lock()
+			.unwrap_or_else(|e| e.into_inner())
+			.deref_mut(),
 	);
 
 	for height in 0..block_height {
@@ -132,7 +135,10 @@ fn build_chain(test_dir: &str, block_height: usize) -> Result<(), libwallet::Err
 				mask1,
 				1,
 				false,
-				tx_pool.lock().expect("Mutex failure").deref_mut(),
+				tx_pool
+					.lock()
+					.unwrap_or_else(|e| e.into_inner())
+					.deref_mut(),
 			);
 			continue;
 		}
@@ -158,12 +164,12 @@ fn build_chain(test_dir: &str, block_height: usize) -> Result<(), libwallet::Err
 						selection_strategy_is_use_all: false,
 						..Default::default()
 					};
-					let slate_i = sender_api.init_send_tx(m, &None, &args, 1)?;
+					let slate_i = sender_api.init_send_tx(m, None, &args, 1)?;
 					slate = client1.send_tx_slate_direct("wallet2", &slate_i)?;
 					sender_api
-						.tx_lock_outputs(m, &None, &slate, None, 0)
+						.tx_lock_outputs(m, None, &slate, None, 0)
 						.unwrap();
-					slate = sender_api.finalize_tx(m, &None, &slate, true)?;
+					slate = sender_api.finalize_tx(m, None, &slate, true)?;
 					Ok(())
 				},
 			)

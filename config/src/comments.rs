@@ -427,20 +427,23 @@ pub fn migrate_comments(
 		if old_key_exist {
 			if prohibited_key.contains(&key.as_str()) {
 				// push new config key/comments
-				let value = comments.get(&key).unwrap();
-				new_config_str.push_str(value);
-				new_config_str.push_str(&key_fmt);
+				if let Some(value) = comments.get(&key) {
+					new_config_str.push_str(value);
+					new_config_str.push_str(&key_fmt);
+				}
 			} else {
 				// push old config key/comment
-				let value = hm_key_cmt_old.get(&key).unwrap();
-				new_config_str.push_str(value);
-				new_config_str.push_str(&key_fmt);
+				if let Some(value) = hm_key_cmt_old.get(&key) {
+					new_config_str.push_str(value);
+					new_config_str.push_str(&key_fmt);
+				}
 			}
 		} else {
 			// old key does not exist, we push new key/comments
-			let value = comments.get(&key).unwrap();
-			new_config_str.push_str(value);
-			new_config_str.push_str(&key_fmt);
+			if let Some(value) = comments.get(&key) {
+				new_config_str.push_str(value);
+				new_config_str.push_str(&key_fmt);
+			}
 		}
 	}
 	new_config_str

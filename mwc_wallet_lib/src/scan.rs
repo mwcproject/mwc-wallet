@@ -28,7 +28,7 @@ fn start_update_thread(
 ) -> Result<(Sender<StatusMessage>, JoinHandle<Result<(), String>>), String> {
 	let (cb_fn, cb_context) = match LIB_CALLBACKS
 		.read()
-		.expect("RwLock failure")
+		.unwrap_or_else(|e| e.into_inner())
 		.get(&response_callback)
 	{
 		Some(cb) => cb.clone(),

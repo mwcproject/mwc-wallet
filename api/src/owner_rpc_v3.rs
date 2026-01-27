@@ -15,7 +15,6 @@
 
 //! JSON-RPC Stub generation for the Owner API
 
-use std::cell::RefCell;
 use uuid::Uuid;
 
 use crate::config::{MQSConfig, WalletConfig};
@@ -4399,17 +4398,18 @@ where
 	}
 
 	fn init_send_tx(&self, token: Token, args: InitTxArgs) -> Result<VersionedSlate, Error> {
-		let tx_session = Some(RefCell::new(TxSession::new()));
-		let slate =
-			Owner::init_send_tx(self, (&token.keychain_mask).as_ref(), &tx_session, &args, 1)?;
+		let mut tx_session = TxSession::new();
+		let slate = Owner::init_send_tx(
+			self,
+			(&token.keychain_mask).as_ref(),
+			Some(&mut tx_session),
+			&args,
+			1,
+		)?;
 		let context_id = {
 			// Save session only on success.
 			wallet_lock!(self.wallet_inst, w);
-			tx_session.unwrap().borrow_mut().save_tx_data(
-				&mut **w,
-				(&token.keychain_mask).as_ref(),
-				&slate.id,
-			)?;
+			tx_session.save_tx_data(&mut **w, (&token.keychain_mask).as_ref(), &slate.id)?;
 			w.get_context_id()
 		};
 
@@ -4429,20 +4429,28 @@ where
 		token: Token,
 		args: IssueInvoiceTxArgs,
 	) -> Result<VersionedSlate, Error> {
-		let tx_session = Some(RefCell::new(TxSession::new()));
-		let slate =
-			Owner::issue_invoice_tx(self, (&token.keychain_mask).as_ref(), &tx_session, &args)?;
+		let mut tx_session = TxSession::new();
+		let slate = Owner::issue_invoice_tx(
+			self,
+			(&token.keychain_mask).as_ref(),
+			Some(&mut tx_session),
+			&args,
+		)?;
 		{
 			// Save session only on success.
 			wallet_lock!(self.wallet_inst, w);
-			tx_session.unwrap().borrow_mut().save_tx_data(
-				&mut **w,
-				(&token.keychain_mask).as_ref(),
-				&slate.id,
-			)?;
+			tx_session.save_tx_data(&mut **w, (&token.keychain_mask).as_ref(), &slate.id)?;
 		}
 
 		// Invoice slate respond does a slatepack encoding if recipient is defined.
+		let slatepack_recipient = match args
+			.slatepack_recipient
+			.map(|a| a.tor_public_key())
+			.filter(|a| a.is_ok())
+		{
+			Some(res) => Some(res?),
+			None => None,
+		};
 
 		let res_slate = Owner::encrypt_slate(
 			self,
@@ -4450,10 +4458,7 @@ where
 			&slate,
 			None,
 			SlatePurpose::InvoiceInitial,
-			args.slatepack_recipient
-				.map(|a| a.tor_public_key())
-				.filter(|a| a.is_ok())
-				.map(|a| a.unwrap()), // sending back to the sender
+			slatepack_recipient, // sending back to the sender
 			None,
 			self.doctest_mode,
 		)
@@ -4483,22 +4488,18 @@ where
 			}
 		}
 
-		let tx_session = Some(RefCell::new(TxSession::new()));
+		let mut tx_session = TxSession::new();
 		let out_slate = Owner::process_invoice_tx(
 			self,
 			(&token.keychain_mask).as_ref(),
-			&tx_session,
+			Some(&mut tx_session),
 			&slate_from,
 			&args,
 		)?;
 		{
 			// Save session only on success.
 			wallet_lock!(self.wallet_inst, w);
-			tx_session.unwrap().borrow_mut().save_tx_data(
-				&mut **w,
-				(&token.keychain_mask).as_ref(),
-				&out_slate.id,
-			)?;
+			tx_session.save_tx_data(&mut **w, (&token.keychain_mask).as_ref(), &out_slate.id)?;
 		}
 
 		let res_slate = Owner::encrypt_slate(
@@ -4526,7 +4527,7 @@ where
 		let out_slate = Owner::finalize_tx(
 			self,
 			(&token.keychain_mask).as_ref(),
-			&None,
+			None,
 			&slate_from,
 			true,
 		)?;
@@ -4560,7 +4561,7 @@ where
 		Owner::tx_lock_outputs(
 			self,
 			(&token.keychain_mask).as_ref(),
-			&None,
+			None,
 			&slate_from,
 			None, // RPC doesn't support address
 			participant_id,
@@ -4609,15 +4610,15 @@ where
 				tx.payment_proof.clone(),
 				tx.input_commits
 					.iter()
-					.map(|s| util::from_hex(s))
-					.filter(|s| s.is_ok())
-					.map(|s| pedersen::Commitment::from_vec(s.unwrap()))
+					.map(|s| util::from_hex(s).ok())
+					.flatten()
+					.map(|s| pedersen::Commitment::from_vec(s))
 					.collect(),
 				tx.output_commits
 					.iter()
-					.map(|s| util::from_hex(s))
-					.filter(|s| s.is_ok())
-					.map(|s| pedersen::Commitment::from_vec(s.unwrap()))
+					.map(|s| util::from_hex(s).ok())
+					.flatten()
+					.map(|s| pedersen::Commitment::from_vec(s))
 					.collect(),
 			),
 		)
@@ -4689,7 +4690,7 @@ where
 
 	fn init_secure_api(&self, ecdh_pubkey: ECDHPubkey) -> Result<ECDHPubkey, Error> {
 		let secp_inst = static_secp_instance();
-		let secp = secp_inst.lock().expect("Mutex failure");
+		let secp = secp_inst.lock().unwrap_or_else(|e| e.into_inner());
 		let sec_key = SecretKey::new(&secp, &mut thread_rng());
 
 		let mut shared_pubkey = ecdh_pubkey.ecdh_pubkey;
@@ -4701,7 +4702,7 @@ where
 		let shared_key = SecretKey::from_slice(&secp, &x_coord[1..])
 			.map_err(|e| Error::Secp(format!("{}", e)))?;
 		{
-			let mut s = self.shared_key.lock().expect("Mutex failure");
+			let mut s = self.shared_key.lock().unwrap_or_else(|e| e.into_inner());
 			*s = Some(shared_key);
 		}
 

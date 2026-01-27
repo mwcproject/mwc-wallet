@@ -127,35 +127,39 @@ pub fn add_broadcasting_messages(
 							{
 								// Broadcasting the message
 								if let Some(peer_id) = libp2p_connection::get_this_peer_id() {
-									let tor_pk = peer_id.as_dalek_pubkey().unwrap(); // It has to be Dalek PK, we don't use any other types
-									match msg.integrity_ctx.calc_kernel_excess(&secp, &tor_pk) {
-										Ok((excess, signature)) => {
-											match libp2p_connection::build_integrity_message(
-												&excess,
-												&tor_pk,
-												&signature,
-												msg.message.as_bytes(),
-												&secp,
-											) {
-												Ok(enc_data) => {
-													if libp2p_connection::publish_message(
-														&msg.topic, enc_data,
-													)
-													.is_none()
-													{
-														error!(
-															"gossipsub message {} wasn't published",
-															msg.message
-														);
+									if let Some(tor_pk) = peer_id.as_dalek_pubkey() {
+										// It has to be Dalek PK, we don't use any other types
+										match msg.integrity_ctx.calc_kernel_excess(&secp, &tor_pk) {
+											Ok((excess, signature)) => {
+												match libp2p_connection::build_integrity_message(
+													&excess,
+													&tor_pk,
+													&signature,
+													msg.message.as_bytes(),
+													&secp,
+												) {
+													Ok(enc_data) => {
+														if libp2p_connection::publish_message(
+															&msg.topic, enc_data,
+														)
+														.is_none()
+														{
+															error!(
+																"gossipsub message {} wasn't published",
+																msg.message
+															);
+														}
 													}
-												}
-												Err(e) => error!(
-													"Unable to build integrity message, {}",
-													e
-												),
-											};
+													Err(e) => error!(
+														"Unable to build integrity message, {}",
+														e
+													),
+												};
+											}
+											Err(e) => {
+												error!("Unable to sign integrity kernel, {}", e)
+											}
 										}
-										Err(e) => error!("Unable to sign integrity kernel, {}", e),
 									}
 								}
 								msg.last_time_published = cur_time;

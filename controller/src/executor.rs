@@ -30,7 +30,7 @@ impl ArcWake for FakeWaker {
 }
 
 impl RunHandlerInThread {
-	pub fn new<F>(handler: F) -> RunHandlerInThread
+	pub fn new<F>(handler: F) -> Result<RunHandlerInThread, Error>
 	where
 		F: Send
 			+ Sync
@@ -54,7 +54,7 @@ impl RunHandlerInThread {
 				let waker = waker_ref(&fw);
 				let mut context = &mut Context::from_waker(&*waker);
 
-				let result: Option<Result<serde_json::Value, Error>>;
+				let result: Result<serde_json::Value, Error>;
 
 				loop {
 					match future.as_mut().poll(&mut context) {
@@ -63,7 +63,7 @@ impl RunHandlerInThread {
 							continue;
 						}
 						Poll::Ready(res) => {
-							result = Some(res);
+							result = res;
 							break;
 						}
 					}
@@ -71,18 +71,23 @@ impl RunHandlerInThread {
 
 				thr_running.store(false, Ordering::Relaxed);
 
-				if let Some(waker) = thr_waker.write().unwrap().take() {
+				if let Some(waker) = thr_waker.write().unwrap_or_else(|e| e.into_inner()).take() {
 					waker.wake();
 				}
-				result.unwrap()
+				result
 			})
-			.unwrap();
+			.map_err(|e| {
+				Error::GenericError(format!(
+					"Failed to start a RunHandlerInThread thread, {}",
+					e
+				))
+			})?;
 
-		Self {
+		Ok(Self {
 			running,
 			waker,
 			worker_thread: RwLock::new(Some(worker_thread)),
-		}
+		})
 	}
 }
 
@@ -90,10 +95,18 @@ impl Future for RunHandlerInThread {
 	type Output = Result<serde_json::Value, Error>;
 
 	fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-		if self.waker.read().unwrap().is_none() {
+		if self
+			.waker
+			.read()
+			.unwrap_or_else(|e| e.into_inner())
+			.is_none()
+		{
 			// Update current task. at the first polling.
 			// Task is needed by thread to notify future executor that job is done
-			self.waker.write().unwrap().replace(cx.waker().clone());
+			self.waker
+				.write()
+				.unwrap_or_else(|e| e.into_inner())
+				.replace(cx.waker().clone());
 		}
 
 		if self.running.load(Ordering::Relaxed) {
@@ -106,9 +119,19 @@ impl Future for RunHandlerInThread {
 			// In this case futures executor guarantee call it once and satisfy get tread data once limitation
 
 			// JoinHandle::join required ownership transfer. That is why it can be done once.
-			if let Some(thr_info) = self.worker_thread.write().unwrap().take() {
+			if let Some(thr_info) = self
+				.worker_thread
+				.write()
+				.unwrap_or_else(|e| e.into_inner())
+				.take()
+			{
 				// Gettign results from the task
-				let result = thr_info.join().unwrap();
+				let result = match thr_info.join() {
+					Ok(r) => r,
+					Err(_) => Err(Error::GenericError(
+						"RunHandlerInThread thread is dead".into(),
+					)),
+				};
 				Poll::Ready(result)
 			} else {
 				// Likely double processing. See comments above.

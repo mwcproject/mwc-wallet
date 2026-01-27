@@ -15,6 +15,7 @@
 //! Generic implementation libp2p related communication functionality
 
 use crate::mwc_util::secp::key::SecretKey;
+use std::cmp::Ordering;
 use std::sync::Mutex;
 
 use crate::api_impl::{foreign, owner};
@@ -182,11 +183,13 @@ where
 			u32::from(ExtKeychainPath::from_identifier(&a.path).path[0]) == INTEGRITY_ACCOUNT_ID
 		})
 		.next();
-	if integrity_account.is_none() {
-		return Ok((None, vec![], tip_height, vec![]));
-	}
 
-	let integrity_account = integrity_account.unwrap();
+	let integrity_account = if let Some(integrity_account) = integrity_account {
+		integrity_account
+	} else {
+		return Ok((None, vec![], tip_height, vec![]));
+	};
+
 	let mut outputs = updater::retrieve_outputs(
 		&mut **w,
 		keychain_mask,
@@ -266,7 +269,7 @@ where
 	integrity_tx.sort_by(|i1, i2| {
 		i1.0.expiration_height
 			.partial_cmp(&i2.0.expiration_height)
-			.unwrap()
+			.unwrap_or(Ordering::Equal)
 	});
 
 	Ok((Some(integrity_account), outputs, tip_height, integrity_tx))
@@ -296,11 +299,11 @@ where
 	// Let's try to satisfy the requirements..
 	let mut results: Vec<(Option<IntegrityContext>, bool)> = Vec::new();
 	// Sorting because we want to apply the best choice (minimal fee that is needed) first
-	transactions.sort_by(|t1, t2| t1.0.fee.partial_cmp(&t2.0.fee).unwrap());
+	transactions.sort_by(|t1, t2| t1.0.fee.partial_cmp(&t2.0.fee).unwrap_or(Ordering::Equal));
 
 	// We want to fill fees starting from the largest value, and apply least transaction
 	let mut fee = fee.clone();
-	fee.sort_by(|f1, f2| f2.partial_cmp(f1).unwrap());
+	fee.sort_by(|f1, f2| f2.partial_cmp(f1).unwrap_or(Ordering::Equal));
 
 	for f in &fee {
 		match transactions.iter().position(|tx| tx.0.fee >= *f) {

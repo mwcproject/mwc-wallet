@@ -88,37 +88,22 @@ where
 		mqs_config: Option<MQSConfig>,
 	) -> Result<(), Error> {
 		let mut default_config = GlobalWalletConfig::for_chain(&chain_type);
-		let config_file_version = match default_config.members.as_ref() {
-			Some(m) => m.clone().config_file_version,
-			None => None,
-		};
+		let config_file_version = default_config.members.config_file_version.clone();
 		let logging = match logging_config {
 			Some(l) => Some(l),
-			None => match default_config.members.as_ref() {
-				Some(m) => m.clone().logging,
-				None => None,
-			},
+			None => default_config.members.logging.clone(),
 		};
 		let wallet = match wallet_config {
 			Some(w) => w,
-			None => match default_config.members.as_ref() {
-				Some(m) => m.clone().wallet,
-				None => WalletConfig::default(),
-			},
+			None => default_config.members.wallet.clone(),
 		};
 		let tor = match tor_config {
 			Some(t) => Some(t),
-			None => match default_config.members.as_ref() {
-				Some(m) => m.clone().tor,
-				None => Some(TorConfig::default()),
-			},
+			None => default_config.members.tor.clone(),
 		};
 		let mqs = match mqs_config {
 			Some(q) => Some(q),
-			None => match default_config.members.as_ref() {
-				Some(m) => m.clone().mqs.clone(),
-				None => Some(MQSConfig::default()),
-			},
+			None => default_config.members.mqs.clone(),
 		};
 
 		let wallet_data_dir = wallet
@@ -127,13 +112,13 @@ where
 			.unwrap_or(String::from(MWC_WALLET_DIR));
 
 		default_config = GlobalWalletConfig {
-			members: Some(GlobalWalletConfigMembers {
+			members: GlobalWalletConfigMembers {
 				config_file_version,
 				wallet,
 				tor,
 				mqs,
 				logging,
-			}),
+			},
 			..default_config
 		};
 		let mut config_file_name = PathBuf::from(self.data_dir.clone());
@@ -149,11 +134,14 @@ where
 		let mut data_dir_name = PathBuf::from(self.data_dir.clone());
 		data_dir_name.push(wallet_data_dir.as_str());
 
+		let config_file_name_str = config_file_name.to_str().ok_or(Error::GenericError(
+			"Can't convert config_file_name into string".into(),
+		))?;
+
 		if config_file_name.exists() && data_dir_name.exists() {
 			let msg = format!(
 				"{} already exists in the target directory ({}). Please remove it first",
-				file_name,
-				config_file_name.to_str().unwrap()
+				file_name, config_file_name_str
 			);
 			return Err(Error::Lifecycle(msg));
 		}
@@ -166,22 +154,21 @@ where
 		let mut abs_path = std::env::current_dir()?;
 		abs_path.push(self.data_dir.clone());
 
-		default_config.update_paths(&abs_path, Some(wallet_data_dir.as_str()));
-		let res =
-			default_config.write_to_file(config_file_name.to_str().unwrap(), false, None, None);
+		default_config
+			.update_paths(&abs_path, Some(wallet_data_dir.as_str()))
+			.map_err(|e| {
+				Error::GenericError(format!("Unable update wallet data directory, {}", e))
+			})?;
+		let res = default_config.write_to_file(config_file_name_str, false, "".into(), None);
 		if let Err(e) = res {
 			let msg = format!(
 				"Error creating config file as ({}): {}",
-				config_file_name.to_str().unwrap(),
-				e
+				config_file_name_str, e
 			);
 			return Err(Error::Lifecycle(msg));
 		}
 
-		info!(
-			"File {} configured and created",
-			config_file_name.to_str().unwrap()
-		);
+		info!("File {} configured and created", config_file_name_str);
 
 		let mut api_secret_path = PathBuf::from(self.data_dir.clone());
 		api_secret_path.push(PathBuf::from(config::NODE_API_SECRET_FILE_NAME));
@@ -209,7 +196,9 @@ where
 	) -> Result<ZeroingString, Error> {
 		let mut data_dir_name = PathBuf::from(self.data_dir.clone());
 		data_dir_name.push(wallet_data_dir.unwrap_or(MWC_WALLET_DIR));
-		let data_dir_name = data_dir_name.to_str().unwrap();
+		let data_dir_name = data_dir_name.to_str().ok_or(Error::GenericError(
+			"Unable convert data_dir_name into string".into(),
+		))?;
 		let exists = WalletSeed::seed_file_exists(&data_dir_name);
 		if !test_mode {
 			if let Ok(true) = exists {
@@ -265,7 +254,9 @@ where
 	) -> Result<Option<SecretKey>, Error> {
 		let mut data_dir_name = PathBuf::from(self.data_dir.clone());
 		data_dir_name.push(wallet_data_dir.unwrap_or(MWC_WALLET_DIR));
-		let data_dir_name = data_dir_name.to_str().unwrap();
+		let data_dir_name = data_dir_name.to_str().ok_or(Error::GenericError(
+			"Unable convert data_dir_name into string".into(),
+		))?;
 		let mut wallet: LMDBBackend<'a, C, K> =
 			match LMDBBackend::new(self.context_id, &data_dir_name, self.node_client.clone()) {
 				Err(e) => {
@@ -283,24 +274,18 @@ where
 
 		if let Ok(mnmenoic) = wallet_seed.to_mnemonic() {
 			let ethereum_wallet = match global::is_mainnet(self.context_id) {
-				true => Some(
-					generate_ethereum_wallet(
-						"mainnet",
-						mnmenoic.as_str(),
-						&password,
-						"m/44'/0'/0'/0",
-					)
-					.unwrap(),
-				),
-				false => Some(
-					generate_ethereum_wallet(
-						"ropsten",
-						mnmenoic.as_str(),
-						&password,
-						"m/44'/0'/0'/0",
-					)
-					.unwrap(),
-				),
+				true => Some(generate_ethereum_wallet(
+					"mainnet",
+					mnmenoic.as_str(),
+					&password,
+					"m/44'/0'/0'/0",
+				)?),
+				false => Some(generate_ethereum_wallet(
+					"ropsten",
+					mnmenoic.as_str(),
+					&password,
+					"m/44'/0'/0'/0",
+				)?),
 			};
 			wallet.set_ethereum_wallet(ethereum_wallet)?;
 		}
@@ -315,18 +300,15 @@ where
 			// Cleaning dangling contexts.
 			let mut batch = wallet.batch(mask.as_ref())?;
 			if !batch.load_flag(FLAG_CONTEXT_CLEARED, false)? {
-				let mut contexts: HashMap<Uuid, Context> = batch
-					.private_context_iter()
-					.map(|(slate, context)| {
-						(
-							Uuid::from_slice(&slate)
-								.expect("Broken UUID data into the context data storage"),
-							context,
-						)
-					})
-					.collect();
+				let mut contexts: HashMap<Uuid, Context> = HashMap::new();
+				for (uuid, context) in batch.private_context_iter()? {
+					let uuid = Uuid::from_slice(&uuid).map_err(|e| {
+						Error::GenericError(format!("Unable to read private context uuid, {}", e))
+					})?;
+					contexts.insert(uuid, context);
+				}
 
-				for tx in batch.tx_log_iter() {
+				for tx in batch.tx_log_iter()? {
 					if tx.tx_type == TxLogEntryType::TxSent && !tx.confirmed {
 						// It is transactions for what we left the data from
 						if let Some(slate_id) = &tx.tx_slate_id {
@@ -349,19 +331,22 @@ where
 			let mut batch = wallet.batch(mask.as_ref())?;
 			if !batch.load_flag(FLAG_OUTPUTS_ROOT_KEY_ID_CORRECTION, false)? {
 				let broken_outputs: Vec<OutputData> = batch
-					.iter()
+					.iter()?
 					.filter(|o| {
 						// We need to fix last element of path if it is not 0
-						let path = o.root_key_id.to_path();
-						let last_id = u32::from(path.path[3]);
-						last_id != 0
+						if let Ok(path) = o.root_key_id.to_path() {
+							let last_id = u32::from(path.path[3]);
+							last_id != 0
+						} else {
+							false
+						}
 					})
 					.collect();
 
 				for mut out in broken_outputs {
-					let mut path = out.root_key_id.to_path();
+					let mut path = out.root_key_id.to_path()?;
 					path.path[3] = ChildNumber::from(0);
-					out.root_key_id = path.to_identifier();
+					out.root_key_id = path.to_identifier()?;
 					batch.save(out)?;
 				}
 				batch.save_flag(FLAG_OUTPUTS_ROOT_KEY_ID_CORRECTION)?;
@@ -388,7 +373,9 @@ where
 	) -> Result<bool, Error> {
 		let mut data_dir_name = PathBuf::from(self.data_dir.clone());
 		data_dir_name.push(wallet_data_dir.unwrap_or(MWC_WALLET_DIR));
-		let data_dir_name = data_dir_name.to_str().unwrap();
+		let data_dir_name = data_dir_name.to_str().ok_or(Error::GenericError(
+			"Unable convert data_dir_name into string".into(),
+		))?;
 		let res = WalletSeed::seed_file_exists(&data_dir_name).map_err(|e| {
 			Error::CallbackImpl(format!("Error checking for wallet existence, {}", e))
 		})?;
@@ -403,7 +390,9 @@ where
 	) -> Result<ZeroingString, Error> {
 		let mut data_dir_name = PathBuf::from(self.data_dir.clone());
 		data_dir_name.push(wallet_data_dir.unwrap_or(MWC_WALLET_DIR));
-		let data_dir_name = data_dir_name.to_str().unwrap();
+		let data_dir_name = data_dir_name.to_str().ok_or(Error::GenericError(
+			"Unable convert data_dir_name into string".into(),
+		))?;
 		let wallet_seed = WalletSeed::from_file(&data_dir_name, password)
 			.map_err(|e| Error::Lifecycle(format!("Error opening wallet seed file, {}", e)))?;
 		let res = wallet_seed
@@ -427,7 +416,9 @@ where
 	) -> Result<(), Error> {
 		let mut data_dir_name = PathBuf::from(self.data_dir.clone());
 		data_dir_name.push(wallet_data_dir.unwrap_or(MWC_WALLET_DIR));
-		let data_dir_name = data_dir_name.to_str().unwrap();
+		let data_dir_name = data_dir_name.to_str().ok_or(Error::GenericError(
+			"Unable convert data_dir_name into string".into(),
+		))?;
 		WalletSeed::recover_from_phrase(data_dir_name, mnemonic, password)
 			.map_err(|e| Error::Lifecycle(format!("Error recovering from mnemonic, {}", e)))?;
 		Ok(())
@@ -442,7 +433,9 @@ where
 	) -> Result<(), Error> {
 		let mut data_dir_name = PathBuf::from(self.data_dir.clone());
 		data_dir_name.push(wallet_data_dir.unwrap_or(MWC_WALLET_DIR));
-		let data_dir_name = data_dir_name.to_str().unwrap();
+		let data_dir_name = data_dir_name.to_str().ok_or(Error::GenericError(
+			"Unable convert data_dir_name into string".into(),
+		))?;
 		// get seed for later check
 
 		let orig_wallet_seed = WalletSeed::from_file(&data_dir_name, old).map_err(|e| {
@@ -503,7 +496,9 @@ where
 
 	fn delete_wallet(&self, _name: Option<&str>) -> Result<(), Error> {
 		let data_dir_name = PathBuf::from(self.data_dir.clone());
-		let data_dir_path = data_dir_name.to_str().unwrap();
+		let data_dir_path = data_dir_name.to_str().ok_or(Error::GenericError(
+			"Unable convert data_dir_name into string".into(),
+		))?;
 		warn!("Removing all wallet data from: {}", data_dir_path);
 		fs::remove_dir_all(data_dir_name)
 			.map_err(|e| Error::IO(format!("Failed to remove wallet data, {}", e)))?;

@@ -106,27 +106,27 @@ impl SlatePutter for PathToSlatePutter {
 		let out_slate = {
 			if self.recipient.is_some() || self.slatepack_format {
 				// recipient is defining enrypted/nonencrypted format. Sender and content are still required.
-				if self.sender.is_none() || self.content.is_none() {
-					return Err(Error::GenericError(
-						"Sender or content are not defined".to_string(),
-					));
-				}
-
-				if slatepack_secret.is_none() {
-					return Err(Error::ArgumentError(
-						"slatepack_secret is not defiled for encrypted slatepack".to_string(),
-					));
-				}
+				let sender = self
+					.sender
+					.clone()
+					.ok_or(Error::GenericError("Sender is not defined".to_string()))?;
+				let content = self
+					.content
+					.clone()
+					.ok_or(Error::GenericError("Content is not defined".to_string()))?;
+				let slatepack_secret = slatepack_secret.ok_or(Error::GenericError(
+					"slatepack_secret is not defiled for encrypted slatepack".to_string(),
+				))?;
 
 				// Do the slatepack
 				VersionedSlate::into_version(
 					self.context_id,
 					slate.clone(),
 					SlateVersion::SP,
-					self.content.clone().unwrap(),
-					self.sender.clone().unwrap(),
+					content,
+					sender,
 					self.recipient.clone(),
-					slatepack_secret.unwrap(),
+					slatepack_secret,
 					use_test_rng,
 					secp,
 				)
@@ -251,15 +251,13 @@ impl SlateGetter for PathToSlateGetter {
 				.map_err(|e| Error::IO(format!("Unable to build slate from the content, {}", e)))?;
 			Ok(SlateGetData::PlainSlate(slate))
 		} else {
-			if slatepack_secret.is_none() {
-				return Err(Error::ArgumentError(
-					"slatepack_secret is none for get encrypted slatepack".into(),
-				));
-			}
+			let slatepack_secret = slatepack_secret.ok_or(Error::GenericError(
+				"slatepack_secret is not defiled for encrypted slatepack".to_string(),
+			))?;
 			let sp = Slate::deserialize_upgrade_slatepack(
 				self.context_id,
 				&content,
-				slatepack_secret.unwrap(),
+				slatepack_secret,
 				secp,
 			)
 			.map_err(|e| Error::LibWallet(format!("Unable to deserialize slatepack, {}", e)))?;

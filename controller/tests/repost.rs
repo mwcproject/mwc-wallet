@@ -110,7 +110,10 @@ fn file_repost_test_impl(test_dir: &str) -> Result<(), wallet::Error> {
 		mask1,
 		bh as usize,
 		false,
-		tx_pool.lock().expect("Mutex failure").deref_mut(),
+		tx_pool
+			.lock()
+			.unwrap_or_else(|e| e.into_inner())
+			.deref_mut(),
 	);
 
 	let send_file = format!("{}/part_tx_1.tx", test_dir);
@@ -135,10 +138,10 @@ fn file_repost_test_impl(test_dir: &str) -> Result<(), wallet::Error> {
 			..Default::default()
 		};
 
-		let slate = api.init_send_tx(m, &None, &args, 1)?;
+		let slate = api.init_send_tx(m, None, &args, 1)?;
 		PathToSlatePutter::build_plain(0, Some((&send_file).into()))
 			.put_tx(&slate, None, true, &secp)?;
-		api.tx_lock_outputs(m, &None, &slate, None, 0)?;
+		api.tx_lock_outputs(m, None, &slate, None, 0)?;
 		Ok(())
 	})?;
 
@@ -148,7 +151,10 @@ fn file_repost_test_impl(test_dir: &str) -> Result<(), wallet::Error> {
 		mask1,
 		3,
 		false,
-		tx_pool.lock().expect("Mutex failure").deref_mut(),
+		tx_pool
+			.lock()
+			.unwrap_or_else(|e| e.into_inner())
+			.deref_mut(),
 	);
 	bh += 3;
 
@@ -163,7 +169,7 @@ fn file_repost_test_impl(test_dir: &str) -> Result<(), wallet::Error> {
 			.get_tx(None, &secp)?
 			.to_slate()?
 			.0;
-		slate = api.receive_tx(&None, &slate, None, &None, None)?;
+		slate = api.receive_tx(None, &slate, None, &None, None)?;
 		PathToSlatePutter::build_plain(0, Some((&receive_file).into()))
 			.put_tx(&slate, None, true, &secp)?;
 		Ok(())
@@ -181,7 +187,7 @@ fn file_repost_test_impl(test_dir: &str) -> Result<(), wallet::Error> {
 			.get_tx(None, &secp)?
 			.to_slate()?
 			.0;
-		slate = api.finalize_tx(m, &None, &slate, true)?;
+		slate = api.finalize_tx(m, None, &slate, true)?;
 		Ok(())
 	})?;
 
@@ -199,7 +205,10 @@ fn file_repost_test_impl(test_dir: &str) -> Result<(), wallet::Error> {
 		mask1,
 		3,
 		false,
-		tx_pool.lock().expect("Mutex failure").deref_mut(),
+		tx_pool
+			.lock()
+			.unwrap_or_else(|e| e.into_inner())
+			.deref_mut(),
 	);
 	bh += 3;
 
@@ -249,10 +258,10 @@ fn file_repost_test_impl(test_dir: &str) -> Result<(), wallet::Error> {
 			selection_strategy_is_use_all: true,
 			..Default::default()
 		};
-		let slate_i = sender_api.init_send_tx(m, &None, &args, 1)?;
+		let slate_i = sender_api.init_send_tx(m, None, &args, 1)?;
 		slate = client1.send_tx_slate_direct("wallet2", &slate_i)?;
-		sender_api.tx_lock_outputs(m, &None, &slate, None, 0)?;
-		slate = sender_api.finalize_tx(m, &None, &slate, true)?;
+		sender_api.tx_lock_outputs(m, None, &slate, None, 0)?;
+		slate = sender_api.finalize_tx(m, None, &slate, true)?;
 		Ok(())
 	})?;
 
@@ -262,7 +271,10 @@ fn file_repost_test_impl(test_dir: &str) -> Result<(), wallet::Error> {
 		mask1,
 		3,
 		false,
-		tx_pool.lock().expect("Mutex failure").deref_mut(),
+		tx_pool
+			.lock()
+			.unwrap_or_else(|e| e.into_inner())
+			.deref_mut(),
 	);
 	bh += 3;
 
@@ -280,7 +292,10 @@ fn file_repost_test_impl(test_dir: &str) -> Result<(), wallet::Error> {
 		mask1,
 		3,
 		false,
-		tx_pool.lock().expect("Mutex failure").deref_mut(),
+		tx_pool
+			.lock()
+			.unwrap_or_else(|e| e.into_inner())
+			.deref_mut(),
 	);
 	bh += 3;
 	//

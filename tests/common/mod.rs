@@ -77,7 +77,7 @@ macro_rules! setup_proxy {
 
 		// add wallet to proxy
 		let config1 = initial_setup_wallet($test_dir, "wallet1");
-		let wallet_config1 = config1.clone().members.unwrap().wallet;
+		let wallet_config1 = config1.clone().members.wallet;
 		//config1.owner_api_listen_port = Some(13420);
 		let ($wallet1, mask1_i) = instantiate_wallet(
 			wallet_config1.clone(),
@@ -102,7 +102,7 @@ macro_rules! setup_proxy {
 		}
 
 		let config2 = initial_setup_wallet($test_dir, "wallet2");
-		let wallet_config2 = config2.clone().members.unwrap().wallet;
+		let wallet_config2 = config2.clone().members.wallet;
 		//config2.api_listen_port = 23415;
 		let ($wallet2, mask2_i) = instantiate_wallet(
 			wallet_config2.clone(),
@@ -177,9 +177,14 @@ pub fn config_command_wallet(
 				.to_owned(),
 		))?;
 	}
-	default_config.update_paths(&current_dir, None);
+	default_config.update_paths(&current_dir, None).unwrap();
 	default_config
-		.write_to_file(config_file_name.to_str().unwrap(), false, None, None)
+		.write_to_file(
+			config_file_name.to_str().unwrap(),
+			false,
+			String::new(),
+			None,
+		)
 		.unwrap_or_else(|e| {
 			panic!("Error creating config file: {}", e);
 		});
@@ -293,9 +298,9 @@ pub fn execute_command(
 	let args = app.clone().get_matches_from(arg_vec);
 	let _ = get_wallet_subcommand(test_dir, wallet_name, args.clone());
 	let config = initial_setup_wallet(test_dir, wallet_name);
-	let mut wallet_config = config.clone().members.unwrap().wallet;
-	let tor_config = config.clone().members.unwrap().tor;
-	let mqs_config = config.clone().members.unwrap().mqs;
+	let mut wallet_config = config.clone().members.wallet;
+	let tor_config = config.clone().members.tor;
+	let mqs_config = config.clone().members.mqs;
 	//unset chain type so it doesn't get reset
 	wallet_config.chain_type = None;
 	wallet_args::wallet_command(
@@ -341,12 +346,12 @@ where
 	let _ = get_wallet_subcommand(test_dir, wallet_name, args.clone());
 	let config =
 		config::initial_setup_wallet(&ChainTypes::AutomatedTesting, None, None, true).unwrap();
-	let mut wallet_config = config.clone().members.unwrap().wallet;
+	let mut wallet_config = config.clone().members.wallet;
 	wallet_config.chain_type = None;
 	wallet_config.api_secret_path = None;
 	wallet_config.node_api_secret_path = None;
-	let tor_config = config.clone().members.unwrap().tor.clone();
-	let mqs_config = config.members.unwrap().mqs;
+	let tor_config = config.clone().members.tor.clone();
+	let mqs_config = config.members.mqs;
 	wallet_args::wallet_command(
 		0,
 		&args,

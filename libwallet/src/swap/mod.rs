@@ -191,7 +191,7 @@ mod tests {
 	}
 
 	fn key_id(d1: u32, d2: u32) -> Identifier {
-		ExtKeychain::derive_key_id(2, d1, d2, 0, 0)
+		ExtKeychain::derive_key_id(2, d1, d2, 0, 0).unwrap()
 	}
 
 	fn key(kc: &ExtKeychain, d1: u32, d2: u32) -> SecretKey {
@@ -261,7 +261,7 @@ mod tests {
 				output: key_id(0, 1),
 				redeem: key_id(0, 2),
 				secondary_context: SecondaryBuyerContext::Eth(EthBuyerContext {
-					address_from_secret: Some(address_from_secret.unwrap()),
+					address_from_secret: address_from_secret.unwrap(),
 				}),
 			}),
 		}
@@ -294,13 +294,13 @@ mod tests {
 		}
 
 		pub fn push_output(&self, commit: Commitment) {
-			let mut state = self.state.lock().expect("RwLock failure");
+			let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
 			let height = state.height;
 			state.outputs.insert(commit, height);
 		}
 
 		pub fn mine_block(&self) {
-			let mut state = self.state.lock().expect("RwLock failure");
+			let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
 			state.height += 1;
 			let height = state.height;
 
@@ -324,7 +324,7 @@ mod tests {
 			if count > 0 {
 				self.mine_block();
 				if count > 1 {
-					let mut state = self.state.lock().expect("Mutex failure");
+					let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
 					state.height += count - 1;
 				}
 			}
@@ -332,18 +332,18 @@ mod tests {
 
 		/// Get a current state for the test chain
 		pub fn get_state(&self) -> TestNodeClientState {
-			self.state.lock().expect("RwLock failure").clone()
+			self.state.lock().unwrap_or_else(|e| e.into_inner()).clone()
 		}
 
 		/// Set a state for the test chain
 		pub fn set_state(&self, chain_state: &TestNodeClientState) {
-			let mut state = self.state.lock().expect("RwLock failure");
+			let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
 			*state = chain_state.clone();
 		}
 
 		// Clean the data, not height. Reorg attack
 		pub fn clean(&self) {
-			let mut state = self.state.lock().expect("RwLock failure");
+			let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
 			state.pending.clear();
 			state.outputs.clear();
 			state.kernels.clear();
@@ -359,7 +359,7 @@ mod tests {
 		}
 		fn get_chain_tip(&self) -> Result<(u64, String, u64), crate::Error> {
 			let res = (
-				self.state.lock().expect("Mutex failure").height,
+				self.state.lock().unwrap_or_else(|e| e.into_inner()).height,
 				"testnodehash".to_string(),
 				123455,
 			);
@@ -396,7 +396,7 @@ mod tests {
 			tx.validate(0, Weighting::AsTransaction, &secp)
 				.map_err(|e| crate::Error::Node(format!("Node failure, {}", e)))?;
 
-			let mut state = self.state.lock().expect("RwLock failure");
+			let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
 			for input in tx.inputs_committed() {
 				// Output not unspent
 				if !state.outputs.contains_key(&input) {
@@ -453,7 +453,7 @@ mod tests {
 			wallet_outputs: &Vec<Commitment>,
 		) -> Result<HashMap<Commitment, (String, u64, u64)>, crate::Error> {
 			let mut map = HashMap::new();
-			let state = self.state.lock().expect("RwLock failure");
+			let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
 			for output in wallet_outputs {
 				if let Some(height) = state.outputs.get(&output) {
 					map.insert(output.clone(), (to_hex(&output.0), *height, 0));
@@ -475,7 +475,7 @@ mod tests {
 			_min_height: Option<u64>,
 			_max_height: Option<u64>,
 		) -> Result<Option<(TxKernel, u64, u64)>, crate::Error> {
-			let state = self.state.lock().expect("RwLock failure");
+			let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
 			let res = state
 				.kernels
 				.get(excess)
@@ -1094,7 +1094,7 @@ mod tests {
 
 		// Undo a BTC block to test seller
 		{
-			let mut state = btc_nc.state.lock().expect("Mutex failure");
+			let mut state = btc_nc.state.lock().unwrap_or_else(|e| e.into_inner());
 			state.height -= 1;
 		}
 
@@ -1629,7 +1629,7 @@ mod tests {
 				self.api
 					.btc_node_client1
 					.lock()
-					.expect("Mutex failure")
+					.unwrap_or_else(|e| e.into_inner())
 					.get_state(),
 			));
 		}
@@ -1640,7 +1640,7 @@ mod tests {
 			self.api
 				.btc_node_client1
 				.lock()
-				.expect("Mutex failure")
+				.unwrap_or_else(|e| e.into_inner())
 				.set_state(&bnc_state);
 		}
 	}
@@ -3558,7 +3558,8 @@ mod tests {
 				.slate
 				.get_lock_height_check()
 				.unwrap();
-			let need_blocks = lock_height - nc.state.lock().expect("Mutex failure").height;
+			let need_blocks =
+				lock_height - nc.state.lock().unwrap_or_else(|e| e.into_inner()).height;
 
 			let res = seller.process(Input::Cancel, kc_sell.secp()).unwrap();
 			assert_eq!(res.next_state_id, StateId::SellerWaitingForRefundHeight);
@@ -4485,7 +4486,11 @@ mod tests {
 			);
 
 			btc_nc.set_state(&btc_state);
-			btc_nc.state.lock().expect("Mutex failure").height -= 4;
+			btc_nc
+				.state
+				.lock()
+				.unwrap_or_else(|e| e.into_inner())
+				.height -= 4;
 
 			test_responds(
 				&mut buyer,
@@ -4540,7 +4545,7 @@ mod tests {
 					.slate
 					.get_lock_height_check()
 					.unwrap()
-					.saturating_sub(nc.state.lock().expect("Mutex failure").height)
+					.saturating_sub(nc.state.lock().unwrap_or_else(|e| e.into_inner()).height)
 					* 60) as i64
 		); // Time is related to refund, not to a real time...
 		assert_eq!(
@@ -4643,7 +4648,8 @@ mod tests {
 				.get_lock_height_check()
 				.unwrap();
 
-			let need_blocks = lock_height - nc.state.lock().expect("Mutex failure").height - 1;
+			let need_blocks =
+				lock_height - nc.state.lock().unwrap_or_else(|e| e.into_inner()).height - 1;
 			nc.mine_blocks(need_blocks);
 
 			seller.pushs();
@@ -6094,7 +6100,9 @@ mod tests {
 		let kc_buy = keychain(2);
 		let ctx_buy = context_buy(&kc_buy);
 
-		let sec_update = swap_api.build_offer_message_secondary_update(&kc_sell, &mut swap_sell);
+		let sec_update = swap_api
+			.build_offer_message_secondary_update(&kc_sell, &mut swap_sell)
+			.unwrap();
 		let offer_message = SellApi::offer_message(0, &swap_sell, sec_update.clone()).unwrap();
 
 		let (uuid, offer_update, secondary_update) = offer_message.unwrap_offer().unwrap();
@@ -6111,8 +6119,9 @@ mod tests {
 		)
 		.unwrap();
 
-		let sec_update =
-			swap_api.build_accept_offer_message_secondary_update(&kc_buy, &mut swap_buy);
+		let sec_update = swap_api
+			.build_accept_offer_message_secondary_update(&kc_buy, &mut swap_buy)
+			.unwrap();
 		let accept_offer_message = BuyApi::accept_offer_message(&swap_buy, sec_update).unwrap();
 
 		let (_uuid, accept_offer_update, secondary_update) =

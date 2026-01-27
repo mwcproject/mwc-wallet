@@ -30,7 +30,6 @@ use mwc_wallet_libwallet::proof::proofaddress::{self, ProvableAddress};
 use mwc_wallet_util::mwc_core::consensus;
 use mwc_wallet_util::mwc_core::core::Transaction;
 use mwc_wallet_util::mwc_util::secp::Secp256k1;
-use std::cell::RefCell;
 use std::ops::DerefMut;
 
 /// Public definition used to generate Foreign jsonrpc api.
@@ -984,7 +983,7 @@ where
 		};
 		let out_slate = Foreign::receive_tx(
 			self,
-			&None,
+			None,
 			&slate_from,
 			sender.map(|p| ProvableAddress::from_tor_pub_key(&p).public_key), // We don't want to change RPC. New fields required new version
 			&dest_acct_name,
@@ -1026,7 +1025,7 @@ where
 			(slate_from, None)
 		};
 
-		let out_slate = Foreign::finalize_invoice_tx(self, &None, &in_slate)?;
+		let out_slate = Foreign::finalize_invoice_tx(self, None, &in_slate)?;
 
 		let res_slate = Foreign::encrypt_slate(
 			self,
@@ -1206,7 +1205,10 @@ pub fn run_doctest_foreign(
 			(&mask1).as_ref(),
 			1 as usize,
 			false,
-			tx_pool.lock().expect("Mutex failure").deref_mut(),
+			tx_pool
+				.lock()
+				.unwrap_or_else(|e| e.into_inner())
+				.deref_mut(),
 		);
 		//update local outputs after each block, so transaction IDs stay consistent
 		let (wallet_refreshed, _) = api_impl::owner::retrieve_summary_info(
@@ -1221,7 +1223,7 @@ pub fn run_doctest_foreign(
 	}
 
 	let (w1_tor_secret, w1_tor_pubkey) = {
-		let mut w_lock = wallet1.lock().expect("Mutex failure");
+		let mut w_lock = wallet1.lock().unwrap_or_else(|e| e.into_inner());
 		let w = w_lock.lc_provider().unwrap().wallet_inst().unwrap();
 		let k = w.keychain((&mask1).as_ref()).unwrap();
 		let secret = proofaddress::payment_proof_address_dalek_secret(0, &k, 0).unwrap();
@@ -1231,7 +1233,7 @@ pub fn run_doctest_foreign(
 	let w1_slatepack_address = ProvableAddress::from_tor_pub_key(&w1_tor_pubkey);
 
 	let (w2_tor_secret, w2_tor_pubkey) = {
-		let mut w_lock = wallet2.lock().expect("Mutex failure");
+		let mut w_lock = wallet2.lock().unwrap_or_else(|e| e.into_inner());
 		let w = w_lock.lc_provider().unwrap().wallet_inst().unwrap();
 		let k = w.keychain((&mask2).as_ref()).unwrap();
 		let secret = proofaddress::payment_proof_address_dalek_secret(0, &k, 0).unwrap();
@@ -1244,10 +1246,10 @@ pub fn run_doctest_foreign(
 
 	if init_invoice_tx {
 		let amount = 2_000_000_000;
-		let tx_session1 = Some(RefCell::new(TxSession::new()));
-		let tx_session2 = Some(RefCell::new(TxSession::new()));
+		let mut tx_session1 = TxSession::new();
+		let mut tx_session2 = TxSession::new();
 		let mut slate = {
-			let mut w_lock = wallet2.lock().expect("Mutex failure");
+			let mut w_lock = wallet2.lock().unwrap_or_else(|e| e.into_inner());
 			let w = w_lock.lc_provider().unwrap().wallet_inst().unwrap();
 			let mut args = IssueInvoiceTxArgs {
 				amount,
@@ -1262,7 +1264,7 @@ pub fn run_doctest_foreign(
 			let slate = api_impl::owner::issue_invoice_tx(
 				&mut **w,
 				(&mask2).as_ref(),
-				&tx_session1,
+				Some(&mut tx_session1),
 				&args,
 				true,
 				1,
@@ -1270,8 +1272,6 @@ pub fn run_doctest_foreign(
 			.unwrap();
 
 			tx_session1
-				.unwrap()
-				.borrow_mut()
 				.save_tx_data(&mut **w, (&mask1).as_ref(), &slate.id)
 				.unwrap();
 			slate
@@ -1281,7 +1281,7 @@ pub fn run_doctest_foreign(
 			api_impl::owner::update_wallet_state(&mut **w1, (&mask1).as_ref(), &None).unwrap();
 		}
 		slate = {
-			let mut w_lock = wallet1.lock().expect("Mutex failure");
+			let mut w_lock = wallet1.lock().unwrap_or_else(|e| e.into_inner());
 			let w = w_lock.lc_provider().unwrap().wallet_inst().unwrap();
 			let args = InitTxArgs {
 				src_acct_name: None,
@@ -1295,7 +1295,7 @@ pub fn run_doctest_foreign(
 			let slate = api_impl::owner::process_invoice_tx(
 				&mut **w,
 				(&mask1).as_ref(),
-				&tx_session2,
+				&mut Some(&mut tx_session2),
 				&slate,
 				&args,
 				true,
@@ -1304,8 +1304,6 @@ pub fn run_doctest_foreign(
 			.unwrap();
 			// participants ids are expected to be different
 			tx_session2
-				.unwrap()
-				.borrow_mut()
 				.save_tx_data(&mut **w, (&mask1).as_ref(), &slate.id)
 				.unwrap();
 			slate
@@ -1347,7 +1345,7 @@ pub fn run_doctest_foreign(
 	}
 	if init_tx {
 		let amount = 2_000_000_000;
-		let mut w_lock = wallet1.lock().expect("Mutex failure");
+		let mut w_lock = wallet1.lock().unwrap_or_else(|e| e.into_inner());
 		let w = w_lock.lc_provider().unwrap().wallet_inst().unwrap();
 		let mut args = InitTxArgs {
 			src_acct_name: None,
@@ -1365,7 +1363,7 @@ pub fn run_doctest_foreign(
 		}
 
 		let slate =
-			api_impl::owner::init_send_tx(&mut **w, (&mask1).as_ref(), &None, &args, true, 1)
+			api_impl::owner::init_send_tx(&mut **w, (&mask1).as_ref(), &mut None, &args, true, 1)
 				.unwrap();
 		println!("INIT SLATE");
 		// Spit out slate for input to finalize_tx

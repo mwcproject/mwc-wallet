@@ -68,7 +68,7 @@ impl EthData {
 	) -> Result<Self, Error> {
 		Ok(Self {
 			redeem_address: offer.redeem_address,
-			address_from_secret: context.address_from_secret,
+			address_from_secret: Some(context.address_from_secret),
 			erc20_approve_tx: None,
 			lock_tx: None,
 			refund_tx: None,
@@ -118,7 +118,7 @@ pub struct EthSellerContext {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct EthBuyerContext {
 	/// Buyer swap offer index in swap contract account
-	pub address_from_secret: Option<Address>,
+	pub address_from_secret: Address,
 }
 
 /// Messages regarding ETH part of the deal
@@ -183,7 +183,11 @@ pub fn to_eth_address(address: String) -> Result<Address, Error> {
 		return Err(Error::InvalidEthAddress);
 	}
 	let mut address_slice = [0u8; 20];
-	address_slice.copy_from_slice(hex::decode(address).unwrap().as_slice());
+	address_slice.copy_from_slice(
+		hex::decode(address.clone())
+			.map_err(|e| Error::Generic(format!("Unbale decode eth address {}, {}", address, e)))?
+			.as_slice(),
+	);
 	Ok(Address::from(address_slice))
 }
 
@@ -205,7 +209,11 @@ pub fn to_eth_tx_hash(tx_hash: String) -> Result<H256, Error> {
 		return Err(Error::InvalidTxHash);
 	}
 	let mut hash_slice = [0u8; 32];
-	hash_slice.copy_from_slice(hex::decode(hash).unwrap().as_slice());
+	hash_slice.copy_from_slice(
+		hex::decode(&hash)
+			.map_err(|e| Error::Generic(format!("Invalid hash {}, {}", hash, e)))?
+			.as_slice(),
+	);
 
 	Ok(H256::from(hash_slice))
 }

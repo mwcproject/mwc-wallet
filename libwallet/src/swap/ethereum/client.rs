@@ -98,12 +98,12 @@ impl TestEthNodeClient {
 
 	/// Get a current state for the test chain
 	pub fn get_state(&self) -> TestEthNodeClientState {
-		self.state.lock().expect("Mutex failure").clone()
+		self.state.lock().unwrap_or_else(|e| e.into_inner()).clone()
 	}
 
 	/// Set a state for the test chain
 	pub fn set_state(&self, chain_state: &TestEthNodeClientState) {
-		let mut state = self.state.lock().expect("Mutex failure");
+		let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
 		*state = chain_state.clone();
 	}
 
@@ -121,7 +121,7 @@ impl EthNodeClient for TestEthNodeClient {
 
 	/// Fetch the current chain height
 	fn height(&self) -> Result<u64, Error> {
-		Ok(self.state.lock().expect("Mutex failure").height)
+		Ok(self.state.lock().unwrap_or_else(|e| e.into_inner()).height)
 	}
 
 	/// get wallet balance
@@ -170,7 +170,7 @@ impl EthNodeClient for TestEthNodeClient {
 		_gas: f32,
 	) -> Result<H256, Error> {
 		//todo need to check balance
-		let mut store = self.swap_store.lock().expect("Mutex failure");
+		let mut store = self.swap_store.lock().unwrap_or_else(|e| e.into_inner());
 		if store.contains_key(&address_from_secret) {
 			return Err(Error::InvalidEthSwapTradeIndex);
 		}
@@ -185,7 +185,7 @@ impl EthNodeClient for TestEthNodeClient {
 			),
 		);
 		if store.contains_key(&address_from_secret) {
-			let mut txs = self.tx_store.lock().expect("Mutex failure");
+			let mut txs = self.tx_store.lock().unwrap_or_else(|e| e.into_inner());
 			txs.insert(H256::from([1u8; 32]), "initiate".to_string());
 			Ok(H256::from([1u8; 32]))
 		} else {
@@ -201,9 +201,9 @@ impl EthNodeClient for TestEthNodeClient {
 		_secret_key: mwc_web3::signing::SecretKey,
 		_gas: f32,
 	) -> Result<H256, Error> {
-		let mut store = self.swap_store.lock().expect("Mutex failure");
+		let mut store = self.swap_store.lock().unwrap_or_else(|e| e.into_inner());
 		if store.contains_key(&address_from_secret) {
-			let mut txs = self.tx_store.lock().expect("Mutex failure");
+			let mut txs = self.tx_store.lock().unwrap_or_else(|e| e.into_inner());
 			txs.insert(H256::from([2u8; 32]), "redeem".to_string());
 			store.remove(&address_from_secret);
 			Ok(H256::from([2u8; 32]))
@@ -219,9 +219,9 @@ impl EthNodeClient for TestEthNodeClient {
 		address_from_secret: Address,
 		_gas: f32,
 	) -> Result<H256, Error> {
-		let mut store = self.swap_store.lock().expect("Mutex failure");
+		let mut store = self.swap_store.lock().unwrap_or_else(|e| e.into_inner());
 		if store.contains_key(&address_from_secret) {
-			let mut txs = self.tx_store.lock().expect("Mutex failure");
+			let mut txs = self.tx_store.lock().unwrap_or_else(|e| e.into_inner());
 			txs.insert(H256::from([3u8; 32]), "refund".to_string());
 			store.remove(&address_from_secret);
 			Ok(H256::from([3u8; 32]))
@@ -236,7 +236,7 @@ impl EthNodeClient for TestEthNodeClient {
 		_currency: Currency,
 		address_from_secret: Address,
 	) -> Result<(u64, Option<Address>, Address, Address, u64), Error> {
-		let store = self.swap_store.lock().expect("Mutex failure");
+		let store = self.swap_store.lock().unwrap_or_else(|e| e.into_inner());
 		if store.contains_key(&address_from_secret) {
 			Ok(store[&address_from_secret])
 		} else {

@@ -117,15 +117,11 @@ impl Address for MWCMQSAddress {
 	/// Extract the address plus additional data
 	fn from_str(context_id: u32, s: &str) -> Result<Self, Error> {
 		let re = Regex::new(MWCMQ_ADDRESS_REGEX).unwrap();
-		let captures = re.captures(s);
-		if captures.is_none() {
-			Err(Error::MqsGenericError(format!(
-				"Unable to parse MWC address {}",
-				s
-			)))?;
-		}
+		let captures = re.captures(s).ok_or(Error::MqsGenericError(format!(
+			"Unable to parse MWC address {}",
+			s
+		)))?;
 
-		let captures = captures.unwrap();
 		let public_key = captures
 			.name("public_key")
 			.ok_or(Error::MqsGenericError(format!(
@@ -201,19 +197,18 @@ impl dyn Address {
 		let re = Regex::new(ADDRESS_REGEX).map_err(|e| {
 			Error::AddressGenericError(format!("Unable to construct address parser, {}", e))
 		})?;
-		let captures = re.captures(address);
-		if captures.is_none() {
-			return Ok(Box::new(MWCMQSAddress::from_str(context_id, address)?));
+		match re.captures(address) {
+			None => Ok(Box::new(MWCMQSAddress::from_str(context_id, address)?)),
+			Some(captures) => {
+				let address_type = captures.name("address_type").unwrap().as_str().to_string();
+				let address: Box<dyn Address> = match address_type.as_ref() {
+					"mwcmqs" => Box::new(MWCMQSAddress::from_str(context_id, address)?),
+					"https" => Box::new(HttpsAddress::from_str(context_id, address)?),
+					"http" => Box::new(HttpsAddress::from_str(context_id, address)?),
+					x => Err(Error::UnknownAddressType(x.to_string()))?,
+				};
+				Ok(address)
+			}
 		}
-
-		let captures = captures.unwrap();
-		let address_type = captures.name("address_type").unwrap().as_str().to_string();
-		let address: Box<dyn Address> = match address_type.as_ref() {
-			"mwcmqs" => Box::new(MWCMQSAddress::from_str(context_id, address)?),
-			"https" => Box::new(HttpsAddress::from_str(context_id, address)?),
-			"http" => Box::new(HttpsAddress::from_str(context_id, address)?),
-			x => Err(Error::UnknownAddressType(x.to_string()))?,
-		};
-		Ok(address)
 	}
 }

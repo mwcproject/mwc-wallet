@@ -62,7 +62,7 @@ pub fn init_mwcmqs_access_data(
 ) {
 	if let Some((_, mut subscr)) = MWCMQS_BROKER
 		.write()
-		.expect("RwLock failure")
+		.unwrap_or_else(|e| e.into_inner())
 		.insert(context_id, (publisher, subscriber))
 	{
 		subscr.stop(false);
@@ -73,7 +73,7 @@ pub fn init_mwcmqs_access_data(
 pub fn get_mwcmqs_brocker(context_id: u32) -> Option<(MWCMQPublisher, MWCMQSubscriber)> {
 	MWCMQS_BROKER
 		.read()
-		.expect("RwLock failure")
+		.unwrap_or_else(|e| e.into_inner())
 		.get(&context_id)
 		.cloned()
 }
@@ -84,7 +84,7 @@ pub fn reset_mwcmqs_brocker(context_id: u32) {
 	let prev_state = {
 		MWCMQS_BROKER
 			.write()
-			.expect("RwLock failure")
+			.unwrap_or_else(|e| e.into_inner())
 			.remove(&context_id)
 	};
 
@@ -365,7 +365,10 @@ impl MWCMQSubscriber {
 	}
 
 	pub fn take_subscribe_thread(&self) -> Option<JoinHandle<()>> {
-		self.subscribe_thread.lock().expect("Mutex failure").take()
+		self.subscribe_thread
+			.lock()
+			.unwrap_or_else(|e| e.into_inner())
+			.take()
 	}
 
 	pub fn is_mqs_running(&self) -> bool {
@@ -378,7 +381,10 @@ impl MWCMQSubscriber {
 }
 impl Subscriber for MWCMQSubscriber {
 	fn start(&mut self, secp: Secp256k1) -> Result<(), Error> {
-		let mut subscribe_thread = self.subscribe_thread.lock().expect("Mutex failure");
+		let mut subscribe_thread = self
+			.subscribe_thread
+			.lock()
+			.unwrap_or_else(|e| e.into_inner());
 
 		if subscribe_thread.is_some() {
 			return Err(Error::MqsGenericError(
@@ -396,7 +402,10 @@ impl Subscriber for MWCMQSubscriber {
 			.name(format!("mwcmqs-broker-{}", self.context_id))
 			.spawn(move || {
 				broker.subscribe(&address, &secret_key, &secp);
-				subscribe_thread2.lock().expect("Mutex failure").take();
+				subscribe_thread2
+					.lock()
+					.unwrap_or_else(|e| e.into_inner())
+					.take();
 				reset_mwcmqs_brocker(context_id);
 			})
 			.map_err(|e| Error::GenericError(format!("Unable to start mwcmqs broker, {}", e)))?;
@@ -409,7 +418,7 @@ impl Subscriber for MWCMQSubscriber {
 		if self
 			.subscribe_thread
 			.lock()
-			.expect("Mutex failure")
+			.unwrap_or_else(|e| e.into_inner())
 			.is_none()
 		{
 			return true; // allready stopped
@@ -434,7 +443,11 @@ impl Subscriber for MWCMQSubscriber {
 
 			let response_status = response.is_ok();
 			self.broker.stop();
-			let listener_thread = self.subscribe_thread.lock().expect("Mutex failure").take();
+			let listener_thread = self
+				.subscribe_thread
+				.lock()
+				.unwrap_or_else(|e| e.into_inner())
+				.take();
 			if let Some(listener_thread) = listener_thread {
 				let _ = listener_thread.join();
 			}
@@ -456,7 +469,7 @@ impl Subscriber for MWCMQSubscriber {
 		self.broker
 			.handler
 			.lock()
-			.expect("Mutex failure")
+			.unwrap_or_else(|e| e.into_inner())
 			.set_notification_channels(slate_id, slate_send_channel);
 	}
 
@@ -464,7 +477,7 @@ impl Subscriber for MWCMQSubscriber {
 		self.broker
 			.handler
 			.lock()
-			.expect("Mutex failure")
+			.unwrap_or_else(|e| e.into_inner())
 			.reset_notification_channels(slate_id);
 	}
 }
@@ -614,37 +627,29 @@ impl MWCMQSBroker {
 		);
 		let response = client.post(&url).form(&params).send();
 
-		if !response.is_ok() {
-			return Err(Error::MqsInvalidRespose(
-				"mwcmqs connection error".to_string(),
-			));
-		} else {
-			let mut response = response.unwrap();
-			let mut resp_str = "".to_string();
-			let read_resp = response.read_to_string(&mut resp_str);
+		let mut response = response.map_err(|e| {
+			Error::MqsInvalidRespose(format!("mwcmqs connection error, {}", e), "".into())
+		})?;
+		let mut resp_str = "".to_string();
+		let _ = response
+			.read_to_string(&mut resp_str)
+			.map_err(|e| Error::MqsInvalidRespose(format!("mwcmqs i/o error, {}", e), "".into()))?;
 
-			if !read_resp.is_ok() {
-				return Err(Error::MqsInvalidRespose("mwcmqs i/o error".to_string()));
-			} else {
-				let data: Vec<&str> = resp_str.split(" ").collect();
-				if data.len() <= 1 {
-					return Err(Error::MqsInvalidRespose("mwcmqs".to_string()));
-				} else {
-					let last_seen = data[1].parse::<i64>();
-					if !last_seen.is_ok() {
-						return Err(Error::MqsInvalidRespose("mwcmqs".to_string()));
-					} else {
-						let last_seen = last_seen.unwrap();
-						if last_seen > 10000000000 {
-							self.do_log_warn(format!("\nWARNING: [{}] has not been connected to mwcmqs recently. This user might not receive the slate.",
-													 to.get_stripped()));
-						} else if last_seen > 150000 {
-							let seconds = last_seen / 1000;
-							self.do_log_warn(format!("\nWARNING: [{}] has not been connected to mwcmqs for {} seconds. This user might not receive the slate.",
-													 to.get_stripped(), seconds));
-						}
-					}
-				}
+		let data: Vec<&str> = resp_str.split(" ").collect();
+		if data.len() <= 1 {
+			return Err(Error::MqsInvalidRespose("mwcmqs".to_string(), resp_str));
+		} else {
+			let last_seen = data[1]
+				.parse::<i64>()
+				.map_err(|_| Error::MqsInvalidRespose("mwcmqs".to_string(), resp_str))?;
+
+			if last_seen > 3600000 {
+				self.do_log_warn(format!("\nWARNING: [{}] has not been connected to mwcmqs recently. This user might not receive the slate.",
+										 to.get_stripped()));
+			} else if last_seen > 150000 {
+				let seconds = last_seen / 1000;
+				self.do_log_warn(format!("\nWARNING: [{}] has not been connected to mwcmqs for {} seconds. This user might not receive the slate.",
+												 to.get_stripped(), seconds));
 			}
 		}
 
@@ -688,8 +693,9 @@ impl MWCMQSBroker {
 
 		let mut challenge = String::new();
 		challenge.push_str(&message_ser);
-		let signature = crypto::sign_challenge(&challenge, secret_key, secp);
-		let signature = signature.unwrap().to_hex();
+		let signature = crypto::sign_challenge(&challenge, secret_key, secp)
+			.map_err(|e| Error::MqsGenericError(format!("sign_challenge error, {}", e)))?;
+		let signature = signature.to_hex();
 
 		let client = reqwest::blocking::Client::builder()
 			.timeout(Duration::from_secs(60))
@@ -714,47 +720,38 @@ impl MWCMQSBroker {
 		);
 		let response = client.post(&url).form(&params).send();
 
-		if !response.is_ok() {
-			return Err(Error::MqsInvalidRespose(format!(
-				"mwcmqs connection error, {:?}",
-				response
-			)));
-		} else {
-			let mut response = response.unwrap();
-			let mut resp_str = "".to_string();
-			let read_resp = response.read_to_string(&mut resp_str);
+		let mut response = response.map_err(|e| {
+			Error::MqsInvalidRespose(format!("mwcmqs connection error, {}", e), "".into())
+		})?;
+		let mut resp_str = "".to_string();
+		let _ = response
+			.read_to_string(&mut resp_str)
+			.map_err(|e| Error::MqsInvalidRespose(format!("mwcmqs i/o error, {}", e), "".into()))?;
 
-			if !read_resp.is_ok() {
-				return Err(Error::MqsInvalidRespose("mwcmqs i/o error".to_string()));
-			} else {
-				let data: Vec<&str> = resp_str.split(" ").collect();
-				if data.len() <= 1 {
-					return Err(Error::MqsInvalidRespose("mwcmqs".to_string()));
+		let data: Vec<&str> = resp_str.split(" ").collect();
+		if data.len() <= 1 {
+			return Err(Error::MqsInvalidRespose("mwcmqs".to_string(), resp_str));
+		} else {
+			let last_seen = data[1]
+				.parse::<i64>()
+				.map_err(|_| Error::MqsInvalidRespose("mwcmqs".to_string(), resp_str))?;
+
+			if last_seen > 3600000 {
+				if mwc_wallet_util::mwc_util::is_console_output_enabled() {
+					println!("\nWARNING: [{}] has not been connected to mwcmqs recently. This user might not receive the swap message.",
+							 to.get_stripped());
 				} else {
-					let last_seen = data[1].parse::<i64>();
-					if !last_seen.is_ok() {
-						return Err(Error::MqsInvalidRespose("mwcmqs".to_string()));
-					} else {
-						let last_seen = last_seen.unwrap();
-						if last_seen > 10000000000 {
-							if mwc_wallet_util::mwc_util::is_console_output_enabled() {
-								println!("\nWARNING: [{}] has not been connected to mwcmqs recently. This user might not receive the swap message.",
+					info!("\nWARNING: [{}] has not been connected to mwcmqs recently. This user might not receive the swap message.",
 										 to.get_stripped());
-							} else {
-								info!("\nWARNING: [{}] has not been connected to mwcmqs recently. This user might not receive the swap message.",
-										 to.get_stripped());
-							}
-						} else if last_seen > 150000 {
-							let seconds = last_seen / 1000;
-							if mwc_wallet_util::mwc_util::is_console_output_enabled() {
-								println!("\nWARNING: [{}] has not been connected to mwcmqs for {} seconds. This user might not receive the swap message.",
+				}
+			} else if last_seen > 150000 {
+				let seconds = last_seen / 1000;
+				if mwc_wallet_util::mwc_util::is_console_output_enabled() {
+					println!("\nWARNING: [{}] has not been connected to mwcmqs for {} seconds. This user might not receive the swap message.",
+							 to.get_stripped(), seconds);
+				} else {
+					info!("\nWARNING: [{}] has not been connected to mwcmqs for {} seconds. This user might not receive the swap message.",
 										 to.get_stripped(), seconds);
-							} else {
-								info!("\nWARNING: [{}] has not been connected to mwcmqs for {} seconds. This user might not receive the swap message.",
-										 to.get_stripped(), seconds);
-							}
-						}
-					}
 				}
 			}
 		}
@@ -823,8 +820,7 @@ impl MWCMQSBroker {
 		let cl = reqwest::blocking::Client::builder()
 			.timeout(Duration::from_secs(secs))
 			.build();
-		if cl.is_ok() {
-			let client = cl.unwrap();
+		if let Ok(client) = cl {
 			let resp_result = client
 				.get(&format!(
 					"https://{}:{}/timenow?address={}",
@@ -834,16 +830,16 @@ impl MWCMQSBroker {
 				))
 				.send();
 
-			if !resp_result.is_ok() {
-				is_error = true;
-			} else {
-				let mut resp = resp_result.unwrap();
-				let read_resp = resp.read_to_string(&mut resp_str);
-				if !read_resp.is_ok() {
-					is_error = true;
-				} else {
-					time_now = &resp_str;
+			match resp_result {
+				Ok(mut resp) => {
+					let read_resp = resp.read_to_string(&mut resp_str);
+					if !read_resp.is_ok() {
+						is_error = true;
+					} else {
+						time_now = &resp_str;
+					}
 				}
+				Err(_) => is_error = true,
 			}
 		} else {
 			is_error = true;
@@ -911,12 +907,13 @@ impl MWCMQSBroker {
 				let cl = reqwest::blocking::Client::builder()
 					.timeout(Duration::from_secs(secs))
 					.build();
-				let client = if cl.is_ok() {
-					cl.unwrap()
-				} else {
-					self.print_error([].to_vec(), "couldn't instantiate client", -101);
-					is_error = true;
-					continue;
+				let client = match cl {
+					Ok(c) => c,
+					Err(_) => {
+						self.print_error([].to_vec(), "couldn't instantiate client", -101);
+						is_error = true;
+						continue;
+					}
 				};
 
 				let mut first_response = true;
@@ -926,373 +923,381 @@ impl MWCMQSBroker {
 					client.get(&*url).send()
 				};
 
-				if !resp_result.is_ok() {
-					let err_message = format!("{:?}", resp_result);
-					if !err_message.contains("source: TimedOut") {
-						// This was not a timeout. Sleep first.
-						if self.healthy.load(Ordering::Relaxed) {
-							is_in_warning = true;
-							self.do_log_warn(format!("\nWARNING: mwcmqs listener [{}] lost connection. Will try to restore in the background. tid=[{}]",
-													 cloned_cloned_address.get_stripped(), nanoid ));
-						}
+				match resp_result {
+					Err(e) => {
+						let err_message = format!("{}", e);
+						if !err_message.contains("source: TimedOut") {
+							// This was not a timeout. Sleep first.
+							if self.healthy.load(Ordering::Relaxed) {
+								is_in_warning = true;
+								self.do_log_warn(format!("\nWARNING: mwcmqs listener [{}] lost connection. Will try to restore in the background. tid=[{}]",
+														 cloned_cloned_address.get_stripped(), nanoid));
+							}
 
-						self.healthy.store(false, Ordering::Relaxed);
-						thread::sleep(Duration::from_millis(5000));
-					} else if count == 1 {
-						delcount = 0;
-						self.do_log_warn(format!(
-							"\nmwcmqs listener started for [{}] tid=[{}]",
-							cloned_cloned_address.get_stripped(),
-							nanoid
-						));
-						self.healthy.store(true, Ordering::Relaxed);
-					} else {
-						delcount = 0;
-						if !self.healthy.load(Ordering::Relaxed) {
+							self.healthy.store(false, Ordering::Relaxed);
+							thread::sleep(Duration::from_millis(5000));
+						} else if count == 1 {
+							delcount = 0;
+							self.do_log_warn(format!(
+								"\nmwcmqs listener started for [{}] tid=[{}]",
+								cloned_cloned_address.get_stripped(),
+								nanoid
+							));
+							self.healthy.store(true, Ordering::Relaxed);
+						} else {
+							delcount = 0;
+							if !self.healthy.load(Ordering::Relaxed) {
+								if is_in_warning {
+									self.do_log_warn(format!(
+										"INFO: mwcmqs listener [{}] reestablished connection. tid=[{}]",
+										cloned_cloned_address.get_stripped(),
+										nanoid
+									));
+									is_in_warning = false;
+									isnginxerror = false;
+								}
+							}
+							self.healthy.store(true, Ordering::Relaxed);
+						}
+					}
+					Ok(mut resp) => {
+						if count == 1 {
+							self.do_log_warn(format!(
+								"\nmwcmqs listener started for [{}] tid=[{}]",
+								cloned_cloned_address.get_stripped(),
+								nanoid
+							));
+							self.healthy.store(true, Ordering::Relaxed);
+						} else if !self.healthy.load(Ordering::Relaxed) && !isnginxerror {
 							if is_in_warning {
 								self.do_log_warn(format!(
-									"INFO: mwcmqs listener [{}] reestablished connection. tid=[{}]",
-									cloned_cloned_address.get_stripped(),
-									nanoid
+									"INFO: listener [{}] reestablished connection.",
+									cloned_cloned_address.get_stripped()
 								));
 								is_in_warning = false;
 								isnginxerror = false;
 							}
-						}
-						self.healthy.store(true, Ordering::Relaxed);
-					}
-				} else {
-					if count == 1 {
-						self.do_log_warn(format!(
-							"\nmwcmqs listener started for [{}] tid=[{}]",
-							cloned_cloned_address.get_stripped(),
-							nanoid
-						));
-						self.healthy.store(true, Ordering::Relaxed);
-					} else if !self.healthy.load(Ordering::Relaxed) && !isnginxerror {
-						if is_in_warning {
-							self.do_log_warn(format!(
-								"INFO: listener [{}] reestablished connection.",
-								cloned_cloned_address.get_stripped()
-							));
-							is_in_warning = false;
-							isnginxerror = false;
-						}
-						self.healthy.store(true, Ordering::Relaxed);
-					} else if !isnginxerror {
-						self.healthy.store(true, Ordering::Relaxed);
-					}
-
-					let mut resp = resp_result.unwrap();
-					let read_resp = resp.read_to_string(&mut resp_str);
-					if !read_resp.is_ok() {
-						// read error occured. Sleep and try again in 5 seconds
-						self.do_log_info(format!("io error occured while trying to connect to {}. Will sleep for 5 second and will reconnect.",
-												 &format!("https://{}:{}", self.mwcmqs_domain, self.mwcmqs_port)));
-						self.do_log_error(format!("Error: {:?}", read_resp));
-						let second = time::Duration::from_millis(5000);
-						thread::sleep(second);
-						continue;
-					}
-
-					let mut break_out = false;
-
-					let msgvec: Vec<&str> = if resp_str.starts_with("messagelist: ") {
-						let mut ret: Vec<&str> = Vec::new();
-						let lines: Vec<&str> = resp_str.split("\n").collect();
-						for i in 1..lines.len() {
-							let params: Vec<&str> = lines[i].split(" ").collect();
-							if params.len() >= 2 {
-								let index = params[1].find(';');
-								if index.is_some() {
-									// new format
-									let index = index.unwrap();
-									let mut last_message_id = &params[1][0..index];
-									let start = last_message_id.find(' ');
-									if start.is_some() {
-										last_message_id = &last_message_id[1 + start.unwrap()..];
-									}
-
-									url = String::from(format!(
-										"https://{}:{}/listener?address={}&delTo={}&time_now={}&signature={}",
-										self.mwcmqs_domain,
-										self.mwcmqs_port,
-										str::replace(&cloned_address.get_stripped(), "@", "%40"),
-										&last_message_id,
-										time_now,
-										time_now_signature
-									));
-									ret.push(&params[1][index + 1..]);
-								} else if params[1] == "closenewlogin" {
-									if cloned_running.load(Ordering::SeqCst) {
-										self.do_log_error(format!(
-											"\nERROR: new login detected. mwcmqs listener will stop!"
-										));
-									}
-									break; // stop listener
-								} else {
-									self.print_error([].to_vec(), "message id expected", -103);
-									is_error = true;
-									continue;
-								}
-							}
-						}
-						ret
-					} else {
-						let index = resp_str.find(';');
-						if index.is_some() {
-							// new format
-							let index = index.unwrap();
-
-							let mut last_message_id = &resp_str[0..index];
-							let start = last_message_id.find(' ');
-							if start.is_some() {
-								last_message_id = &last_message_id[1 + start.unwrap()..];
-							}
-
-							url = String::from(format!(
-								"https://{}:{}/listener?address={}&delTo={}&time_now={}&signature={}",
-								self.mwcmqs_domain,
-								self.mwcmqs_port,
-								str::replace(&cloned_address.get_stripped(), "@", "%40"),
-								&last_message_id,
-								time_now,
-								time_now_signature
-							));
-
-							vec![&resp_str[index + 1..]]
-						} else {
-							if resp_str.find("nginx").is_some() {
-								// this is common for nginx to return if the server is down.
-								// so we don't print. We also add a small sleep here.
-								self.healthy.store(false, Ordering::Relaxed);
-								if !isnginxerror {
-									is_in_warning = true;
-									self.do_log_warn(format!("\nWARNING: mwcmqs listener [{}] lost connection. Will try to restore in the background. tid=[{}]",
-															 cloned_cloned_address.get_stripped(),
-															 nanoid));
-								}
-								isnginxerror = true;
-								let second = time::Duration::from_millis(5000);
-								thread::sleep(second);
-								continue;
-							} else {
-								if resp_str == "message: closenewlogin\n" {
-									if cloned_running.load(Ordering::SeqCst) {
-										self.do_log_error(format!(
-											"\nERROR: new login detected. mwcmqs listener will stop!",
-										));
-									}
-									break; // stop listener
-								} else if resp_str == "message: mapmessage=nil" {
-									// our connection message
-									continue;
-								} else {
-									// Might happen because of sleep
-									//self.print_error([].to_vec(), "message id expected", -102);
-									// is_error = true;
-									continue;
-								}
-							}
-						}
-					};
-
-					for itt in 0..msgvec.len() {
-						if break_out {
-							break;
-						}
-						if msgvec[itt] == "message: closenewlogin\n"
-							|| msgvec[itt] == "closenewlogin"
-						{
-							if cloned_running.load(Ordering::SeqCst) {
-								println!("\nERROR: new login detected. mwcmqs listener will stop!",);
-							}
-							break_out = true;
-							break; // stop listener
-						} else if msgvec[itt] == "message: mapmessage=nil\n"
-							|| msgvec[itt] == "mapmessage=nil"
-							|| msgvec[itt] == "mapmessage=nil\n"
-						{
-							if first_response {
-								delcount = 1;
-								first_response = false;
-							} else {
-								delcount = delcount + 1;
-							}
-							// this is our exit message. Just ignore.
-							continue;
-						}
-						let split = msgvec[itt].split(" ");
-						let vec: Vec<&str> = split.collect();
-						let splitx = if vec.len() == 1 {
-							vec[0].split("&")
-						} else if vec.len() >= 2 {
-							vec[1].split("&")
-						} else {
-							self.print_error(msgvec.clone(), "too many spaced messages", -1);
-							is_error = true;
-							continue;
-						};
-
-						let splitxvec: Vec<&str> = splitx.collect();
-						let splitxveclen = splitxvec.len();
-						if splitxveclen != 3 {
-							if msgvec[itt].find("nginx").is_some() {
-								// this is common for nginx to return if the server is down.
-								// so we don't print. We also add a small sleep here.
-								self.healthy.store(false, Ordering::Relaxed);
-								if !isnginxerror {
-									is_in_warning = true;
-									self.do_log_warn(format!("\nWARNING: mwcmqs listener [{}] lost connection. Will try to restore in the background. tid=[{}]",
-															 cloned_cloned_address.get_stripped(),
-															 nanoid));
-								}
-								isnginxerror = true;
-								let second = time::Duration::from_millis(5000);
-								thread::sleep(second);
-							} else {
-								self.print_error(msgvec.clone(), "splitxveclen != 3", -2);
-								is_error = true;
-							}
-							continue;
-						} else if isnginxerror {
-							isnginxerror = false;
+							self.healthy.store(true, Ordering::Relaxed);
+						} else if !isnginxerror {
 							self.healthy.store(true, Ordering::Relaxed);
 						}
 
-						let mut from = "".to_string();
-						for i in 0..3 {
-							if splitxvec[i].starts_with("from=") {
-								let vec: Vec<&str> = splitxvec[i].split("=").collect();
-								if vec.len() <= 1 {
-									self.print_error(msgvec.clone(), "vec.len <= 1", -3);
-									is_error = true;
-									continue;
-								}
-								from = str::replace(
-									&vec[1].to_string().trim().to_string(),
-									"%40",
-									"@",
-								);
-							}
-						}
-						let mut signature = "".to_string();
-						for i in 0..3 {
-							if splitxvec[i].starts_with("signature=") {
-								let vec: Vec<&str> = splitxvec[i].split("=").collect();
-								if vec.len() <= 1 {
-									self.print_error(msgvec.clone(), "vec.len <= 1", -4);
-									is_error = true;
-									continue;
-								}
-								signature = vec[1].to_string().trim().to_string();
-							}
+						let read_resp = resp.read_to_string(&mut resp_str);
+						if !read_resp.is_ok() {
+							// read error occured. Sleep and try again in 5 seconds
+							self.do_log_info(format!("io error occured while trying to connect to {}. Will sleep for 5 second and will reconnect.",
+													 &format!("https://{}:{}", self.mwcmqs_domain, self.mwcmqs_port)));
+							self.do_log_error(format!("Error: {:?}", read_resp));
+							let second = time::Duration::from_millis(5000);
+							thread::sleep(second);
+							continue;
 						}
 
-						for i in 0..3 {
-							if splitxvec[i].starts_with("mapmessage=")
-								|| splitxvec[i].starts_with("swapmessage=")
-							{
-								let slate_or_swap = if splitxvec[i].starts_with("mapmessage") {
-									"slate"
+						let mut break_out = false;
+
+						let msgvec: Vec<&str> = if resp_str.starts_with("messagelist: ") {
+							let mut ret: Vec<&str> = Vec::new();
+							let lines: Vec<&str> = resp_str.split("\n").collect();
+							for i in 1..lines.len() {
+								let params: Vec<&str> = lines[i].split(" ").collect();
+								if params.len() >= 2 {
+									let index = params[1].find(';');
+									if let Some(index) = index {
+										// new format
+										let mut last_message_id = &params[1][0..index];
+										let start = last_message_id.find(' ');
+										if let Some(start) = start {
+											last_message_id = &last_message_id[1 + start..];
+										}
+
+										url = String::from(format!(
+											"https://{}:{}/listener?address={}&delTo={}&time_now={}&signature={}",
+											self.mwcmqs_domain,
+											self.mwcmqs_port,
+											str::replace(&cloned_address.get_stripped(), "@", "%40"),
+											&last_message_id,
+											time_now,
+											time_now_signature
+										));
+										ret.push(&params[1][index + 1..]);
+									} else if params[1] == "closenewlogin" {
+										if cloned_running.load(Ordering::SeqCst) {
+											self.do_log_error(format!(
+												"\nERROR: new login detected. mwcmqs listener will stop!"
+											));
+										}
+										break; // stop listener
+									} else {
+										self.print_error([].to_vec(), "message id expected", -103);
+										is_error = true;
+										continue;
+									}
+								}
+							}
+							ret
+						} else {
+							let index = resp_str.find(';');
+							if let Some(index) = index {
+								// new format
+								let mut last_message_id = &resp_str[0..index];
+								let start = last_message_id.find(' ');
+								if let Some(start) = start {
+									last_message_id = &last_message_id[1 + start..];
+								}
+
+								url = String::from(format!(
+									"https://{}:{}/listener?address={}&delTo={}&time_now={}&signature={}",
+									self.mwcmqs_domain,
+									self.mwcmqs_port,
+									str::replace(&cloned_address.get_stripped(), "@", "%40"),
+									&last_message_id,
+									time_now,
+									time_now_signature
+								));
+
+								vec![&resp_str[index + 1..]]
+							} else {
+								if resp_str.find("nginx").is_some() {
+									// this is common for nginx to return if the server is down.
+									// so we don't print. We also add a small sleep here.
+									self.healthy.store(false, Ordering::Relaxed);
+									if !isnginxerror {
+										is_in_warning = true;
+										self.do_log_warn(format!("\nWARNING: mwcmqs listener [{}] lost connection. Will try to restore in the background. tid=[{}]",
+																 cloned_cloned_address.get_stripped(),
+																 nanoid));
+									}
+									isnginxerror = true;
+									let second = time::Duration::from_millis(5000);
+									thread::sleep(second);
+									continue;
 								} else {
-									"swap"
-								};
-
-								let split2 = splitxvec[i].split("=");
-								let vec2: Vec<&str> = split2.collect();
-								if vec2.len() <= 1 {
-									self.print_error(msgvec.clone(), "vec2.len <= 1", -5);
-									is_error = true;
-									continue;
+									if resp_str == "message: closenewlogin\n" {
+										if cloned_running.load(Ordering::SeqCst) {
+											self.do_log_error(format!(
+												"\nERROR: new login detected. mwcmqs listener will stop!",
+											));
+										}
+										break; // stop listener
+									} else if resp_str == "message: mapmessage=nil" {
+										// our connection message
+										continue;
+									} else {
+										// Might happen because of sleep
+										//self.print_error([].to_vec(), "message id expected", -102);
+										// is_error = true;
+										continue;
+									}
 								}
-								let r1 = str::replace(vec2[1], "%22", "\"");
-								let r2 = str::replace(&r1, "%7B", "{");
-								let r3 = str::replace(&r2, "%7D", "}");
-								let r4 = str::replace(&r3, "%3A", ":");
-								let r5 = str::replace(&r4, "%2C", ",");
-								let r5 = r5.trim().to_string();
+							}
+						};
 
+						for itt in 0..msgvec.len() {
+							if break_out {
+								break;
+							}
+							if msgvec[itt] == "message: closenewlogin\n"
+								|| msgvec[itt] == "closenewlogin"
+							{
+								if cloned_running.load(Ordering::SeqCst) {
+									println!(
+										"\nERROR: new login detected. mwcmqs listener will stop!",
+									);
+								}
+								break_out = true;
+								break; // stop listener
+							} else if msgvec[itt] == "message: mapmessage=nil\n"
+								|| msgvec[itt] == "mapmessage=nil"
+								|| msgvec[itt] == "mapmessage=nil\n"
+							{
 								if first_response {
 									delcount = 1;
 									first_response = false;
 								} else {
 									delcount = delcount + 1;
 								}
+								// this is our exit message. Just ignore.
+								continue;
+							}
+							let split = msgvec[itt].split(" ");
+							let vec: Vec<&str> = split.collect();
+							let splitx = if vec.len() == 1 {
+								vec[0].split("&")
+							} else if vec.len() >= 2 {
+								vec[1].split("&")
+							} else {
+								self.print_error(msgvec.clone(), "too many spaced messages", -1);
+								is_error = true;
+								continue;
+							};
 
-								let from = MWCMQSAddress::from_str(self.context_id, &from);
-								let from = if !from.is_ok() {
-									self.print_error(msgvec.clone(), "error parsing from", -12);
-									is_error = true;
-									continue;
+							let splitxvec: Vec<&str> = splitx.collect();
+							let splitxveclen = splitxvec.len();
+							if splitxveclen != 3 {
+								if msgvec[itt].find("nginx").is_some() {
+									// this is common for nginx to return if the server is down.
+									// so we don't print. We also add a small sleep here.
+									self.healthy.store(false, Ordering::Relaxed);
+									if !isnginxerror {
+										is_in_warning = true;
+										self.do_log_warn(format!("\nWARNING: mwcmqs listener [{}] lost connection. Will try to restore in the background. tid=[{}]",
+																 cloned_cloned_address.get_stripped(),
+																 nanoid));
+									}
+									isnginxerror = true;
+									let second = time::Duration::from_millis(5000);
+									thread::sleep(second);
 								} else {
-									from.unwrap()
-								};
+									self.print_error(msgvec.clone(), "splitxveclen != 3", -2);
+									is_error = true;
+								}
+								continue;
+							} else if isnginxerror {
+								isnginxerror = false;
+								self.healthy.store(true, Ordering::Relaxed);
+							}
 
-								if slate_or_swap == "slate" {
-									let (mut slate, tx_proof) = match TxProof::from_response(
-										self.context_id,
-										&from.address,
-										r5.clone(),
-										"".to_string(),
-										signature.clone(),
-										&secret_key,
-										&source_address,
-										secp,
-									) {
-										Ok(x) => x,
-										Err(err) => {
-											self.do_log_error(format!("{}", err));
+							let mut from = "".to_string();
+							for i in 0..3 {
+								if splitxvec[i].starts_with("from=") {
+									let vec: Vec<&str> = splitxvec[i].split("=").collect();
+									if vec.len() <= 1 {
+										self.print_error(msgvec.clone(), "vec.len <= 1", -3);
+										is_error = true;
+										continue;
+									}
+									from = str::replace(
+										&vec[1].to_string().trim().to_string(),
+										"%40",
+										"@",
+									);
+								}
+							}
+							let mut signature = "".to_string();
+							for i in 0..3 {
+								if splitxvec[i].starts_with("signature=") {
+									let vec: Vec<&str> = splitxvec[i].split("=").collect();
+									if vec.len() <= 1 {
+										self.print_error(msgvec.clone(), "vec.len <= 1", -4);
+										is_error = true;
+										continue;
+									}
+									signature = vec[1].to_string().trim().to_string();
+								}
+							}
+
+							for i in 0..3 {
+								if splitxvec[i].starts_with("mapmessage=")
+									|| splitxvec[i].starts_with("swapmessage=")
+								{
+									let slate_or_swap = if splitxvec[i].starts_with("mapmessage") {
+										"slate"
+									} else {
+										"swap"
+									};
+
+									let split2 = splitxvec[i].split("=");
+									let vec2: Vec<&str> = split2.collect();
+									if vec2.len() <= 1 {
+										self.print_error(msgvec.clone(), "vec2.len <= 1", -5);
+										is_error = true;
+										continue;
+									}
+									let r1 = str::replace(vec2[1], "%22", "\"");
+									let r2 = str::replace(&r1, "%7B", "{");
+									let r3 = str::replace(&r2, "%7D", "}");
+									let r4 = str::replace(&r3, "%3A", ":");
+									let r5 = str::replace(&r4, "%2C", ",");
+									let r5 = r5.trim().to_string();
+
+									if first_response {
+										delcount = 1;
+										first_response = false;
+									} else {
+										delcount = delcount + 1;
+									}
+
+									let from = MWCMQSAddress::from_str(self.context_id, &from);
+									let from = match from {
+										Ok(fr) => fr,
+										Err(_) => {
+											self.print_error(
+												msgvec.clone(),
+												"error parsing from",
+												-12,
+											);
+											is_error = true;
 											continue;
 										}
 									};
-									push_proof_for_slate(&slate.id, tx_proof);
-									self.handler
-										.lock()
-										.expect("Mutex failure")
-										.on_slate(&from, &mut slate);
-								} else if slate_or_swap == "swap" {
-									let swap_message = match SwapMessage::from_received(
-										self.context_id,
-										&from.address,
-										r5.clone(),
-										"".to_string(),
-										signature.clone(),
-										&secret_key,
-										secp,
-									) {
-										Ok(x) => x,
-										Err(err) => {
-											self.do_log_error(format!("{}", err));
-											continue;
-										}
-									};
-									let ack_message = self
-										.handler
-										.lock()
-										.expect("Mutex failure")
-										.on_swap_message(swap_message);
-									if let Some(ack_message) = ack_message {
-										let mqs_cannel =
-											MwcMqsChannel::new(self.context_id, from.to_string());
-										if let Err(e) =
-											mqs_cannel.send_swap_message(&ack_message, secp)
-										{
-											self.do_log_error(format!(
-												"Unable to send back ack message, {}",
-												e
-											));
+
+									if slate_or_swap == "slate" {
+										let (mut slate, tx_proof) = match TxProof::from_response(
+											self.context_id,
+											&from.address,
+											r5.clone(),
+											"".to_string(),
+											signature.clone(),
+											&secret_key,
+											&source_address,
+											secp,
+										) {
+											Ok(x) => x,
+											Err(err) => {
+												self.do_log_error(format!("{}", err));
+												continue;
+											}
+										};
+										push_proof_for_slate(&slate.id, tx_proof);
+										self.handler
+											.lock()
+											.unwrap_or_else(|e| e.into_inner())
+											.on_slate(&from, &mut slate);
+									} else if slate_or_swap == "swap" {
+										let swap_message = match SwapMessage::from_received(
+											self.context_id,
+											&from.address,
+											r5.clone(),
+											"".to_string(),
+											signature.clone(),
+											&secret_key,
+											secp,
+										) {
+											Ok(x) => x,
+											Err(err) => {
+												self.do_log_error(format!("{}", err));
+												continue;
+											}
+										};
+										let ack_message = self
+											.handler
+											.lock()
+											.unwrap_or_else(|e| e.into_inner())
+											.on_swap_message(swap_message);
+										if let Some(ack_message) = ack_message {
+											let mqs_cannel = MwcMqsChannel::new(
+												self.context_id,
+												from.to_string(),
+											);
+											if let Err(e) =
+												mqs_cannel.send_swap_message(&ack_message, secp)
+											{
+												self.do_log_error(format!(
+													"Unable to send back ack message, {}",
+													e
+												));
+											}
 										}
 									}
-								}
 
-								break;
+									break;
+								}
 							}
 						}
-					}
 
-					if break_out {
-						break;
+						if break_out {
+							break;
+						}
 					}
 				}
 			}

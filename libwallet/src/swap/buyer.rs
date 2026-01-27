@@ -239,7 +239,12 @@ impl BuyApi {
 		let started = offer.start_time.clone();
 		let secondary_fee = offer.secondary_currency.get_default_fee(&offer.network);
 		if !offer.secondary_currency.is_btc_family() {
-			let balance_gwei = get_eth_balance(context_id, ethereum_wallet.unwrap())?;
+			let balance_gwei = get_eth_balance(
+				context_id,
+				ethereum_wallet.ok_or(Error::Generic(
+					"invalid accept_swap_offer params, ethereum_wallet is not set".into(),
+				))?,
+			)?;
 			if secondary_fee > balance_gwei as f32 {
 				return Err(Error::Generic(
 					"No enough ether as gas for swap".to_string(),
@@ -607,7 +612,7 @@ impl BuyApi {
 			.add_key_id(
 				bcontext
 					.output
-					.to_value_path(swap.redeem_slate.slate.amount),
+					.to_value_path(swap.redeem_slate.slate.amount)?,
 			)
 			.sub_blinding_factor(BlindingFactor::from_secret_key(
 				swap.multisig_secret(keychain, context)?,
@@ -640,7 +645,7 @@ impl BuyApi {
 		slate.amount = swap.primary_amount - slate.fee;
 		let mut elems = Vec::new();
 		elems.push(build::output(slate.amount, bcontext.output.clone()));
-		slate.add_transaction_elements(keychain, &proof::ProofBuilder::new(keychain), elems)?;
+		slate.add_transaction_elements(keychain, &proof::ProofBuilder::new(keychain)?, elems)?;
 
 		#[cfg(test)]
 		{

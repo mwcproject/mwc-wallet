@@ -96,7 +96,10 @@ fn socks_tor() -> Result<(), mwc_wallet_controller::Error> {
 		mask1,
 		bh as usize,
 		false,
-		tx_pool.lock().expect("Mutex failure").deref_mut(),
+		tx_pool
+			.lock()
+			.unwrap_or_else(|e| e.into_inner())
+			.deref_mut(),
 	);
 
 	// now, test send from wallet 1 over tor

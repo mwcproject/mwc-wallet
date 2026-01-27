@@ -89,18 +89,21 @@ fn accounts_test_impl(test_dir: &str) -> Result<(), wallet::Error> {
 	wallet::controller::owner_single_use(Some(wallet1.clone()), mask1, None, |api, m| {
 		let accounts = api.accounts(m)?;
 		assert_eq!(accounts[0].label, "default");
-		assert_eq!(accounts[0].path, ExtKeychain::derive_key_id(2, 0, 0, 0, 0));
+		assert_eq!(
+			accounts[0].path,
+			ExtKeychain::derive_key_id(2, 0, 0, 0, 0).unwrap()
+		);
 		Ok(())
 	})?;
 
 	// add some accounts
 	wallet::controller::owner_single_use(Some(wallet1.clone()), mask1, None, |api, m| {
 		let new_path = api.create_account_path(m, "account1").unwrap();
-		assert_eq!(new_path, ExtKeychain::derive_key_id(2, 1, 0, 0, 0));
+		assert_eq!(new_path, ExtKeychain::derive_key_id(2, 1, 0, 0, 0).unwrap());
 		let new_path = api.create_account_path(m, "account2").unwrap();
-		assert_eq!(new_path, ExtKeychain::derive_key_id(2, 2, 0, 0, 0));
+		assert_eq!(new_path, ExtKeychain::derive_key_id(2, 2, 0, 0, 0).unwrap());
 		let new_path = api.create_account_path(m, "account3").unwrap();
-		assert_eq!(new_path, ExtKeychain::derive_key_id(2, 3, 0, 0, 0));
+		assert_eq!(new_path, ExtKeychain::derive_key_id(2, 3, 0, 0, 0).unwrap());
 		// trying to add same label again should fail
 		let res = api.create_account_path(m, "account1");
 		assert!(res.is_err());
@@ -110,7 +113,7 @@ fn accounts_test_impl(test_dir: &str) -> Result<(), wallet::Error> {
 	// add account to wallet 2
 	wallet::controller::owner_single_use(Some(wallet2.clone()), mask2, None, |api, m| {
 		let new_path = api.create_account_path(m, "listener_account").unwrap();
-		assert_eq!(new_path, ExtKeychain::derive_key_id(2, 1, 0, 0, 0));
+		assert_eq!(new_path, ExtKeychain::derive_key_id(2, 1, 0, 0, 0).unwrap());
 		Ok(())
 	})?;
 
@@ -124,7 +127,10 @@ fn accounts_test_impl(test_dir: &str) -> Result<(), wallet::Error> {
 	{
 		wallet_inst!(wallet1, w);
 		w.set_parent_key_id_by_name("account1")?;
-		assert_eq!(w.parent_key_id(), ExtKeychain::derive_key_id(2, 1, 0, 0, 0));
+		assert_eq!(
+			w.parent_key_id(),
+			ExtKeychain::derive_key_id(2, 1, 0, 0, 0).unwrap()
+		);
 	}
 	let _ = test_framework::award_blocks_to_wallet(
 		&chain,
@@ -132,13 +138,19 @@ fn accounts_test_impl(test_dir: &str) -> Result<(), wallet::Error> {
 		mask1,
 		7,
 		false,
-		tx_pool.lock().expect("Mutex failure").deref_mut(),
+		tx_pool
+			.lock()
+			.unwrap_or_else(|e| e.into_inner())
+			.deref_mut(),
 	);
 
 	{
 		wallet_inst!(wallet1, w);
 		w.set_parent_key_id_by_name("account2")?;
-		assert_eq!(w.parent_key_id(), ExtKeychain::derive_key_id(2, 2, 0, 0, 0));
+		assert_eq!(
+			w.parent_key_id(),
+			ExtKeychain::derive_key_id(2, 2, 0, 0, 0).unwrap()
+		);
 	}
 	let _ = test_framework::award_blocks_to_wallet(
 		&chain,
@@ -146,7 +158,10 @@ fn accounts_test_impl(test_dir: &str) -> Result<(), wallet::Error> {
 		mask1,
 		5,
 		false,
-		tx_pool.lock().expect("Mutex failure").deref_mut(),
+		tx_pool
+			.lock()
+			.unwrap_or_else(|e| e.into_inner())
+			.deref_mut(),
 	);
 
 	// Should have 5 in account1 (5 spendable), 5 in account (2 spendable)
@@ -222,10 +237,10 @@ fn accounts_test_impl(test_dir: &str) -> Result<(), wallet::Error> {
 			selection_strategy_is_use_all: true,
 			..Default::default()
 		};
-		let mut slate = api.init_send_tx(m, &None, &args, 1)?;
+		let mut slate = api.init_send_tx(m, None, &args, 1)?;
 		slate = client1.send_tx_slate_direct("wallet2", &slate)?;
-		api.tx_lock_outputs(m, &None, &slate, None, 0)?;
-		slate = api.finalize_tx(m, &None, &slate, true)?;
+		api.tx_lock_outputs(m, None, &slate, None, 0)?;
+		slate = api.finalize_tx(m, None, &slate, true)?;
 		api.post_tx(m, slate.tx_or_err()?, false)?;
 		Ok(())
 	})?;
@@ -237,7 +252,10 @@ fn accounts_test_impl(test_dir: &str) -> Result<(), wallet::Error> {
 		mask1,
 		1,
 		false,
-		tx_pool.lock().expect("Mutex failure").deref_mut(),
+		tx_pool
+			.lock()
+			.unwrap_or_else(|e| e.into_inner())
+			.deref_mut(),
 	);
 
 	wallet::controller::owner_single_use(Some(wallet1.clone()), mask1, None, |api, m| {

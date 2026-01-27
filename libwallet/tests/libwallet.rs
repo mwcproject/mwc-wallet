@@ -35,7 +35,7 @@ fn kernel_sig_msg() -> secp::Message {
 
 #[test]
 fn aggsig_sender_receiver_interaction() {
-	let parent = ExtKeychainPath::new(1, 1, 0, 0, 0).to_identifier();
+	let parent = ExtKeychainPath::new(1, 1, 0, 0, 0).to_identifier().unwrap();
 	let switch = SwitchCommitmentType::Regular;
 	let sender_keychain = ExtKeychain::from_random_seed(true).unwrap();
 	let receiver_keychain = ExtKeychain::from_random_seed(true).unwrap();
@@ -43,7 +43,7 @@ fn aggsig_sender_receiver_interaction() {
 	// Calculate the kernel excess here for convenience.
 	// Normally this would happen during transaction building.
 	let kernel_excess = {
-		let id1 = ExtKeychain::derive_key_id(1, 1, 0, 0, 0);
+		let id1 = ExtKeychain::derive_key_id(1, 1, 0, 0, 0).unwrap();
 		let skey1 = sender_keychain.derive_key(0, &id1, switch).unwrap();
 		let skey2 = receiver_keychain.derive_key(0, &id1, switch).unwrap();
 
@@ -67,7 +67,7 @@ fn aggsig_sender_receiver_interaction() {
 	// sender starts the tx interaction
 	let (sender_pub_excess, _sender_pub_nonce) = {
 		let keychain = sender_keychain.clone();
-		let id1 = ExtKeychain::derive_key_id(1, 1, 0, 0, 0);
+		let id1 = ExtKeychain::derive_key_id(1, 1, 0, 0, 0).unwrap();
 		let skey = keychain.derive_key(0, &id1, switch).unwrap();
 
 		// dealing with an input here so we need to negate the blinding_factor
@@ -92,8 +92,9 @@ fn aggsig_sender_receiver_interaction() {
 			0,
 			None,
 			true,
-		);
-		s_cx.get_public_keys(&keychain.secp())
+		)
+		.unwrap();
+		s_cx.get_public_keys(&keychain.secp()).unwrap()
 	};
 
 	let pub_nonce_sum;
@@ -101,7 +102,7 @@ fn aggsig_sender_receiver_interaction() {
 	// receiver receives partial tx
 	let (receiver_pub_excess, _receiver_pub_nonce, rx_sig_part) = {
 		let keychain = receiver_keychain.clone();
-		let key_id = ExtKeychain::derive_key_id(1, 1, 0, 0, 0);
+		let key_id = ExtKeychain::derive_key_id(1, 1, 0, 0, 0).unwrap();
 
 		// let blind = blind_sum.secret_key(&keychain.secp())?;
 		let blind = keychain.derive_key(0, &key_id, switch).unwrap();
@@ -119,15 +120,16 @@ fn aggsig_sender_receiver_interaction() {
 			0,
 			None,
 			true,
-		);
-		let (pub_excess, pub_nonce) = rx_cx.get_public_keys(&keychain.secp());
+		)
+		.unwrap();
+		let (pub_excess, pub_nonce) = rx_cx.get_public_keys(&keychain.secp()).unwrap();
 		rx_cx.add_output(&key_id, &None, 0);
 
 		pub_nonce_sum = PublicKey::from_combination(
 			keychain.secp(),
 			vec![
-				&s_cx.get_public_keys(keychain.secp()).1,
-				&rx_cx.get_public_keys(keychain.secp()).1,
+				&s_cx.get_public_keys(keychain.secp()).unwrap().1,
+				&rx_cx.get_public_keys(keychain.secp()).unwrap().1,
 			],
 		)
 		.unwrap();
@@ -135,8 +137,8 @@ fn aggsig_sender_receiver_interaction() {
 		pub_key_sum = PublicKey::from_combination(
 			keychain.secp(),
 			vec![
-				&s_cx.get_public_keys(keychain.secp()).0,
-				&rx_cx.get_public_keys(keychain.secp()).0,
+				&s_cx.get_public_keys(keychain.secp()).unwrap().0,
+				&rx_cx.get_public_keys(keychain.secp()).unwrap().0,
 			],
 		)
 		.unwrap();
@@ -229,8 +231,8 @@ fn aggsig_sender_receiver_interaction() {
 		let final_pubkey = PublicKey::from_combination(
 			keychain.secp(),
 			vec![
-				&s_cx.get_public_keys(keychain.secp()).0,
-				&rx_cx.get_public_keys(keychain.secp()).0,
+				&s_cx.get_public_keys(keychain.secp()).unwrap().0,
+				&rx_cx.get_public_keys(keychain.secp()).unwrap().0,
 			],
 		)
 		.unwrap();
@@ -267,7 +269,7 @@ fn aggsig_sender_receiver_interaction() {
 
 #[test]
 fn aggsig_sender_receiver_interaction_offset() {
-	let parent = ExtKeychainPath::new(1, 1, 0, 0, 0).to_identifier();
+	let parent = ExtKeychainPath::new(1, 1, 0, 0, 0).to_identifier().unwrap();
 	let switch = SwitchCommitmentType::Regular;
 	let sender_keychain = ExtKeychain::from_random_seed(true).unwrap();
 	let receiver_keychain = ExtKeychain::from_random_seed(true).unwrap();
@@ -280,7 +282,7 @@ fn aggsig_sender_receiver_interaction_offset() {
 	// Calculate the kernel excess here for convenience.
 	// Normally this would happen during transaction building.
 	let kernel_excess = {
-		let id1 = ExtKeychain::derive_key_id(1, 1, 0, 0, 0);
+		let id1 = ExtKeychain::derive_key_id(1, 1, 0, 0, 0).unwrap();
 		let skey1 = sender_keychain.derive_key(0, &id1, switch).unwrap();
 		let skey2 = receiver_keychain.derive_key(0, &id1, switch).unwrap();
 
@@ -307,7 +309,7 @@ fn aggsig_sender_receiver_interaction_offset() {
 	// sender starts the tx interaction
 	let (sender_pub_excess, _sender_pub_nonce) = {
 		let keychain = sender_keychain.clone();
-		let id1 = ExtKeychain::derive_key_id(1, 1, 0, 0, 0);
+		let id1 = ExtKeychain::derive_key_id(1, 1, 0, 0, 0).unwrap();
 		let skey = keychain.derive_key(0, &id1, switch).unwrap();
 
 		// dealing with an input here so we need to negate the blinding_factor
@@ -337,8 +339,9 @@ fn aggsig_sender_receiver_interaction_offset() {
 			0,
 			None,
 			true,
-		);
-		s_cx.get_public_keys(&keychain.secp())
+		)
+		.unwrap();
+		s_cx.get_public_keys(&keychain.secp()).unwrap()
 	};
 
 	// receiver receives partial tx
@@ -346,7 +349,7 @@ fn aggsig_sender_receiver_interaction_offset() {
 	let pub_key_sum;
 	let (receiver_pub_excess, _receiver_pub_nonce, sig_part) = {
 		let keychain = receiver_keychain.clone();
-		let key_id = ExtKeychain::derive_key_id(1, 1, 0, 0, 0);
+		let key_id = ExtKeychain::derive_key_id(1, 1, 0, 0, 0).unwrap();
 
 		let blind = keychain.derive_key(0, &key_id, switch).unwrap();
 
@@ -363,15 +366,16 @@ fn aggsig_sender_receiver_interaction_offset() {
 			0,
 			None,
 			true,
-		);
-		let (pub_excess, pub_nonce) = rx_cx.get_public_keys(&keychain.secp());
+		)
+		.unwrap();
+		let (pub_excess, pub_nonce) = rx_cx.get_public_keys(&keychain.secp()).unwrap();
 		rx_cx.add_output(&key_id, &None, 0);
 
 		pub_nonce_sum = PublicKey::from_combination(
 			keychain.secp(),
 			vec![
-				&s_cx.get_public_keys(keychain.secp()).1,
-				&rx_cx.get_public_keys(keychain.secp()).1,
+				&s_cx.get_public_keys(keychain.secp()).unwrap().1,
+				&rx_cx.get_public_keys(keychain.secp()).unwrap().1,
 			],
 		)
 		.unwrap();
@@ -379,8 +383,8 @@ fn aggsig_sender_receiver_interaction_offset() {
 		pub_key_sum = PublicKey::from_combination(
 			keychain.secp(),
 			vec![
-				&s_cx.get_public_keys(keychain.secp()).0,
-				&rx_cx.get_public_keys(keychain.secp()).0,
+				&s_cx.get_public_keys(keychain.secp()).unwrap().0,
+				&rx_cx.get_public_keys(keychain.secp()).unwrap().0,
 			],
 		)
 		.unwrap();
@@ -472,8 +476,8 @@ fn aggsig_sender_receiver_interaction_offset() {
 		let final_pubkey = PublicKey::from_combination(
 			keychain.secp(),
 			vec![
-				&s_cx.get_public_keys(keychain.secp()).0,
-				&rx_cx.get_public_keys(keychain.secp()).0,
+				&s_cx.get_public_keys(keychain.secp()).unwrap().0,
+				&rx_cx.get_public_keys(keychain.secp()).unwrap().0,
 			],
 		)
 		.unwrap();
@@ -511,9 +515,9 @@ fn aggsig_sender_receiver_interaction_offset() {
 #[test]
 fn test_rewind_range_proof() {
 	let keychain = ExtKeychain::from_random_seed(true).unwrap();
-	let builder = proof::ProofBuilder::new(&keychain);
-	let key_id = ExtKeychain::derive_key_id(1, 1, 0, 0, 0);
-	let key_id2 = ExtKeychain::derive_key_id(1, 2, 0, 0, 0);
+	let builder = proof::ProofBuilder::new(&keychain).unwrap();
+	let key_id = ExtKeychain::derive_key_id(1, 1, 0, 0, 0).unwrap();
+	let key_id2 = ExtKeychain::derive_key_id(1, 2, 0, 0, 0).unwrap();
 	let switch = SwitchCommitmentType::Regular;
 	let commit = keychain.commit(5, &key_id, switch).unwrap();
 	let extra_data = [99u8; 64];
@@ -579,9 +583,9 @@ fn test_rewind_range_proof() {
 	.unwrap();
 	assert!(proof_info.is_none());
 
-	let key_id4 = ExtKeychain::derive_key_id(1, 2, 0, 0, 5); //simulate a height of 5.
+	let key_id4 = ExtKeychain::derive_key_id(1, 2, 0, 0, 5).unwrap(); //simulate a height of 5.
 	let commit4 = keychain.commit(5, &key_id4, switch).unwrap();
-	let _key_id5 = ExtKeychain::derive_key_id(1, 2, 0, 0, 0); //simulate a height of 5.
+	let _key_id5 = ExtKeychain::derive_key_id(1, 2, 0, 0, 0).unwrap(); //simulate a height of 5.
 	let _commit5 = keychain.commit(5, &key_id4, switch).unwrap();
 	let proof4 = proof::create(&keychain, &builder, 5, &key_id4, switch, commit4, None).unwrap();
 
@@ -592,7 +596,7 @@ fn test_rewind_range_proof() {
 	assert_eq!(r_amount, 5);
 	assert_eq!(r_key_id, key_id4);
 	assert_eq!(r_switch, switch);
-	let path = key_id4.to_path();
+	let path = key_id4.to_path().unwrap();
 	let last_child_number = path.path[3];
 
 	let mut built_height = 0;

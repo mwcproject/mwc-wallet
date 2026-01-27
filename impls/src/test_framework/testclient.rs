@@ -42,8 +42,7 @@ use mwc_wallet_libwallet::types::TxSession;
 use mwc_wallet_libwallet::SlateCtx;
 use mwc_wallet_util::mwc_core::global;
 use serde_json;
-use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Arc;
@@ -115,6 +114,7 @@ where
 			genesis_block,
 			pow::verify_size,
 			false,
+			HashSet::new(),
 		)
 		.unwrap();
 		let (tx, rx) = channel();
@@ -200,7 +200,10 @@ where
 			libwallet::Error::ClientCallback(format!("Error parsing Transaction, {}", e))
 		})?;
 
-		self.tx_pool.lock().expect("Mutex failure").push(tx);
+		self.tx_pool
+			.lock()
+			.unwrap_or_else(|e| e.into_inner())
+			.push(tx);
 
 		Ok(WalletProxyMessage {
 			sender_id: "node".to_owned(),
@@ -226,15 +229,15 @@ where
 		})?;
 
 		let slate: Slate = {
-			let mut w_lock = wallet.1.lock().expect("Mutex failure");
+			let mut w_lock = wallet.1.lock().unwrap_or_else(|e| e.into_inner());
 			let w = w_lock.lc_provider()?.wallet_inst()?;
 			let mask = wallet.2.clone();
 			// receive tx
-			let tx_session = Some(RefCell::new(TxSession::new()));
+			let mut tx_session = TxSession::new();
 			let slate = match foreign::receive_tx(
 				&mut **w,
 				(&mask).as_ref(),
-				&tx_session,
+				Some(&mut tx_session),
 				&slate.to_slate(Some(global::get_network_name(0)), false)?,
 				Some(String::from(m.dest.clone())),
 				None,
@@ -254,16 +257,8 @@ where
 				}
 				Ok((s, _context)) => s,
 			};
-			debug_assert!(tx_session
-				.as_ref()
-				.unwrap()
-				.borrow()
-				.get_context_participant()
-				.is_none());
-			tx_session
-				.unwrap()
-				.borrow_mut()
-				.save_tx_data(&mut **w, (&mask).as_ref(), &slate.id)?;
+			debug_assert!(tx_session.get_context_participant().is_none());
+			tx_session.save_tx_data(&mut **w, (&mask).as_ref(), &slate.id)?;
 			slate
 		};
 
@@ -311,7 +306,7 @@ where
 			body: format!(
 				"{},{},{},{},{}",
 				hdr.height,
-				hdr.hash().to_hex(),
+				hdr.hash()?.to_hex(),
 				hdr.version.0,
 				hdr.pow.nonce,
 				hdr.total_difficulty()
@@ -463,7 +458,7 @@ impl LocalWalletClient {
 
 	/// get an instance of the send queue for other senders
 	pub fn get_send_instance(&self) -> Sender<WalletProxyMessage> {
-		self.tx.lock().expect("Mutex failure").clone()
+		self.tx.lock().unwrap_or_else(|e| e.into_inner()).clone()
 	}
 
 	/// Send the slate to a listening wallet instance
@@ -483,11 +478,11 @@ impl LocalWalletClient {
 			.unwrap(),
 		};
 		{
-			let p = self.proxy_tx.lock().expect("Mutex failure");
+			let p = self.proxy_tx.lock().unwrap_or_else(|e| e.into_inner());
 			p.send(m)
 				.map_err(|e| libwallet::Error::ClientCallback(format!("Send TX Slate, {}", e)))?;
 		}
-		let r = self.rx.lock().expect("Mutex failure");
+		let r = self.rx.lock().unwrap_or_else(|e| e.into_inner());
 		let m = r.recv().unwrap();
 		trace!("Received send_tx_slate response: {:?}", m.clone());
 		let slate: SlateV3 = serde_json::from_str(&m.body).map_err(|e| {
@@ -525,11 +520,11 @@ impl NodeClient for LocalWalletClient {
 			body: serde_json::to_string(tx).unwrap(),
 		};
 		{
-			let p = self.proxy_tx.lock().expect("Mutex failure");
+			let p = self.proxy_tx.lock().unwrap_or_else(|e| e.into_inner());
 			p.send(m)
 				.map_err(|e| libwallet::Error::ClientCallback(format!("post_tx send, {}", e)))?;
 		}
-		let r = self.rx.lock().expect("Mutex failure");
+		let r = self.rx.lock().unwrap_or_else(|e| e.into_inner());
 		let m = r.recv().unwrap();
 		trace!("Received post_tx response: {:?}", m);
 		Ok(())
@@ -544,12 +539,12 @@ impl NodeClient for LocalWalletClient {
 			body: "".to_owned(),
 		};
 		{
-			let p = self.proxy_tx.lock().expect("Mutex failure");
+			let p = self.proxy_tx.lock().unwrap_or_else(|e| e.into_inner());
 			p.send(m).map_err(|e| {
 				libwallet::Error::ClientCallback(format!("Get chain height send, {}", e))
 			})?;
 		}
-		let r = self.rx.lock().expect("Mutex failure");
+		let r = self.rx.lock().unwrap_or_else(|e| e.into_inner());
 		let m = r.recv().unwrap();
 		trace!("Received get_chain_tip response: {:?}", m.clone());
 		let res = m.body.parse::<String>().map_err(|e| {
@@ -568,12 +563,12 @@ impl NodeClient for LocalWalletClient {
 			body: format!("{}", height),
 		};
 		{
-			let p = self.proxy_tx.lock().expect("Mutex failure");
+			let p = self.proxy_tx.lock().unwrap_or_else(|e| e.into_inner());
 			p.send(m).map_err(|e| {
 				libwallet::Error::ClientCallback(format!("Get chain header info send, {}", e))
 			})?;
 		}
-		let r = self.rx.lock().expect("Mutex failure");
+		let r = self.rx.lock().unwrap_or_else(|e| e.into_inner());
 		let m = r.recv().unwrap();
 		trace!("Received get_header_info response: {:?}", m.clone());
 		let res = m.body.parse::<String>().map_err(|e| {
@@ -625,12 +620,12 @@ impl NodeClient for LocalWalletClient {
 			body: query_str,
 		};
 		{
-			let p = self.proxy_tx.lock().expect("Mutex failure");
+			let p = self.proxy_tx.lock().unwrap_or_else(|e| e.into_inner());
 			p.send(m).map_err(|e| {
 				libwallet::Error::ClientCallback(format!("Get outputs from node send, {}", e))
 			})?;
 		}
-		let r = self.rx.lock().expect("Mutex failure");
+		let r = self.rx.lock().unwrap_or_else(|e| e.into_inner());
 		let m = r.recv().unwrap();
 		let outputs: Vec<api::Output> = serde_json::from_str(&m.body).unwrap();
 		let mut api_outputs: HashMap<pedersen::Commitment, (String, u64, u64)> = HashMap::new();
@@ -668,7 +663,7 @@ impl NodeClient for LocalWalletClient {
 			body: query,
 		};
 		{
-			let p = self.proxy_tx.lock().expect("Mutex failure");
+			let p = self.proxy_tx.lock().unwrap_or_else(|e| e.into_inner());
 			p.send(m).map_err(|e| {
 				libwallet::Error::ClientCallback(format!(
 					"Get outputs from node by PMMR index send, {}",
@@ -676,7 +671,7 @@ impl NodeClient for LocalWalletClient {
 				))
 			})?;
 		}
-		let r = self.rx.lock().expect("Mutex failure");
+		let r = self.rx.lock().unwrap_or_else(|e| e.into_inner());
 		let m = r.recv().unwrap();
 		let res: Option<LocatedTxKernel> = serde_json::from_str(&m.body).map_err(|e| {
 			libwallet::Error::ClientCallback(format!("Get transaction kernels send, {}", e))
@@ -713,7 +708,7 @@ impl NodeClient for LocalWalletClient {
 			body: query_str,
 		};
 		{
-			let p = self.proxy_tx.lock().expect("Mutex failure");
+			let p = self.proxy_tx.lock().unwrap_or_else(|e| e.into_inner());
 			p.send(m).map_err(|e| {
 				libwallet::Error::ClientCallback(format!(
 					"Get outputs from node by PMMR index send, {}",
@@ -722,7 +717,7 @@ impl NodeClient for LocalWalletClient {
 			})?;
 		}
 
-		let r = self.rx.lock().expect("Mutex failure");
+		let r = self.rx.lock().unwrap_or_else(|e| e.into_inner());
 		let m = r.recv().unwrap();
 		let o: api::OutputListing = serde_json::from_str(&m.body).unwrap();
 
@@ -763,7 +758,7 @@ impl NodeClient for LocalWalletClient {
 			body: query_str,
 		};
 		{
-			let p = self.proxy_tx.lock().expect("Mutex failure");
+			let p = self.proxy_tx.lock().unwrap_or_else(|e| e.into_inner());
 			p.send(m).map_err(|e| {
 				libwallet::Error::ClientCallback(format!(
 					"Get outputs within height range send, {}",
@@ -772,7 +767,7 @@ impl NodeClient for LocalWalletClient {
 			})?;
 		}
 
-		let r = self.rx.lock().expect("Mutex failure");
+		let r = self.rx.lock().unwrap_or_else(|e| e.into_inner());
 		let m = r.recv().unwrap();
 		let o: api::OutputListing = serde_json::from_str(&m.body).unwrap();
 		Ok((o.last_retrieved_index, o.highest_index))
@@ -791,13 +786,13 @@ impl NodeClient for LocalWalletClient {
 			body: format!("{},{}", start_height, end_height),
 		};
 		{
-			let p = self.proxy_tx.lock().expect("Mutex failure");
+			let p = self.proxy_tx.lock().unwrap_or_else(|e| e.into_inner());
 			p.send(m).map_err(|e| {
 				libwallet::Error::ClientCallback(format!("Get blocks by height range send, {}", e))
 			})?;
 		}
 
-		let r = self.rx.lock().expect("Mutex failure");
+		let r = self.rx.lock().unwrap_or_else(|e| e.into_inner());
 		let m = r.recv().unwrap();
 		let o: Vec<api::BlockPrintable> = serde_json::from_str(&m.body).unwrap();
 		Ok(o)

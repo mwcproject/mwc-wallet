@@ -15,7 +15,6 @@
 
 //! JSON-RPC Stub generation for the Owner API
 
-use std::cell::RefCell;
 use uuid::Uuid;
 
 use crate::core::core::Transaction;
@@ -3517,15 +3516,12 @@ where
 	}
 
 	fn init_send_tx(&self, args: InitTxArgs) -> Result<VersionedSlate, Error> {
-		let tx_session = Some(RefCell::new(TxSession::new()));
-		let slate = Owner::init_send_tx(self, None, &tx_session, &args, 1)?;
+		let mut tx_session = TxSession::new();
+		let slate = Owner::init_send_tx(self, None, Some(&mut tx_session), &args, 1)?;
 		let context_id = {
 			// Save session only on success.
 			wallet_lock!(self.wallet_inst, w);
-			tx_session
-				.unwrap()
-				.borrow_mut()
-				.save_tx_data(&mut **w, None, &slate.id)?;
+			tx_session.save_tx_data(&mut **w, None, &slate.id)?;
 			w.get_context_id()
 		};
 
@@ -3541,16 +3537,22 @@ where
 	}
 
 	fn issue_invoice_tx(&self, args: IssueInvoiceTxArgs) -> Result<VersionedSlate, Error> {
-		let tx_session = Some(RefCell::new(TxSession::new()));
-		let slate = Owner::issue_invoice_tx(self, None, &tx_session, &args)?;
+		let mut tx_session = TxSession::new();
+		let slate = Owner::issue_invoice_tx(self, None, Some(&mut tx_session), &args)?;
 		{
 			// Save session only on success.
 			wallet_lock!(self.wallet_inst, w);
-			tx_session
-				.unwrap()
-				.borrow_mut()
-				.save_tx_data(&mut **w, None, &slate.id)?;
+			tx_session.save_tx_data(&mut **w, None, &slate.id)?;
 		}
+
+		let slatepack_recipient = match args
+			.slatepack_recipient
+			.map(|a| a.tor_public_key())
+			.filter(|a| a.is_ok())
+		{
+			Some(res) => Some(res?),
+			None => None,
+		};
 
 		let vslate = Owner::encrypt_slate(
 			&self,
@@ -3558,10 +3560,7 @@ where
 			&slate,
 			None,
 			SlatePurpose::InvoiceInitial,
-			args.slatepack_recipient
-				.map(|a| a.tor_public_key())
-				.filter(|a| a.is_ok())
-				.map(|a| a.unwrap()),
+			slatepack_recipient,
 			None,
 			self.doctest_mode,
 		)?;
@@ -3587,15 +3586,13 @@ where
 			}
 		}
 
-		let tx_session = Some(RefCell::new(TxSession::new()));
-		let out_slate = Owner::process_invoice_tx(self, None, &tx_session, &slate_from, &args)?;
+		let mut tx_session = TxSession::new();
+		let out_slate =
+			Owner::process_invoice_tx(self, None, Some(&mut tx_session), &slate_from, &args)?;
 		{
 			// Save session only on success.
 			wallet_lock!(self.wallet_inst, w);
-			tx_session
-				.unwrap()
-				.borrow_mut()
-				.save_tx_data(&mut **w, None, &out_slate.id)?;
+			tx_session.save_tx_data(&mut **w, None, &out_slate.id)?;
 		}
 
 		let vslate = Owner::encrypt_slate(
@@ -3619,7 +3616,7 @@ where
 				.map_err(|e| Error::SlatepackDecodeError(format!("{}", e)))?;
 
 		// Not checking content. If slate good enough to finalize, there is not problem with a content
-		let out_slate = Owner::finalize_tx(self, None, &None, &slate_from, true)?;
+		let out_slate = Owner::finalize_tx(self, None, None, &slate_from, true)?;
 
 		let vslate = Owner::encrypt_slate(
 			&self,
@@ -3641,7 +3638,7 @@ where
 	fn tx_lock_outputs(&self, slate: VersionedSlate, participant_id: usize) -> Result<(), Error> {
 		let (slate_from, _content, _sender) = Owner::decrypt_versioned_slate(self, None, slate)
 			.map_err(|e| Error::SlatepackDecodeError(format!("{}", e)))?;
-		Owner::tx_lock_outputs(self, None, &None, &slate_from, None, participant_id)
+		Owner::tx_lock_outputs(self, None, None, &slate_from, None, participant_id)
 	}
 
 	fn cancel_tx(&self, tx_id: Option<u32>, tx_slate_id: Option<Uuid>) -> Result<(), Error> {
@@ -3677,15 +3674,15 @@ where
 				tx.payment_proof.clone(),
 				tx.input_commits
 					.iter()
-					.map(|s| util::from_hex(s))
-					.filter(|s| s.is_ok())
-					.map(|s| pedersen::Commitment::from_vec(s.unwrap()))
+					.map(|s| util::from_hex(s).ok())
+					.flatten()
+					.map(|s| pedersen::Commitment::from_vec(s))
 					.collect(),
 				tx.output_commits
 					.iter()
-					.map(|s| util::from_hex(s))
-					.filter(|s| s.is_ok())
-					.map(|s| pedersen::Commitment::from_vec(s.unwrap()))
+					.map(|s| util::from_hex(s).ok())
+					.flatten()
+					.map(|s| pedersen::Commitment::from_vec(s))
 					.collect(),
 			),
 		)
@@ -4014,7 +4011,10 @@ pub fn run_doctest_owner(
 			(&mask1).as_ref(),
 			1 as usize,
 			false,
-			tx_pool.lock().expect("Mutex failure").deref_mut(),
+			tx_pool
+				.lock()
+				.unwrap_or_else(|e| e.into_inner())
+				.deref_mut(),
 		);
 		//update local outputs after each block, so transaction IDs stay consistent
 		let (wallet_refreshed, _) = api_impl::owner::retrieve_summary_info(
@@ -4035,7 +4035,7 @@ pub fn run_doctest_owner(
 	println!("public_proof address {}", public_proof_address.public_key);
 
 	let (w1_tor_secret, w1_tor_pubkey) = {
-		let mut w_lock = wallet1.lock().expect("Mutex failure");
+		let mut w_lock = wallet1.lock().unwrap_or_else(|e| e.into_inner());
 		let w = w_lock.lc_provider().unwrap().wallet_inst().unwrap();
 		let k = w.keychain((&mask1).as_ref()).unwrap();
 		let secret = proofaddress::payment_proof_address_dalek_secret(0, &k, 0).unwrap();
@@ -4045,7 +4045,7 @@ pub fn run_doctest_owner(
 	let _w1_slatepack_address = ProvableAddress::from_tor_pub_key(&w1_tor_pubkey);
 
 	let (w2_tor_secret, w2_tor_pubkey) = {
-		let mut w_lock = wallet2.lock().expect("Mutex failure");
+		let mut w_lock = wallet2.lock().unwrap_or_else(|e| e.into_inner());
 		let w = w_lock.lc_provider().unwrap().wallet_inst().unwrap();
 		let k = w.keychain((&mask2).as_ref()).unwrap();
 		let secret = proofaddress::payment_proof_address_dalek_secret(0, &k, 0).unwrap();
@@ -4061,7 +4061,7 @@ pub fn run_doctest_owner(
 		}
 
 		let amount = 2_000_000_000;
-		let mut w_lock = wallet1.lock().expect("Mutex failure");
+		let mut w_lock = wallet1.lock().unwrap_or_else(|e| e.into_inner());
 		let w = w_lock.lc_provider().unwrap().wallet_inst().unwrap();
 		let proof_address = match payment_proof {
 			true => {
@@ -4088,7 +4088,7 @@ pub fn run_doctest_owner(
 		}
 
 		let mut slate =
-			api_impl::owner::init_send_tx(&mut **w, (&mask1).as_ref(), &None, &args, true, 1)
+			api_impl::owner::init_send_tx(&mut **w, (&mask1).as_ref(), &mut None, &args, true, 1)
 				.unwrap();
 		println!("INITIAL SLATE");
 		println!(
@@ -4122,12 +4122,12 @@ pub fn run_doctest_owner(
 		}
 
 		{
-			let mut w_lock = wallet2.lock().expect("Mutex failure");
+			let mut w_lock = wallet2.lock().unwrap_or_else(|e| e.into_inner());
 			let w2 = w_lock.lc_provider().unwrap().wallet_inst().unwrap();
 			slate = api_impl::foreign::receive_tx(
 				&mut **w2,
 				(&mask2).as_ref(),
-				&None,
+				None,
 				&slate,
 				Some(String::from("testW1")),
 				None,
@@ -4146,7 +4146,7 @@ pub fn run_doctest_owner(
 			api_impl::owner::tx_lock_outputs(
 				&mut **w,
 				(&mask2).as_ref(),
-				&None,
+				&mut None,
 				&slate,
 				Some(String::from("testW2")),
 				0,
@@ -4187,7 +4187,7 @@ pub fn run_doctest_owner(
 			slate = api_impl::owner::finalize_tx(
 				&mut **w,
 				(&mask1).as_ref(),
-				&None,
+				&mut None,
 				&slate,
 				true,
 				true,
@@ -4239,7 +4239,10 @@ pub fn run_doctest_owner(
 			(&mask1).as_ref(),
 			3 as usize,
 			false,
-			tx_pool.lock().expect("Mutex failure").deref_mut(),
+			tx_pool
+				.lock()
+				.unwrap_or_else(|e| e.into_inner())
+				.deref_mut(),
 		);
 	}
 

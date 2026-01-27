@@ -407,10 +407,9 @@ impl Slate {
 		let ttl_cutoff_height = if version == 2 {
 			let parse_slate: Result<SlateV2ParseTTL, serde_json::error::Error> =
 				serde_json::from_str(slate_json);
-			if parse_slate.is_ok() {
-				parse_slate.unwrap().ttl_cutoff_height
-			} else {
-				None
+			match parse_slate {
+				Ok(slate) => slate.ttl_cutoff_height,
+				Err(_) => None,
 			}
 		} else {
 			None
@@ -733,11 +732,11 @@ impl Slate {
 	}
 
 	/// Return vector of all partial sigs
-	fn part_sigs(&self) -> Vec<&Signature> {
+	fn part_sigs(&self) -> Vec<Signature> {
 		self.participant_data
 			.iter()
-			.filter(|p| p.part_sig.is_some())
-			.map(|p| p.part_sig.as_ref().unwrap())
+			.map(|p| p.part_sig)
+			.flatten()
 			.collect()
 	}
 
@@ -939,7 +938,9 @@ impl Slate {
 				debug_assert!(p.part_sig.is_some());
 				aggsig::verify_partial_sig(
 					secp,
-					p.part_sig.as_ref().unwrap(),
+					p.part_sig.as_ref().ok_or(Error::GenericError(
+						"at complete slate the part_sig is empty".into(),
+					))?,
 					&self.pub_nonce_sum(secp)?,
 					&p.public_blind_excess,
 					Some(&self.pub_blind_sum(secp)?),
@@ -1016,7 +1017,7 @@ impl Slate {
 		let pub_nonce_sum = self.pub_nonce_sum(secp)?;
 		let final_pubkey = self.pub_blind_sum(secp)?;
 		// get the final signature
-		let final_sig = aggsig::add_signatures(secp, part_sigs, &pub_nonce_sum)?;
+		let final_sig = aggsig::add_signatures(secp, part_sigs.iter().collect(), &pub_nonce_sum)?;
 
 		// Calculate the final public key (for our own sanity check)
 
@@ -1086,7 +1087,7 @@ impl Slate {
 		);
 		trace!(
 			"Final tx: {}",
-			serde_json::to_string_pretty(&final_tx).unwrap()
+			serde_json::to_string_pretty(&final_tx).unwrap_or(String::from("<INVALID TX>"))
 		);
 		final_tx.kernels()[0].verify(secp)?;
 
@@ -1542,7 +1543,7 @@ impl TryFrom<&TxKernelV3> for TxKernel {
 			CompatKernelFeatures::HeightLocked => KernelFeatures::HeightLocked { fee, lock_height },
 			CompatKernelFeatures::NoRecentDuplicate => KernelFeatures::NoRecentDuplicate {
 				fee,
-				relative_height: NRDRelativeHeight::new(lock_height).unwrap(),
+				relative_height: NRDRelativeHeight::new(lock_height)?,
 			},
 		};
 		Ok(TxKernel {

@@ -36,7 +36,6 @@ use crate::{
 use ed25519_dalek::PublicKey as DalekPublicKey;
 use mwc_wallet_util::mwc_keychain::Identifier;
 use mwc_wallet_util::OnionV3Address;
-use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -67,7 +66,7 @@ lazy_static! {
 pub fn foreign_clean_context(context_id: u32) {
 	let _ = RECV_ACCOUNT
 		.write()
-		.expect("Mutex failure")
+		.unwrap_or_else(|e| e.into_inner())
 		.remove(&context_id);
 }
 
@@ -75,19 +74,19 @@ pub fn foreign_clean_context(context_id: u32) {
 pub fn get_receive_account(context_id: u32) -> Option<Identifier> {
 	RECV_ACCOUNT
 		.read()
-		.expect("Mutex failure")
+		.unwrap_or_else(|e| e.into_inner())
 		.get(&context_id)
 		.cloned()
 }
 
 /// Set receive tx callback. Used in library mode
 pub fn set_receive_callback(cb: Box<dyn Fn(ReceiveData) + Send + Sync>) {
-	*RECEIVE_CALLBACK.write().expect("RwLock failure") = Some(cb);
+	*RECEIVE_CALLBACK.write().unwrap_or_else(|e| e.into_inner()) = Some(cb);
 }
 
 /// Clean the callback
 pub fn clean_receive_callback() {
-	*RECEIVE_CALLBACK.write().expect("RwLock failure") = None;
+	*RECEIVE_CALLBACK.write().unwrap_or_else(|e| e.into_inner()) = None;
 }
 
 /// get tor proof address
@@ -127,7 +126,7 @@ where
 pub fn set_receive_account(context_id: u32, account_path: Identifier) {
 	let _ = RECV_ACCOUNT
 		.write()
-		.expect("Mutex failure")
+		.unwrap_or_else(|e| e.into_inner())
 		.insert(context_id, account_path);
 }
 
@@ -165,7 +164,7 @@ pub fn verify_slate_messages(slate: &Slate) -> Result<(), Error> {
 pub fn receive_tx<'a, T: ?Sized, C, K>(
 	w: &mut T,
 	keychain_mask: Option<&SecretKey>,
-	tx_session: &Option<RefCell<TxSession>>,
+	mut tx_session: Option<&mut TxSession>,
 	slate: &Slate,
 	address: Option<String>,
 	key_id_opt: Option<&str>,
@@ -181,7 +180,7 @@ where
 	K: Keychain + 'a,
 {
 	let display_from = address.clone().unwrap_or("http listener".to_string());
-	let slate_message = &slate.participant_data[0].message;
+	let slate_message: &Option<String> = &slate.participant_data[0].message;
 	let address_for_logging = address.clone().unwrap_or("http".to_string());
 
 	debug!("foreign just received_tx just got slate = {:?}", slate);
@@ -243,7 +242,7 @@ where
 	let mut context = tx::add_output_to_slate(
 		&mut *w,
 		keychain_mask,
-		tx_session,
+		&mut tx_session,
 		&mut ret_slate,
 		height,
 		Some(address_for_logging),
@@ -264,7 +263,7 @@ where
 		ret_slate.adjust_offset(&keychain, &mut context)?;
 	}
 
-	tx::update_message(&mut *w, keychain_mask, tx_session, &ret_slate)?;
+	tx::update_message(&mut *w, keychain_mask, &mut tx_session, &ret_slate)?;
 
 	let excess = ret_slate.calc_excess(keychain.secp())?;
 
@@ -306,45 +305,48 @@ where
 	}
 
 	// that means it's not mqs so need to print it
-	if slate_message.is_some() {
-		if mwc_wallet_util::mwc_util::is_console_output_enabled() {
-			println!(
-				"slate [{}] received from [{}] for [{}] MWCs. Message: [\"{}\"]",
-				slate.id.to_string(),
-				display_from,
-				amount_to_hr_string(slate.amount, false),
-				slate_message.clone().unwrap()
-			);
-		} else {
-			info!(
-				"slate [{}] received from [{}] for [{}] MWCs. Message: [\"{}\"]",
-				slate.id.to_string(),
-				display_from,
-				amount_to_hr_string(slate.amount, false),
-				slate_message.clone().unwrap()
-			);
+	match slate_message {
+		Some(slate_message) => {
+			if mwc_wallet_util::mwc_util::is_console_output_enabled() {
+				println!(
+					"slate [{}] received from [{}] for [{}] MWCs. Message: [\"{}\"]",
+					slate.id.to_string(),
+					display_from,
+					amount_to_hr_string(slate.amount, false),
+					slate_message
+				);
+			} else {
+				info!(
+					"slate [{}] received from [{}] for [{}] MWCs. Message: [\"{}\"]",
+					slate.id.to_string(),
+					display_from,
+					amount_to_hr_string(slate.amount, false),
+					slate_message
+				);
+			}
 		}
-	} else {
-		if mwc_wallet_util::mwc_util::is_console_output_enabled() {
-			println!(
-				"slate [{}] received from [{}] for [{}] MWCs.",
-				slate.id.to_string(),
-				display_from,
-				amount_to_hr_string(slate.amount, false)
-			);
-		} else {
-			info!(
-				"slate [{}] received from [{}] for [{}] MWCs.",
-				slate.id.to_string(),
-				display_from,
-				amount_to_hr_string(slate.amount, false)
-			);
+		None => {
+			if mwc_wallet_util::mwc_util::is_console_output_enabled() {
+				println!(
+					"slate [{}] received from [{}] for [{}] MWCs.",
+					slate.id.to_string(),
+					display_from,
+					amount_to_hr_string(slate.amount, false)
+				);
+			} else {
+				info!(
+					"slate [{}] received from [{}] for [{}] MWCs.",
+					slate.id.to_string(),
+					display_from,
+					amount_to_hr_string(slate.amount, false)
+				);
+			}
 		}
 	}
 
 	RECEIVE_CALLBACK
 		.read()
-		.expect("RwLock failure")
+		.unwrap_or_else(|e| e.into_inner())
 		.as_ref()
 		.map(|cb| {
 			cb(ReceiveData {
@@ -363,7 +365,7 @@ where
 pub fn finalize_invoice_tx<'a, T: ?Sized, C, K>(
 	w: &mut T,
 	keychain_mask: Option<&SecretKey>,
-	tx_session: &Option<RefCell<TxSession>>,
+	tx_session: &mut Option<&mut TxSession>,
 	slate: &Slate,
 	refresh_from_node: bool,
 	use_test_rng: bool,
@@ -378,8 +380,7 @@ where
 	// Participant id 0 for mwc713 compatibility
 	let context = match tx_session {
 		Some(tx) => {
-			tx.borrow()
-				.get_context_participant()
+			tx.get_context_participant()
 				.clone()
 				.ok_or(Error::TransactionWasFinalizedOrCancelled(format!(
 					"{}",
@@ -473,7 +474,7 @@ where
 	tx::update_message(&mut *w, keychain_mask, tx_session, &sl)?;
 
 	match tx_session {
-		Some(tx) => tx.borrow_mut().clear_context_participant(),
+		Some(tx) => tx.clear_context_participant(),
 		None => {
 			let mut batch = w.batch(keychain_mask)?;
 			// Participant id 0 for mwc713 compatibility

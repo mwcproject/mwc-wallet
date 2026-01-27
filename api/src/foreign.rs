@@ -25,7 +25,6 @@ use crate::util::secp::key::SecretKey;
 use ed25519_dalek::PublicKey as DalekPublicKey;
 use libwallet::types::TxSession;
 use libwallet::wallet_lock;
-use std::cell::RefCell;
 use std::sync::Arc;
 use std::sync::Mutex;
 
@@ -394,7 +393,7 @@ where
 	///
 	/// // . . .
 	/// // Obtain a sent slate somehow
-	/// let result = api_foreign.receive_tx(&None, &slate, None, &None, None);
+	/// let result = api_foreign.receive_tx(None, &slate, None, &None, None);
 	///
 	/// if let Ok(slate) = result {
 	///     // Send back to recipient somehow
@@ -404,7 +403,7 @@ where
 
 	pub fn receive_tx(
 		&self,
-		tx_session: &Option<RefCell<TxSession>>,
+		tx_session: Option<&mut TxSession>,
 		slate: &Slate,
 		address: Option<String>,
 		dest_acct_name: &Option<String>,
@@ -462,8 +461,8 @@ where
 	/// ```
 	/// # mwc_wallet_api::doctest_helper_setup_doc_env_foreign!(wallet, wallet_config);
 	///
-	/// let mut api_owner = Owner::new(0, wallet.clone(), None, None);
-	/// let mut api_foreign = Foreign::new(wallet.clone(), None, None);
+	/// let api_owner = Owner::new(0, wallet.clone(), None, None);
+	/// let api_foreign = Foreign::new(wallet.clone(), None, None);
 	///
 	/// // . . .
 	/// // Issue the invoice tx via the owner API
@@ -471,20 +470,20 @@ where
 	///     amount: 10_000_000_000,
 	///     ..Default::default()
 	/// };
-	/// let result = api_owner.issue_invoice_tx(None, &None, &args);
+	/// let result = api_owner.issue_invoice_tx(None, None, &args);
 	///
 	/// // If result okay, send to payer, who will apply the transaction via their
 	/// // owner API, then send back the slate
 	/// // ...
 	/// # let slate = Slate::blank(2, false);
 	///
-	/// let slate = api_foreign.finalize_invoice_tx(&None, &slate);
+	/// let slate = api_foreign.finalize_invoice_tx(None, &slate);
 	/// // if okay, then post via the owner API
 	/// ```
 
 	pub fn finalize_invoice_tx(
 		&self,
-		tx_session: &Option<RefCell<TxSession>>,
+		mut tx_session: Option<&mut TxSession>,
 		slate: &Slate,
 	) -> Result<Slate, Error> {
 		wallet_lock!(self.wallet_inst, w);
@@ -498,7 +497,7 @@ where
 		foreign::finalize_invoice_tx(
 			&mut **w,
 			(&self.keychain_mask).as_ref(),
-			tx_session,
+			&mut tx_session,
 			slate,
 			true,
 			self.doctest_mode,

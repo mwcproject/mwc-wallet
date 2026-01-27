@@ -26,7 +26,8 @@ pub fn post(context_id: u32, input_path: String, fluff: Option<bool>) -> Result<
 
 	#[cfg(not(target_os = "android"))]
 	let home_dir = dirs::home_dir()
-		.map(|p| p.to_str().unwrap().to_string())
+		.map(|p| p.to_str().map(|s| s.to_string()))
+		.flatten()
 		.unwrap_or("~".to_string());
 
 	#[cfg(target_os = "android")]
@@ -34,8 +35,9 @@ pub fn post(context_id: u32, input_path: String, fluff: Option<bool>) -> Result<
 		.map(|p| {
 			let mut p = p.clone();
 			p.pop();
-			p.to_str().unwrap().to_string()
+			p.to_str().map(|s| s.to_string())
 		})
+		.flatten()
 		.unwrap_or("~".to_string());
 
 	let mut file = File::open(input_path.replace("~", &home_dir))

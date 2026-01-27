@@ -60,7 +60,7 @@ fn get_mwc_path(
 
 	if !mwc_path.exists() {
 		Err(ConfigError::PathNotFoundError(String::from(
-			mwc_path.to_str().unwrap(),
+			mwc_path.to_str().unwrap_or("<INVALID PATH>".into()),
 		)))
 	} else {
 		Ok(mwc_path)
@@ -148,7 +148,12 @@ pub fn initial_setup_wallet(
 	let (path, config) = if let Some(p) = check_config_current_dir(WALLET_CONFIG_FILE_NAME) {
 		let mut path = p.clone();
 		path.pop();
-		(path, GlobalWalletConfig::new(p.to_str().unwrap())?)
+		(
+			path,
+			GlobalWalletConfig::new(p.to_str().ok_or(ConfigError::InvalidConfig(
+				"Internal error: invalid wallet config file name".into(),
+			))?)?,
+		)
 	} else {
 		// Check if mwc dir exists
 		let mwc_path = match data_path {
@@ -166,7 +171,7 @@ pub fn initial_setup_wallet(
 				let mut default_config = GlobalWalletConfig::for_chain(chain_type);
 				default_config.config_file_path = Some(config_path);
 				// update paths relative to current dir
-				default_config.update_paths(&mwc_path, wallet_data_dir);
+				default_config.update_paths(&mwc_path, wallet_data_dir)?;
 				(mwc_path, default_config)
 			}
 			true => {
@@ -174,7 +179,11 @@ pub fn initial_setup_wallet(
 				path.pop();
 				(
 					path,
-					GlobalWalletConfig::new(config_path.to_str().unwrap())?,
+					GlobalWalletConfig::new(config_path.to_str().ok_or(
+						ConfigError::InvalidConfig(
+							"Internal error: invalid wallet config file name".into(),
+						),
+					)?)?,
 				)
 			}
 		}
@@ -201,7 +210,7 @@ impl Default for GlobalWalletConfig {
 	fn default() -> GlobalWalletConfig {
 		GlobalWalletConfig {
 			config_file_path: None,
-			members: Some(GlobalWalletConfigMembers::default()),
+			members: GlobalWalletConfigMembers::default(),
 		}
 	}
 }
@@ -211,7 +220,7 @@ impl GlobalWalletConfig {
 	/// apply defaults for each chain type
 	pub fn for_chain(chain_type: &global::ChainTypes) -> GlobalWalletConfig {
 		let mut defaults_conf = GlobalWalletConfig::default();
-		let defaults = &mut defaults_conf.members.as_mut().unwrap().wallet;
+		let defaults = &mut defaults_conf.members.wallet;
 		defaults.chain_type = Some(chain_type.clone());
 
 		match *chain_type {
@@ -236,10 +245,16 @@ impl GlobalWalletConfig {
 		return_value.config_file_path = Some(PathBuf::from(&file_path));
 
 		// Config file path is given but not valid
-		let config_file = return_value.config_file_path.clone().unwrap();
+		let config_file =
+			return_value
+				.config_file_path
+				.clone()
+				.ok_or(ConfigError::InvalidConfig(
+					"config_file_path is empty".into(),
+				))?;
 		if !config_file.exists() {
 			return Err(ConfigError::FileNotFoundError(
-				config_file.to_str().unwrap().to_string(),
+				config_file.to_str().unwrap_or("<EMPTY CONFIG>").to_string(),
 			));
 		}
 
@@ -250,7 +265,12 @@ impl GlobalWalletConfig {
 
 	/// Read config
 	fn read_config(mut self) -> Result<GlobalWalletConfig, ConfigError> {
-		let config_file_path = self.config_file_path.as_mut().unwrap();
+		let config_file_path = self
+			.config_file_path
+			.as_mut()
+			.ok_or(ConfigError::InvalidConfig(
+				"config_file_path is empty".into(),
+			))?;
 		let contents = fs::read_to_string(config_file_path.clone())?;
 		let migrated = GlobalWalletConfig::migrate_config_file_version_none_to_2(
 			contents,
@@ -260,45 +280,63 @@ impl GlobalWalletConfig {
 		let decoded: Result<GlobalWalletConfigMembers, toml::de::Error> = toml::from_str(&fixed);
 		match decoded {
 			Ok(gc) => {
-				self.members = Some(gc);
+				self.members = gc;
 				Ok(self)
 			}
 			Err(e) => Err(ConfigError::ParseError(
-				String::from(self.config_file_path.as_mut().unwrap().to_str().unwrap()),
+				self.config_file_path
+					.map(|path| path.to_string_lossy().to_string())
+					.unwrap_or("<INVALID CONFIG FILE>".into()),
 				format!("{}", e),
 			)),
 		}
 	}
 
 	/// Update paths
-	pub fn update_paths(&mut self, wallet_home: &PathBuf, wallet_data_dir: Option<&str>) {
+	pub fn update_paths(
+		&mut self,
+		wallet_home: &PathBuf,
+		wallet_data_dir: Option<&str>,
+	) -> Result<(), ConfigError> {
 		let mut wallet_path = wallet_home.clone();
 		wallet_path.push(wallet_data_dir.unwrap_or(MWC_WALLET_DIR));
-		self.members.as_mut().unwrap().wallet.data_file_dir =
-			wallet_path.to_str().unwrap().to_owned();
+		self.members.wallet.data_file_dir = wallet_path
+			.to_str()
+			.ok_or(ConfigError::InvalidConfig(
+				"Unable to build wallet_path".into(),
+			))?
+			.to_owned();
 		let mut secret_path = wallet_home.clone();
 		secret_path.push(OWNER_API_SECRET_FILE_NAME);
-		self.members.as_mut().unwrap().wallet.api_secret_path =
-			Some(secret_path.to_str().unwrap().to_owned());
+		self.members.wallet.api_secret_path = Some(
+			secret_path
+				.to_str()
+				.ok_or(ConfigError::InvalidConfig(
+					"Unable to build secret_path".into(),
+				))?
+				.to_owned(),
+		);
 		let mut node_secret_path = wallet_home.clone();
 		node_secret_path.push(NODE_API_SECRET_FILE_NAME);
-		self.members.as_mut().unwrap().wallet.node_api_secret_path =
-			Some(node_secret_path.to_str().unwrap().to_owned());
+		self.members.wallet.node_api_secret_path = Some(
+			node_secret_path
+				.to_str()
+				.ok_or(ConfigError::InvalidConfig(
+					"Unable to build node_secret_path".into(),
+				))?
+				.to_owned(),
+		);
 		let mut log_path = wallet_home.clone();
 		log_path.push(WALLET_LOG_FILE_NAME);
-		self.members
-			.as_mut()
-			.unwrap()
-			.logging
-			.as_mut()
-			.unwrap()
-			.log_file_path = log_path.to_str().unwrap().to_owned();
+		if let Some(logging) = self.members.logging.as_mut() {
+			logging.log_file_path = log_path.to_str().unwrap().to_owned();
+		}
+		Ok(())
 	}
 
 	/// Serialize config
-	pub fn ser_config(&mut self) -> Result<String, ConfigError> {
-		let encoded: Result<String, toml::ser::Error> =
-			toml::to_string(self.members.as_mut().unwrap());
+	pub fn ser_config(&self) -> Result<String, ConfigError> {
+		let encoded: Result<String, toml::ser::Error> = toml::to_string(&self.members);
 		match encoded {
 			Ok(enc) => return Ok(enc),
 			Err(e) => {
@@ -315,12 +353,12 @@ impl GlobalWalletConfig {
 		&mut self,
 		name: &str,
 		migration: bool,
-		old_config: Option<String>,
+		old_config: String,
 		old_version: Option<u32>,
 	) -> Result<(), ConfigError> {
 		let conf_out = self.ser_config()?;
 		let commented_config = if migration {
-			migrate_comments(old_config.unwrap(), conf_out, old_version)
+			migrate_comments(old_config, conf_out, old_version)
 		} else {
 			let fixed_config = GlobalWalletConfig::fix_log_level(conf_out);
 			insert_comments(fixed_config)
@@ -337,8 +375,12 @@ impl GlobalWalletConfig {
 		config_str: String,
 		config_file_path: PathBuf,
 	) -> Result<String, ConfigError> {
-		let config: GlobalWalletConfigMembers =
-			toml::from_str(&GlobalWalletConfig::fix_warning_level(config_str.clone())).unwrap();
+		let config: GlobalWalletConfigMembers = toml::from_str(
+			&GlobalWalletConfig::fix_warning_level(config_str.clone()),
+		)
+		.map_err(|e| {
+			ConfigError::SerializationError(format!("Failed to serialize config into toml, {}", e))
+		})?;
 		if config.config_file_version != None {
 			return Ok(config_str);
 		}
@@ -348,16 +390,16 @@ impl GlobalWalletConfig {
 			..config
 		};
 		let mut gc = GlobalWalletConfig {
-			members: Some(adjusted_config),
+			members: adjusted_config,
 			config_file_path: Some(config_file_path.clone()),
 		};
-		let str_path = config_file_path.into_os_string().into_string().unwrap();
-		gc.write_to_file(
-			&str_path,
-			true,
-			Some(config_str),
-			config.config_file_version,
-		)?;
+		let str_path = config_file_path
+			.into_os_string()
+			.into_string()
+			.map_err(|e| {
+				ConfigError::SerializationError(format!("invalid config file path, {:?}", e))
+			})?;
+		gc.write_to_file(&str_path, true, config_str, config.config_file_version)?;
 		let adjusted_config_str = fs::read_to_string(str_path.clone())?;
 		Ok(adjusted_config_str)
 	}

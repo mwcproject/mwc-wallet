@@ -58,7 +58,7 @@ where
 	C: NodeClient + 'a,
 	K: Keychain + 'a,
 {
-	Ok(wallet.acct_path_iter().collect())
+	Ok(wallet.acct_path_iter()?.collect())
 }
 
 /// Renames an account path with a new label
@@ -75,7 +75,7 @@ where
 	K: Keychain + 'a,
 {
 	let label = label.to_string();
-	if let Some(_) = wallet.acct_path_iter().find(|l| l.label == label) {
+	if let Some(_) = wallet.acct_path_iter()?.find(|l| l.label == label) {
 		return Err(Error::AccountLabelAlreadyExists(label.clone()));
 	}
 
@@ -85,7 +85,7 @@ where
 	}
 
 	let found = wallet
-		.acct_path_iter()
+		.acct_path_iter()?
 		.find(|l| l.label == old_label)
 		.is_some();
 
@@ -112,16 +112,18 @@ where
 	K: Keychain + 'a,
 {
 	let label = label.to_owned();
-	if wallet.acct_path_iter().any(|l| l.label == label) {
+	if wallet.acct_path_iter()?.any(|l| l.label == label) {
 		return Err(Error::AccountLabelAlreadyExists(label));
 	}
 
 	// We're always using paths at m/k/0 for parent keys for output derivations
 	// We try to find the first available index. Maximum will not work because there we can use reserved accounts
-	let acc_ids: HashSet<u32> = wallet
-		.acct_path_iter()
-		.map(|acc| u32::from(acc.path.to_path().path[0]))
-		.collect();
+	let mut acc_ids: HashSet<u32> = HashSet::new();
+	for acc in wallet.acct_path_iter()? {
+		let id = u32::from(acc.path.to_path()?.path[0]);
+		acc_ids.insert(id);
+	}
+
 	let id = (1..65536)
 		.filter(|v| !acc_ids.contains(v))
 		.next()
@@ -129,15 +131,15 @@ where
 			"Unable create a new account. Too many already exist".to_string(),
 		))?;
 
-	let template_account = wallet.acct_path_iter().next();
+	let template_account = wallet.acct_path_iter()?.next();
 
 	let return_id = {
 		if let Some(e) = template_account {
-			let mut p = e.path.to_path();
+			let mut p = e.path.to_path()?;
 			p.path[0] = ChildNumber::from(id);
-			p.to_identifier()
+			p.to_identifier()?
 		} else {
-			ExtKeychain::derive_key_id(2, 0, 0, 0, 0)
+			ExtKeychain::derive_key_id(2, 0, 0, 0, 0)?
 		}
 	};
 

@@ -135,7 +135,10 @@ fn revert(
 		mask1,
 		bh as usize,
 		false,
-		tx_pool.lock().expect("Mutex failure").deref_mut(),
+		tx_pool
+			.lock()
+			.unwrap_or_else(|e| e.into_inner())
+			.deref_mut(),
 	)?;
 
 	// Sanity check contents
@@ -180,14 +183,14 @@ fn revert(
 			selection_strategy_is_use_all: false,
 			..Default::default()
 		};
-		let slate = api.init_send_tx(m, &None, &args, 1)?;
+		let slate = api.init_send_tx(m, None, &args, 1)?;
 		// output tx file
 		let send_file = format!("{}/part_tx_1.tx", test_dir);
 		PathToSlatePutter::build_plain(0, Some(PathBuf::from(send_file)))
 			.put_tx(&slate, None, false, &secp)?;
-		api.tx_lock_outputs(m, &None, &slate, None, 0)?;
+		api.tx_lock_outputs(m, None, &slate, None, 0)?;
 		let slate = client1.send_tx_slate_direct("wallet2", &slate)?;
-		let slate = api.finalize_tx(m, &None, &slate, true)?;
+		let slate = api.finalize_tx(m, None, &slate, true)?;
 		tx = slate.tx;
 
 		Ok(())
@@ -214,7 +217,7 @@ fn revert(
 	// Update parallel chain
 	assert_eq!(chain2.head_header().unwrap().height, 0);
 	for i in 0..bh {
-		let hash = chain.get_header_by_height(i + 1).unwrap().hash();
+		let hash = chain.get_header_by_height(i + 1).unwrap().hash().unwrap();
 		let block = chain.get_block(&hash).unwrap();
 		process_block(&chain2, block);
 	}
@@ -259,7 +262,7 @@ fn revert(
 	award_block_to_wallet(&chain2, &[], wallet1.clone(), mask1)?;
 	assert_eq!(chain2.head_header().unwrap().height, bh + 1);
 	let new_head = chain2
-		.get_block(&chain2.head_header().unwrap().hash())
+		.get_block(&chain2.head_header().unwrap().hash().unwrap())
 		.unwrap();
 
 	// Input blocks from parallel chain to original chain, updating it as well

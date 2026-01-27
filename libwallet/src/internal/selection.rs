@@ -33,7 +33,6 @@ use crate::types::*;
 use mwc_wallet_util::mwc_core::libtx::{inputs_for_fee_points, inputs_for_minimal_fee};
 use mwc_wallet_util::mwc_util as util;
 use mwc_wallet_util::mwc_util::ToHex;
-use std::cell::RefCell;
 use std::collections::HashSet;
 
 /// Initialize a transaction on the sender side, returns a corresponding
@@ -94,7 +93,8 @@ where
 	// Update the fee on the slate so we account for this when building the tx.
 	slate.fee = fee;
 
-	let blinding = slate.add_transaction_elements(keychain, &ProofBuilder::new(keychain), elems)?;
+	let blinding =
+		slate.add_transaction_elements(keychain, &ProofBuilder::new(keychain)?, elems)?;
 
 	// Create our own private context
 	let mut context = if slate.compact_slate {
@@ -112,7 +112,7 @@ where
 			0 as u8,
 			slate.ttl_cutoff_height.clone(),
 			slate.compact_slate,
-		)
+		)?
 	} else {
 		// Legacy part
 		Context::with_excess(
@@ -128,7 +128,7 @@ where
 			0 as u8,
 			slate.ttl_cutoff_height.clone(),
 			slate.compact_slate,
-		)
+		)?
 	};
 
 	// Store our private identifiers for each input
@@ -149,7 +149,7 @@ where
 pub fn lock_tx_context<'a, T: ?Sized, C, K>(
 	wallet: &mut T,
 	keychain_mask: Option<&SecretKey>,
-	tx_session: &Option<RefCell<TxSession>>,
+	tx_session: &mut Option<&mut TxSession>,
 	slate: &Slate,
 	current_height: u64,
 	context: &Context,
@@ -190,12 +190,12 @@ where
 	let parent_key_id = context.parent_key_id.clone();
 
 	let found_tx = match tx_session {
-		Some(tx) => tx.borrow().get_tx_log_entry().clone(),
+		Some(tx) => tx.get_tx_log_entry().clone(),
 		None => {
 			let batch = wallet.batch(keychain_mask)?;
 			// Check if such transaction already exist. It is very possible for lock after case.
 			batch
-				.tx_log_iter()
+				.tx_log_iter()?
 				.filter(|tx_entry| {
 					if tx_entry.tx_type != TxLogEntryType::TxSent {
 						return false;
@@ -295,7 +295,7 @@ where
 		outputs.push(OutputData {
 			root_key_id: parent_key_id.clone(),
 			key_id: id.clone(),
-			n_child: id.to_path().last_path_index(),
+			n_child: id.to_path()?.last_path_index(),
 			commit: Some(ToHex::to_hex(&commit)),
 			mmr_index: None,
 			value: change_amount,
@@ -309,7 +309,6 @@ where
 
 	match tx_session {
 		Some(tx) => {
-			let mut tx = tx.borrow_mut();
 			tx.set_tx_log_entry(t.clone());
 			tx.set_outputs(outputs);
 			tx.set_input_commits(input_commits);
@@ -351,7 +350,7 @@ where
 pub fn build_recipient_output<'a, T: ?Sized, C, K>(
 	wallet: &mut T,
 	keychain_mask: Option<&SecretKey>,
-	tx_session: &Option<RefCell<TxSession>>,
+	tx_session: &mut Option<&mut TxSession>,
 	slate: &mut Slate,
 	current_height: u64,
 	address: Option<String>,
@@ -372,17 +371,16 @@ where
 	// Keeping keys with amounts because context want that ( <id>, <amount> )
 	let mut key_vec_amounts = Vec::new();
 
-	if output_amounts.is_some() {
+	if let Some(output_amounts_unwrapped) = &output_amounts {
 		// Just calculating the key...
 		let mut i = 0;
-		let output_amounts_unwrapped = output_amounts.clone().unwrap();
 		assert!(num_outputs == output_amounts_unwrapped.len());
 		let mut sum = 0;
 		for oaui in output_amounts_unwrapped {
 			sum = sum + oaui;
 			key_vec_amounts.push((
 				keys::next_available_key(wallet, Some(&parent_key_id))?,
-				oaui,
+				oaui.clone(),
 			));
 			i = i + 1;
 		}
@@ -398,11 +396,11 @@ where
 		let mut remaining_amount = amount;
 		assert!(num_outputs > 0);
 		for i in 0..num_outputs {
-			let key_id = if key_id_opt.is_some() {
+			let key_id = if let Some(key_id_opt) = key_id_opt {
 				// Note! No need to handle so far, that is why we have one key_id_opt, so num_outputs can be only 1
 				// If it is not true - likely use case was changed.
 				assert!(num_outputs == 1);
-				let key_str = key_id_opt.unwrap();
+				let key_str = key_id_opt;
 				Identifier::from_hex(key_str)?
 			} else {
 				keys::next_available_key(wallet, Some(&parent_key_id))?
@@ -439,11 +437,11 @@ where
 
 	let mut out_vec = Vec::new();
 	for kva in &key_vec_amounts {
-		out_vec.push(build::output(kva.1, kva.0.clone()));
+		out_vec.push(build::output(kva.1.clone(), kva.0.clone()));
 	}
 
 	let blinding =
-		slate.add_transaction_elements(&keychain, &ProofBuilder::new(&keychain), out_vec)?;
+		slate.add_transaction_elements(&keychain, &ProofBuilder::new(&keychain)?, out_vec)?;
 
 	// Add blinding sum to our context
 	let mut context = if slate.compact_slate {
@@ -460,7 +458,7 @@ where
 			slate.get_kernel_features(),
 			slate.ttl_cutoff_height.clone(),
 			slate.compact_slate,
-		)
+		)?
 	} else {
 		// Legacy model
 		Context::with_excess(
@@ -476,7 +474,7 @@ where
 			slate.get_kernel_features(),
 			slate.ttl_cutoff_height.clone(),
 			slate.compact_slate,
-		)
+		)?
 	};
 
 	for kva in &key_vec_amounts {
@@ -523,7 +521,7 @@ where
 			root_key_id: parent_key_id.clone(),
 			key_id: kva.0.clone(),
 			mmr_index: None,
-			n_child: kva.0.to_path().last_path_index(),
+			n_child: kva.0.to_path()?.last_path_index(),
 			commit: commit_vec[i].clone(),
 			value: kva.1,
 			status: OutputStatus::Unconfirmed,
@@ -537,8 +535,8 @@ where
 
 	match tx_session {
 		Some(tx) => {
-			tx.borrow_mut().set_tx_log_entry(t.clone());
-			tx.borrow_mut().set_outputs(outputs);
+			tx.set_tx_log_entry(t.clone());
+			tx.set_outputs(outputs);
 		}
 		None => {
 			let mut batch = wallet.batch(keychain_mask)?;
@@ -557,7 +555,17 @@ where
 
 	// returning last key that was used in the chain.
 	// That suppose to satisfy all caller needs
-	Ok((key_vec_amounts.last().unwrap().0.clone(), context, t))
+	Ok((
+		key_vec_amounts
+			.last()
+			.ok_or(Error::GenericError(
+				"build_recipient_output internal error,  is empty".into(),
+			))?
+			.0
+			.clone(),
+		context,
+		t,
+	))
 }
 
 fn calc_fees(
@@ -714,7 +722,7 @@ where
 		change_output_minimum_confirmations,
 		optimal_outputs_num,
 		min_outputs_num,
-	);
+	)?;
 
 	if coins.len() + routputs > max_outputs {
 		return Err(Error::TooLargeSlate(max_outputs))?;
@@ -767,7 +775,7 @@ where
 				change_output_minimum_confirmations,
 				optimal_outputs_num,
 				min_outputs_num,
-			);
+			)?;
 
 			if coins.len() + num_outputs > max_outputs {
 				return Err(Error::TooLargeSlate(max_outputs))?;
@@ -915,7 +923,7 @@ pub fn select_coins<'a, T: ?Sized, C, K>(
 	change_output_minimum_confirmations: u64,
 	optimal_outputs_num: usize,
 	min_outputs_num: Option<usize>, // Minimal number of outputs. Needs to keep fee below some threshold (fee can be already fixed, so need it to be lower)
-) -> Vec<OutputData>
+) -> Result<Vec<OutputData>, Error>
 //    max_outputs_available, Outputs
 where
 	T: WalletBackend<'a, C, K>,
@@ -925,7 +933,7 @@ where
 	let mut change_outputs: HashSet<String> = HashSet::new();
 	if exclude_change_outputs {
 		let txs: Vec<TxLogEntry> = wallet
-			.tx_log_iter()
+			.tx_log_iter()?
 			.filter(|tx_entry| tx_entry.tx_type == TxLogEntryType::TxSent && tx_entry.confirmed)
 			.collect();
 
@@ -942,7 +950,7 @@ where
 	);
 	// first find all eligible outputs based on number of confirmations
 	let mut eligible = wallet
-		.iter()
+		.iter()?
 		.filter(|out| {
 			if out.root_key_id != *parent_key_id {
 				return false;
@@ -1053,7 +1061,7 @@ where
 		}
 	}
 
-	eligible[best_idx0..best_idx0 + best_len].to_vec()
+	Ok(eligible[best_idx0..best_idx0 + best_len].to_vec())
 }
 
 /// Repopulates output in the slate's transaction
@@ -1064,7 +1072,7 @@ where
 pub fn repopulate_tx<'a, T: ?Sized, C, K>(
 	wallet: &mut T,
 	keychain_mask: Option<&SecretKey>,
-	tx_session: &Option<RefCell<TxSession>>,
+	tx_session: &mut Option<&mut TxSession>,
 	slate: &mut Slate,
 	context: &Context,
 	update_fee: bool,
@@ -1120,12 +1128,7 @@ where
 				// Outputs are expected to exist in the session
 				debug_assert!(wallet.get(&id, &mmr).is_err());
 
-				if let Some(out) = ts_ses
-					.borrow()
-					.get_outputs()
-					.iter()
-					.find(|out| out.key_id == id)
-				{
+				if let Some(out) = ts_ses.get_outputs().iter().find(|out| out.key_id == id) {
 					if amount != out.value {
 						return Err(Error::GenericError(format!(
 							"Internal error. Output value {} doesn't match expected {} for {} {:?}",
@@ -1149,7 +1152,7 @@ where
 		}
 	}
 
-	slate.add_transaction_elements(&keychain, &ProofBuilder::new(&keychain), parts)?;
+	slate.add_transaction_elements(&keychain, &ProofBuilder::new(&keychain)?, parts)?;
 	// restore the original offset
 	slate.tx_or_err_mut()?.offset = slate.offset.clone();
 	Ok(())

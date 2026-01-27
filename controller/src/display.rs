@@ -378,15 +378,19 @@ pub fn view_wallet_output(
 	println!();
 	let title = format!("View Wallet Outputs - Block Height: {}", cur_height);
 
-	if term::stdout().is_none() {
-		println!("Could not open terminal");
-		return Ok(());
-	}
+	let mut t = match term::stdout() {
+		Some(t) => t,
+		None => {
+			println!("Could not open terminal");
+			return Ok(());
+		}
+	};
 
-	let mut t = term::stdout().unwrap();
-	t.fg(term::color::MAGENTA).unwrap();
-	writeln!(t, "{}", title).unwrap();
-	t.reset().unwrap();
+	t.fg(term::color::MAGENTA)
+		.map_err(|e| Error::IO(format!("Terminal error: {}", e)))?;
+	writeln!(t, "{}", title)?;
+	t.reset()
+		.map_err(|e| Error::IO(format!("Terminal error: {}", e)))?;
 
 	let mut table = table!();
 
@@ -595,7 +599,7 @@ pub fn accounts(acct_mappings: Vec<AcctPathMapping>) {
 	for m in acct_mappings {
 		table.add_row(row![
 			bFC->m.label,
-			bGC->m.path.to_bip_32_string(),
+			bGC->m.path.to_bip_32_string().unwrap_or("<INVALID_PATH>".to_string()),
 		]);
 	}
 	table.set_format(*prettytable::format::consts::FORMAT_NO_BORDER_LINE_SEPARATOR);
@@ -955,8 +959,10 @@ pub fn swap_trade(
 }
 
 fn timestamp_to_local_time(timestamp: i64) -> String {
-	let dt = Local.timestamp_opt(timestamp, 0).unwrap();
-	dt.format("%B %e %H:%M:%S").to_string()
+	match Local.timestamp_opt(timestamp, 0).single() {
+		Some(dt) => dt.format("%B %e %H:%M:%S").to_string(),
+		None => format!("TS: {}", timestamp),
+	}
 }
 
 /// Display summary eth info in a pretty way

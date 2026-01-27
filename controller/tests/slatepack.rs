@@ -161,7 +161,10 @@ fn slatepack_exchange_test_impl(test_dir: &str) -> Result<(), libwallet::Error> 
 		mask1,
 		bh as usize,
 		false,
-		tx_pool.lock().expect("Mutex failure").deref_mut(),
+		tx_pool
+			.lock()
+			.unwrap_or_else(|e| e.into_inner())
+			.deref_mut(),
 	);
 
 	let (_address1, recipients_1, secret_1, sender_1) = {
@@ -169,7 +172,7 @@ fn slatepack_exchange_test_impl(test_dir: &str) -> Result<(), libwallet::Error> 
 		let mut sec_key = DalekSecretKey::from_bytes(&[0u8; 32]).unwrap();
 		let mut address = proofaddress::ProvableAddress::blank();
 		wallet::controller::owner_single_use(Some(wallet1.clone()), mask1, None, |api, m| {
-			let mut w_lock = api.wallet_inst.lock().expect("Mutex failure");
+			let mut w_lock = api.wallet_inst.lock().unwrap_or_else(|e| e.into_inner());
 			let w = w_lock.lc_provider()?.wallet_inst()?;
 			let k = w.keychain(m)?;
 			sec_key = proofaddress::payment_proof_address_dalek_secret(0, &k, 0)?;
@@ -186,7 +189,7 @@ fn slatepack_exchange_test_impl(test_dir: &str) -> Result<(), libwallet::Error> 
 		let mut sec_key = DalekSecretKey::from_bytes(&[0u8; 32]).unwrap();
 		let mut address = proofaddress::ProvableAddress::blank();
 		wallet::controller::owner_single_use(Some(wallet2.clone()), mask2, None, |api, m| {
-			let mut w_lock = api.wallet_inst.lock().expect("Mutex failure");
+			let mut w_lock = api.wallet_inst.lock().unwrap_or_else(|e| e.into_inner());
 			let w = w_lock.lc_provider()?.wallet_inst()?;
 			let k = w.keychain(m)?;
 			sec_key = proofaddress::payment_proof_address_dalek_secret(0, &k, 0)?;
@@ -220,7 +223,7 @@ fn slatepack_exchange_test_impl(test_dir: &str) -> Result<(), libwallet::Error> 
 			slatepack_recipient: Some(address2.clone()),
 			..Default::default()
 		};
-		let slate = api.init_send_tx(m, &None, &args, 1).unwrap();
+		let slate = api.init_send_tx(m, None, &args, 1).unwrap();
 
 		println!("init_send_tx write slate: {:?}", slate);
 
@@ -234,7 +237,7 @@ fn slatepack_exchange_test_impl(test_dir: &str) -> Result<(), libwallet::Error> 
 			&secret_1,
 			&secp,
 		)?;
-		api.tx_lock_outputs(m, &None, &slate, None, 0).unwrap();
+		api.tx_lock_outputs(m, None, &slate, None, 0).unwrap();
 		Ok(())
 	})
 	.unwrap();
@@ -255,7 +258,7 @@ fn slatepack_exchange_test_impl(test_dir: &str) -> Result<(), libwallet::Error> 
 
 	// wallet 2 receives file, completes, sends file back
 	wallet::controller::foreign_single_use(wallet2.clone(), mask2_i.clone(), |api| {
-		let slate = api.receive_tx(&None, &receive_slate, None, &None, None)?;
+		let slate = api.receive_tx(None, &receive_slate, None, &None, None)?;
 		println!("receive_tx write slate: {:?}", slate);
 		output_slatepack(
 			&slate,
@@ -279,7 +282,7 @@ fn slatepack_exchange_test_impl(test_dir: &str) -> Result<(), libwallet::Error> 
 
 		println!("receive_tx read slate: {:?}", slate);
 
-		slate = api.finalize_tx(m, &None, &slate, true)?;
+		slate = api.finalize_tx(m, None, &slate, true)?;
 
 		println!("finalize_tx write slate: {:?}", slate);
 
@@ -306,7 +309,10 @@ fn slatepack_exchange_test_impl(test_dir: &str) -> Result<(), libwallet::Error> 
 		mask1,
 		3,
 		false,
-		tx_pool.lock().expect("Mutex failure").deref_mut(),
+		tx_pool
+			.lock()
+			.unwrap_or_else(|e| e.into_inner())
+			.deref_mut(),
 	);
 	bh += 3;
 
@@ -347,7 +353,7 @@ fn slatepack_exchange_test_impl(test_dir: &str) -> Result<(), libwallet::Error> 
 			slatepack_recipient: Some(address2.clone()),
 			..Default::default()
 		};
-		let slate = api.issue_invoice_tx(m, &None, &args)?;
+		let slate = api.issue_invoice_tx(m, None, &args)?;
 
 		println!("issue_invoice_tx write slate: {:?}", slate);
 		//tmp_slate2 = slate.clone();
@@ -386,8 +392,8 @@ fn slatepack_exchange_test_impl(test_dir: &str) -> Result<(), libwallet::Error> 
 			..Default::default()
 		};
 
-		let invoice_slate = api.process_invoice_tx(m, &None, &invoice_slate, &args)?;
-		api.tx_lock_outputs(m, &None, &invoice_slate, None, 1)?; // because of mwc compability, Invoice processer using participant_id 1
+		let invoice_slate = api.process_invoice_tx(m, None, &invoice_slate, &args)?;
+		api.tx_lock_outputs(m, None, &invoice_slate, None, 1)?; // because of mwc compability, Invoice processer using participant_id 1
 
 		println!("process_invoice_tx write slate: {:?}", invoice_slate);
 		//tmp_slate = invoice_slate.clone();
@@ -409,7 +415,7 @@ fn slatepack_exchange_test_impl(test_dir: &str) -> Result<(), libwallet::Error> 
 
 		println!("process_invoice_tx read slate: {:?}", slate);
 		//let slate = tmp_slate.clone();
-		let slate = api.finalize_invoice_tx(&None, &slate)?; // Slate will be finalized and posted automatically
+		let slate = api.finalize_invoice_tx(None, &slate)?; // Slate will be finalized and posted automatically
 		output_slatepack(
 			&slate,
 			SlatePurpose::FullSlate,
@@ -430,7 +436,10 @@ fn slatepack_exchange_test_impl(test_dir: &str) -> Result<(), libwallet::Error> 
 		mask1,
 		3,
 		false,
-		tx_pool.lock().expect("Mutex failure").deref_mut(),
+		tx_pool
+			.lock()
+			.unwrap_or_else(|e| e.into_inner())
+			.deref_mut(),
 	);
 	let (send_file, receive_file, final_file) = (
 		format!("{}/standard_pp_S1.slatepack", test_dir),
@@ -451,7 +460,7 @@ fn slatepack_exchange_test_impl(test_dir: &str) -> Result<(), libwallet::Error> 
 			slatepack_recipient: Some(address2.clone()),
 			..Default::default()
 		};
-		let slate = api.init_send_tx(m, &None, &args, 1)?;
+		let slate = api.init_send_tx(m, None, &args, 1)?;
 		output_slatepack(
 			&slate,
 			SlatePurpose::SendInitial,
@@ -461,7 +470,7 @@ fn slatepack_exchange_test_impl(test_dir: &str) -> Result<(), libwallet::Error> 
 			&secret_1,
 			&secp,
 		)?;
-		api.tx_lock_outputs(m, &None, &slate, None, 0)?;
+		api.tx_lock_outputs(m, None, &slate, None, 0)?;
 		Ok(())
 	})
 	.unwrap();
@@ -471,7 +480,7 @@ fn slatepack_exchange_test_impl(test_dir: &str) -> Result<(), libwallet::Error> 
 		let sender = res.get_sender();
 		assert!(sender.is_some());
 		let slate = res.to_result_slate();
-		let slate = api.receive_tx(&None, &slate, None, &None, None)?;
+		let slate = api.receive_tx(None, &slate, None, &None, None)?;
 		output_slatepack(
 			&slate,
 			SlatePurpose::SendResponse,
@@ -491,7 +500,7 @@ fn slatepack_exchange_test_impl(test_dir: &str) -> Result<(), libwallet::Error> 
 		let sender = res.get_sender();
 		assert!(sender.is_some());
 		let slate = res.to_result_slate();
-		let slate = api.finalize_tx(m, &None, &slate, true)?;
+		let slate = api.finalize_tx(m, None, &slate, true)?;
 		// Output final file for reference
 		output_slatepack(
 			&slate,

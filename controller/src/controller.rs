@@ -32,7 +32,6 @@ use mwc_wallet_util::OnionV3Address;
 use qr_code::QrCode;
 use serde::{Deserialize, Serialize};
 use serde_json;
-use std::cell::RefCell;
 
 use mwc_wallet_impls::{
 	Address, CloseReason, MWCMQPublisher, MWCMQSAddress, MWCMQSubscriber, Publisher, Subscriber,
@@ -99,7 +98,7 @@ lazy_static! {
 pub fn get_foreign_api_health(context_id: u32) -> bool {
 	FOREIGN_API_HEALTH
 		.read()
-		.expect("RwLock failure")
+		.unwrap_or_else(|e| e.into_inner())
 		.get(&context_id)
 		.cloned()
 		.unwrap_or(false)
@@ -108,14 +107,14 @@ pub fn get_foreign_api_health(context_id: u32) -> bool {
 pub fn set_foreign_api_health(context_id: u32, healthy: bool) {
 	FOREIGN_API_HEALTH
 		.write()
-		.expect("RwLock failure")
+		.unwrap_or_else(|e| e.into_inner())
 		.insert(context_id, healthy);
 }
 
 pub fn reset_foreign_api_health(context_id: u32) {
 	FOREIGN_API_HEALTH
 		.write()
-		.expect("RwLock failure")
+		.unwrap_or_else(|e| e.into_inner())
 		.remove(&context_id);
 }
 
@@ -125,7 +124,7 @@ pub fn foreign_owner_api_clean_context(context_id: u32) {
 	let prev_owner_api = {
 		OWNER_API
 			.write()
-			.expect("RwLock failure")
+			.unwrap_or_else(|e| e.into_inner())
 			.remove(&context_id)
 	};
 
@@ -137,14 +136,14 @@ pub fn foreign_owner_api_clean_context(context_id: u32) {
 pub fn is_foreign_api_running(context_id: u32) -> bool {
 	FOREIGN_API
 		.read()
-		.expect("RwLock failure")
+		.unwrap_or_else(|e| e.into_inner())
 		.contains_key(&context_id)
 }
 
 pub fn is_owner_api_running(context_id: u32) -> bool {
 	OWNER_API
 		.read()
-		.expect("RwLock failure")
+		.unwrap_or_else(|e| e.into_inner())
 		.contains_key(&context_id)
 }
 
@@ -152,7 +151,7 @@ pub fn stop_foreign_api_running(context_id: u32) {
 	let prev_foreign_api = {
 		FOREIGN_API
 			.write()
-			.expect("RwLock failure")
+			.unwrap_or_else(|e| e.into_inner())
 			.remove(&context_id)
 	};
 
@@ -164,21 +163,21 @@ pub fn stop_foreign_api_running(context_id: u32) {
 pub fn reset_foreign_api_server(context_id: u32) {
 	FOREIGN_API
 		.write()
-		.expect("RwLock failure")
+		.unwrap_or_else(|e| e.into_inner())
 		.remove(&context_id);
 }
 
 pub fn set_foreign_api_server(context_id: u32, api_server: Option<Arc<ForeignApiServer>>) {
 	// Stopping prev server. That is a point to store it this way
 	{
-		let mut lock = FOREIGN_API.write().expect("RwLock failure");
+		let mut lock = FOREIGN_API.write().unwrap_or_else(|e| e.into_inner());
 		if let Some(server) = lock.remove(&context_id) {
 			server.stop();
 		}
 	}
 
 	if let Some(new_server) = api_server {
-		let mut lock = FOREIGN_API.write().expect("RwLock failure");
+		let mut lock = FOREIGN_API.write().unwrap_or_else(|e| e.into_inner());
 		lock.insert(context_id, new_server);
 	}
 }
@@ -186,7 +185,7 @@ pub fn set_foreign_api_server(context_id: u32, api_server: Option<Arc<ForeignApi
 pub fn take_foreign_api_listener_thread(context_id: u32) -> Option<JoinHandle<()>> {
 	match FOREIGN_API
 		.write()
-		.expect("RwLock failure")
+		.unwrap_or_else(|e| e.into_inner())
 		.get_mut(&context_id)
 	{
 		Some(server) => server.take_listener_thread(),
@@ -198,7 +197,7 @@ pub fn set_owner_api_server(context_id: u32, api_server: Option<ApiServer>) {
 	let prev_owner_api = {
 		OWNER_API
 			.write()
-			.expect("RwLock failure")
+			.unwrap_or_else(|e| e.into_inner())
 			.remove(&context_id)
 	};
 
@@ -209,7 +208,7 @@ pub fn set_owner_api_server(context_id: u32, api_server: Option<ApiServer>) {
 	if let Some(new_server) = api_server {
 		OWNER_API
 			.write()
-			.expect("RwLock failure")
+			.unwrap_or_else(|e| e.into_inner())
 			.insert(context_id, new_server);
 	}
 }
@@ -252,7 +251,7 @@ where
 	C: NodeClient + 'static,
 	K: Keychain + 'static,
 {
-	let mask = keychain_mask.lock().expect("Mutex failure");
+	let mask = keychain_mask.lock().unwrap_or_else(|e| e.into_inner());
 	// eventually want to read a list of service config keys
 
 	wallet_lock!(wallet, w_inst);
@@ -436,7 +435,7 @@ where
 	pub fn set_publisher(&self, publisher: Box<dyn Publisher + Send>) {
 		self.publisher
 			.lock()
-			.expect("Mutext failure")
+			.unwrap_or_else(|e| e.into_inner())
 			.replace(publisher);
 	}
 
@@ -450,7 +449,7 @@ where
 		let foreign_api = Foreign::new(self.wallet.clone(), None, None);
 
 		if slate.num_participants > slate.participant_data.len() {
-			let tx_session = Some(RefCell::new(TxSession::new()));
+			let mut tx_session = TxSession::new();
 			//TODO: this needs to be changed to properly figure out if this slate is an invoice or a send
 			if slate.tx_or_err()?.inputs().len() == 0 {
 				// mwc-wallet doesn't support invoices
@@ -528,7 +527,7 @@ where
 			} else {
 				let s = foreign_api
 					.receive_tx(
-						&tx_session,
+						Some(&mut tx_session),
 						slate,
 						Some(from.get_full_name()),
 						dest_acct_name,
@@ -546,9 +545,11 @@ where
 			// Send slate back
 			self.publisher
 				.lock()
-				.expect("Mutex failure")
+				.unwrap_or_else(|e| e.into_inner())
 				.as_ref()
-				.expect("call set_publisher() method!!!")
+				.ok_or(Error::GenericError(
+					"Publisher is not set, call set_publisher() method!!!".into(),
+				))?
 				.post_slate(slate, from, secp)
 				.map_err(|e| {
 					self.do_log_error(format!("ERROR: Unable to send slate back, {}", e));
@@ -562,17 +563,9 @@ where
 			));
 
 			{
-				debug_assert!(tx_session
-					.as_ref()
-					.unwrap()
-					.borrow()
-					.get_context_participant()
-					.is_none());
+				debug_assert!(tx_session.get_context_participant().is_none());
 				wallet_lock!(self.wallet, w);
-				tx_session
-					.unwrap()
-					.borrow_mut()
-					.save_tx_data(&mut **w, None, &slate.id)?;
+				tx_session.save_tx_data(&mut **w, None, &slate.id)?;
 			}
 
 			Ok(())
@@ -582,7 +575,7 @@ where
 			if let Some(slate_sender) = self
 				.slate_send_channel
 				.lock()
-				.expect("Mutext failure")
+				.unwrap_or_else(|e| e.into_inner())
 				.get(&slate.id)
 			{
 				//this happens when the request is from sender. Sender just want have a respond back
@@ -605,7 +598,11 @@ where
 		swapmessage: Message,
 	) -> Result<Option<Message>, Error> {
 		let owner_api = Owner::new(self.context_id, self.wallet.clone(), None, None);
-		let mask = self.keychain_mask.lock().expect("Mutext failure").clone();
+		let mask = self
+			.keychain_mask
+			.lock()
+			.unwrap_or_else(|e| e.into_inner())
+			.clone();
 
 		let msg_str = serde_json::to_string(&swapmessage).map_err(|e| {
 			Error::ProcessSwapMessageError(format!(
@@ -669,7 +666,7 @@ where
 
 		let secp = {
 			let secp_inst = static_secp_instance();
-			let secp = secp_inst.lock().expect("Mutext failure").clone();
+			let secp = secp_inst.lock().unwrap_or_else(|e| e.into_inner()).clone();
 			secp
 		};
 
@@ -718,7 +715,7 @@ where
 	fn set_notification_channels(&self, slate_id: &uuid::Uuid, slate_send_channel: Sender<Slate>) {
 		self.slate_send_channel
 			.lock()
-			.expect("Mutex failure")
+			.unwrap_or_else(|e| e.into_inner())
 			.insert(slate_id.clone(), slate_send_channel);
 	}
 
@@ -726,7 +723,7 @@ where
 		let _ = self
 			.slate_send_channel
 			.lock()
-			.expect("Mutex failure")
+			.unwrap_or_else(|e| e.into_inner())
 			.remove(slate_id);
 	}
 }
@@ -785,7 +782,10 @@ where
 
 	let mwcmqs_secret_key = controller_derive_address_key(
 		wallet.clone(),
-		keychain_mask.lock().expect("Mutex failure").as_ref(),
+		keychain_mask
+			.lock()
+			.unwrap_or_else(|e| e.into_inner())
+			.as_ref(),
 	)?;
 
 	let secp = Secp256k1::with_caps(ContextFlag::Full);
@@ -869,7 +869,7 @@ where
 	let context_id = {
 		wallet
 			.lock()
-			.expect("Mutex failure")
+			.unwrap_or_else(|e| e.into_inner())
 			.lc_provider()?
 			.get_context_id()
 	};
@@ -888,9 +888,8 @@ where
 	//I don't know why but it seems the warn message in controller.rs will get printed to console.
 	warn!("owner listener started {}", addr);
 	let mut router = Router::new();
-	if api_secret.is_some() {
-		let api_basic_auth =
-			"Basic ".to_string() + &to_base64(&("mwc:".to_string() + &api_secret.unwrap()));
+	if let Some(api_secret) = api_secret {
+		let api_basic_auth = "Basic ".to_string() + &to_base64(&("mwc:".to_string() + &api_secret));
 		let basic_auth_middleware = Arc::new(BasicAuthMiddleware::new(
 			api_basic_auth,
 			&MWC_OWNER_BASIC_REALM,
@@ -928,7 +927,9 @@ where
 	}
 	let mut apis = ApiServer::new();
 	warn!("Starting HTTP Owner API server at {}.", addr);
-	let socket_addr: SocketAddr = addr.parse().expect("unable to parse socket address");
+	let socket_addr: SocketAddr = addr
+		.parse()
+		.map_err(|e| Error::ArgumentError(format!("Invalid listen address {}, {}", addr, e)))?;
 	let api_thread = apis
 		.start(socket_addr, router, tls_config)
 		.map_err(|e| Error::GenericError(format!("API thread failed to start, {}", e)))?;
@@ -1104,7 +1105,10 @@ where
 	// Check if wallet has been opened first, get slatepack public key
 	let (slatepack_secret, slatepack_pk, context_id) = {
 		wallet_lock!(wallet, w);
-		let mask = keychain_mask.lock().expect("Mutex failure").clone();
+		let mask = keychain_mask
+			.lock()
+			.unwrap_or_else(|e| e.into_inner())
+			.clone();
 		let keychain = w.keychain(mask.as_ref())?;
 		let context_id = w.get_context_id();
 		let address_index: u32 = {
@@ -1199,10 +1203,16 @@ where
 		.name(format!("wallet-foreign-listener-{}", context_id))
 		.spawn(move || {
 			let socket_addr: Option<SocketAddr> = match addr {
-				Some(addr) => Some(
-					addr.parse()
-						.expect(&format!("Unable to parse socket address {}", addr)),
-				),
+				Some(addr) => match addr.parse() {
+					Ok(a) => Some(a),
+					Err(e) => {
+						error!(
+							"foreign_listener got invalid foreign listen address {}, {}",
+							addr, e
+						);
+						None
+					}
+				},
 				None => None,
 			};
 
@@ -1337,9 +1347,9 @@ where
 		let future = Self::call_api(req, api);
 		Box::pin(future)
 	};
-		let res = crate::executor::RunHandlerInThread::new(handler).await?;
+		let res = crate::executor::RunHandlerInThread::new(handler)?.await?;
 
-		Ok(json_response_pretty(&res))
+		Ok(json_response_pretty(&res)?)
 	}
 }
 
@@ -1364,7 +1374,13 @@ where
 	}
 
 	fn options(&self, _req: Request<Body>) -> ResponseFuture {
-		Box::pin(async { Ok(create_ok_response("{}")) })
+		Box::pin(async {
+			let res = match create_ok_response("{}") {
+				Ok(r) => r,
+				Err(e) => create_error_response(e),
+			};
+			Ok(res)
+		})
 	}
 }
 
@@ -1413,7 +1429,7 @@ impl OwnerV3Helpers {
 
 	/// whether encryption is enabled
 	pub fn encryption_enabled(key: Arc<Mutex<Option<SecretKey>>>) -> bool {
-		let share_key_ref = key.lock().expect("Mutex failure");
+		let share_key_ref = key.lock().unwrap_or_else(|e| e.into_inner());
 		share_key_ref.is_some()
 	}
 
@@ -1440,7 +1456,7 @@ impl OwnerV3Helpers {
 		new_key: Option<SecretKey>,
 	) {
 		if let Some(_) = val["result"]["Ok"].as_str() {
-			let mut share_key_ref = key.lock().expect("Mutex failure");
+			let mut share_key_ref = key.lock().unwrap_or_else(|e| e.into_inner());
 			*share_key_ref = new_key;
 		}
 	}
@@ -1458,7 +1474,7 @@ impl OwnerV3Helpers {
 				Err(_) => return,
 			};
 
-			let mut shared_mask_ref = mask.lock().expect("Mutext failure");
+			let mut shared_mask_ref = mask.lock().unwrap_or_else(|e| e.into_inner());
 			*shared_mask_ref = Some(sk);
 		}
 	}
@@ -1468,16 +1484,18 @@ impl OwnerV3Helpers {
 		key: Arc<Mutex<Option<SecretKey>>>,
 		req: &serde_json::Value,
 	) -> Result<(JsonId, serde_json::Value), serde_json::Value> {
-		let share_key_ref = key.lock().expect("Mutex failure");
-		if share_key_ref.is_none() {
-			return Err(EncryptionErrorResponse::new(
-				1,
-				-32002,
-				"Encrypted request internal error",
-			)
-			.as_json_value());
-		}
-		let shared_key = share_key_ref.as_ref().unwrap();
+		let share_key_ref = key.lock().unwrap_or_else(|e| e.into_inner());
+		let shared_key = match &*share_key_ref {
+			Some(k) => k,
+			None => {
+				return Err(EncryptionErrorResponse::new(
+					1,
+					-32002,
+					"Encrypted request internal error",
+				)
+				.as_json_value())
+			}
+		};
 		let enc_req: EncryptedRequest = serde_json::from_value(req.clone()).map_err(|e| {
 			EncryptionErrorResponse::new(
 				1,
@@ -1500,16 +1518,18 @@ impl OwnerV3Helpers {
 		id: &JsonId,
 		res: &serde_json::Value,
 	) -> Result<serde_json::Value, serde_json::Value> {
-		let share_key_ref = key.lock().expect("Mutex failure");
-		if share_key_ref.is_none() {
-			return Err(EncryptionErrorResponse::new(
-				1,
-				-32002,
-				"Encrypted response internal error",
-			)
-			.as_json_value());
-		}
-		let shared_key = share_key_ref.as_ref().unwrap();
+		let share_key_ref = key.lock().unwrap_or_else(|e| e.into_inner());
+		let shared_key = match &*share_key_ref {
+			Some(k) => k,
+			None => {
+				return Err(EncryptionErrorResponse::new(
+					1,
+					-32002,
+					"Encrypted request internal error",
+				)
+				.as_json_value())
+			}
+		};
 		let enc_res = EncryptedResponse::from_json(id, res, &shared_key).map_err(|e| {
 			EncryptionErrorResponse::new(1, -32003, &format!("Encryption Error: {}", e))
 				.as_json_value()
@@ -1673,7 +1693,10 @@ where
 					OwnerV3Helpers::update_owner_api_shared_key(
 						key.clone(),
 						&unencrypted_intercept,
-						api.shared_key.lock().expect("Mutex failure").clone(),
+						api.shared_key
+							.lock()
+							.unwrap_or_else(|e| e.into_inner())
+							.clone(),
 					);
 				}
 				Ok(r)
@@ -1699,10 +1722,14 @@ where
 		let future = Self::call_api(req, key, mask, running_foreign, api);
 		Box::pin(future)
 	};
-		let res = crate::executor::RunHandlerInThread::new(handler).await?;
+		let res = crate::executor::RunHandlerInThread::new(handler)?.await?;
 
 		//let res = Self::call_api(req, key, mask, running_foreign, api).await?;
-		Ok(json_response_pretty(&res))
+		let res = match json_response_pretty(&res) {
+			Ok(r) => r,
+			Err(e) => create_error_response(e),
+		};
+		Ok(res)
 	}
 }
 
@@ -1730,7 +1757,13 @@ where
 	}
 
 	fn options(&self, _req: Request<Body>) -> ResponseFuture {
-		Box::pin(async { Ok(create_ok_response("{}")) })
+		Box::pin(async {
+			let res = match create_ok_response("{}") {
+				Ok(r) => r,
+				Err(e) => create_error_response(e),
+			};
+			Ok(res)
+		})
 	}
 }
 /// V2 API Handler/Wrapper for foreign functions
@@ -1801,8 +1834,8 @@ where
 		let future = Self::call_api(req, api);
 		Box::pin(future)
 	};
-		let res = crate::executor::RunHandlerInThread::new(handler).await?;
-		Ok(json_response_pretty(&res))
+		let res = crate::executor::RunHandlerInThread::new(handler)?.await?;
+		Ok(json_response_pretty(&res)?)
 	}
 }
 
@@ -1813,7 +1846,11 @@ where
 	K: Keychain + 'static,
 {
 	fn post(&self, req: Request<Body>) -> ResponseFuture {
-		let mask = self.keychain_mask.lock().expect("Mutext failure").clone();
+		let mask = self
+			.keychain_mask
+			.lock()
+			.unwrap_or_else(|e| e.into_inner())
+			.clone();
 		let wallet = self.wallet.clone();
 
 		Box::pin(async move {
@@ -1828,13 +1865,19 @@ where
 	}
 
 	fn options(&self, _req: Request<Body>) -> ResponseFuture {
-		Box::pin(async { Ok(create_ok_response("{}")) })
+		Box::pin(async {
+			let res = match create_ok_response("{}") {
+				Ok(r) => r,
+				Err(e) => create_error_response(e),
+			};
+			Ok(res)
+		})
 	}
 }
 
 // Utility to serialize a struct into JSON and produce a sensible Response
 // out of it.
-fn _json_response<T>(s: &T) -> Response<Body>
+fn _json_response<T>(s: &T) -> Result<Response<Body>, Error>
 where
 	T: Serialize,
 {
@@ -1848,7 +1891,7 @@ where
 }
 
 // pretty-printed version of above
-fn json_response_pretty<T>(s: &T) -> Response<Body>
+fn json_response_pretty<T>(s: &T) -> Result<Response<Body>, Error>
 where
 	T: Serialize,
 {
@@ -1873,7 +1916,7 @@ fn create_error_response(e: Error) -> Response<Body> {
 		.unwrap()
 }
 
-fn create_ok_response(json: &str) -> Response<Body> {
+fn create_ok_response(json: &str) -> Result<Response<Body>, Error> {
 	Response::builder()
 		.status(StatusCode::OK)
 		.header("access-control-allow-origin", "*")
@@ -1883,14 +1926,14 @@ fn create_ok_response(json: &str) -> Response<Body> {
 		)
 		.header(hyper::header::CONTENT_TYPE, "application/json")
 		.body(json.to_string().into())
-		.unwrap()
+		.map_err(|e| Error::IO(format!("Unable to build a response, {}", e)))
 }
 
 /// Build a new hyper Response with the status code and body provided.
 ///
 /// Whenever the status code is `StatusCode::OK` the text parameter should be
 /// valid JSON as the content type header will be set to `application/json'
-fn response<T: Into<Body>>(status: StatusCode, text: T) -> Response<Body> {
+fn response<T: Into<Body>>(status: StatusCode, text: T) -> Result<Response<Body>, Error> {
 	let mut builder = Response::builder()
 		.status(status)
 		.header("access-control-allow-origin", "*")
@@ -1903,7 +1946,9 @@ fn response<T: Into<Body>>(status: StatusCode, text: T) -> Response<Body> {
 		builder = builder.header(hyper::header::CONTENT_TYPE, "application/json");
 	}
 
-	builder.body(text.into()).unwrap()
+	builder
+		.body(text.into())
+		.map_err(|e| Error::IO(format!("Unable to build a response, {}", e)))
 }
 
 async fn parse_body<T>(req: Request<Body>) -> Result<T, Error>

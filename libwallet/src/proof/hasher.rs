@@ -62,8 +62,17 @@ impl BIP32Hasher for BIP32MwcboxHasher {
 	fn master_seed() -> [u8; 12] {
 		b"Grinbox_seed".to_owned()
 	}
-	fn init_sha512(&mut self, seed: &[u8]) {
-		self.hmac_sha512 = HmacSha512::new_from_slice(seed).expect("HMAC can take key of any size");
+	fn init_sha512(
+		&mut self,
+		seed: &[u8],
+	) -> Result<(), mwc_wallet_util::mwc_keychain::extkey_bip32::Error> {
+		self.hmac_sha512 = HmacSha512::new_from_slice(seed).map_err(|e| {
+			mwc_wallet_util::mwc_keychain::extkey_bip32::Error::Generic(format!(
+				"Unable to build sha512 for seed, {}",
+				e
+			))
+		})?;
+		Ok(())
 	}
 	fn append_sha512(&mut self, value: &[u8]) {
 		self.hmac_sha512.update(value);
@@ -99,7 +108,7 @@ pub fn derive_address_key<K: Keychain>(
 	index: u32,
 ) -> Result<SecretKey, Error> {
 	let root = keychain
-		.derive_key(713, &K::root_key_id(), SwitchCommitmentType::Regular)
+		.derive_key(713, &K::root_key_id()?, SwitchCommitmentType::Regular)
 		.map_err(|e| Error::DeriveKeyError(format!("Derive key error, {}", e)))?;
 	let mut hasher = BIP32MwcboxHasher::new(is_floonet(context_id));
 	let secp = keychain.secp();

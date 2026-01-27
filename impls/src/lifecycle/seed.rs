@@ -218,8 +218,8 @@ impl WalletSeed {
 			None => WalletSeed::init_new(seed_length),
 		};
 
-		if passed_seed.is_some() {
-			seed = passed_seed.unwrap();
+		if let Some(s) = passed_seed {
+			seed = s;
 		}
 
 		if write_seed {
@@ -333,7 +333,8 @@ impl EncryptedWalletSeed {
 		for _ in 0..suffix_len {
 			enc_bytes.push(0);
 		}*/
-		let unbound_key = aead::UnboundKey::new(&aead::CHACHA20_POLY1305, &key).unwrap();
+		let unbound_key = aead::UnboundKey::new(&aead::CHACHA20_POLY1305, &key)
+			.map_err(|e| Error::GenericError(format!("Fail to build unbound key, {}", e)))?;
 		let sealing_key: aead::LessSafeKey = aead::LessSafeKey::new(unbound_key);
 		let aad = aead::Aad::from(&[]);
 		sealing_key
@@ -372,7 +373,8 @@ impl EncryptedWalletSeed {
 
 		let mut n = [0u8; 12];
 		n.copy_from_slice(&nonce[0..12]);
-		let unbound_key = aead::UnboundKey::new(&aead::CHACHA20_POLY1305, &key).unwrap();
+		let unbound_key = aead::UnboundKey::new(&aead::CHACHA20_POLY1305, &key)
+			.map_err(|e| Error::GenericError(format!("Fail to build unbound key, {}", e)))?;
 		let opening_key: aead::LessSafeKey = aead::LessSafeKey::new(unbound_key);
 		let aad = aead::Aad::from(&[]);
 		opening_key

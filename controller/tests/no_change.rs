@@ -87,7 +87,10 @@ fn no_change_test_impl(test_dir: &str, inputs_num: usize) -> Result<(), wallet::
 		mask1,
 		4,
 		false,
-		tx_pool.lock().expect("Mutex failure").deref_mut(),
+		tx_pool
+			.lock()
+			.unwrap_or_else(|e| e.into_inner())
+			.deref_mut(),
 	);
 	let fee = core::libtx::tx_fee(0, inputs_num, 1, 1);
 
@@ -103,10 +106,10 @@ fn no_change_test_impl(test_dir: &str, inputs_num: usize) -> Result<(), wallet::
 			selection_strategy_is_use_all: false,
 			..Default::default()
 		};
-		slate = api.init_send_tx(m, &None, &args, 1)?;
+		slate = api.init_send_tx(m, None, &args, 1)?;
 		slate = client1.send_tx_slate_direct("wallet2", &slate)?;
-		api.tx_lock_outputs(m, &None, &slate, None, 0)?;
-		slate = api.finalize_tx(m, &None, &slate, true)?;
+		api.tx_lock_outputs(m, None, &slate, None, 0)?;
+		slate = api.finalize_tx(m, None, &slate, true)?;
 		assert!(slate.tx.clone().unwrap().body.inputs.len() == inputs_num);
 		assert!(slate.tx.clone().unwrap().body.outputs.len() == 1); // only destination output is expected, no change outputs
 		api.post_tx(m, slate.tx_or_err()?, false)?;
@@ -120,7 +123,10 @@ fn no_change_test_impl(test_dir: &str, inputs_num: usize) -> Result<(), wallet::
 		mask1,
 		1,
 		false,
-		tx_pool.lock().expect("Mutex failure").deref_mut(),
+		tx_pool
+			.lock()
+			.unwrap_or_else(|e| e.into_inner())
+			.deref_mut(),
 	);
 
 	// Refresh and check transaction log for wallet 1
@@ -143,7 +149,7 @@ fn no_change_test_impl(test_dir: &str, inputs_num: usize) -> Result<(), wallet::
 			amount: reward * inputs_num as u64 - fee,
 			..Default::default()
 		};
-		slate = api.issue_invoice_tx(m, &None, &args)?;
+		slate = api.issue_invoice_tx(m, None, &args)?;
 		Ok(())
 	})?;
 
@@ -158,8 +164,8 @@ fn no_change_test_impl(test_dir: &str, inputs_num: usize) -> Result<(), wallet::
 			selection_strategy_is_use_all: false,
 			..Default::default()
 		};
-		slate = api.process_invoice_tx(m, &None, &slate, &args)?;
-		api.tx_lock_outputs(m, &None, &slate, None, 1)?;
+		slate = api.process_invoice_tx(m, None, &slate, &args)?;
+		api.tx_lock_outputs(m, None, &slate, None, 1)?;
 		assert!(slate.tx.clone().unwrap().body.inputs.len() == inputs_num);
 		assert!(slate.tx.clone().unwrap().body.outputs.len() == 1); // only destination output is expected, no change outputs
 		Ok(())
@@ -168,7 +174,7 @@ fn no_change_test_impl(test_dir: &str, inputs_num: usize) -> Result<(), wallet::
 	// wallet 2 finalizes and posts
 	wallet::controller::foreign_single_use(wallet2.clone(), mask2_i.clone(), |api| {
 		// Wallet 2 receives the invoice transaction
-		slate = api.finalize_invoice_tx(&None, &slate)?;
+		slate = api.finalize_invoice_tx(None, &slate)?;
 		Ok(())
 	})?;
 	wallet::controller::owner_single_use(Some(wallet2.clone()), mask1, None, |api, m| {
@@ -183,7 +189,10 @@ fn no_change_test_impl(test_dir: &str, inputs_num: usize) -> Result<(), wallet::
 		mask1,
 		1,
 		false,
-		tx_pool.lock().expect("Mutex failure").deref_mut(),
+		tx_pool
+			.lock()
+			.unwrap_or_else(|e| e.into_inner())
+			.deref_mut(),
 	);
 
 	// Refresh and check transaction log for wallet 1

@@ -54,7 +54,7 @@ lazy_static! {
 pub fn owner_swap_clean_context(context_id: u32) {
 	let _ = ONLINE_OFFERS
 		.write()
-		.expect("Mutex failure")
+		.unwrap_or_else(|e| e.into_inner())
 		.remove(&context_id);
 }
 
@@ -62,13 +62,9 @@ pub fn owner_swap_clean_context(context_id: u32) {
 pub fn add_published_offer(context_id: u32, offer_id: String, message_uuid: Uuid) {
 	let mut offers = ONLINE_OFFERS.write().expect("Mutex Failure");
 
-	if !offers.contains_key(&context_id) {
-		offers.insert(context_id, HashMap::new());
-	}
-
 	offers
-		.get_mut(&context_id)
-		.unwrap()
+		.entry(context_id)
+		.or_insert_with(|| HashMap::new())
 		.insert(offer_id, message_uuid);
 }
 
@@ -76,7 +72,7 @@ pub fn add_published_offer(context_id: u32, offer_id: String, message_uuid: Uuid
 pub fn remove_published_offer(context_id: u32, message_uuid: &Uuid) {
 	ONLINE_OFFERS
 		.write()
-		.expect("Mutex Failure")
+		.unwrap_or_else(|e| e.into_inner())
 		.get_mut(&context_id)
 		.map(|offers| offers.retain(|_k, v| v != message_uuid));
 }
@@ -84,7 +80,7 @@ pub fn remove_published_offer(context_id: u32, message_uuid: &Uuid) {
 fn get_swap_storage_key<K: Keychain>(keychain: &K) -> Result<SecretKey, Error> {
 	Ok(keychain.derive_key(
 		0,
-		&ExtKeychainPath::new(3, 3, 2, 1, 0).to_identifier(),
+		&ExtKeychainPath::new(3, 3, 2, 1, 0).to_identifier()?,
 		SwitchCommitmentType::None,
 	)?)
 }
@@ -117,8 +113,11 @@ where
 
 	let mut outs: HashMap<String, u64> = outputs
 		.iter()
-		.filter(|o| o.output.commit.is_some())
-		.map(|o| (o.output.commit.clone().unwrap(), o.output.value))
+		.map(|o| match &o.output.commit {
+			Some(commit) => Some((commit.clone(), o.output.value)),
+			None => None,
+		})
+		.flatten()
 		.collect();
 
 	wallet_lock!(wallet_inst, w);
@@ -138,9 +137,8 @@ where
 	let mut swap_reserved_amount = 0;
 	let mut swap_reserved_gas_amount = 0.0;
 
-	if params.outputs.is_some() {
-		let outputs_to_use: HashSet<String> =
-			params.outputs.clone().unwrap().iter().cloned().collect();
+	if let Some(outputs) = &params.outputs {
+		let outputs_to_use: HashSet<String> = outputs.iter().cloned().collect();
 		outs.retain(|k, _| outputs_to_use.contains(k));
 	} else {
 		// Searching to swaps that are started, but not locked
@@ -613,7 +611,7 @@ where
 					&swap.erc20_swap_contract_address,
 				)?;
 
-				if eth_infura_project_id.is_some() {
+				if let Some(eth_infura_project_id) = &eth_infura_project_id {
 					let swap_api: Box<dyn SwapApi<K>> = crate::swap::api::create_eth_instance(
 						context_id,
 						&swap.secondary_currency,
@@ -621,7 +619,7 @@ where
 						ethereum_wallet,
 						eth_swap_contract_address,
 						erc20_swap_contract_address,
-						eth_infura_project_id.clone().unwrap(),
+						eth_infura_project_id.clone(),
 					)?;
 					swap_api.test_client_connections()?;
 				}
@@ -632,27 +630,20 @@ where
 			}
 		},
 		"destination" => {
-			if method.is_none() || destination.is_none() {
-				return Err(Error::Generic(
-					"Please define both '--method' and '--dest' values".to_string(),
-				));
-			}
-			let method = method.unwrap();
+			let method =
+				method.ok_or(Error::Generic("Please define '--method' value".to_string()))?;
+			let destination =
+				destination.ok_or(Error::Generic("Please define '--dest' value".to_string()))?;
 
 			swap.communication_method = method;
-			swap.communication_address = destination.unwrap();
+			swap.communication_address = destination;
 			trades::store_swap_trade(context_id, &context, &swap, &skey, &*swap_lock)?;
 			return Ok((swap.state.clone(), Action::None));
 		}
 		"secondary_address" => {
-			if secondary_address.is_none() {
-				return Err(Error::Generic(
-					"Please define '--buyer_refund_address' or '--secondary_address' values"
-						.to_string(),
-				));
-			}
-
-			let secondary_address = secondary_address.unwrap();
+			let secondary_address = secondary_address.ok_or(Error::Generic(
+				"Please define '--buyer_refund_address' or '--secondary_address' values".into(),
+			))?;
 			swap.secondary_currency
 				.validate_address(context_id, &secondary_address)?;
 
@@ -669,13 +660,9 @@ where
 			return Ok((swap.state.clone(), Action::None));
 		}
 		"secondary_fee" => {
-			if secondary_fee.is_none() {
-				return Err(Error::Generic(
-					"Please define '--secondary_fee' values".to_string(),
-				));
-			}
-
-			let secondary_fee = secondary_fee.unwrap();
+			let secondary_fee = secondary_fee.ok_or(Error::Generic(
+				"Please define '--secondary_fee' values".to_string(),
+			))?;
 			if secondary_fee <= 0.0 {
 				return Err(Error::Generic(
 					"Please define positive '--secondary_fee' value".to_string(),
@@ -1071,22 +1058,15 @@ pub fn cancel_trades_by_tag<'a, K>(
 where
 	K: Keychain + 'a,
 {
-	if win_swap.tag.is_none() {
-		return Ok(vec![]);
-	}
-
-	if mwc_wallet_util::mwc_util::is_console_output_enabled() {
-		println!(
-			"Winning Trade with SwapId {} and tag {}",
-			win_swap.id,
-			win_swap.tag.clone().unwrap()
-		);
-	} else {
-		info!(
-			"Winning Trade with SwapId {} and tag {}",
-			win_swap.id,
-			win_swap.tag.clone().unwrap()
-		);
+	match &win_swap.tag {
+		Some(tag) => {
+			if mwc_wallet_util::mwc_util::is_console_output_enabled() {
+				println!("Winning Trade with SwapId {} and tag {}", win_swap.id, tag);
+			} else {
+				info!("Winning Trade with SwapId {} and tag {}", win_swap.id, tag);
+			}
+		}
+		None => return Ok(vec![]),
 	}
 
 	let swap_id = trades::list_swap_trades(context_id)?;
@@ -1418,11 +1398,12 @@ where
 		vec![]
 	};
 
-	if process_respond.action.is_none() {
-		return Ok((process_respond, cancelled_swaps));
-	}
+	let action = match &process_respond.action {
+		None => return Ok((process_respond, cancelled_swaps)),
+		Some(action) => action.clone(),
+	};
 
-	match process_respond.action.clone().unwrap() {
+	match action {
 		Action::SellerSendOfferMessage(message)
 		| Action::BuyerSendAcceptOfferMessage(message)
 		| Action::BuyerSendInitRedeemMessage(message)
@@ -1436,7 +1417,9 @@ where
 				fsm.process(Input::Execute, swap, &context, &tx_conf, keychain.secp())?;
 			swap.append_to_last_message(&format!(", {}", dest_str));
 			if has_ack {
-				match process_respond.action.clone().unwrap() {
+				match process_respond.action.ok_or(Error::Generic(
+					"swap_process_impl internal error, process_respond.action is empty".into(),
+				))? {
 					Action::SellerSendOfferMessage(_) | Action::BuyerSendAcceptOfferMessage(_) => {
 						swap.ack_msg1()
 					}
@@ -1484,7 +1467,7 @@ where
 			wallet_lock!(wallet_inst, w);
 			// Checking if transaction is already created.
 			let kernel = &swap.lock_slate.slate.tx_or_err()?.body.kernels[0].excess;
-			if w.tx_log_iter()
+			if w.tx_log_iter()?
 				.filter(|tx| tx.kernel_excess.filter(|c| c == kernel).is_some())
 				.count() == 0
 			{
@@ -1505,7 +1488,7 @@ where
 				selection::lock_tx_context(
 					&mut **w,
 					keychain_mask,
-					&None,
+					&mut None,
 					&swap.lock_slate.slate,
 					tx_conf.mwc_tip,
 					&slate_context,
@@ -1532,7 +1515,7 @@ where
 
 			// Checking if this transaction already exist
 			let kernel = &swap.redeem_slate.slate.tx_or_err()?.body.kernels[0].excess;
-			if w.tx_log_iter()
+			if w.tx_log_iter()?
 				.filter(|tx| tx.kernel_excess.filter(|c| c == kernel).is_some())
 				.count() == 0
 			{
@@ -1555,7 +1538,7 @@ where
 			wallet_lock!(wallet_inst, w);
 
 			let kernel = &swap.refund_slate.slate.tx_or_err()?.body.kernels[0].excess;
-			if w.tx_log_iter()
+			if w.tx_log_iter()?
 				.filter(|tx| tx.kernel_excess.filter(|c| c == kernel).is_some())
 				.count() == 0
 			{
@@ -1712,7 +1695,7 @@ where
 		root_key_id: parent_key_id.clone(),
 		key_id: output_key_id.clone(),
 		mmr_index: None,
-		n_child: output_key_id.to_path().last_path_index(),
+		n_child: output_key_id.to_path()?.last_path_index(),
 		commit: Some(to_hex(&slate.tx_or_err()?.outputs_committed()[0].0)),
 		value: slate.amount,
 		status: OutputStatus::Unconfirmed,
@@ -1817,7 +1800,7 @@ where
 
 		if ONLINE_OFFERS
 			.read()
-			.expect("Mutex failure")
+			.unwrap_or_else(|e| e.into_inner())
 			.get(&context_id)
 			.map(|offers| offers.contains_key(&offer_id))
 			.unwrap_or(false)

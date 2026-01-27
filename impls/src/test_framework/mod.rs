@@ -33,7 +33,6 @@ use chrono::Duration;
 use mwc_wallet_libwallet::types::TxSession;
 use mwc_wallet_libwallet::wallet_lock;
 use mwc_wallet_util::mwc_core::consensus::HeaderDifficultyInfo;
-use std::cell::RefCell;
 use std::collections::{HashSet, VecDeque};
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -117,7 +116,7 @@ fn get_blocks_by_height_local(
 	let mut res: Vec<BlockPrintable> = Vec::new();
 
 	for height in start_index..=end_index {
-		let hash = chain.get_header_by_height(height).unwrap().hash();
+		let hash = chain.get_header_by_height(height).unwrap().hash().unwrap();
 		let block = chain.get_block(&hash).unwrap();
 		res.push(BlockPrintable::from_block(&block, &chain, true, false).unwrap());
 	}
@@ -199,7 +198,7 @@ where
 	};
 	// build coinbase (via api) and add block
 	let (coinbase_tx, context_id) = {
-		let mut w_lock = wallet.lock().expect("Mutex failure");
+		let mut w_lock = wallet.lock().unwrap_or_else(|e| e.into_inner());
 		let w = w_lock.lc_provider()?.wallet_inst()?;
 		(
 			foreign::build_coinbase(&mut **w, keychain_mask, &block_fees, false)?,
@@ -282,7 +281,7 @@ where
 	C: NodeClient + 'a,
 	K: keychain::Keychain + 'a,
 {
-	let tx_session = Some(RefCell::new(TxSession::new()));
+	let mut tx_session = TxSession::new();
 	let (slate, client) = {
 		wallet_lock!(wallet, w);
 		// Caller need to update the wallet first
@@ -302,7 +301,7 @@ where
 			let slate_i = owner::init_send_tx(
 				&mut **w,
 				keychain_mask,
-				&tx_session,
+				&mut Some(&mut tx_session),
 				&args,
 				test_mode,
 				routputs,
@@ -311,7 +310,7 @@ where
 			owner::tx_lock_outputs(
 				&mut **w,
 				keychain_mask,
-				&tx_session,
+				&mut Some(&mut tx_session),
 				&slate,
 				Some(String::from(dest)),
 				0,
@@ -320,7 +319,7 @@ where
 			let (slate, _) = owner::finalize_tx(
 				&mut **w,
 				keychain_mask,
-				&tx_session,
+				&mut Some(&mut tx_session),
 				&slate,
 				false,
 				true,
@@ -334,17 +333,9 @@ where
 	owner::post_tx(&client, slate.tx_or_err()?, false)?; // mines a block
 
 	{
-		debug_assert!(tx_session
-			.as_ref()
-			.unwrap()
-			.borrow()
-			.get_context_participant()
-			.is_none());
+		debug_assert!(tx_session.get_context_participant().is_none());
 		wallet_lock!(wallet, w);
-		tx_session
-			.unwrap()
-			.borrow_mut()
-			.save_tx_data(&mut **w, keychain_mask, &slate.id)?;
+		tx_session.save_tx_data(&mut **w, keychain_mask, &slate.id)?;
 	}
 	Ok(())
 }

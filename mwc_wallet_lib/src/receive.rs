@@ -74,7 +74,7 @@ pub fn receive(
 		let (slate, _) = foreign::receive_tx(
 			&mut **w,
 			None,
-			&None,
+			None,
 			&slate,
 			sender.map(|p| ProvableAddress::from_tor_pub_key(&p).public_key),
 			None,

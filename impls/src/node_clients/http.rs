@@ -63,7 +63,12 @@ where
 
 	// Return none is cached value not set of epired
 	fn get_value(&self, key: &K) -> Option<T> {
-		match self.data.write().expect("RwLock failure").get(key) {
+		match self
+			.data
+			.write()
+			.unwrap_or_else(|e| e.into_inner())
+			.get(key)
+		{
 			Some((data, time)) => {
 				if time.elapsed().as_millis() > CACHE_VALID_TIME_MS {
 					return None;
@@ -77,12 +82,12 @@ where
 	fn set_value(&self, key: K, value: T) {
 		self.data
 			.write()
-			.expect("RwLock failure")
+			.unwrap_or_else(|e| e.into_inner())
 			.insert(key, (value, Instant::now()));
 	}
 
 	fn clean(&self) {
-		self.data.write().expect("RwLock failure").clear();
+		self.data.write().unwrap_or_else(|e| e.into_inner()).clear();
 	}
 }
 
@@ -619,7 +624,7 @@ impl NodeClient for HTTPNodeClient {
 		assert!(start_height <= end_height);
 
 		let mut result_blocks: Vec<api::BlockPrintable> = Vec::new();
-		let rt = Builder::new_current_thread().enable_all().build().unwrap();
+		let rt = Builder::new_current_thread().enable_all().build()?;
 		let mut height = start_height;
 
 		while height <= end_height {
@@ -893,9 +898,9 @@ mod tests {
 	// We will need to revisit this if we decide to support "commit only" inputs (no features) at wallet level.
 	fn tx1i1o_v2_compatible() -> Transaction {
 		let keychain = ExtKeychain::from_random_seed(false).unwrap();
-		let builder = ProofBuilder::new(&keychain);
-		let key_id1 = ExtKeychain::derive_key_id(1, 1, 0, 0, 0);
-		let key_id2 = ExtKeychain::derive_key_id(1, 2, 0, 0, 0);
+		let builder = ProofBuilder::new(&keychain).unwrap();
+		let key_id1 = ExtKeychain::derive_key_id(1, 1, 0, 0, 0).unwrap();
+		let key_id2 = ExtKeychain::derive_key_id(1, 2, 0, 0, 0).unwrap();
 		let tx = build::transaction(
 			KernelFeatures::Plain { fee: 2.into() },
 			&[build::input(5, key_id1), build::output(3, key_id2)],

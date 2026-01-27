@@ -58,7 +58,7 @@ macro_rules! cli_message_inline {
 							print!(" {}", COLORED_PROMPT);
 							print!("\x1B[J");
 							print!("{}", *contents);
-							std::io::stdout().flush().unwrap();
+							let _ = std::io::stdout().flush();
 					/*} else {
 							info!($fmt_string, $( $arg ),*);
 					}*/
@@ -76,7 +76,7 @@ macro_rules! cli_message {
 							//print!("\r");
 							print!($fmt_string, $( $arg ),*);
 							println!();
-							std::io::stdout().flush().unwrap();
+							let _ = std::io::stdout().flush();
 					/*} else {
 							info!($fmt_string, $( $arg ),*);
 					}*/
@@ -152,7 +152,7 @@ where
 
 				// reset buffer
 				{
-					let mut contents = STDIN_CONTENTS.lock().expect("Mutex failure");
+					let mut contents = STDIN_CONTENTS.lock().unwrap_or_else(|e| e.into_inner());
 					*contents = String::from("");
 				}
 
@@ -170,13 +170,18 @@ where
 						// handle opening /closing separately
 						keychain_mask = match args.subcommand() {
 							("open", Some(args)) => {
-								let mut wallet_lock =
-									owner_api.wallet_inst.lock().expect("Mutex failure");
-								let lc = wallet_lock.lc_provider().unwrap();
+								let mut wallet_lock = owner_api
+									.wallet_inst
+									.lock()
+									.unwrap_or_else(|e| e.into_inner());
+								let lc = wallet_lock.lc_provider()?;
 
 								let mask = match lc.open_wallet(
 									None,
-									wallet_args::prompt_password(&global_wallet_args.password),
+									wallet_args::prompt_password(&global_wallet_args.password)
+										.map_err(|e| {
+											Error::IO(format!("Password prompt error, {}", e))
+										})?,
 									false,
 									false,
 									None,
@@ -200,7 +205,7 @@ where
 									&wallet_config.eth_swap_contract_address,
 									&wallet_config.erc20_swap_contract_address,
 									&wallet_config.eth_infura_project_id,
-								);
+								)?;
 
 								if wallet_opened {
 									let wallet_inst = lc.wallet_inst()?;
@@ -218,9 +223,11 @@ where
 								mask
 							}
 							("close", Some(_)) => {
-								let mut wallet_lock =
-									owner_api.wallet_inst.lock().expect("Mutex failure");
-								let lc = wallet_lock.lc_provider().unwrap();
+								let mut wallet_lock = owner_api
+									.wallet_inst
+									.lock()
+									.unwrap_or_else(|e| e.into_inner());
+								let lc = wallet_lock.lc_provider()?;
 								lc.close_wallet(None)?;
 								None
 							}
@@ -286,7 +293,7 @@ impl Completer for EditorHelper {
 
 impl Hinter for EditorHelper {
 	fn hint(&self, line: &str, _pos: usize, _ctx: &Context<'_>) -> Option<String> {
-		let mut contents = STDIN_CONTENTS.lock().expect("Mutex failure");
+		let mut contents = STDIN_CONTENTS.lock().unwrap_or_else(|e| e.into_inner());
 		*contents = line.into();
 		None
 	}

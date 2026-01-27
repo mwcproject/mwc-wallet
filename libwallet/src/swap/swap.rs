@@ -652,20 +652,23 @@ lazy_static! {
 pub fn set_testing_cur_time(cur_time: i64) {
 	CURRENT_TEST_TIME
 		.write()
-		.expect("RwLock failure")
+		.unwrap_or_else(|e| e.into_inner())
 		.replace(cur_time.clone());
 }
 
 #[cfg(test)]
 /// Remove test timer control for swaps. Will use current system time instead
 pub fn reset_testing_cur_time() {
-	CURRENT_TEST_TIME.write().expect("RwLock failure").take();
+	CURRENT_TEST_TIME
+		.write()
+		.unwrap_or_else(|e| e.into_inner())
+		.take();
 }
 
 #[cfg(test)]
 /// Current time. In release it is just a current time. In debug it is a test controlled time that allows us to validate the edge cases
 pub fn get_cur_time() -> i64 {
-	match *CURRENT_TEST_TIME.read().expect("RwLock failure") {
+	match *CURRENT_TEST_TIME.read().unwrap_or_else(|e| e.into_inner()) {
 		Some(time) => time,
 		None => Utc::now().timestamp(),
 	}

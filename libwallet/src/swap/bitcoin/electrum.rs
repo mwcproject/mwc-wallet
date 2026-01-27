@@ -301,7 +301,9 @@ impl ElectrumNodeClient {
 			));
 		}
 
-		let (c, t) = self.client.as_mut().unwrap();
+		let (c, t) = self.client.as_mut().ok_or(Error::Generic(
+			"Electrum client internal error, client is not initialized".into(),
+		))?;
 		let _ = replace(t, Instant::now());
 		Ok(c)
 	}

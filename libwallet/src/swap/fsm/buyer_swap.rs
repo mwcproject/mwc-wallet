@@ -26,7 +26,7 @@ use crate::swap::swap;
 use crate::swap::types::{check_txs_confirmed, Action, SwapTransactionsConfirmations};
 use crate::swap::{BuyApi, Context, Error, Swap, SwapApi};
 use crate::NodeClient;
-use chrono::{Local, TimeZone};
+use chrono::Local;
 use mwc_wallet_util::mwc_util::secp::Secp256k1;
 use std::marker::PhantomData;
 use std::sync::Arc;
@@ -46,7 +46,7 @@ impl State for BuyerOfferCreated {
 		StateId::BuyerOfferCreated
 	}
 	fn get_eta(&self, swap: &Swap, _secp: &Secp256k1) -> Option<StateEtaInfo> {
-		let dt = Local.timestamp_opt(swap.started.timestamp(), 0).unwrap();
+		let dt = swap.started.with_timezone(&Local);
 		let time_str = dt.format("%B %e %H:%M:%S").to_string();
 		Some(StateEtaInfo::new(&format!("Get an Offer at {}", time_str)))
 	}
@@ -154,15 +154,19 @@ where
 					if swap::get_cur_time() < time_limit {
 						self.message = swap.message1.clone();
 						if self.message.is_none() {
-							let sec_update = self
-								.swap_api
-								.build_accept_offer_message_secondary_update(&*self.keychain, swap);
+							let sec_update =
+								self.swap_api.build_accept_offer_message_secondary_update(
+									&*self.keychain,
+									swap,
+								)?;
 							self.message = Some(BuyApi::accept_offer_message(swap, sec_update)?);
 						}
 						Ok(
 							StateProcessRespond::new(StateId::BuyerSendingAcceptOfferMessage)
 								.action(Action::BuyerSendAcceptOfferMessage(
-									self.message.clone().unwrap(),
+									self.message.clone().ok_or(Error::Generic(
+										"Internal error, empty message value".into(),
+									))?,
 								))
 								.time_limit(time_limit),
 						)
@@ -184,7 +188,11 @@ where
 			Input::Execute => {
 				debug_assert!(self.message.is_some()); // Check expected to be called first
 				if swap.message1.is_none() {
-					swap.message1 = Some(self.message.clone().unwrap());
+					swap.message1 = Some(
+						self.message
+							.clone()
+							.ok_or(Error::Generic("Internal error, empty message value".into()))?,
+					);
 				}
 				swap.posted_msg1 = Some(swap::get_cur_time());
 				swap.add_journal_message("Response to offer message was sent back".to_string());
@@ -743,7 +751,9 @@ impl State for BuyerSendingInitRedeemMessage {
 						Ok(
 							StateProcessRespond::new(StateId::BuyerSendingInitRedeemMessage)
 								.action(Action::BuyerSendInitRedeemMessage(
-									self.message.clone().unwrap(),
+									self.message.clone().ok_or(Error::Generic(
+										"Internal error, empty message value".into(),
+									))?,
 								))
 								.time_limit(time_limit),
 						)
@@ -761,7 +771,11 @@ impl State for BuyerSendingInitRedeemMessage {
 			Input::Execute => {
 				debug_assert!(self.message.is_some()); // Check expected to be called first
 				if swap.message2.is_none() {
-					swap.message2 = Some(self.message.clone().unwrap());
+					swap.message2 = Some(
+						self.message
+							.clone()
+							.ok_or(Error::Generic("Internal error, empty message value".into()))?,
+					);
 				}
 				swap.posted_msg2 = Some(swap::get_cur_time());
 				swap.add_journal_message("Sent init redeem message".to_string());
@@ -1358,13 +1372,14 @@ where
 		StateId::BuyerPostingRefundForSecondary
 	}
 	fn get_eta(&self, swap: &Swap, _secp: &Secp256k1) -> Option<StateEtaInfo> {
+		let address = swap
+			.unwrap_buyer()
+			.map(|b| b.unwrap_or("XXXXXXX".to_string()))
+			.unwrap_or("XXXXXXX".to_string());
 		Some(
 			StateEtaInfo::new(&format!(
 				"Post {} Refund to address {}",
-				swap.secondary_currency,
-				swap.unwrap_buyer()
-					.unwrap()
-					.unwrap_or("XXXXXXX".to_string())
+				swap.secondary_currency, address
 			))
 			.start_time(swap.get_time_secondary_lock_publish()),
 		)
@@ -1391,13 +1406,14 @@ where
 				}
 
 				// Check if refund is already issued
-				if tx_conf.secondary_refund_conf.is_some()
-					&& (tx_conf.secondary_refund_conf.unwrap() > 0
-						|| !self.swap_api.is_secondary_tx_fee_changed(swap)?)
-				{
-					return Ok(StateProcessRespond::new(
-						StateId::BuyerWaitingForRefundConfirmations,
-					));
+				if let Some(secondary_refund_conf) = tx_conf.secondary_refund_conf {
+					if secondary_refund_conf > 0
+						|| !self.swap_api.is_secondary_tx_fee_changed(swap)?
+					{
+						return Ok(StateProcessRespond::new(
+							StateId::BuyerWaitingForRefundConfirmations,
+						));
+					}
 				}
 
 				Ok(
@@ -1473,12 +1489,13 @@ where
 		StateId::BuyerWaitingForRefundConfirmations
 	}
 	fn get_eta(&self, swap: &Swap, _secp: &Secp256k1) -> Option<StateEtaInfo> {
+		let address = swap
+			.unwrap_buyer()
+			.map(|b| b.unwrap_or("XXXXXXX".to_string()))
+			.unwrap_or("XXXXXXX".to_string());
 		Some(StateEtaInfo::new(&format!(
 			"Wait for {} Refund confirmations, address {}",
-			swap.secondary_currency,
-			swap.unwrap_buyer()
-				.unwrap()
-				.unwrap_or("XXXXXXX".to_string())
+			swap.secondary_currency, address,
 		)))
 	}
 	fn is_cancellable(&self) -> bool {
@@ -1573,10 +1590,13 @@ impl State for BuyerCancelledRefunded {
 		StateId::BuyerCancelledRefunded
 	}
 	fn get_eta(&self, swap: &Swap, _secp: &Secp256k1) -> Option<StateEtaInfo> {
+		let address = swap
+			.unwrap_buyer()
+			.map(|b| b.unwrap_or("XXXXXXX".to_string()))
+			.unwrap_or("XXXXXXX".to_string());
 		Some(StateEtaInfo::new(&format!(
 			"Swap is cancelled, {} refund is redeemed to address {}",
-			swap.secondary_currency,
-			swap.unwrap_buyer().unwrap().unwrap_or("XXXXXX".to_string())
+			swap.secondary_currency, address,
 		)))
 	}
 	fn is_cancellable(&self) -> bool {
