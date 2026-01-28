@@ -45,6 +45,7 @@ use mwc_wallet_util::mwc_core::global::ChainTypes;
 use mwc_wallet_util::mwc_keychain::Identifier;
 use mwc_wallet_util::mwc_node_lib::ffi::LIB_CALLBACKS;
 use mwc_wallet_util::mwc_node_workflow::context::{allocate_new_context, release_context};
+use mwc_wallet_util::mwc_p2p::tor::arti;
 use mwc_wallet_util::mwc_p2p::tor::arti::is_arti_healthy;
 use mwc_wallet_util::mwc_p2p::TorConfig;
 use mwc_wallet_util::mwc_util::static_secp_instance;
@@ -249,9 +250,16 @@ fn process_request(input: String) -> Result<Value, String> {
 				.insert(context_id, config);
 			json!({"context_id" : context_id})
 		}
+		// Stop active scan operations. It is a long waiting time to finish scan, we don't want app be unresponsive
+		"stop_running_scan" => {
+			let context_id = get_param(&params, "context_id")?;
+			mwc_wallet_libwallet::internal::scan::interrupt_scan(context_id);
+			json!({})
+		}
 		// Release all resources associated with this wallet.
 		"release_wallet" => {
 			let context_id = get_param(&params, "context_id")?;
+			arti::release_arti_cancelling(context_id);
 			release_wallet_context(context_id);
 			release_wallet(context_id);
 			release_context(context_id).map_err(|e| format!("Unable to release context, {}", e))?;

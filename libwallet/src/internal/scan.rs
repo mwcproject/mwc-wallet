@@ -42,7 +42,7 @@ use mwc_wallet_util::mwc_core::consensus::DAY_HEIGHT;
 use std::cmp;
 use std::collections::{HashMap, HashSet};
 use std::sync::mpsc::Sender;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 use uuid::Uuid;
 // Wallet - node sync up strategy. We can request blocks from the node and analyze them. 1 week of blocks can be requested in theory.
 // Or we can validate tx kernels, outputs e.t.c
@@ -56,6 +56,35 @@ const OUTPUT_TO_BLOCK: usize = 100;
 // How many parallel requests to use for the blocks. We don't want to be very aggressive because
 // of the node load. 4 is a reasonable number
 const SYNC_BLOCKS_THREADS: usize = 4;
+
+lazy_static! {
+	static ref SCAN_INTERRUPT: RwLock<HashMap<u32, bool>> = RwLock::new(HashMap::new());
+}
+
+/// Clean up the scan interruption flag
+pub fn release_interrupt_scan(context_id: u32) {
+	SCAN_INTERRUPT
+		.write()
+		.unwrap_or_else(|e| e.into_inner())
+		.remove(&context_id);
+}
+
+/// Set interruption flag, so all scans will be interrupted, so no waiting will be introduced
+pub fn interrupt_scan(context_id: u32) {
+	SCAN_INTERRUPT
+		.write()
+		.unwrap_or_else(|e| e.into_inner())
+		.insert(context_id, true);
+}
+
+fn is_scan_interrupted(context_id: u32) -> bool {
+	SCAN_INTERRUPT
+		.read()
+		.unwrap_or_else(|e| e.into_inner())
+		.get(&context_id)
+		.cloned()
+		.unwrap_or(false)
+}
 
 /// Utility struct for return values from below
 #[derive(Debug, Clone)]
@@ -177,6 +206,10 @@ where
 	let legacy_version = HeaderVersion(1);
 
 	for output in outputs.iter() {
+		if is_scan_interrupted(context_id) {
+			return Err(Error::Interrupted);
+		}
+
 		let (commit, proof, is_coinbase, height, mmr_index) = output;
 		// attempt to unwind message from the RP and get a value
 		// will fail if it's not ours
@@ -304,6 +337,10 @@ where
 	let secp = Secp256k1::with_caps(ContextFlag::VerifyOnly);
 
 	loop {
+		if is_scan_interrupted(context_id) {
+			return Err(Error::Interrupted);
+		}
+
 		let (highest_index, last_retrieved_index, outputs) =
 			client.get_outputs_by_pmmr_index(start_index, end_index, batch_size)?;
 
@@ -392,6 +429,10 @@ where
 		}
 	}
 	loop {
+		if is_scan_interrupted(context_id) {
+			return Err(Error::Interrupted);
+		}
+
 		let (highest_index, last_retrieved_index, outputs) =
 			client.get_outputs_by_pmmr_index(start_index, end_index, batch_size)?;
 
@@ -671,6 +712,8 @@ where
 	// In any case we can't use it for recovering.
 	let mut last_output = String::new();
 
+	let context_id = wallet.get_context_id();
+
 	// Wallet's transactions with extended info
 	// Key: transaction uuid
 	let mut transactions: HashMap<TxUuidPlus, WalletTxInfo> = HashMap::new();
@@ -686,6 +729,10 @@ where
 			if w_out.is_spendable() {
 				spendable_outputs += 1;
 			}
+		}
+
+		if is_scan_interrupted(context_id) {
+			return Err(Error::Interrupted);
 		}
 
 		// Key: id + tx.parent_key_id
@@ -738,6 +785,10 @@ where
 			transactions.insert(wtx.tx_uuid.clone(), wtx);
 		}
 
+		if is_scan_interrupted(context_id) {
+			return Err(Error::Interrupted);
+		}
+
 		// Propagate tx to output mapping to outputs
 		for tx in transactions.values() {
 			// updated output vs Transactions mapping
@@ -758,6 +809,10 @@ where
 
 		let height_deep_limit =
 			SYNC_BLOCKS_DEEPNESS + not_confirmed_txs / 2 + spendable_outputs / OUTPUT_TO_BLOCK;
+
+		if is_scan_interrupted(context_id) {
+			return Err(Error::Interrupted);
+		}
 
 		// We need to choose a strategy. If there are few blocks, it is really make sense request those blocks
 		if !do_full_outputs_refresh && (end_height - start_height <= height_deep_limit as u64) {
@@ -809,6 +864,10 @@ where
 					end_height,
 					cur_height + (SYNC_BLOCKS_THREADS * SYNC_BLOCKS_THREADS - 1) as u64,
 				);
+
+				if is_scan_interrupted(context_id) {
+					return Err(Error::Interrupted);
+				}
 
 				// printing the progress
 				if let Some(ref s) = status_send_channel {
@@ -1007,6 +1066,10 @@ where
 				let _ = s.send(StatusMessage::Scanning(show_progress, msg, 99));
 			}
 
+			if is_scan_interrupted(context_id) {
+				return Err(Error::Interrupted);
+			}
+
 			// Validate kernels from transaction. Kernel are a source of truth
 			let client = wallet.w2n_client().clone();
 			for tx in transactions.values_mut() {
@@ -1080,6 +1143,10 @@ where
 					wallet_outputs_to_check.chunks(100).collect();
 
 				let mut chunk_num = 0;
+
+				if is_scan_interrupted(context_id) {
+					return Err(Error::Interrupted);
+				}
 
 				for chunk in &slices {
 					if let Some(ref s) = status_send_channel {

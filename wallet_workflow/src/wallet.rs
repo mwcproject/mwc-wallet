@@ -24,6 +24,7 @@ pub fn init_wallet_context(context_id: u32) {
 	mwc_wallet_controller::command::auto_swaps_clean_context(context_id);
 	mwc_wallet_controller::controller::foreign_owner_api_clean_context(context_id);
 	mwc_wallet_controller::controller::reset_foreign_api_health(context_id);
+	mwc_wallet_libwallet::internal::scan::release_interrupt_scan(context_id);
 }
 
 pub fn release_wallet_context(context_id: u32) {
@@ -36,4 +37,5 @@ pub fn release_wallet_context(context_id: u32) {
 	mwc_wallet_controller::command::auto_swaps_clean_context(context_id);
 	mwc_wallet_controller::controller::foreign_owner_api_clean_context(context_id);
 	mwc_wallet_controller::controller::reset_foreign_api_health(context_id);
+	mwc_wallet_libwallet::internal::scan::release_interrupt_scan(context_id);
 }
