@@ -50,11 +50,13 @@ pub mod tor;
 
 #[cfg(feature = "libp2p")]
 pub use crate::adapters::libp2p_messaging;
+#[cfg(feature = "swaps")]
+pub use crate::adapters::SwapMessageSender;
 pub use crate::adapters::{
 	create_sender, get_mwcmqs_brocker, init_mwcmqs_access_data, Address, AddressType, CloseReason,
 	HttpDataSender, HttpsAddress, MWCMQPublisher, MWCMQSAddress, MWCMQSubscriber, MwcMqsChannel,
 	PathToSlateGetter, PathToSlatePutter, Publisher, SlateGetter, SlatePutter, SlateReceiver,
-	SlateSender, Subscriber, SubscriptionHandler, SwapMessageSender,
+	SlateSender, Subscriber, SubscriptionHandler
 };
 pub use crate::backends::{wallet_db_exists, LMDBBackend};
 pub use crate::client_utils::json_rpc;

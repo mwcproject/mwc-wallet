@@ -504,6 +504,7 @@ where
 		)
 	}
 
+	#[cfg(feature = "swaps")]
 	pub fn receive_swap_message(&self, swap_message: &String) -> Result<(), Error> {
 		foreign::receive_swap_message(
 			self.wallet_inst.clone(),
@@ -514,6 +515,7 @@ where
 
 	// Processing marketplace message. Currently we can notify QT wallet that offer is accepted.
 	// And we can notify that offers are dropped.
+	#[cfg(feature = "swaps")]
 	pub fn marketplace_message(&self, message: &String) -> Result<String, Error> {
 		foreign::marketplace_message(
 			self.wallet_inst.clone(),

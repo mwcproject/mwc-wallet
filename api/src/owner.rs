@@ -28,17 +28,24 @@ use crate::impls::create_sender;
 use crate::keychain::{Identifier, Keychain};
 use crate::libwallet::api_impl::foreign;
 use crate::libwallet::api_impl::owner_updater::{start_updater_log_thread, StatusMessage};
-use crate::libwallet::api_impl::{owner, owner_eth, owner_swap, owner_updater};
+use crate::libwallet::api_impl::{owner, owner_updater};
+#[cfg(feature = "swaps")]
+use crate::libwallet::api_impl::{owner_eth, owner_swap};
 use crate::libwallet::proof::proofaddress;
 use crate::libwallet::proof::tx_proof::TxProof;
+#[cfg(feature = "swaps")]
 use crate::libwallet::swap::fsm::state::{StateEtaInfo, StateId, StateProcessRespond};
+#[cfg(feature = "swaps")]
 use crate::libwallet::swap::types::{Action, Currency, SwapTransactionsConfirmations};
+#[cfg(feature = "swaps")]
 use crate::libwallet::swap::{message::Message, swap::Swap, swap::SwapJournalRecord};
 #[cfg(feature = "grin_proof")]
 use crate::libwallet::PaymentProof;
+#[cfg(feature = "grin_proof")]
+use crate::libwallet::SwapStartArgs;
 use crate::libwallet::{
 	AcctPathMapping, BuiltOutput, Error, InitTxArgs, IssueInvoiceTxArgs, NodeClient,
-	NodeHeightResult, OutputCommitMapping, Slate, SlatePurpose, SlateVersion, SwapStartArgs,
+	NodeHeightResult, OutputCommitMapping, Slate, SlatePurpose, SlateVersion,
 	TxLogEntry, VersionedSlate, ViewWallet, WalletInfo, WalletInst, WalletLCProvider,
 };
 
@@ -2685,6 +2692,7 @@ where
 	}
 
 	/// Start swap trade process. Return SwapID that can be used to check the status or perform further action.
+	#[cfg(feature = "swaps")]
 	pub fn swap_start(
 		&self,
 		keychain_mask: Option<&SecretKey>,
@@ -2699,6 +2707,7 @@ where
 			.map_err(|e| e.into())
 	}
 
+	#[cfg(feature = "swaps")]
 	pub fn swap_create_from_offer(
 		&self,
 		keychain_mask: Option<&SecretKey>,
@@ -2713,6 +2722,7 @@ where
 	}
 
 	/// List all available swap operations. SwapId & Status
+	#[cfg(feature = "swaps")]
 	pub fn swap_list(
 		&self,
 		keychain_mask: Option<&SecretKey>,
@@ -2723,6 +2733,7 @@ where
 	}
 
 	/// Delete swap trade
+	#[cfg(feature = "swaps")]
 	pub fn swap_delete(
 		&self,
 		keychain_mask: Option<&SecretKey>,
@@ -2732,6 +2743,7 @@ where
 			.map_err(|e| e.into())
 	}
 	/// Retrieve swap trade
+	#[cfg(feature = "swaps")]
 	pub fn swap_get(
 		&self,
 		keychain_mask: Option<&SecretKey>,
@@ -2743,6 +2755,7 @@ where
 
 	/// Adjust the sate of swap trade.
 	/// method & destination required for adjust_cmd='destination'
+	#[cfg(feature = "swaps")]
 	pub fn swap_adjust(
 		&self,
 		keychain_mask: Option<&SecretKey>,
@@ -2775,6 +2788,7 @@ where
 	}
 
 	/// Dump swap file content
+	#[cfg(feature = "swaps")]
 	pub fn swap_dump(
 		&self,
 		keychain_mask: Option<&SecretKey>,
@@ -2785,11 +2799,13 @@ where
 	}
 
 	/// dump ethereum info
+	#[cfg(feature = "swaps")]
 	pub fn eth_info(&self, currency: Currency) -> Result<(String, String, String), Error> {
 		owner_eth::info(self.wallet_inst.clone(), currency).map_err(|e| e.into())
 	}
 
 	/// ethereum transfer
+	#[cfg(feature = "swaps")]
 	pub fn eth_transfer(
 		&self,
 		dest: String,
@@ -2802,6 +2818,7 @@ where
 	/// Refresh and get a status and current expected action for the swap.
 	/// return: <state>, <Action>, <time limit>, <Roadmap lines>, <Journal records>, <last error> , <mkt place cancelled trades>
 	/// time limit shows when this action will be expired
+	#[cfg(feature = "swaps")]
 	pub fn update_swap_status_action(
 		&self,
 		keychain_mask: Option<&SecretKey>,
@@ -2838,6 +2855,7 @@ where
 	}
 
 	/// Get a status of the transactions that involved into the swap.
+	#[cfg(feature = "swaps")]
 	pub fn get_swap_tx_tstatus(
 		&self,
 		keychain_mask: Option<&SecretKey>,
@@ -2861,6 +2879,7 @@ where
 		.map_err(|e| e.into())
 	}
 
+	#[cfg(feature = "swaps")]
 	pub fn swap_process<F>(
 		&self,
 		keychain_mask: Option<&SecretKey>,
@@ -2896,6 +2915,7 @@ where
 	}
 
 	/// Process swap income message
+	#[cfg(feature = "swaps")]
 	pub fn swap_income_message(
 		&self,
 		keychain_mask: Option<&SecretKey>,

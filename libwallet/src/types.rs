@@ -16,7 +16,6 @@
 //! Types and traits that should be provided by a wallet
 //! implementation
 
-use super::swap::ethereum::EthereumWallet;
 use crate::config::{MQSConfig, WalletConfig};
 use crate::error::Error;
 use crate::mwc_api::{Libp2pMessages, Libp2pPeers};
@@ -282,10 +281,12 @@ where
 	fn last_scanned_blocks(&mut self) -> Result<Vec<ScannedBlockInfo>, Error>;
 
 	/// set ethereum wallet instance
+	#[cfg(feature = "swaps")]
 	fn set_ethereum_wallet(&mut self, ethereum_wallet: Option<EthereumWallet>)
 		-> Result<(), Error>;
 
 	/// get ethereum wallet instance
+	#[cfg(feature = "swaps")]
 	fn get_ethereum_wallet(&self) -> Result<EthereumWallet, Error>;
 }
 

@@ -16,7 +16,6 @@
 //! Generic implementation of owner API functions
 
 use crate::api_impl::owner::check_ttl;
-use crate::api_impl::owner_swap;
 use crate::internal::selection;
 use crate::internal::{tx, updater};
 use crate::mwc_core::core::amount_to_hr_string;
@@ -29,15 +28,19 @@ use crate::proof::proofaddress::ProvableAddress;
 use crate::slate_versions::SlateVersion;
 use crate::types::{TxSession, U64_DATA_IDX_ADDRESS_INDEX};
 use crate::Context;
+#[cfg(feature = "swaps")]
+use crate::{WalletInst, WalletLCProvider};
 use crate::{
 	BlockFees, CbData, Error, NodeClient, Slate, SlatePurpose, TxLogEntryType, VersionInfo,
-	VersionedSlate, WalletBackend, WalletInst, WalletLCProvider,
+	VersionedSlate, WalletBackend,
 };
 use ed25519_dalek::PublicKey as DalekPublicKey;
 use mwc_wallet_util::mwc_keychain::Identifier;
 use mwc_wallet_util::OnionV3Address;
 use std::collections::HashMap;
+#[cfg(feature = "swaps")]
 use std::sync::Arc;
+#[cfg(feature = "swaps")]
 use std::sync::Mutex;
 use std::sync::RwLock;
 use strum::IntoEnumIterator;
@@ -501,6 +504,7 @@ where
 }
 
 /// Process the incoming swap message received from TOR
+#[cfg(feature = "swaps")]
 pub fn receive_swap_message<'a, L, C, K>(
 	wallet_inst: Arc<Mutex<Box<dyn WalletInst<'a, L, C, K>>>>,
 	keychain_mask: Option<&SecretKey>,
@@ -517,6 +521,7 @@ where
 
 /// Process swap marketplace message. Please note. Wallet does a minor role here,
 /// The marketplace workflow and managed by QT wallet.
+#[cfg(feature = "swaps")]
 pub fn marketplace_message<'a, L, C, K>(
 	wallet_inst: Arc<Mutex<Box<dyn WalletInst<'a, L, C, K>>>>,
 	keychain_mask: Option<&SecretKey>,

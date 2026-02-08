@@ -394,6 +394,7 @@ impl From<mwc_store::Error> for Error {
 	}
 }
 
+#[cfg(feature = "swaps")]
 impl From<crate::swap::error::Error> for Error {
 	fn from(error: crate::swap::error::Error) -> Error {
 		Error::Backend(format!("{}", error))

@@ -37,6 +37,7 @@ use mwc_wallet_impls::{
 	Address, CloseReason, MWCMQPublisher, MWCMQSAddress, MWCMQSubscriber, Publisher, Subscriber,
 	SubscriptionHandler,
 };
+#[cfg(feature = "swaps")]
 use mwc_wallet_libwallet::swap::message::Message;
 use mwc_wallet_libwallet::wallet_lock;
 use mwc_wallet_util::mwc_core::core;
@@ -593,6 +594,7 @@ where
 		}
 	}
 
+	#[cfg(feature = "swaps")]
 	fn process_incoming_swap_message(
 		&self,
 		swapmessage: Message,
@@ -679,6 +681,7 @@ where
 		}
 	}
 
+	#[cfg(feature = "swaps")]
 	fn on_swap_message(&self, swap: Message) -> Option<Message> {
 		let result = self.process_incoming_swap_message(swap);
 

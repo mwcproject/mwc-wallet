@@ -1,5 +1,6 @@
 //The following is support mqs usage in mwc713
 use crate::error::Error;
+#[cfg(feature = "swaps")]
 use mwc_wallet_libwallet::swap::message::Message;
 use mwc_wallet_libwallet::Slate;
 use std::sync::mpsc::Sender;
@@ -36,6 +37,8 @@ pub trait Publisher {
 		source_address: &ProvableAddress,
 		secp: &Secp256k1,
 	) -> Result<String, Error>;
+
+	#[cfg(feature = "swaps")]
 	fn post_take(&self, message: &Message, to: &dyn Address, secp: &Secp256k1)
 		-> Result<(), Error>;
 	// Address of this publisher (from address)
@@ -58,6 +61,7 @@ pub trait SubscriptionHandler: Send {
 	fn on_dropped(&self);
 	fn on_reestablished(&self);
 	// process swap message and return the message to respond
+	#[cfg(feature = "swaps")]
 	fn on_swap_message(&self, swap: Message) -> Option<Message>;
 
 	fn set_notification_channels(&self, slate_id: &uuid::Uuid, slate_send_channel: Sender<Slate>);

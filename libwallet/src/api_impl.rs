@@ -24,9 +24,7 @@
 
 pub mod foreign;
 pub mod owner;
-pub mod owner_eth;
 #[cfg(feature = "libp2p")]
 pub mod owner_libp2p;
-pub mod owner_swap;
 pub mod owner_updater;
 pub mod types;

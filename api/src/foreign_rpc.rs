@@ -1039,14 +1039,23 @@ where
 		Ok(res_slate)
 	}
 
-	fn receive_swap_message(&self, message: String) -> Result<(), Error> {
-		Foreign::receive_swap_message(&self, &message)?;
+	fn receive_swap_message(&self, _message: String) -> Result<(), Error> {
+		#[cfg(feature = "swaps")]
+		Foreign::receive_swap_message(&self, &_message)?;
 		Ok(())
 	}
 
 	fn marketplace_message(&self, message: &String) -> Result<String, Error> {
-		let res = Foreign::marketplace_message(&self, &message)?;
-		Ok(res)
+		#[cfg(feature = "swaps")]
+		{
+			let res = Foreign::marketplace_message(&self, &message)?;
+			Ok(res)
+		}
+		#[cfg(not(feature = "swaps"))]
+		{
+			let _ = message;
+			Err(Error::GenericError("Swaps are disabled".into()))
+		}
 	}
 }
 

@@ -16,11 +16,14 @@
 
 pub fn init_wallet_context(context_id: u32) {
 	mwc_wallet_libwallet::foreign::foreign_clean_context(context_id);
+	#[cfg(feature = "swaps")]
 	mwc_wallet_libwallet::owner_swap::owner_swap_clean_context(context_id);
 	mwc_wallet_libwallet::internal::scan::scan_clean_context(context_id);
+	#[cfg(feature = "swaps")]
 	mwc_wallet_libwallet::swap::trades::trades_clean_context(context_id);
 	mwc_wallet_impls::adapters::reset_mwcmqs_brocker(context_id);
 	mwc_wallet_impls::tor::status::tor_status_clean_context(context_id);
+	#[cfg(feature = "swaps")]
 	mwc_wallet_controller::command::auto_swaps_clean_context(context_id);
 	mwc_wallet_controller::controller::foreign_owner_api_clean_context(context_id);
 	mwc_wallet_controller::controller::reset_foreign_api_health(context_id);
@@ -29,11 +32,14 @@ pub fn init_wallet_context(context_id: u32) {
 
 pub fn release_wallet_context(context_id: u32) {
 	mwc_wallet_libwallet::foreign::foreign_clean_context(context_id);
+	#[cfg(feature = "swaps")]
 	mwc_wallet_libwallet::owner_swap::owner_swap_clean_context(context_id);
 	mwc_wallet_libwallet::internal::scan::scan_clean_context(context_id);
+	#[cfg(feature = "swaps")]
 	mwc_wallet_libwallet::swap::trades::trades_clean_context(context_id);
 	mwc_wallet_impls::adapters::reset_mwcmqs_brocker(context_id);
 	mwc_wallet_impls::tor::status::tor_status_clean_context(context_id);
+	#[cfg(feature = "swaps")]
 	mwc_wallet_controller::command::auto_swaps_clean_context(context_id);
 	mwc_wallet_controller::controller::foreign_owner_api_clean_context(context_id);
 	mwc_wallet_controller::controller::reset_foreign_api_health(context_id);

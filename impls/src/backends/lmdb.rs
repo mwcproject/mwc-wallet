@@ -29,8 +29,10 @@ use crate::store::{self, option_to_not_found, to_key, to_key_u64, u64_to_key};
 
 use crate::core::core::Transaction;
 use crate::core::ser;
+#[cfg(feature = "swaps")]
+use crate::libwallet::swap::ethereum::EthereumWallet;
 use crate::libwallet::{
-	swap::ethereum::EthereumWallet, AcctPathMapping, Context, Error, NodeClient, OutputData,
+	AcctPathMapping, Context, Error, NodeClient, OutputData,
 	ScannedBlockInfo, TxLogEntry, TxProof, WalletBackend, WalletOutputBatch,
 };
 use crate::util::secp::constants::SECRET_KEY_SIZE;
@@ -121,6 +123,7 @@ where
 	/// wallet to node client
 	w2n_client: C,
 	/// ethereum wallet instance
+	#[cfg(feature = "swaps")]
 	ethereum_wallet: Option<EthereumWallet>,
 	///phantom
 	_phantom: &'ck PhantomData<C>,
@@ -195,6 +198,7 @@ where
 			master_checksum: Box::new(None),
 			parent_key_id: LMDBBackend::<C, K>::default_path()?,
 			w2n_client: n_client,
+			#[cfg(feature = "swaps")]
 			ethereum_wallet: None,
 			_phantom: &PhantomData,
 		};
@@ -650,6 +654,7 @@ where
 	}
 
 	/// set ethereum wallet instance
+	#[cfg(feature = "swaps")]
 	fn set_ethereum_wallet(
 		&mut self,
 		ethereum_wallet: Option<EthereumWallet>,
@@ -659,6 +664,7 @@ where
 	}
 
 	/// get ethereum wallet instance
+	#[cfg(feature = "swaps")]
 	fn get_ethereum_wallet(&self) -> Result<EthereumWallet, Error> {
 		Ok(self
 			.ethereum_wallet

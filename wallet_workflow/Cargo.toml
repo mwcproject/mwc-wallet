@@ -13,3 +13,6 @@ edition = "2024"
 mwc_wallet_libwallet = { path = "../libwallet", version = "6.0.0" }
 mwc_wallet_impls = { path = "../impls", version = "6.0.0" }
 mwc_wallet_controller = { path = "../controller", version = "6.0.0" }
+
+[features]
+swaps = ["mwc_wallet_libwallet/swaps", "mwc_wallet_controller/swaps", "mwc_wallet_impls/swaps"]

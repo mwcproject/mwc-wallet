@@ -48,6 +48,9 @@ pub mod ser;
 /// Types used by swap library
 pub mod types;
 
+pub mod owner_eth;
+pub mod owner_swap;
+
 pub use self::error::Error;
 pub use self::swap::Swap;
 pub use self::types::Context;

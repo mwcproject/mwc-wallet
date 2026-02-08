@@ -34,3 +34,4 @@ tempfile = "3.1"
 
 [features]
 grin_proof = ["mwc_wallet_libwallet/grin_proof"]
+swaps = ["mwc_wallet_libwallet/swaps"]

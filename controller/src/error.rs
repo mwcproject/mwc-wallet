@@ -142,6 +142,7 @@ impl From<mwc_wallet_libwallet::Error> for Error {
 	}
 }
 
+#[cfg(feature = "swaps")]
 impl From<mwc_wallet_libwallet::swap::Error> for Error {
 	fn from(error: mwc_wallet_libwallet::swap::Error) -> Error {
 		Error::SwapError(format!("{}", error))

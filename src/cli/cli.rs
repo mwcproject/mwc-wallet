@@ -196,16 +196,18 @@ where
 									}
 								};
 
-								let wallet_inst = lc.wallet_inst()?;
-
-								mwc_wallet_libwallet::swap::trades::init_swap_trade_backend(
-									wallet_inst.get_context_id(),
-									wallet_inst.get_data_file_dir(),
-									&wallet_config.swap_electrumx_addr,
-									&wallet_config.eth_swap_contract_address,
-									&wallet_config.erc20_swap_contract_address,
-									&wallet_config.eth_infura_project_id,
-								)?;
+								#[cfg(feature = "swaps")]
+								{
+									let wallet_inst = lc.wallet_inst()?;
+									mwc_wallet_libwallet::swap::trades::init_swap_trade_backend(
+										wallet_inst.get_context_id(),
+										wallet_inst.get_data_file_dir(),
+										&wallet_config.swap_electrumx_addr,
+										&wallet_config.eth_swap_contract_address,
+										&wallet_config.erc20_swap_contract_address,
+										&wallet_config.eth_infura_project_id,
+									)?;
+								}
 
 								if wallet_opened {
 									let wallet_inst = lc.wallet_inst()?;

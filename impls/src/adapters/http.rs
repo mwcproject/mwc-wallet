@@ -17,9 +17,12 @@ use crate::adapters::MarketplaceMessageSender;
 /// HTTP Wallet 'plugin' implementation
 use crate::error::Error;
 use crate::libwallet::slate_versions::{SlateVersion, VersionedSlate};
+#[cfg(feature = "swaps")]
 use crate::libwallet::swap::message::Message;
+#[cfg(feature = "swaps")]
+use crate::SwapMessageSender;
 use crate::libwallet::Slate;
-use crate::{SlateSender, SwapMessageSender};
+use crate::SlateSender;
 use ed25519_dalek::{PublicKey as DalekPublicKey, SecretKey as DalekSecretKey};
 use mwc_wallet_libwallet::address;
 use mwc_wallet_libwallet::proof::proofaddress::ProvableAddress;
@@ -166,7 +169,7 @@ impl HttpDataSender {
 		if tor_config.is_tor_internal_arti() {
 			if !arti::is_arti_started() {
 				// Starting tor service. Start once and never stop after. We have a single tor core, let's keep it running
-				arti::start_arti(&tor_config, base_dir, false)
+	upgraded			arti::start_arti(&tor_config, base_dir, false)
 					.map_err(|e| Error::Arti(format!("Unable to start Tor (Arti), {}", e)))?;
 				need_stop_arti = true;
 			}
@@ -696,6 +699,7 @@ impl SlateSender for HttpDataSender {
 	}
 }
 
+#[cfg(feature = "swaps")]
 impl SwapMessageSender for HttpDataSender {
 	/// Send a swap message. Return true is message delivery acknowledge can be set (message was delivered and processed)
 	fn send_swap_message(&self, swap_message: &Message, _secp: &Secp256k1) -> Result<bool, Error> {

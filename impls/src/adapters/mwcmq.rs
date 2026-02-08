@@ -21,13 +21,16 @@ use std::sync::Mutex;
 
 use crate::core::core::amount_to_hr_string;
 use crate::SlateSender;
+#[cfg(feature = "swaps")]
 use crate::SwapMessageSender;
 use ed25519_dalek::{PublicKey as DalekPublicKey, SecretKey as DalekSecretKey};
 use mwc_wallet_libwallet::proof::message::EncryptedMessage;
 use mwc_wallet_libwallet::proof::proofaddress::ProvableAddress;
 use mwc_wallet_libwallet::proof::tx_proof::{push_proof_for_slate, TxProof};
 use mwc_wallet_libwallet::slatepack::SlatePurpose;
+#[cfg(feature = "swaps")]
 use mwc_wallet_libwallet::swap::message::Message;
+#[cfg(feature = "swaps")]
 use mwc_wallet_libwallet::swap::message::SwapMessage;
 use mwc_wallet_libwallet::{Slate, SlateCtx, SlateVersion, VersionedSlate};
 use mwc_wallet_util::mwc_core::global;
@@ -149,6 +152,7 @@ impl MwcMqsChannel {
 		return Ok(slate_returned);
 	}
 
+	#[cfg(feature = "swaps")]
 	fn send_swap_to_mqs(
 		&self,
 		swap_message: &Message,
@@ -215,6 +219,7 @@ impl SlateSender for MwcMqsChannel {
 	}
 }
 
+#[cfg(feature = "swaps")]
 impl SwapMessageSender for MwcMqsChannel {
 	/// Send a swap message. Return true is message delivery acknowledge can be set (message was delivered and procesed)
 	fn send_swap_message(&self, message: &Message, secp: &Secp256k1) -> Result<bool, Error> {
@@ -325,6 +330,7 @@ impl Publisher for MWCMQPublisher {
 		Ok(slate)
 	}
 
+	#[cfg(feature = "swaps")]
 	fn post_take(
 		&self,
 		message: &Message,
@@ -656,6 +662,7 @@ impl MWCMQSBroker {
 		Ok(())
 	}
 
+	#[cfg(feature = "swaps")]
 	fn post_take(
 		&self,
 		swapmessage: &Message,
@@ -1254,38 +1261,41 @@ impl MWCMQSBroker {
 											.unwrap_or_else(|e| e.into_inner())
 											.on_slate(&from, &mut slate);
 									} else if slate_or_swap == "swap" {
-										let swap_message = match SwapMessage::from_received(
-											self.context_id,
-											&from.address,
-											r5.clone(),
-											"".to_string(),
-											signature.clone(),
-											&secret_key,
-											secp,
-										) {
-											Ok(x) => x,
-											Err(err) => {
-												self.do_log_error(format!("{}", err));
-												continue;
-											}
-										};
-										let ack_message = self
-											.handler
-											.lock()
-											.unwrap_or_else(|e| e.into_inner())
-											.on_swap_message(swap_message);
-										if let Some(ack_message) = ack_message {
-											let mqs_cannel = MwcMqsChannel::new(
+										#[cfg(feature = "swaps")]
+										{
+											let swap_message = match SwapMessage::from_received(
 												self.context_id,
-												from.to_string(),
-											);
-											if let Err(e) =
-												mqs_cannel.send_swap_message(&ack_message, secp)
-											{
-												self.do_log_error(format!(
-													"Unable to send back ack message, {}",
-													e
-												));
+												&from.address,
+												r5.clone(),
+												"".to_string(),
+												signature.clone(),
+												&secret_key,
+												secp,
+											) {
+												Ok(x) => x,
+												Err(err) => {
+													self.do_log_error(format!("{}", err));
+													continue;
+												}
+											};
+											let ack_message = self
+												.handler
+												.lock()
+												.unwrap_or_else(|e| e.into_inner())
+												.on_swap_message(swap_message);
+											if let Some(ack_message) = ack_message {
+												let mqs_cannel = MwcMqsChannel::new(
+													self.context_id,
+													from.to_string(),
+												);
+												if let Err(e) =
+													mqs_cannel.send_swap_message(&ack_message, secp)
+												{
+													self.do_log_error(format!(
+														"Unable to send back ack message, {}",
+														e
+													));
+												}
 											}
 										}
 									}

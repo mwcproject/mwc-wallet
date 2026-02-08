@@ -39,8 +39,10 @@ use mwc_wallet_libwallet::proof::proofaddress::ProvableAddress;
 use mwc_wallet_libwallet::types::{
 	U64_DATA_IDX_ADDRESS_INDEX, U64_DATA_IDX_LAST_WORKING_NODE_INDEX,
 };
+#[cfg(feature = "swaps")]
+use mwc_wallet_libwallet::swap::types::Currency;
 use mwc_wallet_libwallet::{
-	swap::types::Currency, wallet_lock, IssueInvoiceTxArgs, NodeClient, SwapStartArgs, WalletInst,
+	wallet_lock, IssueInvoiceTxArgs, NodeClient, SwapStartArgs, WalletInst,
 	WalletLCProvider,
 };
 use mwc_wallet_libwallet::{Slate, SlatePurpose};
@@ -55,10 +57,10 @@ use std::collections::HashSet;
 use std::fmt::Display;
 use std::str::FromStr;
 use std::sync::Arc;
-use std::{
-	convert::TryFrom,
-	path::{Path, PathBuf},
-};
+#[cfg(feature = "swaps")]
+use std::convert::TryFrom;
+use std::path::{Path, PathBuf};
+#[cfg(feature = "swaps")]
 use uuid::Uuid;
 
 // define what to do on argument error
@@ -1273,6 +1275,7 @@ pub fn parse_swap_start_args(args: &ArgMatches) -> Result<SwapStartArgs, ParseEr
 	})
 }
 
+#[cfg(feature = "swaps")]
 pub fn parse_swap_args(args: &ArgMatches) -> Result<command::SwapArgs, ParseError> {
 	let swap_id = args.value_of("swap_id").map(|s| String::from(s));
 	let adjust = args
@@ -1362,6 +1365,7 @@ pub fn parse_swap_args(args: &ArgMatches) -> Result<command::SwapArgs, ParseErro
 	})
 }
 
+#[cfg(feature = "swaps")]
 pub fn parse_integrity_args(args: &ArgMatches) -> Result<command::IntegrityArgs, ParseError> {
 	let mut fee = vec![];
 	let subcommand = if args.is_present("check") {
@@ -1400,6 +1404,7 @@ pub fn parse_integrity_args(args: &ArgMatches) -> Result<command::IntegrityArgs,
 	})
 }
 
+#[cfg(feature = "swaps")]
 pub fn parse_messaging_args(args: &ArgMatches) -> Result<command::MessagingArgs, ParseError> {
 	let fee = match args.value_of("fee") {
 		Some(s) => Some(core::core::amount_from_hr_string(s).map_err(|e| {
@@ -1439,6 +1444,7 @@ pub fn parse_messaging_args(args: &ArgMatches) -> Result<command::MessagingArgs,
 	})
 }
 
+#[cfg(feature = "swaps")]
 pub fn parse_send_marketplace_message(
 	args: &ArgMatches,
 ) -> Result<command::SendMarketplaceMessageArgs, ParseError> {
@@ -1449,6 +1455,7 @@ pub fn parse_send_marketplace_message(
 	})
 }
 
+#[cfg(feature = "swaps")]
 pub fn parse_eth_args(args: &ArgMatches) -> Result<command::EthArgs, ParseError> {
 	let subcommand = if args.is_present("info") {
 		command::EthSubcommand::Info
@@ -1620,6 +1627,7 @@ where
 
 			let wallet_inst = lc.wallet_inst()?;
 
+			#[cfg(feature = "swaps")]
 			mwc_wallet_libwallet::swap::trades::init_swap_trade_backend(
 				context_id,
 				wallet_inst.get_data_file_dir(),
@@ -1952,15 +1960,18 @@ where
 			// for CLI mode only, should be handled externally
 			Ok(())
 		}
+		#[cfg(feature = "swaps")]
 		("swap_start", Some(args)) => {
 			let a = arg_parse!(parse_swap_start_args(&args));
 			let _ = command::swap_start(owner_api, km, &a)?;
 			Ok(())
 		}
+		#[cfg(feature = "swaps")]
 		("swap_create_from_offer", Some(args)) => {
 			let mwc_amount = arg_parse!(parse_required(args, "file"));
 			command::swap_create_from_offer(owner_api, km, mwc_amount.to_string())
 		}
+		#[cfg(feature = "swaps")]
 		("swap", Some(args)) => {
 			let a = arg_parse!(parse_swap_args(&args));
 			command::swap(
@@ -1973,6 +1984,7 @@ where
 				cli_mode,
 			)
 		}
+		#[cfg(feature = "swaps")]
 		("integrity", Some(args)) => {
 			#[allow(unused_variables)]
 			let a = arg_parse!(parse_integrity_args(&args));
@@ -1982,6 +1994,7 @@ where
 			println!("integrity feature is not included in this release");
 			Ok(())
 		}
+		#[cfg(feature = "swaps")]
 		("messaging", Some(args)) => {
 			#[allow(unused_variables)]
 			let a = arg_parse!(parse_messaging_args(&args));
@@ -1991,6 +2004,7 @@ where
 			println!("messaging feature is not included in this release");
 			Ok(())
 		}
+		#[cfg(feature = "swaps")]
 		("send_marketplace_message", Some(args)) => {
 			let a = arg_parse!(parse_send_marketplace_message(&args));
 			command::send_marketplace_message(owner_api.wallet_inst.clone(), km, tor_config, a)
@@ -1998,6 +2012,7 @@ where
 		("check_tor_connection", _) => {
 			command::check_tor_connection(owner_api.wallet_inst.clone(), km, tor_config)
 		}
+		#[cfg(feature = "swaps")]
 		("eth", Some(args)) => {
 			let a = arg_parse!(parse_eth_args(&args));
 			command::eth(owner_api.wallet_inst.clone(), a)

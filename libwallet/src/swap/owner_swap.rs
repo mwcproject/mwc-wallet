@@ -14,7 +14,7 @@
 
 //! Generic implementation of owner API atomic swap functions
 
-use crate::{mwc_util::secp::key::SecretKey, swap::ethereum::EthereumWallet};
+use crate::{mwc_util::secp::key::SecretKey, ethereum::EthereumWallet};
 use std::sync::Mutex;
 
 use crate::internal::selection;
@@ -23,12 +23,11 @@ use crate::mwc_core::{core, global};
 use crate::mwc_keychain::ExtKeychainPath;
 use crate::mwc_keychain::{Identifier, Keychain, SwitchCommitmentType};
 use crate::mwc_util::to_hex;
-use crate::swap::error::Error;
-use crate::swap::fsm::state::{Input, StateEtaInfo, StateId, StateProcessRespond};
-use crate::swap::message::{Message, SecondaryUpdate, Update};
-use crate::swap::swap::{Swap, SwapJournalRecord};
-use crate::swap::types::{Action, Currency, Network, Role, SwapTransactionsConfirmations};
-use crate::swap::{trades, BuyApi, Context, SwapApi};
+use crate::error::Error;
+use crate::fsm::state::{Input, StateEtaInfo, StateId, StateProcessRespond};
+use crate::message::{Message, SecondaryUpdate, Update};
+use crate::types::{Action, Currency, Network, Role, SwapTransactionsConfirmations};
+use crate::{trades, BuyApi, Context, SwapApi};
 use crate::types::NodeClient;
 use crate::{get_receive_account, owner_eth};
 use crate::{

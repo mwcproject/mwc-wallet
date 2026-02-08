@@ -23,35 +23,50 @@ use crate::error::Error;
 use crate::impls::{create_sender, SlateGetter as _};
 use crate::impls::{PathToSlateGetter, PathToSlatePutter, SlatePutter};
 use crate::keychain;
+#[cfg(feature = "swaps")]
+use crate::libwallet::swap::types::Currency;
 use crate::libwallet::{
-	swap::types::Currency, InitTxArgs, IssueInvoiceTxArgs, NodeClient, WalletLCProvider,
+	InitTxArgs, IssueInvoiceTxArgs, NodeClient, WalletLCProvider,
 };
 use crate::util::secp::key::SecretKey;
 use crate::util::ZeroingString;
 use crate::{controller, display};
 use ::core::time;
+#[cfg(feature = "swaps")]
 use chrono::Utc;
 use ed25519_dalek::{PublicKey as DalekPublicKey, SecretKey as DalekSecretKey};
-use mwc_wallet_impls::adapters::{
-	create_swap_message_sender, validate_tor_address, MarketplaceMessageSender,
-};
+#[cfg(feature = "swaps")]
+use mwc_wallet_impls::adapters::create_swap_message_sender;
+#[cfg(feature = "swaps")]
+use mwc_wallet_impls::adapters::MarketplaceMessageSender;
+#[cfg(feature = "swaps")]
+use mwc_wallet_impls::adapters::validate_tor_address;
 #[cfg(feature = "libp2p")]
 use mwc_wallet_impls::libp2p_messaging;
+#[cfg(feature = "swaps")]
 use mwc_wallet_impls::tor;
+#[cfg(feature = "swaps")]
 use mwc_wallet_impls::HttpDataSender;
+#[cfg(feature = "swaps")]
 use mwc_wallet_impls::{Address, MWCMQSAddress, Publisher};
 #[cfg(feature = "libp2p")]
 use mwc_wallet_libwallet::api_impl::owner_libp2p;
-use mwc_wallet_libwallet::api_impl::{owner, owner_eth, owner_swap};
+#[cfg(feature = "swaps")]
+use mwc_wallet_libwallet::api_impl::{owner_eth, owner_swap};
+use mwc_wallet_libwallet::api_impl::owner;
 
 use mwc_wallet_libwallet::proof::proofaddress::{self, ProvableAddress};
 use mwc_wallet_libwallet::proof::tx_proof::TxProof;
 use mwc_wallet_libwallet::slate_versions::v2::TransactionV2;
 use mwc_wallet_libwallet::slate_versions::v3::{sig_is_blank, TransactionV3};
 use mwc_wallet_libwallet::slatepack::SlatePurpose;
+#[cfg(feature = "swaps")]
 use mwc_wallet_libwallet::swap::fsm::state::StateId;
+#[cfg(feature = "swaps")]
 use mwc_wallet_libwallet::swap::trades;
+#[cfg(feature = "swaps")]
 use mwc_wallet_libwallet::swap::types::Action;
+#[cfg(feature = "swaps")]
 use mwc_wallet_libwallet::swap::{message, Swap};
 use mwc_wallet_libwallet::types::{TxSession, U64_DATA_IDX_ADDRESS_INDEX};
 use mwc_wallet_libwallet::{
@@ -77,12 +92,14 @@ use mwc_wallet_util::mwc_util::secp::{ContextFlag, Secp256k1};
 use mwc_wallet_util::mwc_util::static_secp_instance;
 use qr_code::{EcLevel, QrCode};
 use serde_json as json;
+#[cfg(feature = "swaps")]
 use serde_json::json;
 #[cfg(feature = "libp2p")]
 use serde_json::{Map as JsonMap, Value as JsonValue};
 use std::collections::{HashMap, HashSet};
 use std::convert::TryFrom;
 use std::fs::File;
+#[cfg(feature = "swaps")]
 use std::io;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -100,6 +117,7 @@ lazy_static! {
 	static ref RUNNING_AUTO_SWAP_THREADS:  RwLock<HashMap<u32, HashMap<String,Option<JoinHandle<()>>>>> = RwLock::new(HashMap::new());
 }
 
+#[cfg(feature = "swaps")]
 pub fn auto_swaps_clean_context(context_id: u32) {
 	stop_autoswap_swap_threads(context_id);
 	debug_assert!(
@@ -111,6 +129,7 @@ pub fn auto_swaps_clean_context(context_id: u32) {
 	);
 }
 
+#[cfg(feature = "swaps")]
 fn stop_autoswap_swap_threads(context_id: u32) {
 	let threads = RUNNING_AUTO_SWAP_THREADS
 		.write()
@@ -125,6 +144,7 @@ fn stop_autoswap_swap_threads(context_id: u32) {
 	}
 }
 
+#[cfg(feature = "swaps")]
 fn is_running_swap_task(context_id: u32, swap_id: &String) -> bool {
 	match RUNNING_AUTO_SWAP_THREADS
 		.read()
@@ -136,6 +156,7 @@ fn is_running_swap_task(context_id: u32, swap_id: &String) -> bool {
 	}
 }
 
+#[cfg(feature = "swaps")]
 fn unregister_swap_task(context_id: u32, swap_id: &String) {
 	if let Some(swaps) = RUNNING_AUTO_SWAP_THREADS
 		.write()
@@ -2547,6 +2568,7 @@ where
 }
 
 // return swap Id
+#[cfg(feature = "swaps")]
 pub fn swap_start<L, C, K>(
 	owner_api: &mut Owner<L, C, K>,
 	keychain_mask: Option<&SecretKey>,
@@ -2602,6 +2624,7 @@ where
 	Ok(swap_id)
 }
 
+#[cfg(feature = "swaps")]
 pub fn swap_create_from_offer<L, C, K>(
 	owner_api: &mut Owner<L, C, K>,
 	keychain_mask: Option<&SecretKey>,
@@ -2633,6 +2656,7 @@ where
 
 // Swap operation
 #[derive(PartialEq)]
+#[cfg(feature = "swaps")]
 pub enum SwapSubcommand {
 	List,
 	ListAndCheck,
@@ -2648,6 +2672,7 @@ pub enum SwapSubcommand {
 }
 
 /// Arguments for the swap command
+#[cfg(feature = "swaps")]
 pub struct SwapArgs {
 	/// What we want to do with a swap
 	pub subcommand: SwapSubcommand,
@@ -2693,11 +2718,13 @@ pub struct SwapArgs {
 
 /// Eth operation
 #[derive(PartialEq)]
+#[cfg(feature = "swaps")]
 pub enum EthSubcommand {
 	Info,
 	Send,
 }
 /// Arguments for the eth command
+#[cfg(feature = "swaps")]
 pub struct EthArgs {
 	/// eth subcommand
 	pub subcommand: EthSubcommand,
@@ -2711,6 +2738,7 @@ pub struct EthArgs {
 
 // Integrity operation
 #[derive(PartialEq)]
+#[cfg(feature = "swaps")]
 pub enum IntegritySubcommand {
 	Check,
 	Create,
@@ -2718,6 +2746,7 @@ pub enum IntegritySubcommand {
 }
 
 /// Arguments for the integrity command
+#[cfg(feature = "swaps")]
 pub struct IntegrityArgs {
 	/// What we want to do with integrity kernels
 	pub subcommand: IntegritySubcommand,
@@ -2732,6 +2761,7 @@ pub struct IntegrityArgs {
 }
 
 /// Arguments for the messaging command
+#[cfg(feature = "swaps")]
 pub struct MessagingArgs {
 	/// Show status of the messaging pool
 	pub show_status: bool,
@@ -2762,6 +2792,7 @@ pub struct MessagingArgs {
 }
 
 /// Arguments for send marketplace message
+#[cfg(feature = "swaps")]
 pub struct SendMarketplaceMessageArgs {
 	/// marketplace command
 	pub command: String,
@@ -2773,6 +2804,7 @@ pub struct SendMarketplaceMessageArgs {
 
 // For Json we can't use int 64, we have to convert all of them to Strings
 #[derive(Serialize, Deserialize)]
+#[cfg(feature = "swaps")]
 pub struct StateEtaInfoString {
 	/// True if this is current active state
 	pub active: bool,
@@ -2783,6 +2815,7 @@ pub struct StateEtaInfoString {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[cfg(feature = "swaps")]
 pub struct SwapJournalRecordString {
 	/// Unix timestamp, when event happens
 	pub time: String,
@@ -2790,6 +2823,7 @@ pub struct SwapJournalRecordString {
 	pub message: String,
 }
 
+#[cfg(feature = "swaps")]
 fn notify_about_cancelled_swaps<L, C, K>(
 	wallet_inst: Arc<Mutex<Box<dyn WalletInst<'static, L, C, K>>>>,
 	keychain_mask: Option<&SecretKey>,
@@ -2828,6 +2862,7 @@ fn notify_about_cancelled_swaps<L, C, K>(
 	}
 }
 
+#[cfg(feature = "swaps")]
 pub fn swap<L, C, K>(
 	wallet_inst: Arc<Mutex<Box<dyn WalletInst<'static, L, C, K>>>>,
 	keychain_mask: Option<&SecretKey>,
@@ -3912,6 +3947,7 @@ where
 	}
 }
 
+#[cfg(feature = "swaps")]
 pub fn eth<L, C, K>(
 	wallet_inst: Arc<Mutex<Box<dyn WalletInst<'static, L, C, K>>>>,
 	args: EthArgs,
@@ -4613,6 +4649,7 @@ where
 }
 
 /// integrity fee related operations
+#[cfg(feature = "swaps")]
 pub fn send_marketplace_message<L, C, K>(
 	wallet_inst: Arc<Mutex<Box<dyn WalletInst<'static, L, C, K>>>>,
 	keychain_mask: Option<&SecretKey>,

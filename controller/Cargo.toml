@@ -19,19 +19,15 @@ serde_derive = "1"
 serde_json = "1"
 log = "0.4"
 prettytable-rs = "0.10"
-ring = "0.16"
 term = "0.6"
 tokio = { version = "1", features = ["full"] }
 uuid = { version = "0.8", features = ["serde", "v4"] }
-url = "2.1"
 chrono = { version = "0.4.11", features = ["serde"] }
 lazy_static = "1.4"
 thiserror = "1"
 qr_code = "1.1.0"
 colored = "1.6"
-x25519-dalek = "0.6"
 ed25519-dalek = "1.0.0-pre.4"
-mwc-wagyu-ethereum = { git = "https://github.com/mwcproject/wagyu-ethereum", version = "0.6.3", branch = "master" }
 
 #mwc-libp2p = { git = "https://github.com/mwcproject/rust-libp2p", version="0.35.3", branch = "master", default-features = false, features = [ "noise", "yamux", "mplex", "dns", "tcp-tokio", "ping", "gossipsub"], optional = true }
 #mwc-libp2p = { path = "../../rust-libp2p", default-features = false, features = [ "noise", "yamux", "mplex", "dns", "tcp-tokio", "ping", "gossipsub"] }
@@ -50,3 +46,4 @@ remove_dir_all = "0.7"
 # real dependency: libp2p = ["dep:mwc-libp2p"]
 libp2p = []
 grin_proof = ["mwc_wallet_libwallet/grin_proof"]
+swaps = ["mwc_wallet_libwallet/swaps"]

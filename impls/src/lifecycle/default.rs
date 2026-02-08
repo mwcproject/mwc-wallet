@@ -20,6 +20,7 @@ use crate::config::{
 };
 use crate::core::global;
 use crate::keychain::{ChildNumber, Keychain};
+#[cfg(feature = "swaps")]
 use crate::libwallet::swap::ethereum::generate_ethereum_wallet;
 use crate::libwallet::{Error, NodeClient, WalletBackend, WalletLCProvider};
 use crate::lifecycle::seed::WalletSeed;
@@ -272,6 +273,7 @@ where
 			))
 		})?;
 
+		#[cfg(feature = "swaps")]
 		if let Ok(mnmenoic) = wallet_seed.to_mnemonic() {
 			let ethereum_wallet = match global::is_mainnet(self.context_id) {
 				true => Some(generate_ethereum_wallet(
