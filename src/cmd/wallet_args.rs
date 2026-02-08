@@ -36,14 +36,13 @@ use mwc_wallet_impls::{DefaultLCProvider, DefaultWalletImpl};
 use mwc_wallet_impls::{PathToSlateGetter, SlateGetter};
 use mwc_wallet_libwallet::proof::proofaddress;
 use mwc_wallet_libwallet::proof::proofaddress::ProvableAddress;
+#[cfg(feature = "swaps")]
+use mwc_wallet_libwallet::swap::types::Currency;
 use mwc_wallet_libwallet::types::{
 	U64_DATA_IDX_ADDRESS_INDEX, U64_DATA_IDX_LAST_WORKING_NODE_INDEX,
 };
-#[cfg(feature = "swaps")]
-use mwc_wallet_libwallet::swap::types::Currency;
 use mwc_wallet_libwallet::{
-	wallet_lock, IssueInvoiceTxArgs, NodeClient, SwapStartArgs, WalletInst,
-	WalletLCProvider,
+	wallet_lock, IssueInvoiceTxArgs, NodeClient, SwapStartArgs, WalletInst, WalletLCProvider,
 };
 use mwc_wallet_libwallet::{Slate, SlatePurpose};
 use mwc_wallet_util::mwc_core::core::amount_to_hr_string;
@@ -54,12 +53,12 @@ use mwc_wallet_util::{mwc_core as core, OnionV3Address};
 use rpassword;
 use semver::Version;
 use std::collections::HashSet;
-use std::fmt::Display;
-use std::str::FromStr;
-use std::sync::Arc;
 #[cfg(feature = "swaps")]
 use std::convert::TryFrom;
+use std::fmt::Display;
 use std::path::{Path, PathBuf};
+use std::str::FromStr;
+use std::sync::Arc;
 #[cfg(feature = "swaps")]
 use uuid::Uuid;
 

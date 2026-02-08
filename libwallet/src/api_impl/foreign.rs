@@ -28,12 +28,12 @@ use crate::proof::proofaddress::ProvableAddress;
 use crate::slate_versions::SlateVersion;
 use crate::types::{TxSession, U64_DATA_IDX_ADDRESS_INDEX};
 use crate::Context;
-#[cfg(feature = "swaps")]
-use crate::{WalletInst, WalletLCProvider};
 use crate::{
 	BlockFees, CbData, Error, NodeClient, Slate, SlatePurpose, TxLogEntryType, VersionInfo,
 	VersionedSlate, WalletBackend,
 };
+#[cfg(feature = "swaps")]
+use crate::{WalletInst, WalletLCProvider};
 use ed25519_dalek::PublicKey as DalekPublicKey;
 use mwc_wallet_util::mwc_keychain::Identifier;
 use mwc_wallet_util::OnionV3Address;

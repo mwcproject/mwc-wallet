@@ -32,8 +32,8 @@ use crate::core::ser;
 #[cfg(feature = "swaps")]
 use crate::libwallet::swap::ethereum::EthereumWallet;
 use crate::libwallet::{
-	AcctPathMapping, Context, Error, NodeClient, OutputData,
-	ScannedBlockInfo, TxLogEntry, TxProof, WalletBackend, WalletOutputBatch,
+	AcctPathMapping, Context, Error, NodeClient, OutputData, ScannedBlockInfo, TxLogEntry, TxProof,
+	WalletBackend, WalletOutputBatch,
 };
 use crate::util::secp::constants::SECRET_KEY_SIZE;
 use crate::util::secp::key::SecretKey;

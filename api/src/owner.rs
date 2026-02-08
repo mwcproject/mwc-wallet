@@ -45,8 +45,8 @@ use crate::libwallet::PaymentProof;
 use crate::libwallet::SwapStartArgs;
 use crate::libwallet::{
 	AcctPathMapping, BuiltOutput, Error, InitTxArgs, IssueInvoiceTxArgs, NodeClient,
-	NodeHeightResult, OutputCommitMapping, Slate, SlatePurpose, SlateVersion,
-	TxLogEntry, VersionedSlate, ViewWallet, WalletInfo, WalletInst, WalletLCProvider,
+	NodeHeightResult, OutputCommitMapping, Slate, SlatePurpose, SlateVersion, TxLogEntry,
+	VersionedSlate, ViewWallet, WalletInfo, WalletInst, WalletLCProvider,
 };
 
 use crate::util::logger::LoggingConfig;

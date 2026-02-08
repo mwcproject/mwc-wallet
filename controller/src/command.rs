@@ -25,9 +25,7 @@ use crate::impls::{PathToSlateGetter, PathToSlatePutter, SlatePutter};
 use crate::keychain;
 #[cfg(feature = "swaps")]
 use crate::libwallet::swap::types::Currency;
-use crate::libwallet::{
-	InitTxArgs, IssueInvoiceTxArgs, NodeClient, WalletLCProvider,
-};
+use crate::libwallet::{InitTxArgs, IssueInvoiceTxArgs, NodeClient, WalletLCProvider};
 use crate::util::secp::key::SecretKey;
 use crate::util::ZeroingString;
 use crate::{controller, display};
@@ -38,9 +36,9 @@ use ed25519_dalek::{PublicKey as DalekPublicKey, SecretKey as DalekSecretKey};
 #[cfg(feature = "swaps")]
 use mwc_wallet_impls::adapters::create_swap_message_sender;
 #[cfg(feature = "swaps")]
-use mwc_wallet_impls::adapters::MarketplaceMessageSender;
-#[cfg(feature = "swaps")]
 use mwc_wallet_impls::adapters::validate_tor_address;
+#[cfg(feature = "swaps")]
+use mwc_wallet_impls::adapters::MarketplaceMessageSender;
 #[cfg(feature = "libp2p")]
 use mwc_wallet_impls::libp2p_messaging;
 #[cfg(feature = "swaps")]
@@ -49,11 +47,11 @@ use mwc_wallet_impls::tor;
 use mwc_wallet_impls::HttpDataSender;
 #[cfg(feature = "swaps")]
 use mwc_wallet_impls::{Address, MWCMQSAddress, Publisher};
+use mwc_wallet_libwallet::api_impl::owner;
 #[cfg(feature = "libp2p")]
 use mwc_wallet_libwallet::api_impl::owner_libp2p;
 #[cfg(feature = "swaps")]
 use mwc_wallet_libwallet::api_impl::{owner_eth, owner_swap};
-use mwc_wallet_libwallet::api_impl::owner;
 
 use mwc_wallet_libwallet::proof::proofaddress::{self, ProvableAddress};
 use mwc_wallet_libwallet::proof::tx_proof::TxProof;

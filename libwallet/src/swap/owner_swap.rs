@@ -14,22 +14,22 @@
 
 //! Generic implementation of owner API atomic swap functions
 
-use crate::{mwc_util::secp::key::SecretKey, ethereum::EthereumWallet};
+use crate::{ethereum::EthereumWallet, mwc_util::secp::key::SecretKey};
 use std::sync::Mutex;
 
+use crate::error::Error;
+use crate::fsm::state::{Input, StateEtaInfo, StateId, StateProcessRespond};
 use crate::internal::selection;
+use crate::message::{Message, SecondaryUpdate, Update};
 use crate::mwc_core::core::Committed;
 use crate::mwc_core::{core, global};
 use crate::mwc_keychain::ExtKeychainPath;
 use crate::mwc_keychain::{Identifier, Keychain, SwitchCommitmentType};
 use crate::mwc_util::to_hex;
-use crate::error::Error;
-use crate::fsm::state::{Input, StateEtaInfo, StateId, StateProcessRespond};
-use crate::message::{Message, SecondaryUpdate, Update};
-use crate::types::{Action, Currency, Network, Role, SwapTransactionsConfirmations};
-use crate::{trades, BuyApi, Context, SwapApi};
 use crate::types::NodeClient;
+use crate::types::{Action, Currency, Network, Role, SwapTransactionsConfirmations};
 use crate::{get_receive_account, owner_eth};
+use crate::{trades, BuyApi, Context, SwapApi};
 use crate::{
 	wallet_lock, OutputData, OutputStatus, Slate, SwapStartArgs, TxLogEntry, TxLogEntryType,
 	WalletBackend, WalletInst, WalletLCProvider,
