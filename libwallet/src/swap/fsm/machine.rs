@@ -122,8 +122,7 @@ impl<'a> StateMachine<'a> {
 
 		// go backward first
 		let mut prev_state_id = state.get_prev_swap_state();
-		while prev_state_id.is_some() {
-			let psid = prev_state_id.unwrap();
+		while let Some(psid) = prev_state_id {
 			let prev_state = self
 				.state_map
 				.get(&psid)
@@ -142,8 +141,7 @@ impl<'a> StateMachine<'a> {
 		}
 		// going forward
 		let mut next_state_id = state.get_next_swap_state();
-		while next_state_id.is_some() {
-			let nsid = next_state_id.unwrap();
+		while let Some(nsid) = next_state_id {
 			let next_state = self
 				.state_map
 				.get(&nsid)

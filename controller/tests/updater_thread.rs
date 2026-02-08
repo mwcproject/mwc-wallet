@@ -105,7 +105,10 @@ fn updater_thread_test_impl(test_dir: &str) -> Result<(), wallet::Error> {
 		mask1,
 		bh as usize,
 		false,
-		tx_pool.lock().expect("Mutex failure").deref_mut(),
+		tx_pool
+			.lock()
+			.unwrap_or_else(|e| e.into_inner())
+			.deref_mut(),
 	);
 
 	let owner_api = api::Owner::new(0, wallet1, None, None);

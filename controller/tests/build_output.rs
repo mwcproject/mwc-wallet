@@ -74,7 +74,10 @@ fn build_output_test_impl(test_dir: &str) -> Result<(), libwallet::Error> {
 		let built_output = sender_api.build_output(m, features, amount)?;
 
 		let key_id = built_output.key_id;
-		assert_eq!(key_id.to_path(), ExtKeychainPath::new(3, 0, 0, 0, 0));
+		assert_eq!(
+			key_id.to_path().unwrap(),
+			ExtKeychainPath::new(3, 0, 0, 0, 0)
+		);
 
 		let blind = built_output.blind;
 		let key = keychain.derive_key(amount, &key_id, SwitchCommitmentType::Regular)?;

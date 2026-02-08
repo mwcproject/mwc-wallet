@@ -74,7 +74,10 @@ fn ownership_proof_impl(test_dir: &str) -> Result<(), wallet::Error> {
 		mask1,
 		10 as usize,
 		false,
-		tx_pool.lock().expect("Mutex failure").deref_mut(),
+		tx_pool
+			.lock()
+			.unwrap_or_else(|e| e.into_inner())
+			.deref_mut(),
 	);
 
 	wallet::controller::owner_single_use(Some(wallet1.clone()), mask1, None, |api, m| {

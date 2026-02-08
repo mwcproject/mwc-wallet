@@ -14,7 +14,6 @@
 
 //! Generic implementation of owner API functions
 
-use std::cell::RefCell;
 use uuid::Uuid;
 
 use crate::mwc_core::core::hash::Hashed;
@@ -118,7 +117,7 @@ where
 
 	wallet_lock!(wallet_inst, w);
 	let keychain = w.keychain(keychain_mask)?;
-	let root_public_key = keychain.public_root_key();
+	let root_public_key = keychain.public_root_key()?;
 	let rewind_hash = ViewKey::rewind_hash(keychain.secp(), root_public_key).to_hex();
 	Ok(rewind_hash)
 }
@@ -440,7 +439,7 @@ where
 pub fn init_send_tx<'a, T: ?Sized, C, K>(
 	w: &mut T,
 	keychain_mask: Option<&SecretKey>,
-	tx_session: &Option<RefCell<TxSession>>,
+	tx_session: &mut Option<&mut TxSession>,
 	args: &InitTxArgs,
 	use_test_rng: bool,
 	routputs: usize, // Number of resulting outputs. Normally it is 1
@@ -631,7 +630,6 @@ where
 
 	match tx_session {
 		Some(tx_ses) => {
-			let mut tx_ses = tx_ses.borrow_mut();
 			tx_ses.set_context_participant(context, 0);
 			tx_ses.set_tx_log_entry(t);
 		}
@@ -661,7 +659,7 @@ where
 pub fn issue_invoice_tx<'a, T: ?Sized, C, K>(
 	w: &mut T,
 	keychain_mask: Option<&SecretKey>,
-	tx_session: &Option<RefCell<TxSession>>,
+	mut tx_session: Option<&mut TxSession>,
 	args: &IssueInvoiceTxArgs,
 	use_test_rng: bool,
 	num_outputs: usize, // Number of outputs for this transaction. Normally it is 1
@@ -697,7 +695,7 @@ where
 	let context = tx::add_output_to_slate(
 		&mut *w,
 		keychain_mask,
-		tx_session,
+		&mut tx_session,
 		&mut slate,
 		chain_tip,
 		args.address.clone(),
@@ -715,7 +713,7 @@ where
 	// recieve the transaction back
 	match tx_session {
 		Some(tx_ses) => {
-			tx_ses.borrow_mut().set_context_participant(context, 0);
+			tx_ses.set_context_participant(context, 0);
 		}
 		None => {
 			let mut batch = w.batch(keychain_mask)?;
@@ -733,7 +731,7 @@ pub fn generate_invoice_slate<'a, T: ?Sized, C, K>(
 	w: &mut T,
 	keychain_mask: Option<&SecretKey>,
 	amount: u64,
-	tx_session: &Option<RefCell<TxSession>>,
+	mut tx_session: Option<&mut TxSession>,
 ) -> Result<(Slate, Context), Error>
 where
 	T: WalletBackend<'a, C, K>,
@@ -751,7 +749,7 @@ where
 	let context = tx::add_output_to_slate(
 		&mut *w,
 		keychain_mask,
-		tx_session,
+		&mut tx_session,
 		&mut slate,
 		chain_tip,
 		None,
@@ -774,7 +772,7 @@ where
 pub fn process_invoice_tx<'a, T: ?Sized, C, K>(
 	w: &mut T,
 	keychain_mask: Option<&SecretKey>,
-	tx_session: &Option<RefCell<TxSession>>,
+	tx_session: &mut Option<&mut TxSession>,
 	slate: &Slate,
 	args: &InitTxArgs,
 	use_test_rng: bool,
@@ -840,7 +838,6 @@ where
 	// if self sending, make sure to store 'initiator' keys
 	let context_res = match tx_session {
 		Some(tx) => tx
-			.borrow()
 			.get_context_participant()
 			.clone()
 			.ok_or(Error::Backend("Context doesn't exist".into()))
@@ -927,7 +924,7 @@ where
 	// recieve the transaction back
 	match tx_session {
 		Some(tx) => {
-			tx.borrow_mut().set_context_participant(context, 1);
+			tx.set_context_participant(context, 1);
 		}
 		None => {
 			let mut batch = w.batch(keychain_mask)?;
@@ -944,7 +941,7 @@ where
 pub fn tx_lock_outputs<'a, T: ?Sized, C, K>(
 	w: &mut T,
 	keychain_mask: Option<&SecretKey>,
-	tx_session: &Option<RefCell<TxSession>>,
+	tx_session: &mut Option<&mut TxSession>,
 	slate: &Slate,
 	address: Option<String>,
 	participant_id: usize,
@@ -957,8 +954,7 @@ where
 {
 	let context = match tx_session {
 		Some(tx) => {
-			tx.borrow()
-				.get_context_participant()
+			tx.get_context_participant()
 				.clone()
 				.ok_or(Error::TransactionWasFinalizedOrCancelled(format!(
 					"{}",
@@ -1013,7 +1009,7 @@ where
 pub fn finalize_tx<'a, T: ?Sized, C, K>(
 	w: &mut T,
 	keychain_mask: Option<&SecretKey>,
-	tx_session: &Option<RefCell<TxSession>>,
+	tx_session: &mut Option<&mut TxSession>,
 	slate: &Slate,
 	refresh_from_node: bool,
 	use_test_rng: bool,
@@ -1029,8 +1025,7 @@ where
 	check_ttl(w, &sl, refresh_from_node)?;
 	let mut context = match tx_session {
 		Some(tx) => {
-			tx.borrow()
-				.get_context_participant()
+			tx.get_context_participant()
 				.clone()
 				.ok_or(Error::TransactionWasFinalizedOrCancelled(format!(
 					"{}",
@@ -1089,7 +1084,7 @@ where
 
 		// Store the updated context
 		match tx_session {
-			Some(tx) => tx.borrow_mut().set_context_participant(context.clone(), 0),
+			Some(tx) => tx.set_context_participant(context.clone(), 0),
 			None => {
 				let mut batch = w.batch(keychain_mask)?;
 				batch.save_private_context(sl.id.as_bytes(), 0, &context)?;
@@ -1137,7 +1132,7 @@ where
 	)?;
 	tx::update_message(&mut *w, keychain_mask, tx_session, &sl)?;
 	match tx_session {
-		Some(tx) => tx.borrow_mut().clear_context_participant(),
+		Some(tx) => tx.clear_context_participant(),
 		None => {
 			let mut batch = w.batch(keychain_mask)?;
 			batch.delete_private_context(sl.id.as_bytes(), 0)?;
@@ -1230,7 +1225,7 @@ where
 	} else {
 		debug!(
 			"api: post_tx: successfully posted tx: {}, fluff? {}",
-			tx.hash(),
+			tx.hash()?,
 			fluff
 		);
 		Ok(())
@@ -1331,11 +1326,23 @@ where
 		vec![ScannedBlockInfo::new(tip_height, tip_hash.clone())];
 	{
 		let mut step = 4;
-		while blocks.last().unwrap().height.saturating_sub(step) > start_height {
-			let h = blocks.last().unwrap().height.saturating_sub(step);
-			let hdr = w.w2n_client().get_header_info(h)?;
-			blocks.push(ScannedBlockInfo::new(h, hdr.hash));
-			step *= 2;
+		loop {
+			match blocks.last() {
+				Some(block) => {
+					if block.height.saturating_sub(step) > start_height {
+						let h = block.height.saturating_sub(step);
+						let hdr = w.w2n_client().get_header_info(h)?;
+						blocks.push(ScannedBlockInfo::new(h, hdr.hash));
+						step *= 2;
+					} else {
+						break;
+					}
+				}
+				None => {
+					error!("Internal error at scan, blocks are empty");
+					break;
+				}
+			}
 		}
 		// adding last_scanned_block.height not needed
 	}
@@ -1434,10 +1441,10 @@ where
 		file.as_mut(),
 		status_send_channel,
 	);
-	for output in w.iter() {
+	for output in w.iter()? {
 		write_info(format!("{:?}", output), file.as_mut(), status_send_channel);
 	}
-	for output in w.archive_iter() {
+	for output in w.archive_iter()? {
 		write_info(
 			format!("Archived  {:?}", output),
 			file.as_mut(),
@@ -1450,7 +1457,7 @@ where
 		file.as_mut(),
 		status_send_channel,
 	);
-	for tx_log in w.tx_log_iter() {
+	for tx_log in w.tx_log_iter()? {
 		write_info(format!("{:?}", tx_log), file.as_mut(), status_send_channel);
 		// Checking if Slate is available
 		if let Some(uuid) = tx_log.tx_slate_id {
@@ -1472,7 +1479,7 @@ where
 		}
 	}
 
-	for tx_log in w.tx_log_archive_iter() {
+	for tx_log in w.tx_log_archive_iter()? {
 		// Checking if Slate is available
 		if let Some(uuid) = tx_log.tx_slate_id {
 			let uuid_str = uuid.to_string();
@@ -1558,7 +1565,7 @@ where
 		if tip_height > 100 {
 			// let's find commit's/txs min heights
 			let mut max_height = tip_height - 100;
-			for output in wallet.iter() {
+			for output in wallet.iter()? {
 				let h = output.height.saturating_sub(100);
 				if h < max_height {
 					max_height = h;
@@ -1665,11 +1672,23 @@ where
 	{
 		let mut step = 4;
 
-		while blocks.last().unwrap().height.saturating_sub(step) > last_scanned_block.height {
-			let h = blocks.last().unwrap().height.saturating_sub(step);
-			let hdr = wallet.w2n_client().get_header_info(h)?;
-			blocks.push(ScannedBlockInfo::new(h, hdr.hash));
-			step *= 2;
+		loop {
+			match blocks.last() {
+				Some(block) => {
+					if block.height.saturating_sub(step) > last_scanned_block.height {
+						let h = block.height.saturating_sub(step);
+						let hdr = wallet.w2n_client().get_header_info(h)?;
+						blocks.push(ScannedBlockInfo::new(h, hdr.hash));
+						step *= 2;
+					} else {
+						break;
+					}
+				}
+				None => {
+					error!("Internal error at update_wallet_state, blocks are empty");
+					break;
+				}
+			}
 		}
 		// adding last_scanned_block.height not needed
 	}
@@ -1772,7 +1791,7 @@ where
 	//	std::str::from_utf8(&msg).unwrap(),
 	crypto::verify_signature(
 		&msg,
-		&crypto::signature_from_string(&proof.recipient_sig, keychain.secp()).unwrap(),
+		&crypto::signature_from_string(&proof.recipient_sig, keychain.secp())?,
 		&recipient_pubkey,
 		keychain.secp(),
 	)
@@ -1782,7 +1801,7 @@ where
 
 	crypto::verify_signature(
 		&msg,
-		&crypto::signature_from_string(&proof.sender_sig, keychain.secp()).unwrap(),
+		&crypto::signature_from_string(&proof.sender_sig, keychain.secp())?,
 		&sender_pubkey,
 		keychain.secp(),
 	)
@@ -1837,7 +1856,7 @@ where
 	let secp = keychain.secp();
 
 	if include_public_root_key {
-		let root_public_key = keychain.public_root_key();
+		let root_public_key = keychain.public_root_key()?;
 		let root_public_key = root_public_key.to_hex();
 		message2sign.push('|');
 		message2sign.push_str(root_public_key.as_str());
@@ -1890,7 +1909,7 @@ where
 			)
 			.map_err(|e| Error::from(e))?;
 		Some(PubKeySignature {
-			public_key: keychain.public_root_key().to_hex(),
+			public_key: keychain.public_root_key()?.to_hex(),
 			signature: signature.to_hex(),
 		})
 	} else {
@@ -2105,7 +2124,9 @@ where
 		&mut **w,
 		keychain_mask,
 		output.value,
-		output.commit.unwrap(),
+		output.commit.ok_or(Error::GenericError(
+			"Internal error at self_spend_particular_output, output.commit is empty".into(),
+		))?,
 		address,
 		_current_height,
 		_minimum_confirmations,
@@ -2132,7 +2153,7 @@ where
 	let blind = k.derive_key(amount, &key_id, SwitchCommitmentType::Regular)?;
 	let commit = k.secp().commit(amount, blind.clone())?;
 
-	let proof_builder = proof::ProofBuilder::new(&k);
+	let proof_builder = proof::ProofBuilder::new(&k)?;
 	let proof = proof::create(
 		&k,
 		&proof_builder,

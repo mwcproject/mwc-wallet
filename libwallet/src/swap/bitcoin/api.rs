@@ -130,27 +130,27 @@ where
 		let outputs = match self
 			.btc_node_client1
 			.lock()
-			.expect("Mutex failure")
+			.unwrap_or_else(|e| e.into_inner())
 			.unspent(self.context_id, self.secondary_currency, &address[0])
 		{
 			Ok(r) => r,
 			Err(_) => self
 				.btc_node_client2
 				.lock()
-				.expect("Mutex failure")
+				.unwrap_or_else(|e| e.into_inner())
 				.unspent(self.context_id, self.secondary_currency, &address[0])?,
 		};
 		let height = match self
 			.btc_node_client1
 			.lock()
-			.expect("Mutex failure")
+			.unwrap_or_else(|e| e.into_inner())
 			.height()
 		{
 			Ok(r) => r,
 			Err(_) => self
 				.btc_node_client2
 				.lock()
-				.expect("Mutex failure")
+				.unwrap_or_else(|e| e.into_inner())
 				.height()?,
 		};
 		let mut pending_amount = 0;
@@ -300,12 +300,12 @@ where
 			if let Err(_) = self
 				.btc_node_client1
 				.lock()
-				.expect("Mutex failure")
+				.unwrap_or_else(|e| e.into_inner())
 				.post_tx(tx.clone())
 			{
 				self.btc_node_client2
 					.lock()
-					.expect("Mutex failure")
+					.unwrap_or_else(|e| e.into_inner())
 					.post_tx(tx)?;
 			}
 		}
@@ -370,14 +370,14 @@ where
 				let height = match self
 					.btc_node_client1
 					.lock()
-					.expect("Mutex failure")
+					.unwrap_or_else(|e| e.into_inner())
 					.transaction(&tx_hash)
 				{
 					Ok(h) => h,
 					Err(_) => self
 						.btc_node_client2
 						.lock()
-						.expect("Mutex failure")
+						.unwrap_or_else(|e| e.into_inner())
 						.transaction(&tx_hash)?,
 				};
 				match height {
@@ -434,26 +434,40 @@ where
 				inputs: inputs.ok_or(Error::UnexpectedRole(
 					"Fn create_context() for seller not found inputs".to_string(),
 				))?,
-				change_output: keys.next().unwrap(),
+				change_output: keys
+					.next()
+					.ok_or(Error::Generic("Not enough keys items".into()))?,
 				change_amount,
-				refund_output: keys.next().unwrap(),
+				refund_output: keys
+					.next()
+					.ok_or(Error::Generic("Not enough keys items".into()))?,
 				secondary_context: SecondarySellerContext::Btc(BtcSellerContext {
-					cosign: keys.next().unwrap(),
+					cosign: keys
+						.next()
+						.ok_or(Error::Generic("Not enough keys items".into()))?,
 				}),
 			})
 		} else {
 			RoleContext::Buyer(BuyerContext {
 				parent_key_id: parent_key_id,
-				output: keys.next().unwrap(),
-				redeem: keys.next().unwrap(),
+				output: keys
+					.next()
+					.ok_or(Error::Generic("Not enough keys items".into()))?,
+				redeem: keys
+					.next()
+					.ok_or(Error::Generic("Not enough keys items".into()))?,
 				secondary_context: SecondaryBuyerContext::Btc(BtcBuyerContext {
-					refund: keys.next().unwrap(),
+					refund: keys
+						.next()
+						.ok_or(Error::Generic("Not enough keys items".into()))?,
 				}),
 			})
 		};
 
 		Ok(Context {
-			multisig_key: keys.next().unwrap(),
+			multisig_key: keys
+				.next()
+				.ok_or(Error::Generic("Not enough keys items".into()))?,
 			multisig_nonce: generate_nonce(secp)?,
 			lock_nonce: generate_nonce(secp)?,
 			refund_nonce: generate_nonce(secp)?,
@@ -541,12 +555,9 @@ where
 		&self,
 		_keychain: &K, // To make compiler happy
 		swap: &mut Swap,
-	) -> SecondaryUpdate {
-		let btc_data = swap
-			.secondary_data
-			.unwrap_btc()
-			.expect("Secondary data of unexpected type");
-		SecondaryUpdate::BTC(btc_data.offer_update())
+	) -> Result<SecondaryUpdate, Error> {
+		let btc_data = swap.secondary_data.unwrap_btc()?;
+		Ok(SecondaryUpdate::BTC(btc_data.offer_update()))
 	}
 
 	/// Build secondary update part of the accept offer message
@@ -554,12 +565,9 @@ where
 		&self,
 		_keychain: &K, // To make compiler happy
 		swap: &mut Swap,
-	) -> SecondaryUpdate {
-		let btc_data = swap
-			.secondary_data
-			.unwrap_btc()
-			.expect("Secondary data of unexpected type");
-		SecondaryUpdate::BTC(btc_data.accept_offer_update())
+	) -> Result<SecondaryUpdate, Error> {
+		let btc_data = swap.secondary_data.unwrap_btc()?;
+		Ok(SecondaryUpdate::BTC(btc_data.accept_offer_update()?))
 	}
 
 	fn publish_secondary_transaction(
@@ -579,12 +587,12 @@ where
 			if let Err(_) = self
 				.btc_node_client1
 				.lock()
-				.expect("Mutex failure")
+				.unwrap_or_else(|e| e.into_inner())
 				.post_tx(btc_tx.tx.clone())
 			{
 				self.btc_node_client2
 					.lock()
-					.expect("Mutex failure")
+					.unwrap_or_else(|e| e.into_inner())
 					.post_tx(btc_tx.tx)?;
 			}
 		}
@@ -615,14 +623,14 @@ where
 		let btc_tip = match self
 			.btc_node_client1
 			.lock()
-			.expect("Mutex failure")
+			.unwrap_or_else(|e| e.into_inner())
 			.height()
 		{
 			Ok(r) => r,
 			Err(_) => self
 				.btc_node_client2
 				.lock()
-				.expect("Mutex failure")
+				.unwrap_or_else(|e| e.into_inner())
 				.height()?,
 		};
 		let btc_data = swap.secondary_data.unwrap_btc()?;
@@ -648,14 +656,14 @@ where
 				let outputs = match self
 					.btc_node_client1
 					.lock()
-					.expect("Mutex failure")
+					.unwrap_or_else(|e| e.into_inner())
 					.unspent(self.context_id, swap.secondary_currency, &address[0])
 				{
 					Ok(r) => r,
 					Err(_) => self
 						.btc_node_client2
 						.lock()
-						.expect("Mutex failure")
+						.unwrap_or_else(|e| e.into_inner())
 						.unspent(self.context_id, swap.secondary_currency, &address[0])?,
 				};
 				for output in outputs {
@@ -866,7 +874,10 @@ where
 	/// Validate clients. We want to be sure that the clients able to acceess the servers
 	fn test_client_connections(&self) -> Result<(), Error> {
 		{
-			let mut c = self.btc_node_client1.lock().expect("Mutex failure");
+			let mut c = self
+				.btc_node_client1
+				.lock()
+				.unwrap_or_else(|e| e.into_inner());
 			let name = c.name();
 			let _ = c.height().map_err(|e| {
 				Error::ElectrumNodeClient(format!(
@@ -876,7 +887,10 @@ where
 			})?;
 		}
 		{
-			let mut c = self.btc_node_client2.lock().expect("Mutex failure");
+			let mut c = self
+				.btc_node_client2
+				.lock()
+				.unwrap_or_else(|e| e.into_inner());
 			let name = c.name();
 			let _ = c.height().map_err(|e| {
 				Error::ElectrumNodeClient(format!(

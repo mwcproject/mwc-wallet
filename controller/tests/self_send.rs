@@ -20,7 +20,6 @@ extern crate mwc_wallet_impls as impls;
 
 use mwc_wallet_util::mwc_core as core;
 use mwc_wallet_util::mwc_core::global;
-use std::cell::RefCell;
 use std::ops::DerefMut;
 use std::sync::Arc;
 
@@ -38,6 +37,14 @@ use mwc_wallet_libwallet::types::TxSession;
 use mwc_wallet_libwallet::wallet_lock;
 use mwc_wallet_util::mwc_core::core::Transaction;
 use std::sync::Mutex;
+
+fn get_session(session: &mut TxSession, use_sessions: bool) -> Option<&mut TxSession> {
+	if use_sessions {
+		Some(session)
+	} else {
+		None
+	}
+}
 
 /// self send impl
 fn self_send_test_impl(test_dir: &str, use_sessions: bool) -> Result<(), wallet::Error> {
@@ -92,7 +99,10 @@ fn self_send_test_impl(test_dir: &str, use_sessions: bool) -> Result<(), wallet:
 		mask1,
 		bh as usize,
 		false,
-		tx_pool.lock().expect("Mutex failure").deref_mut(),
+		tx_pool
+			.lock()
+			.unwrap_or_else(|e| e.into_inner())
+			.deref_mut(),
 	);
 
 	// Should have 5 in account1 (5 spendable), 5 in account (2 spendable)
@@ -112,22 +122,22 @@ fn self_send_test_impl(test_dir: &str, use_sessions: bool) -> Result<(), wallet:
 			..Default::default()
 		};
 
-		// Using sessions for this test
-		let (sender_tx_sessions, receiver_tx_sessions) = if use_sessions {
-			(
-				Some(RefCell::new(TxSession::new())),
-				Some(RefCell::new(TxSession::new())),
-			)
-		} else {
-			(None, None)
-		};
+		let mut sender_session = TxSession::new();
+		let mut receiver_session = TxSession::new();
 
-		let mut slate = api.init_send_tx(m, &sender_tx_sessions, &args, 1)?;
-		api.tx_lock_outputs(m, &sender_tx_sessions, &slate, None, 0)?;
+		let mut slate =
+			api.init_send_tx(m, get_session(&mut sender_session, use_sessions), &args, 1)?;
+		api.tx_lock_outputs(
+			m,
+			get_session(&mut sender_session, use_sessions),
+			&slate,
+			None,
+			0,
+		)?;
 		// Send directly to self
 		wallet::controller::foreign_single_use(wallet1.clone(), mask1_i.clone(), |api| {
 			slate = api.receive_tx(
-				&receiver_tx_sessions,
+				get_session(&mut receiver_session, use_sessions),
 				&slate,
 				None,
 				&Some("listener".to_string()),
@@ -135,32 +145,21 @@ fn self_send_test_impl(test_dir: &str, use_sessions: bool) -> Result<(), wallet:
 			)?;
 			Ok(())
 		})?;
-		slate = api.finalize_tx(m, &sender_tx_sessions, &slate, true)?;
+		slate = api.finalize_tx(
+			m,
+			get_session(&mut sender_session, use_sessions),
+			&slate,
+			true,
+		)?;
 		api.post_tx(m, slate.tx_or_err()?, false)?; // mines a block
 
 		if use_sessions {
-			debug_assert!(sender_tx_sessions
-				.as_ref()
-				.unwrap()
-				.borrow()
-				.get_context_participant()
-				.is_none());
-			debug_assert!(receiver_tx_sessions
-				.as_ref()
-				.unwrap()
-				.borrow()
-				.get_context_participant()
-				.is_none());
+			debug_assert!(sender_session.get_context_participant().is_none());
+			debug_assert!(receiver_session.get_context_participant().is_none());
 
 			wallet_lock!(api.wallet_inst, w);
-			sender_tx_sessions
-				.unwrap()
-				.borrow_mut()
-				.save_tx_data(&mut **w, m, &slate.id)?;
-			receiver_tx_sessions
-				.unwrap()
-				.borrow_mut()
-				.save_tx_data(&mut **w, m, &slate.id)?;
+			sender_session.save_tx_data(&mut **w, m, &slate.id)?;
+			receiver_session.save_tx_data(&mut **w, m, &slate.id)?;
 		}
 		Ok(())
 	})?;
@@ -171,7 +170,10 @@ fn self_send_test_impl(test_dir: &str, use_sessions: bool) -> Result<(), wallet:
 		mask1,
 		3,
 		false,
-		tx_pool.lock().expect("Mutex failure").deref_mut(),
+		tx_pool
+			.lock()
+			.unwrap_or_else(|e| e.into_inner())
+			.deref_mut(),
 	);
 	bh += 3;
 

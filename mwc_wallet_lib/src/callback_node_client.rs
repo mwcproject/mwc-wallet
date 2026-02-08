@@ -55,7 +55,9 @@ impl CallbackNodeClient {
 	) -> Result<D, Error> {
 		let str_response = match self.build_request(method, params) {
 			Ok(req) => {
-				let c_req = CString::new(req).expect("Unable convert string into C format");
+				let c_req = CString::new(req).map_err(|e| {
+					Error::IO(format!("Unable convert string into C format, {}", e))
+				})?;
 				let c_compatible_ref: *const libc::c_char = c_req.as_c_str().as_ptr();
 
 				let callback = self.callback;

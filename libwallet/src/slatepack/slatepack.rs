@@ -179,12 +179,10 @@ impl Slatepack {
 				Ok(payload) => payload,
 				Err(e) => {
 					// Try recipient PK.  May be we are open what was stored before.
-					let res = Self::decrypt_payload(data_to_decrypt, nonce, secret, &recipient);
-					if res.is_err() {
-						// in case of error we want to return the parent error.
-						return Err(e);
+					match Self::decrypt_payload(data_to_decrypt, nonce, secret, &recipient) {
+						Ok(res) => res,
+						Err(_) => return Err(e),
 					}
-					res.unwrap()
 				}
 			};
 
@@ -379,12 +377,9 @@ impl Slatepack {
 		if let Some(recipient) = &self.recipient {
 			// recipient is define, so we can do encryption
 
-			if self.sender.is_none() {
-				return Err(Error::SlatepackEncodeError(
-					"Not found expected sender value".to_string(),
-				));
-			}
-			let sender = self.sender.clone().unwrap();
+			let sender = self.sender.ok_or(Error::SlatepackEncodeError(
+				"Not found expected sender value".to_string(),
+			))?;
 			// Sender address, so other party can open the message
 			debug_assert!(sender.as_bytes().len() == 32);
 			w_pack.write_bytes(sender.as_bytes())?;

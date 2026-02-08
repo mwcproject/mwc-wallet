@@ -39,11 +39,10 @@ use blake2_rfc::blake2b::blake2b;
 use chrono::{Duration, Utc};
 use mwc_wallet_util::mwc_chain::Chain;
 use mwc_wallet_util::mwc_core::consensus::DAY_HEIGHT;
-use std::cell::RefCell;
 use std::cmp;
 use std::collections::{HashMap, HashSet};
 use std::sync::mpsc::Sender;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 use uuid::Uuid;
 // Wallet - node sync up strategy. We can request blocks from the node and analyze them. 1 week of blocks can be requested in theory.
 // Or we can validate tx kernels, outputs e.t.c
@@ -57,6 +56,35 @@ const OUTPUT_TO_BLOCK: usize = 100;
 // How many parallel requests to use for the blocks. We don't want to be very aggressive because
 // of the node load. 4 is a reasonable number
 const SYNC_BLOCKS_THREADS: usize = 4;
+
+lazy_static! {
+	static ref SCAN_INTERRUPT: RwLock<HashMap<u32, bool>> = RwLock::new(HashMap::new());
+}
+
+/// Clean up the scan interruption flag
+pub fn release_interrupt_scan(context_id: u32) {
+	SCAN_INTERRUPT
+		.write()
+		.unwrap_or_else(|e| e.into_inner())
+		.remove(&context_id);
+}
+
+/// Set interruption flag, so all scans will be interrupted, so no waiting will be introduced
+pub fn interrupt_scan(context_id: u32) {
+	SCAN_INTERRUPT
+		.write()
+		.unwrap_or_else(|e| e.into_inner())
+		.insert(context_id, true);
+}
+
+fn is_scan_interrupted(context_id: u32) -> bool {
+	SCAN_INTERRUPT
+		.read()
+		.unwrap_or_else(|e| e.into_inner())
+		.get(&context_id)
+		.cloned()
+		.unwrap_or(false)
+}
 
 /// Utility struct for return values from below
 #[derive(Debug, Clone)]
@@ -138,20 +166,22 @@ lazy_static! {
 pub fn scan_clean_context(context_id: u32) {
 	let _ = REPLAY_MITIGATION_CONFIG
 		.lock()
-		.expect("Mutex failure")
+		.unwrap_or_else(|e| e.into_inner())
 		.remove(&context_id);
 }
 
 /// Set address derivative index
 pub fn set_replay_config(context_id: u32, config: ReplayMitigationConfig) {
-	let mut lock = REPLAY_MITIGATION_CONFIG.lock().expect("Mutex failure");
+	let mut lock = REPLAY_MITIGATION_CONFIG
+		.lock()
+		.unwrap_or_else(|e| e.into_inner());
 	lock.insert(context_id, config);
 }
 /// Get address derivative index
 pub fn get_replay_config(context_id: u32) -> ReplayMitigationConfig {
 	REPLAY_MITIGATION_CONFIG
 		.lock()
-		.expect("Mutex failure")
+		.unwrap_or_else(|e| e.into_inner())
 		.get(&context_id)
 		.cloned()
 		.unwrap_or(ReplayMitigationConfig::default())
@@ -171,11 +201,15 @@ where
 	let mut wallet_outputs: Vec<OutputResult> = Vec::new();
 	let mut self_spend_outputs: Vec<OutputResult> = Vec::new();
 
-	let legacy_builder = proof::LegacyProofBuilder::new(keychain);
-	let builder = proof::ProofBuilder::new(keychain);
+	let legacy_builder = proof::LegacyProofBuilder::new(keychain)?;
+	let builder = proof::ProofBuilder::new(keychain)?;
 	let legacy_version = HeaderVersion(1);
 
 	for output in outputs.iter() {
+		if is_scan_interrupted(context_id) {
+			return Err(Error::Interrupted);
+		}
+
 		let (commit, proof, is_coinbase, height, mmr_index) = output;
 		// attempt to unwind message from the RP and get a value
 		// will fail if it's not ours
@@ -223,7 +257,7 @@ where
 
 		//adding an extra check of the height.
 		//get the height used while building the key_id
-		let path = key_id.to_path();
+		let path = key_id.to_path()?;
 		let last_child_number = path.path[3];
 
 		let mut built_height = 0;
@@ -251,7 +285,7 @@ where
 					self_spend_outputs.push(OutputResult {
 						commit: *commit,
 						key_id: key_id.clone(),
-						n_child: key_id.to_path().last_path_index(),
+						n_child: key_id.to_path()?.last_path_index(),
 						value: amount,
 						height: *height,
 						lock_height: lock_height,
@@ -267,7 +301,7 @@ where
 			wallet_outputs.push(OutputResult {
 				commit: *commit,
 				key_id: key_id.clone(),
-				n_child: key_id.to_path().last_path_index(),
+				n_child: key_id.to_path()?.last_path_index(),
 				value: amount,
 				height: *height,
 				lock_height: lock_height,
@@ -303,6 +337,10 @@ where
 	let secp = Secp256k1::with_caps(ContextFlag::VerifyOnly);
 
 	loop {
+		if is_scan_interrupted(context_id) {
+			return Err(Error::Interrupted);
+		}
+
 		let (highest_index, last_retrieved_index, outputs) =
 			client.get_outputs_by_pmmr_index(start_index, end_index, batch_size)?;
 
@@ -330,28 +368,28 @@ where
 				.map_err(|e| Error::Nonce(format!("Unable to create nonce: {}", e)))?;
 			let info = secp.rewind_bullet_proof(*commit, nonce.clone(), None, *proof);
 
-			if info.is_err() {
-				continue;
+			match info {
+				Err(_) => continue,
+				Ok(info) => {
+					vw.total_balance += info.value;
+					let lock_height = if *is_coinbase {
+						*height + global::coinbase_maturity(context_id)
+					} else {
+						*height
+					};
+
+					let output_info = ViewWalletOutputResult {
+						commit: ToHex::to_hex(&commit),
+						value: info.value,
+						height: *height,
+						mmr_index: *mmr_index,
+						is_coinbase: *is_coinbase,
+						lock_height: lock_height,
+					};
+
+					vw.output_result.push(output_info);
+				}
 			}
-
-			let info = info.unwrap();
-			vw.total_balance += info.value;
-			let lock_height = if *is_coinbase {
-				*height + global::coinbase_maturity(context_id)
-			} else {
-				*height
-			};
-
-			let output_info = ViewWalletOutputResult {
-				commit: ToHex::to_hex(&commit),
-				value: info.value,
-				height: *height,
-				mmr_index: *mmr_index,
-				is_coinbase: *is_coinbase,
-				lock_height: lock_height,
-			};
-
-			vw.output_result.push(output_info);
 		}
 		if highest_index <= last_retrieved_index {
 			vw.last_pmmr_index = last_retrieved_index;
@@ -391,6 +429,10 @@ where
 		}
 	}
 	loop {
+		if is_scan_interrupted(context_id) {
+			return Err(Error::Interrupted);
+		}
+
 		let (highest_index, last_retrieved_index, outputs) =
 			client.get_outputs_by_pmmr_index(start_index, end_index, batch_size)?;
 
@@ -444,11 +486,11 @@ where
 	let commit = wallet.calc_commit(keychain_mask, output.value, &output.key_id)?;
 	let mut batch = wallet.batch(keychain_mask)?;
 
-	let parent_key_id = output.key_id.parent_path();
-	let mut path = parent_key_id.to_path();
+	let parent_key_id = output.key_id.parent_path()?;
+	let mut path = parent_key_id.to_path()?;
 	// Resetting reply attack prevention block number to 0, so we could calculate parent correctly
 	path.path[3] = ChildNumber::from(0);
-	let parent_key_id = path.to_identifier();
+	let parent_key_id = path.to_identifier()?;
 
 	if !found_parents.contains_key(&parent_key_id) {
 		found_parents.insert(parent_key_id.clone(), 0);
@@ -457,7 +499,14 @@ where
 	let log_id = {
 		if let Some(uuid) = commit2transactionuuid.get(&ToHex::to_hex(&commit)) {
 			// Transaction already exist. using it...
-			transaction.get(uuid).unwrap().tx_log.id
+			transaction
+				.get(uuid)
+				.ok_or(Error::GenericError(format!(
+					"restore_missing_output internal error, not found expected transaction {:?}",
+					uuid
+				)))?
+				.tx_log
+				.id
 		} else {
 			// Creating new transaction
 			let log_id = batch.next_tx_log_id(&parent_key_id)?;
@@ -472,7 +521,7 @@ where
 			t.num_outputs = 1;
 			t.output_commits = vec![output.commit.clone()];
 			if let Ok(hdr_info) = node_client.get_header_info(t.output_height) {
-				t.update_confirmation_ts(hdr_info.confirmed_time);
+				t.update_confirmation_ts(hdr_info.confirmed_time)?;
 			}
 			batch.save_tx_log_entry(t, &parent_key_id)?;
 			log_id
@@ -663,22 +712,27 @@ where
 	// In any case we can't use it for recovering.
 	let mut last_output = String::new();
 
+	let context_id = wallet.get_context_id();
+
 	// Wallet's transactions with extended info
 	// Key: transaction uuid
 	let mut transactions: HashMap<TxUuidPlus, WalletTxInfo> = HashMap::new();
 	let chain_outs: Vec<OutputResult>;
 	{
 		// First, reading data from the wallet
-		for w_out in wallet.iter().filter(|w| w.commit.is_some()) {
-			outputs.insert(
-				w_out.commit.clone().unwrap(),
-				WalletOutputInfo::new(w_out.clone()),
-			);
-			last_output = w_out.commit.clone().unwrap();
+		for w_out in wallet.iter()?.filter(|w| w.commit.is_some()) {
+			last_output = w_out.commit.clone().ok_or(Error::GenericError(
+				"get_wallet_and_chain_data internal error, w_out.commit is empty".into(),
+			))?;
+			outputs.insert(last_output.clone(), WalletOutputInfo::new(w_out.clone()));
 
 			if w_out.is_spendable() {
 				spendable_outputs += 1;
 			}
+		}
+
+		if is_scan_interrupted(context_id) {
+			return Err(Error::Interrupted);
 		}
 
 		// Key: id + tx.parent_key_id
@@ -694,7 +748,7 @@ where
 
 		// Collecting Transactions from the wallet. UUID need to be known, otherwise
 		// transaction is non complete and can be ignored.
-		for tx in wallet.tx_log_iter() {
+		for tx in wallet.tx_log_iter()? {
 			if !tx.confirmed {
 				not_confirmed_txs += 1;
 			}
@@ -731,6 +785,10 @@ where
 			transactions.insert(wtx.tx_uuid.clone(), wtx);
 		}
 
+		if is_scan_interrupted(context_id) {
+			return Err(Error::Interrupted);
+		}
+
 		// Propagate tx to output mapping to outputs
 		for tx in transactions.values() {
 			// updated output vs Transactions mapping
@@ -751,6 +809,10 @@ where
 
 		let height_deep_limit =
 			SYNC_BLOCKS_DEEPNESS + not_confirmed_txs / 2 + spendable_outputs / OUTPUT_TO_BLOCK;
+
+		if is_scan_interrupted(context_id) {
+			return Err(Error::Interrupted);
+		}
 
 		// We need to choose a strategy. If there are few blocks, it is really make sense request those blocks
 		if !do_full_outputs_refresh && (end_height - start_height <= height_deep_limit as u64) {
@@ -779,7 +841,7 @@ where
 
 					if !tx.tx_log.confirmed {
 						tx.kernel_validation = Some(false);
-						let kernel = util::to_hex(&tx.tx_log.kernel_excess.clone().unwrap().0);
+						let kernel = util::to_hex(&tx.tx_log.kernel_excess.clone().ok_or(Error::GenericError("get_wallet_and_chain_data internal error, tx.tx_log.kernel_excess is empty".into()))?.0);
 
 						if let Some(v) = txkernel_to_txuuid.get_mut(&kernel) {
 							v.push(tx_uuid.clone());
@@ -802,6 +864,10 @@ where
 					end_height,
 					cur_height + (SYNC_BLOCKS_THREADS * SYNC_BLOCKS_THREADS - 1) as u64,
 				);
+
+				if is_scan_interrupted(context_id) {
+					return Err(Error::Interrupted);
+				}
 
 				// printing the progress
 				if let Some(ref s) = status_send_channel {
@@ -875,7 +941,8 @@ where
 				for tx_kernel in b.kernels {
 					if let Some(tx_uuid_vec) = txkernel_to_txuuid.get(&tx_kernel.excess) {
 						for tx_uuid in tx_uuid_vec {
-							let tx = transactions.get_mut(tx_uuid).unwrap();
+							let tx = transactions.get_mut(tx_uuid)
+								.ok_or(Error::GenericError(format!("get_wallet_and_chain_data internal error, not found expected transaction {:?}", tx_uuid)))?;
 							tx.kernel_validation = Some(true);
 							tx.tx_log.output_height = height; // Height must come from kernel and will match heights of outputs
 							tx.updated = true;
@@ -999,6 +1066,10 @@ where
 				let _ = s.send(StatusMessage::Scanning(show_progress, msg, 99));
 			}
 
+			if is_scan_interrupted(context_id) {
+				return Err(Error::Interrupted);
+			}
+
 			// Validate kernels from transaction. Kernel are a source of truth
 			let client = wallet.w2n_client().clone();
 			for tx in transactions.values_mut() {
@@ -1043,14 +1114,20 @@ where
 
 			// Validate all 'active output' - Unspend and Locked if they still on the chain
 			// Spent and Unconfirmed news should come from the updates
-			let wallet_outputs_to_check: Vec<pedersen::Commitment> = outputs
-				.values()
-				.filter(|out| out.output.is_spendable() && !out.commit.is_empty())
-				// Parsing Commtment string into the binary, how API needed
-				.map(|out| util::from_hex(&out.output.commit.as_ref().unwrap()))
-				.filter(|out| out.is_ok())
-				.map(|out| pedersen::Commitment::from_vec(out.unwrap()))
-				.collect();
+			let mut wallet_outputs_to_check: Vec<pedersen::Commitment> = Vec::new();
+
+			for out in outputs.values() {
+				if out.output.is_spendable() && !out.commit.is_empty() {
+					if let Ok(hex) = util::from_hex(
+						&out.output.commit.as_ref().ok_or(Error::GenericError(
+							"get_wallet_and_chain_data internal error, out.output.commit is empty"
+								.into(),
+						))?,
+					) {
+						wallet_outputs_to_check.push(pedersen::Commitment::from_vec(hex));
+					}
+				}
+			}
 
 			// get_outputs_from_nodefor large number will take a time. Chunk size is 200 ids.
 
@@ -1066,6 +1143,10 @@ where
 					wallet_outputs_to_check.chunks(100).collect();
 
 				let mut chunk_num = 0;
+
+				if is_scan_interrupted(context_id) {
+					return Err(Error::Interrupted);
+				}
 
 				for chunk in &slices {
 					if let Some(ref s) = status_send_channel {
@@ -1128,8 +1209,8 @@ where
 		let mut commits: HashSet<String> = HashSet::new();
 
 		for tx in transactions.values() {
-			if tx.kernel_validation.is_some() {
-				if tx.tx_log.confirmed && tx.kernel_validation.clone().unwrap() == false {
+			if let Some(kernel_validation) = tx.kernel_validation {
+				if tx.tx_log.confirmed && kernel_validation == false {
 					// All input commits need to reevaluate
 					commits.extend(tx.input_commit.clone());
 				}
@@ -1141,9 +1222,9 @@ where
 		if !commits.is_empty() {
 			let wallet_outputs_to_check: Vec<pedersen::Commitment> = commits
 				.iter()
-				.map(|out| util::from_hex(out))
-				.filter(|out| out.is_ok())
-				.map(|out| pedersen::Commitment::from_vec(out.unwrap()))
+				.map(|out| util::from_hex(out).ok())
+				.flatten()
+				.map(|out| pedersen::Commitment::from_vec(out))
 				.collect();
 
 			let client = wallet.w2n_client().clone();
@@ -1387,7 +1468,7 @@ where
 	// Updating confirmed height record. The height at what we finish updating the data
 	// Updating 'done' job for all accounts that was involved. Update was done for all accounts- let's update that
 	{
-		let accounts: Vec<Identifier> = wallet.acct_path_iter().map(|m| m.path).collect();
+		let accounts: Vec<Identifier> = wallet.acct_path_iter()?.map(|m| m.path).collect();
 		let mut batch = wallet.batch(keychain_mask)?;
 
 		for par_id in &accounts {
@@ -1626,8 +1707,8 @@ where
 {
 	for tx_info in transactions.values_mut() {
 		// Checking the kernel - the source of truth for transactions
-		if tx_info.kernel_validation.is_some() {
-			if tx_info.kernel_validation.clone().unwrap() {
+		if let Some(kernel_validation) = tx_info.kernel_validation {
+			if kernel_validation {
 				// transaction is valid
 				let mut change_update_sent = false;
 				if tx_info.tx_log.is_cancelled_reverted() {
@@ -1652,7 +1733,7 @@ where
 					{
 						tx_info
 							.tx_log
-							.update_confirmation_ts(hdr_info.confirmed_time);
+							.update_confirmation_ts(hdr_info.confirmed_time)?;
 					}
 					tx_info.updated = true;
 
@@ -2183,21 +2264,20 @@ where
 			);
 			t.confirmed = true;
 			if let Ok(hdr_info) = node_client.get_header_info(t.output_height) {
-				t.update_confirmation_ts(hdr_info.confirmed_time);
+				t.update_confirmation_ts(hdr_info.confirmed_time)?;
 			}
 			t.output_height = w_out.output.height;
 			t.amount_credited = w_out.output.value;
 			t.amount_debited = 0;
 			t.num_outputs = 1;
 			// calculate kernel excess for coinbase
-			if w_out.output.commit.is_some() {
-				let secp = batch.keychain().secp();
+			if let Some(commit) = &w_out.output.commit {
+				let secp = batch.keychain()?.secp();
 				let over_commit = secp.commit_value(w_out.output.value)?;
-				let commit = pedersen::Commitment::from_vec(
-					util::from_hex(w_out.output.commit.as_ref().unwrap()).map_err(|e| {
+				let commit =
+					pedersen::Commitment::from_vec(util::from_hex(commit).map_err(|e| {
 						Error::GenericError(format!("Output commit parse error, {}", e))
-					})?,
-				);
+					})?);
 				t.output_commits = vec![commit.clone()];
 				let excess = secp.commit_sum(vec![commit], vec![over_commit])?;
 				t.kernel_excess = Some(excess);
@@ -2259,7 +2339,7 @@ where
 					{
 						tx_info
 							.tx_log
-							.update_confirmation_ts(hdr_info.confirmed_time);
+							.update_confirmation_ts(hdr_info.confirmed_time)?;
 					}
 				}
 
@@ -2290,7 +2370,7 @@ where
 	K: Keychain + 'a,
 {
 	let label_base = "account";
-	let accounts: Vec<Identifier> = wallet.acct_path_iter().map(|m| m.path).collect();
+	let accounts: Vec<Identifier> = wallet.acct_path_iter()?.map(|m| m.path).collect();
 	let mut acct_index = accounts.len();
 	for (path, max_child_index) in found_parents.iter() {
 		// Only restore paths that don't exist
@@ -2354,16 +2434,13 @@ fn report_transaction_collision(
 		tx_uuid
 			.iter()
 			.map(|tx_uuid| transactions.get(tx_uuid))
-			.filter(|wtx| {
-				wtx.map(|tx| !tx.tx_log.is_cancelled_reverted())
-					.unwrap_or(false)
-			})
+			.flatten()
+			.filter(|wtx| !wtx.tx_log.is_cancelled_reverted())
 			.for_each(|wtx| {
 				if cancelled_tx.len() > 0 {
 					cancelled_tx.push_str(", ");
 				}
-				let tx = wtx.unwrap();
-				cancelled_tx.push_str(&format!("{}", tx.tx_uuid.uuid_str));
+				cancelled_tx.push_str(&format!("{}", wtx.tx_uuid.uuid_str));
 			});
 
 		let inputs = if inputs { "inputs" } else { "outputs" };
@@ -2409,7 +2486,7 @@ where
 					.w2n_client()
 					.get_header_info(wtx.tx_log.output_height)
 				{
-					wtx.tx_log.update_confirmation_ts(hdr_info.confirmed_time);
+					wtx.tx_log.update_confirmation_ts(hdr_info.confirmed_time)?;
 				}
 				wtx.updated = true;
 				if let Some(ref s) = status_send_channel {
@@ -2461,24 +2538,29 @@ where
 		..Default::default()
 	};
 
-	let tx_session_send = Some(RefCell::new(TxSession::new()));
-	let tx_session_receive = Some(RefCell::new(TxSession::new()));
+	let mut tx_session_send = TxSession::new();
+	let mut tx_session_receive = TxSession::new();
 
 	let mut slate;
 	{
 		//send
-		slate = owner::init_send_tx(wallet, keychain_mask, &tx_session_send, &args, false, 1)?;
+		slate = owner::init_send_tx(
+			wallet,
+			keychain_mask,
+			&mut Some(&mut tx_session_send),
+			&args,
+			false,
+			1,
+		)?;
 		//receiver
 		let mut dest_account_name: Option<String> = None;
-		let address_string;
-		if address.is_some() {
-			address_string = address.clone().unwrap();
-			dest_account_name = Some(address_string);
+		if let Some(address) = &address {
+			dest_account_name = Some(address.clone());
 		}
 		slate = foreign::receive_tx(
 			wallet,
 			keychain_mask,
-			&tx_session_receive,
+			Some(&mut tx_session_receive),
 			&slate,
 			address.clone(),
 			None,
@@ -2492,7 +2574,7 @@ where
 		owner::tx_lock_outputs(
 			wallet,
 			keychain_mask,
-			&tx_session_send,
+			&mut Some(&mut tx_session_send),
 			&slate,
 			address,
 			0,
@@ -2501,7 +2583,7 @@ where
 		slate = owner::finalize_tx(
 			wallet,
 			keychain_mask,
-			&tx_session_send,
+			&mut Some(&mut tx_session_send),
 			&slate,
 			false,
 			false,
@@ -2516,27 +2598,11 @@ where
 	};
 	owner::post_tx(&client, slate.tx_or_err()?, false)?;
 
-	debug_assert!(tx_session_send
-		.as_ref()
-		.unwrap()
-		.borrow()
-		.get_context_participant()
-		.is_none());
-	debug_assert!(tx_session_receive
-		.as_ref()
-		.unwrap()
-		.borrow()
-		.get_context_participant()
-		.is_none());
+	debug_assert!(tx_session_send.get_context_participant().is_none());
+	debug_assert!(tx_session_receive.get_context_participant().is_none());
 
-	tx_session_send
-		.unwrap()
-		.borrow_mut()
-		.save_tx_data(wallet, keychain_mask, &slate.id)?;
-	tx_session_receive
-		.unwrap()
-		.borrow_mut()
-		.save_tx_data(wallet, keychain_mask, &slate.id)?;
+	tx_session_send.save_tx_data(wallet, keychain_mask, &slate.id)?;
+	tx_session_receive.save_tx_data(wallet, keychain_mask, &slate.id)?;
 
 	Ok(())
 }

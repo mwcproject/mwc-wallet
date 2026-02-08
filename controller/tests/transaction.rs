@@ -90,7 +90,10 @@ fn basic_transaction_api(test_dir: &str) -> Result<(), wallet::Error> {
 		mask1,
 		10,
 		false,
-		tx_pool.lock().expect("Mutex failure").deref_mut(),
+		tx_pool
+			.lock()
+			.unwrap_or_else(|e| e.into_inner())
+			.deref_mut(),
 	);
 
 	// Check wallet 1 contents are as expected
@@ -124,7 +127,7 @@ fn basic_transaction_api(test_dir: &str) -> Result<(), wallet::Error> {
 			selection_strategy_is_use_all: true,
 			..Default::default()
 		};
-		let slate_i = sender_api.init_send_tx(m, &None, &args, 1)?;
+		let slate_i = sender_api.init_send_tx(m, None, &args, 1)?;
 
 		// Check we are creating a tx with the expected lock_height of 0.
 		// We will check this produces a Plain kernel later.
@@ -135,8 +138,8 @@ fn basic_transaction_api(test_dir: &str) -> Result<(), wallet::Error> {
 		assert_eq!(0, slate_i.get_lock_height());
 
 		slate = client1.send_tx_slate_direct("wallet2", &slate_i)?;
-		sender_api.tx_lock_outputs(m, &None, &slate, None, 0)?;
-		slate = sender_api.finalize_tx(m, &None, &slate, true)?;
+		sender_api.tx_lock_outputs(m, None, &slate, None, 0)?;
+		slate = sender_api.finalize_tx(m, None, &slate, true)?;
 
 		// Check we have a single kernel and that it is a Plain kernel (no lock_height).
 		// fees for 7 inputs, 2 outputs, 1 kernel (weight 52)  (2 * 4 + 1 - 7)*1m = 2m = 2000000
@@ -208,7 +211,10 @@ fn basic_transaction_api(test_dir: &str) -> Result<(), wallet::Error> {
 		mask1,
 		1,
 		false,
-		tx_pool.lock().expect("Mutex failure").deref_mut(),
+		tx_pool
+			.lock()
+			.unwrap_or_else(|e| e.into_inner())
+			.deref_mut(),
 	);
 
 	// Check wallet 1 contents are as expected
@@ -255,7 +261,10 @@ fn basic_transaction_api(test_dir: &str) -> Result<(), wallet::Error> {
 		mask1,
 		3,
 		false,
-		tx_pool.lock().expect("Mutex failure").deref_mut(),
+		tx_pool
+			.lock()
+			.unwrap_or_else(|e| e.into_inner())
+			.deref_mut(),
 	);
 
 	// refresh wallets and retrieve info/tests for each wallet after maturity
@@ -302,7 +311,7 @@ fn basic_transaction_api(test_dir: &str) -> Result<(), wallet::Error> {
 			estimate_only: Some(true),
 			..Default::default()
 		};
-		let est = sender_api.init_send_tx(m, &None, &init_args, 1)?;
+		let est = sender_api.init_send_tx(m, None, &init_args, 1)?;
 		assert_eq!(est.amount, 10 * core::consensus::MWC_FIRST_GROUP_REWARD);
 		// fees for 5 inputs, 2 outputs, 1 kernel   2*4 + 1 - 5 = 4m
 		assert_eq!(est.fee, 4_000_000 / 100);
@@ -317,7 +326,7 @@ fn basic_transaction_api(test_dir: &str) -> Result<(), wallet::Error> {
 			estimate_only: Some(true),
 			..Default::default()
 		};
-		let est = sender_api.init_send_tx(m, &None, &init_args, 1)?;
+		let est = sender_api.init_send_tx(m, None, &init_args, 1)?;
 		assert_eq!(est.amount, core::consensus::MWC_FIRST_GROUP_REWARD * 3);
 		// fees for 3 inputs, 2 outputs, 1 kernel    2*4+1-3 = 6m
 		assert_eq!(est.fee, 6_000_000 / 100);
@@ -338,10 +347,10 @@ fn basic_transaction_api(test_dir: &str) -> Result<(), wallet::Error> {
 			selection_strategy_is_use_all: true,
 			..Default::default()
 		};
-		let slate_i = sender_api.init_send_tx(m, &None, &args, 1)?;
+		let slate_i = sender_api.init_send_tx(m, None, &args, 1)?;
 		slate = client1.send_tx_slate_direct("wallet2", &slate_i)?;
-		sender_api.tx_lock_outputs(m, &None, &slate, None, 0)?;
-		slate = sender_api.finalize_tx(m, &None, &slate, true)?;
+		sender_api.tx_lock_outputs(m, None, &slate, None, 0)?;
+		slate = sender_api.finalize_tx(m, None, &slate, true)?;
 		Ok(())
 	})?;
 
@@ -352,7 +361,10 @@ fn basic_transaction_api(test_dir: &str) -> Result<(), wallet::Error> {
 		mask1,
 		1,
 		false,
-		tx_pool.lock().expect("Mutex failure").deref_mut(),
+		tx_pool
+			.lock()
+			.unwrap_or_else(|e| e.into_inner())
+			.deref_mut(),
 	);
 
 	wallet::controller::owner_single_use(Some(wallet1.clone()), mask1, None, |sender_api, m| {
@@ -376,7 +388,10 @@ fn basic_transaction_api(test_dir: &str) -> Result<(), wallet::Error> {
 		mask1,
 		1,
 		false,
-		tx_pool.lock().expect("Mutex failure").deref_mut(),
+		tx_pool
+			.lock()
+			.unwrap_or_else(|e| e.into_inner())
+			.deref_mut(),
 	);
 
 	wallet::controller::owner_single_use(Some(wallet1.clone()), mask1, None, |sender_api, m| {
@@ -396,7 +411,10 @@ fn basic_transaction_api(test_dir: &str) -> Result<(), wallet::Error> {
 		mask1,
 		4,
 		false,
-		tx_pool.lock().expect("Mutex failure").deref_mut(),
+		tx_pool
+			.lock()
+			.unwrap_or_else(|e| e.into_inner())
+			.deref_mut(),
 	);
 
 	// check wallet2 has stored transaction
@@ -430,7 +448,7 @@ fn basic_transaction_api(test_dir: &str) -> Result<(), wallet::Error> {
 			selection_strategy_is_use_all: true,
 			..Default::default()
 		};
-		let res = sender_api.init_send_tx(m, &None, &args, 1);
+		let res = sender_api.init_send_tx(m, None, &args, 1);
 		assert!(res.is_err());
 		Ok(())
 	})?;
@@ -450,7 +468,7 @@ fn basic_transaction_api(test_dir: &str) -> Result<(), wallet::Error> {
 			selection_strategy_is_use_all: true,
 			..Default::default()
 		};
-		let slate_i = sender_api.init_send_tx(m, &None, &args, 1)?;
+		let slate_i = sender_api.init_send_tx(m, None, &args, 1)?;
 		let total_spend: u64 = slate_i.amount + slate_i.fee;
 		assert_eq!(amount, total_spend);
 		Ok(())
@@ -513,7 +531,10 @@ fn tx_rollback(test_dir: &str) -> Result<(), wallet::Error> {
 		mask1,
 		5,
 		false,
-		tx_pool.lock().expect("Mutex failure").deref_mut(),
+		tx_pool
+			.lock()
+			.unwrap_or_else(|e| e.into_inner())
+			.deref_mut(),
 	);
 
 	let amount = core::consensus::MWC_FIRST_GROUP_REWARD / 2;
@@ -530,10 +551,10 @@ fn tx_rollback(test_dir: &str) -> Result<(), wallet::Error> {
 			..Default::default()
 		};
 
-		let slate_i = sender_api.init_send_tx(m, &None, &args, 1)?;
+		let slate_i = sender_api.init_send_tx(m, None, &args, 1)?;
 		slate = client1.send_tx_slate_direct("wallet2", &slate_i)?;
-		sender_api.tx_lock_outputs(m, &None, &slate, None, 0)?;
-		slate = sender_api.finalize_tx(m, &None, &slate, true)?;
+		sender_api.tx_lock_outputs(m, None, &slate, None, 0)?;
+		slate = sender_api.finalize_tx(m, None, &slate, true)?;
 		Ok(())
 	})?;
 
@@ -599,7 +620,10 @@ fn tx_rollback(test_dir: &str) -> Result<(), wallet::Error> {
 		mask1,
 		5,
 		false,
-		tx_pool.lock().expect("Mutex failure").deref_mut(),
+		tx_pool
+			.lock()
+			.unwrap_or_else(|e| e.into_inner())
+			.deref_mut(),
 	);
 
 	// Wallet 1 decides to roll back instead

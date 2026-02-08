@@ -83,7 +83,10 @@ impl SellApi {
 		);
 
 		let now_ts = swap::get_cur_time();
-		let started = Utc.timestamp_opt(now_ts, 0).unwrap();
+		let started = Utc
+			.timestamp_opt(now_ts, 0)
+			.single()
+			.ok_or_else(|| Error::Generic(format!("Invalid UNIX timestamp: {}", now_ts)))?;
 
 		let ls = Slate::blank(2, false);
 
@@ -497,12 +500,12 @@ impl SellApi {
 
 		// Input(s)
 		for (input_identifier, _, input_amount) in &scontext.inputs {
-			sum = sum.sub_key_id(input_identifier.to_value_path(*input_amount));
+			sum = sum.sub_key_id(input_identifier.to_value_path(*input_amount)?);
 		}
 
 		// Change output, partial multisig output, offset
 		sum = sum
-			.add_key_id(scontext.change_output.to_value_path(change))
+			.add_key_id(scontext.change_output.to_value_path(change)?)
 			.add_blinding_factor(BlindingFactor::from_secret_key(
 				swap.multisig_secret(keychain, context)?,
 			))
@@ -535,7 +538,7 @@ impl SellApi {
 			elems.push(build::input(*input_amount, input_identifier.clone()));
 		}
 		elems.push(build::output(change, scontext.change_output.clone()));
-		slate.add_transaction_elements(keychain, &proof::ProofBuilder::new(keychain), elems)?;
+		slate.add_transaction_elements(keychain, &proof::ProofBuilder::new(keychain)?, elems)?;
 		slate.tx_or_err_mut()?.offset =
 			BlindingFactor::from_secret_key(SecretKey::new(keychain.secp(), &mut thread_rng()));
 
@@ -613,7 +616,7 @@ impl SellApi {
 			.sub_blinding_factor(BlindingFactor::from_secret_key(
 				swap.multisig_secret(keychain, context)?,
 			))
-			.add_key_id(scontext.refund_output.to_value_path(swap.refund_amount()))
+			.add_key_id(scontext.refund_output.to_value_path(swap.refund_amount())?)
 			.sub_blinding_factor(swap.refund_slate.slate.tx_or_err()?.offset.clone());
 		let sec_key = keychain.blind_sum(&sum)?.secret_key(keychain.secp())?;
 
@@ -640,7 +643,7 @@ impl SellApi {
 		// The multisig input is missing because it is not yet fully known
 		let mut elems = Vec::new();
 		elems.push(build::output(refund_amount, scontext.refund_output.clone()));
-		slate.add_transaction_elements(keychain, &proof::ProofBuilder::new(keychain), elems)?;
+		slate.add_transaction_elements(keychain, &proof::ProofBuilder::new(keychain)?, elems)?;
 		slate.tx_or_err_mut()?.offset =
 			BlindingFactor::from_secret_key(SecretKey::new(keychain.secp(), &mut thread_rng()));
 

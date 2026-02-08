@@ -96,7 +96,8 @@ impl EncryptedBody {
 
 		let nonce: [u8; 12] = thread_rng().gen();
 
-		let unbound_key = aead::UnboundKey::new(&aead::AES_256_GCM, &enc_key.0).unwrap();
+		let unbound_key = aead::UnboundKey::new(&aead::AES_256_GCM, &enc_key.0)
+			.map_err(|e| Error::GenericError(format!("aead key creation error, {}", e)))?;
 		let sealing_key: aead::LessSafeKey = aead::LessSafeKey::new(unbound_key);
 		let aad = aead::Aad::from(&[]);
 		let res = sealing_key.seal_in_place_append_tag(
@@ -160,7 +161,8 @@ impl EncryptedBody {
 		}
 		let mut n = [0u8; 12];
 		n.copy_from_slice(&nonce[0..12]);
-		let unbound_key = aead::UnboundKey::new(&aead::AES_256_GCM, &dec_key.0).unwrap();
+		let unbound_key = aead::UnboundKey::new(&aead::AES_256_GCM, &dec_key.0)
+			.map_err(|e| Error::GenericError(format!("aead key creation error, {}", e)))?;
 		let opening_key: aead::LessSafeKey = aead::LessSafeKey::new(unbound_key);
 		let aad = aead::Aad::from(&[]);
 		opening_key
@@ -485,7 +487,7 @@ fn encrypted_request() -> Result<(), Error> {
 	let shared_key = {
 		let sec_key_bytes = from_hex(sec_key_str).unwrap();
 		let secp_inst = static_secp_instance();
-		let secp = secp_inst.lock().expect("Mutex failure");
+		let secp = secp_inst.lock().unwrap_or_else(|e| e.into_inner());
 		SecretKey::from_slice(&secp, &sec_key_bytes)?
 	};
 	let req = serde_json::json!({

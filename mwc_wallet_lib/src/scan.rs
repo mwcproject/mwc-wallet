@@ -28,7 +28,7 @@ fn start_update_thread(
 ) -> Result<(Sender<StatusMessage>, JoinHandle<Result<(), String>>), String> {
 	let (cb_fn, cb_context) = match LIB_CALLBACKS
 		.read()
-		.expect("RwLock failure")
+		.unwrap_or_else(|e| e.into_inner())
 		.get(&response_callback)
 	{
 		Some(cb) => cb.clone(),
@@ -125,7 +125,7 @@ pub fn update_wallet_state(
 	let (validated, height) = {
 		wallet_lock!(wallet, w);
 		let (validated, height) = owner::update_wallet_state(&mut **w, None, &tx)
-			.map_err(|e| format!("Rewind hash scan error, {}", e))?;
+			.map_err(|e| format!("Update wallet state scan error, {}", e))?;
 		drop(tx);
 		(validated, height)
 	};

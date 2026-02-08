@@ -45,6 +45,7 @@ use mwc_wallet_util::mwc_core::global::ChainTypes;
 use mwc_wallet_util::mwc_keychain::Identifier;
 use mwc_wallet_util::mwc_node_lib::ffi::LIB_CALLBACKS;
 use mwc_wallet_util::mwc_node_workflow::context::{allocate_new_context, release_context};
+use mwc_wallet_util::mwc_p2p::tor::arti;
 use mwc_wallet_util::mwc_p2p::tor::arti::is_arti_healthy;
 use mwc_wallet_util::mwc_p2p::TorConfig;
 use mwc_wallet_util::mwc_util::static_secp_instance;
@@ -79,18 +80,18 @@ lazy_static! {
 fn release_wallet(context_id: u32) {
 	let _ = (*WALLET_CONFIG)
 		.write()
-		.expect("RwLock falure")
+		.unwrap_or_else(|e| e.into_inner())
 		.remove(&context_id);
 	let _ = (*WALLET_INSTANCE)
 		.write()
-		.expect("RwLock falure")
+		.unwrap_or_else(|e| e.into_inner())
 		.remove(&context_id);
 }
 
 fn get_wallet_config(context_id: u32) -> Result<GlobalWalletConfigMembers, String> {
 	Ok((*WALLET_CONFIG)
 		.read()
-		.expect("RwLock failure")
+		.unwrap_or_else(|e| e.into_inner())
 		.get(&context_id)
 		.ok_or("Wallet config is not set. Call 'init_wallet' first".to_string())?
 		.clone())
@@ -99,7 +100,7 @@ fn get_wallet_config(context_id: u32) -> Result<GlobalWalletConfigMembers, Strin
 pub fn get_wallet_instance(context_id: u32) -> Result<WalletArc, String> {
 	let wallet = (*WALLET_INSTANCE)
 		.write()
-		.expect("RwLock falure")
+		.unwrap_or_else(|e| e.into_inner())
 		.get(&context_id)
 		.ok_or("Wallet is not set. Call init,restore or open wallet first".to_string())?
 		.clone();
@@ -109,7 +110,7 @@ pub fn get_wallet_instance(context_id: u32) -> Result<WalletArc, String> {
 fn create_node_client(callback_name: &String) -> Result<CallbackNodeClient, String> {
 	let (cb, context) = (*LIB_CALLBACKS)
 		.read()
-		.expect("RwLock failure")
+		.unwrap_or_else(|e| e.into_inner())
 		.get(callback_name)
 		.ok_or(format!(
 			"Callback {} is not found, use 'register_lib_callback' to add it",
@@ -130,13 +131,15 @@ fn create_wallet_instance(
 		context_id,
 		node_client,
 	)) as Box<LibWallet>;
-	let lc = wallet.lc_provider().unwrap();
+	let lc = wallet
+		.lc_provider()
+		.map_err(|e| format!("Unbale to build wallet LC provider, {}", e))?;
 	let _ = lc.set_top_level_directory(&config.data_file_dir);
 	let wallet = Arc::new(Mutex::new(wallet));
 
 	if (*WALLET_INSTANCE)
 		.read()
-		.expect("RwLock falure")
+		.unwrap_or_else(|e| e.into_inner())
 		.contains_key(&context_id)
 	{
 		return Err(format!("Wallet already created for context {}", context_id));
@@ -144,7 +147,7 @@ fn create_wallet_instance(
 
 	(*WALLET_INSTANCE)
 		.write()
-		.expect("RwLock falure")
+		.unwrap_or_else(|e| e.into_inner())
 		.insert(context_id, wallet.clone());
 	Ok(wallet)
 }
@@ -197,7 +200,7 @@ fn process_request(input: String) -> Result<Value, String> {
 
 			let (cb, ctx) = LIB_CALLBACKS
 				.read()
-				.expect("RwLock failure")
+				.unwrap_or_else(|e| e.into_inner())
 				.get(&callback_name)
 				.cloned()
 				.ok_or(format!(
@@ -229,7 +232,6 @@ fn process_request(input: String) -> Result<Value, String> {
 				config.wallet.chain_type.unwrap_or(ChainTypes::Mainnet),
 				config.wallet.tx_fee_base,
 				None,
-				&None,
 			)
 			.map_err(|e| format!("Failed to allocate a new context. {}", e))?;
 			init_wallet_context(context_id);
@@ -244,13 +246,20 @@ fn process_request(input: String) -> Result<Value, String> {
 
 			WALLET_CONFIG
 				.write()
-				.expect("RwLock failure")
+				.unwrap_or_else(|e| e.into_inner())
 				.insert(context_id, config);
 			json!({"context_id" : context_id})
+		}
+		// Stop active scan operations. It is a long waiting time to finish scan, we don't want app be unresponsive
+		"stop_running_scan" => {
+			let context_id = get_param(&params, "context_id")?;
+			mwc_wallet_libwallet::internal::scan::interrupt_scan(context_id);
+			json!({})
 		}
 		// Release all resources associated with this wallet.
 		"release_wallet" => {
 			let context_id = get_param(&params, "context_id")?;
+			arti::release_arti_cancelling(context_id);
 			release_wallet_context(context_id);
 			release_wallet(context_id);
 			release_context(context_id).map_err(|e| format!("Unable to release context, {}", e))?;
@@ -280,7 +289,7 @@ fn process_request(input: String) -> Result<Value, String> {
 			let node_client = create_node_client(&callback_name)?;
 			let wallet = create_wallet_instance(context_id, node_client, &config.wallet)?;
 
-			let mut w_lock = wallet.lock().expect("Mutex failure");
+			let mut w_lock = wallet.lock().unwrap_or_else(|e| e.into_inner());
 			let p = w_lock
 				.lc_provider()
 				.map_err(|e| format!("Wallet is invalid, {}", e))?;
@@ -321,7 +330,7 @@ fn process_request(input: String) -> Result<Value, String> {
 			let node_client = create_node_client(&callback_name)?;
 			let wallet = create_wallet_instance(context_id, node_client, &config.wallet)?;
 
-			let mut w_lock = wallet.lock().expect("Mutex failure");
+			let mut w_lock = wallet.lock().unwrap_or_else(|e| e.into_inner());
 			let p = w_lock
 				.lc_provider()
 				.map_err(|e| format!("Wallet is invalid, {}", e))?;
@@ -349,7 +358,7 @@ fn process_request(input: String) -> Result<Value, String> {
 			let node_client = create_node_client(&callback_name)?;
 			let wallet = create_wallet_instance(context_id, node_client, &config.wallet)?;
 
-			let mut w_lock = wallet.lock().expect("Mutex failure");
+			let mut w_lock = wallet.lock().unwrap_or_else(|e| e.into_inner());
 			let p = w_lock
 				.lc_provider()
 				.map_err(|e| format!("Wallet is invalid, {}", e))?;
@@ -370,7 +379,7 @@ fn process_request(input: String) -> Result<Value, String> {
 			let context_id = get_param(&params, "context_id")?;
 
 			let wallet = get_wallet_instance(context_id)?;
-			let mut w_lock = wallet.lock().expect("Mutex failure");
+			let mut w_lock = wallet.lock().unwrap_or_else(|e| e.into_inner());
 			let lc = w_lock
 				.lc_provider()
 				.map_err(|e| format!("Wallet is invalid, {}", e))?;
@@ -385,7 +394,7 @@ fn process_request(input: String) -> Result<Value, String> {
 			let config: GlobalWalletConfigMembers = get_wallet_config(context_id)?;
 			let wallet = get_wallet_instance(context_id)?;
 
-			let mut w_lock = wallet.lock().expect("Mutex failure");
+			let mut w_lock = wallet.lock().unwrap_or_else(|e| e.into_inner());
 			let lc = w_lock
 				.lc_provider()
 				.map_err(|e| format!("Wallet is invalid, {}", e))?;
@@ -420,7 +429,7 @@ fn process_request(input: String) -> Result<Value, String> {
 			let config: GlobalWalletConfigMembers = get_wallet_config(context_id)?;
 			let wallet = get_wallet_instance(context_id)?;
 
-			let mut w_lock = wallet.lock().expect("Mutex failure");
+			let mut w_lock = wallet.lock().unwrap_or_else(|e| e.into_inner());
 			let lc = w_lock
 				.lc_provider()
 				.map_err(|e| format!("Wallet is invalid, {}", e))?;
@@ -706,11 +715,10 @@ fn process_request(input: String) -> Result<Value, String> {
 				true,
 			)
 			.map_err(|e| e.to_string())?;
-			if res_tx_uuid.is_none() {
-				return Err("Intenal error. Tx UUID wasn't generated".into());
-			}
+			let res_tx_uuid =
+				res_tx_uuid.ok_or(String::from("Intenal error. Tx UUID wasn't generated"))?;
 			json!({
-				"tx_uuid" : res_tx_uuid.unwrap().to_string(),
+				"tx_uuid" : res_tx_uuid.to_string(),
 			})
 		}
 		"encode_slatepack" => {
@@ -977,7 +985,7 @@ fn process_request(input: String) -> Result<Value, String> {
 
 			let secp = {
 				let secp_inst = static_secp_instance();
-				let secp = secp_inst.lock().expect("Mutex failure").clone();
+				let secp = secp_inst.lock().unwrap_or_else(|e| e.into_inner()).clone();
 				secp
 			};
 

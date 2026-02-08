@@ -15,18 +15,25 @@
 
 use crate::core::core::{self, amount_to_hr_string};
 use crate::core::global;
+#[cfg(feature = "swaps")]
 use crate::libwallet::swap::fsm::state::StateEtaInfo;
+#[cfg(feature = "swaps")]
 use crate::libwallet::swap::swap;
+#[cfg(feature = "swaps")]
 use crate::libwallet::swap::types::{Action, Currency, Role};
 use crate::libwallet::{
 	AcctPathMapping, Error, OutputCommitMapping, OutputStatus, TxLogEntry, ViewWallet, WalletInfo,
 };
 
 use crate::util::{to_hex, ToHex};
+#[cfg(feature = "swaps")]
 use chrono::prelude::*;
+#[cfg(feature = "swaps")]
 use chrono::Local;
 use colored::*;
+#[cfg(feature = "swaps")]
 use mwc_wallet_libwallet::swap::swap::SwapJournalRecord;
+#[cfg(feature = "swaps")]
 use mwc_wallet_libwallet::swap::types::SwapTransactionsConfirmations;
 use mwc_wallet_util::mwc_util::secp::Secp256k1;
 use prettytable;
@@ -378,15 +385,19 @@ pub fn view_wallet_output(
 	println!();
 	let title = format!("View Wallet Outputs - Block Height: {}", cur_height);
 
-	if term::stdout().is_none() {
-		println!("Could not open terminal");
-		return Ok(());
-	}
+	let mut t = match term::stdout() {
+		Some(t) => t,
+		None => {
+			println!("Could not open terminal");
+			return Ok(());
+		}
+	};
 
-	let mut t = term::stdout().unwrap();
-	t.fg(term::color::MAGENTA).unwrap();
-	writeln!(t, "{}", title).unwrap();
-	t.reset().unwrap();
+	t.fg(term::color::MAGENTA)
+		.map_err(|e| Error::IO(format!("Terminal error: {}", e)))?;
+	writeln!(t, "{}", title)?;
+	t.reset()
+		.map_err(|e| Error::IO(format!("Terminal error: {}", e)))?;
 
 	let mut table = table!();
 
@@ -595,7 +606,7 @@ pub fn accounts(acct_mappings: Vec<AcctPathMapping>) {
 	for m in acct_mappings {
 		table.add_row(row![
 			bFC->m.label,
-			bGC->m.path.to_bip_32_string(),
+			bGC->m.path.to_bip_32_string().unwrap_or("<INVALID_PATH>".to_string()),
 		]);
 	}
 	table.set_format(*prettytable::format::consts::FORMAT_NO_BORDER_LINE_SEPARATOR);
@@ -729,6 +740,7 @@ pub fn payment_proof(tx: &TxLogEntry) -> Result<(), Error> {
 }
 
 /// Display list of wallet accounts in a pretty way
+#[cfg(feature = "swaps")]
 pub fn swap_trades(trades: Vec<(String, String)>) {
 	println!("\n____ Swap trades ____\n",);
 	let mut table = table!();
@@ -749,6 +761,7 @@ pub fn swap_trades(trades: Vec<(String, String)>) {
 }
 
 /// Display list of wallet accounts in a pretty way
+#[cfg(feature = "swaps")]
 pub fn swap_trade(
 	swap: &swap::Swap,
 	action: &Action,
@@ -954,12 +967,16 @@ pub fn swap_trade(
 	Ok(())
 }
 
+#[cfg(feature = "swaps")]
 fn timestamp_to_local_time(timestamp: i64) -> String {
-	let dt = Local.timestamp_opt(timestamp, 0).unwrap();
-	dt.format("%B %e %H:%M:%S").to_string()
+	match Local.timestamp_opt(timestamp, 0).single() {
+		Some(dt) => dt.format("%B %e %H:%M:%S").to_string(),
+		None => format!("TS: {}", timestamp),
+	}
 }
 
 /// Display summary eth info in a pretty way
+#[cfg(feature = "swaps")]
 pub fn eth_info(account: String, height: String, balance: String, currency: Currency) {
 	println!(
 		"\n____ Ethereum Wallet Summary Info - Account '{}' as of height {} ____\n",

@@ -174,6 +174,9 @@ pub enum Error {
 	/// Transaction in Pending status
 	#[error("Transaction Not Confirmed")]
 	EthTransactionInPending,
+	/// Lib Tx error
+	#[error("Lib Tx error: {0}")]
+	LibTx(#[from] mwc_wallet_util::mwc_core::libtx::Error),
 }
 
 #[warn(deprecated)]

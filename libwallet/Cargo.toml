@@ -65,14 +65,14 @@ bigdecimal = "0.4.2"
 #mwc-libp2p = { path = "../../rust-libp2p", default-features = false, features = [ "noise", "yamux", "mplex", "dns", "tcp-tokio", "ping", "gossipsub"] }
 #mwc-libp2p = { git = "https://github.com/mwcproject/rust-libp2p", version="0.35.3", branch = "master", default-features = false, features = [ "noise", "yamux", "mplex", "dns", "tcp-tokio", "ping", "gossipsub"] }
 #bitcoin = { version = "0.27", path = "../../rust-bitcoin", features = ["bitcoinconsensus"] }
-mwc-bitcoin = { git = "https://github.com/mwcproject/rust-bitcoin",  version = "0.27.1", branch = "zkp", features = ["bitcoinconsensus"] }
+#mwc-bitcoin = { git = "https://github.com/mwcproject/rust-bitcoin",  version = "0.27.1", branch = "zkp", features = ["bitcoinconsensus"] }
 #bch = { path = "../../rust-bch" }
-mwc-bch = { git = "https://github.com/mwcproject/rust-bch", version = "0.2.0", branch = "master" }
+#mwc-bch = { git = "https://github.com/mwcproject/rust-bch", version = "0.2.0", branch = "master" }
 #web3 = { version = "0.15.0", default-features = false, features = ["ws-tls-async-std", "signing"] }
-mwc-web3 = { git = "https://github.com/mwcproject/rust-web3", version = "0.20.0", branch = "master",  default-features = false, features = ["ws-rustls-tokio", "signing"] }
-mwc-wagyu-ethereum = { git = "https://github.com/mwcproject/wagyu-ethereum", version = "0.6.3", branch = "master" }
-mwc-wagyu-model = { git = "https://github.com/mwcproject/wagyu-model",version = "0.6.3",  branch = "master" }
-mwc-zcash_primitives = { git = "https://github.com/mwcproject/librustzcash", version = "0.4.0", branch = "master", features = ["transparent-inputs"] }
+#mwc-web3 = { git = "https://github.com/mwcproject/rust-web3", version = "0.20.0", branch = "master",  default-features = false, features = ["ws-rustls-tokio", "signing"] }
+#mwc-wagyu-ethereum = { git = "https://github.com/mwcproject/wagyu-ethereum", version = "0.6.3", branch = "master" }
+#mwc-wagyu-model = { git = "https://github.com/mwcproject/wagyu-model",version = "0.6.3",  branch = "master" }
+#mwc-zcash_primitives = { git = "https://github.com/mwcproject/librustzcash", version = "0.4.0", branch = "master", features = ["transparent-inputs"] }
 
 #zcash_primitives = { path = "../../librustzcash/zcash_primitives", features = ["transparent-inputs"] }
 
@@ -87,3 +87,5 @@ libc = { version = "0.2.69", default-features = false }
 # real dependency: libp2p = ["dep:mwc-libp2p"]
 libp2p = []
 grin_proof = []
+# real dependency: swaps = mwc-bch - mwc-zcash_primitives
+swaps = []

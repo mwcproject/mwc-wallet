@@ -234,7 +234,7 @@ pub struct GlobalWalletConfig {
 	/// Keep track of the file we've read
 	pub config_file_path: Option<PathBuf>,
 	/// Wallet members
-	pub members: Option<GlobalWalletConfigMembers>,
+	pub members: GlobalWalletConfigMembers,
 }
 
 /// Wallet internal members

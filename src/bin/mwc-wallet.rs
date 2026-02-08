@@ -32,6 +32,7 @@ use std::path::PathBuf;
 
 use mwc_wallet::cmd;
 use mwc_wallet_config::parse_node_address_string;
+use mwc_wallet_util::mwc_util::logger::LoggingConfig;
 
 // include build information
 pub mod built_info {
@@ -113,8 +114,7 @@ fn real_main() -> i32 {
 
 	// Load relevant config, try and load a wallet config file
 	// Use defaults for configuration if config file not found anywhere
-	let mut config = match config::initial_setup_wallet(&chain_type, current_dir, None, create_path)
-	{
+	let config = match config::initial_setup_wallet(&chain_type, current_dir, None, create_path) {
 		Ok(c) => c,
 		Err(e) => match e {
 			ConfigError::PathNotFoundError(m) => {
@@ -131,13 +131,23 @@ fn real_main() -> i32 {
 	//config.members.as_mut().unwrap().wallet.chain_type = Some(chain_type);
 
 	// Load logging config
-	let mut l = config.members.as_mut().unwrap().logging.clone().unwrap();
+	let mut l = config
+		.members
+		.logging
+		.clone()
+		.unwrap_or(LoggingConfig::default());
 	// no logging to stdout if we're running cli
 	match args.subcommand() {
 		("cli", _) => l.log_to_stdout = true,
 		_ => {}
 	};
-	let logs_rx = mwc_node_workflow::logging::init_bin_logs(&l);
+	let logs_rx = match mwc_node_workflow::logging::init_bin_logs(&l) {
+		Ok(l) => l,
+		Err(e) => {
+			println!("Invalid logs configuration, {}", e);
+			return 0;
+		}
+	};
 	if logs_rx.is_some() {
 		println!("Invalid logs configuration. Looks like config from node was used");
 		return 0;
@@ -145,7 +155,12 @@ fn real_main() -> i32 {
 
 	info!(
 		"Using wallet configuration file at {}",
-		config.config_file_path.as_ref().unwrap().to_str().unwrap()
+		config
+			.config_file_path
+			.as_ref()
+			.map(|p| p.to_str())
+			.flatten()
+			.unwrap_or("<INVALID CONFIG FILE PATH>")
 	);
 
 	log_build_info();
@@ -153,15 +168,12 @@ fn real_main() -> i32 {
 	let context_id = match mwc_node_workflow::context::allocate_new_context(
 		*config
 			.members
-			.as_ref()
-			.unwrap()
 			.wallet
 			.chain_type
 			.as_ref()
-			.unwrap(),
-		config.members.as_ref().unwrap().wallet.tx_fee_base.clone(),
+			.expect("Chain type in mwc-wallet.toml is not set!"),
+		config.members.wallet.tx_fee_base.clone(),
 		None,
-		&None,
 	) {
 		Ok(c_id) => c_id,
 		Err(e) => {
@@ -173,7 +185,7 @@ fn real_main() -> i32 {
 
 	mwc_wallet_workflow::wallet::init_wallet_context(context_id);
 
-	let wallet_config = config.clone().members.unwrap().wallet;
+	let wallet_config = config.clone().members.wallet;
 
 	let check_node_api_http_addr = match &wallet_config.check_node_api_http_addr {
 		Some(s) => s.clone(),
@@ -185,8 +197,13 @@ fn real_main() -> i32 {
 
 	//parse the nodes address and put them in a vec
 	let node_list = parse_node_address_string(check_node_api_http_addr);
-	let node_client = HTTPNodeClient::new(context_id, node_list, None)
-		.expect("Unable create HTTP client for mwc-node connection");
+	let node_client = match HTTPNodeClient::new(context_id, node_list, None) {
+		Ok(client) => client,
+		Err(e) => {
+			println!("Unable create HTTP client for mwc-node connection, {}", e);
+			return 0;
+		}
+	};
 
 	let res = cmd::wallet_command(context_id, &args, config, node_client);
 

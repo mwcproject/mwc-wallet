@@ -370,6 +370,10 @@ pub enum Error {
 	/// Invalid network
 	#[error("command 'faucet_request' works only with a floonet. Please restart your wallet with --floonet parameter.")]
 	FaucetRequestInvalidNetwork,
+
+	/// Interrupted by request
+	#[error("Interrupted by request")]
+	Interrupted,
 }
 
 impl From<io::Error> for Error {
@@ -390,6 +394,7 @@ impl From<mwc_store::Error> for Error {
 	}
 }
 
+#[cfg(feature = "swaps")]
 impl From<crate::swap::error::Error> for Error {
 	fn from(error: crate::swap::error::Error) -> Error {
 		Error::Backend(format!("{}", error))

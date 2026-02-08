@@ -106,14 +106,14 @@ pub trait SwapApi<K: Keychain>: Sync + Send {
 		&self,
 		_keychain: &K, // To make compiler happy
 		swap: &mut Swap,
-	) -> SecondaryUpdate;
+	) -> Result<SecondaryUpdate, Error>;
 
 	/// Build secondary update part of the accept offer message
 	fn build_accept_offer_message_secondary_update(
 		&self,
 		_keychain: &K, // To make compiler happy
 		swap: &mut Swap,
-	) -> SecondaryUpdate;
+	) -> Result<SecondaryUpdate, Error>;
 
 	/// Publishing Secinadary (BTC) transactions
 	/// Seller: redeep BTC transaction at State RedeemSecondary
@@ -241,8 +241,7 @@ where
 				ethereum_wallet,
 				eth_swap_contract_addr,
 				erc20_swap_contract_addr,
-			)
-			.unwrap();
+			)?;
 
 			Ok(Box::new(EthSwapApi::new(
 				context_id,

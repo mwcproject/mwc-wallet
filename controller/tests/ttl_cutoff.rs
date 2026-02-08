@@ -88,7 +88,10 @@ fn ttl_cutoff_test_impl(test_dir: &str) -> Result<(), wallet::Error> {
 		mask1,
 		bh as usize,
 		false,
-		tx_pool.lock().expect("Mutex failure").deref_mut(),
+		tx_pool
+			.lock()
+			.unwrap_or_else(|e| e.into_inner())
+			.deref_mut(),
 	);
 
 	let amount = 2_000_000_000; // mwc had 60_000_000_000
@@ -105,10 +108,10 @@ fn ttl_cutoff_test_impl(test_dir: &str) -> Result<(), wallet::Error> {
 			ttl_blocks: Some(2),
 			..Default::default()
 		};
-		let slate_i = sender_api.init_send_tx(m, &None, &args, 1)?;
+		let slate_i = sender_api.init_send_tx(m, None, &args, 1)?;
 
 		slate = client1.send_tx_slate_direct("wallet2", &slate_i)?;
-		sender_api.tx_lock_outputs(m, &None, &slate, None, 0)?;
+		sender_api.tx_lock_outputs(m, None, &slate, None, 0)?;
 
 		let (_, txs) = sender_api.retrieve_txs(m, true, None, Some(slate.id), None, None)?;
 		let tx = txs[0].clone();
@@ -124,7 +127,10 @@ fn ttl_cutoff_test_impl(test_dir: &str) -> Result<(), wallet::Error> {
 		mask1,
 		2,
 		false,
-		tx_pool.lock().expect("Mutex failure").deref_mut(),
+		tx_pool
+			.lock()
+			.unwrap_or_else(|e| e.into_inner())
+			.deref_mut(),
 	);
 
 	wallet::controller::owner_single_use(Some(wallet1.clone()), mask1, None, |sender_api, m| {
@@ -162,8 +168,8 @@ fn ttl_cutoff_test_impl(test_dir: &str) -> Result<(), wallet::Error> {
 			ttl_blocks: Some(2),
 			..Default::default()
 		};
-		let slate_i = sender_api.init_send_tx(m, &None, &args, 1)?;
-		sender_api.tx_lock_outputs(m, &None, &slate_i, None, 0)?;
+		let slate_i = sender_api.init_send_tx(m, None, &args, 1)?;
+		sender_api.tx_lock_outputs(m, None, &slate_i, None, 0)?;
 		slate = slate_i;
 
 		let (_, txs) = sender_api.retrieve_txs(m, true, None, Some(slate.id), None, None)?;
@@ -180,7 +186,10 @@ fn ttl_cutoff_test_impl(test_dir: &str) -> Result<(), wallet::Error> {
 		mask1,
 		2,
 		false,
-		tx_pool.lock().expect("Mutex failure").deref_mut(),
+		tx_pool
+			.lock()
+			.unwrap_or_else(|e| e.into_inner())
+			.deref_mut(),
 	);
 
 	// Wallet 2 will need to have updated past the TTL

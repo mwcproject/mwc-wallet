@@ -29,9 +29,11 @@ use crate::store::{self, option_to_not_found, to_key, to_key_u64, u64_to_key};
 
 use crate::core::core::Transaction;
 use crate::core::ser;
+#[cfg(feature = "swaps")]
+use crate::libwallet::swap::ethereum::EthereumWallet;
 use crate::libwallet::{
-	swap::ethereum::EthereumWallet, AcctPathMapping, Context, Error, NodeClient, OutputData,
-	ScannedBlockInfo, TxLogEntry, TxProof, WalletBackend, WalletOutputBatch,
+	AcctPathMapping, Context, Error, NodeClient, OutputData, ScannedBlockInfo, TxLogEntry, TxProof,
+	WalletBackend, WalletOutputBatch,
 };
 use crate::util::secp::constants::SECRET_KEY_SIZE;
 use crate::util::secp::key::SecretKey;
@@ -80,7 +82,7 @@ fn private_ctx_xor_keys<K>(
 where
 	K: Keychain,
 {
-	let root_key = keychain.derive_key(0, &K::root_key_id(), SwitchCommitmentType::Regular)?;
+	let root_key = keychain.derive_key(0, &K::root_key_id()?, SwitchCommitmentType::Regular)?;
 
 	// derive XOR values for storing secret values in DB
 	// h(root_key|slate_id|"blind")
@@ -121,6 +123,7 @@ where
 	/// wallet to node client
 	w2n_client: C,
 	/// ethereum wallet instance
+	#[cfg(feature = "swaps")]
 	ethereum_wallet: Option<EthereumWallet>,
 	///phantom
 	_phantom: &'ck PhantomData<C>,
@@ -133,18 +136,35 @@ where
 {
 	pub fn new(context_id: u32, data_file_dir: &str, n_client: C) -> Result<Self, Error> {
 		let db_path = path::Path::new(data_file_dir).join(DB_DIR);
-		fs::create_dir_all(&db_path).expect("Couldn't create wallet backend directory!");
-
+		fs::create_dir_all(&db_path).map_err(|e| {
+			Error::Backend(format!(
+				"Couldn't create wallet backend directory {}, {}",
+				db_path.to_string_lossy(),
+				e
+			))
+		})?;
 		let stored_tx_path = path::Path::new(data_file_dir).join(TX_SAVE_DIR);
-		fs::create_dir_all(&stored_tx_path)
-			.expect("Couldn't create wallet backend tx storage directory!");
+		fs::create_dir_all(&stored_tx_path).map_err(|e| {
+			Error::Backend(format!(
+				"Couldn't create wallet backend tx storage directory {}, {}",
+				stored_tx_path.to_string_lossy(),
+				e
+			))
+		})?;
 		let stored_tx_path = path::Path::new(data_file_dir).join(TX_ARCHIVE_DIR);
-		fs::create_dir_all(&stored_tx_path)
-			.expect("Couldn't create wallet backend tx storage directory!");
+		fs::create_dir_all(&stored_tx_path).map_err(|e| {
+			Error::Backend(format!(
+				"Couldn't create wallet backend tx storage directory {}, {}",
+				stored_tx_path.to_string_lossy(),
+				e
+			))
+		})?;
 
 		let store = store::Store::new(
 			context_id,
-			db_path.to_str().unwrap(),
+			db_path
+				.to_str()
+				.ok_or(Error::Backend("Couldn't build db_path value".into()))?,
 			None,
 			Some(DB_DIR),
 			None,
@@ -155,7 +175,7 @@ where
 		// completed transactions, for reference
 		let default_account = AcctPathMapping {
 			label: "default".to_owned(),
-			path: LMDBBackend::<C, K>::default_path(),
+			path: LMDBBackend::<C, K>::default_path()?,
 		};
 		let acct_key = to_key(
 			ACCOUNT_PATH_MAPPING_PREFIX,
@@ -176,19 +196,20 @@ where
 			data_file_dir: data_file_dir.to_owned(),
 			keychain: None,
 			master_checksum: Box::new(None),
-			parent_key_id: LMDBBackend::<C, K>::default_path(),
+			parent_key_id: LMDBBackend::<C, K>::default_path()?,
 			w2n_client: n_client,
+			#[cfg(feature = "swaps")]
 			ethereum_wallet: None,
 			_phantom: &PhantomData,
 		};
 		Ok(res)
 	}
 
-	fn default_path() -> Identifier {
+	fn default_path() -> Result<Identifier, Error> {
 		// return the default parent wallet path, corresponding to the default account
 		// in the BIP32 spec. Parent is account 0 at level 2, child output identifiers
 		// are all at level 3
-		ExtKeychain::derive_key_id(2, 0, 0, 0, 0)
+		Ok(ExtKeychain::derive_key_id(2, 0, 0, 0, 0)?)
 	}
 
 	/// Just test to see if database files exist in the current directory. If
@@ -198,7 +219,10 @@ where
 		db_path.exists()
 	}
 
-	fn iter_impl<'a, T: Readable + 'a>(&'a self, prefix: u8) -> Box<dyn Iterator<Item = T> + 'a> {
+	fn iter_impl<'a, T: Readable + 'a>(
+		&'a self,
+		prefix: u8,
+	) -> Result<Box<dyn Iterator<Item = T> + 'a>, Error> {
 		let protocol_version = self.db.protocol_version();
 		let prefix_iter = self.db.iter(&[prefix], move |_, mut v| {
 			ser::deserialize(
@@ -209,8 +233,8 @@ where
 			)
 			.map_err(From::from)
 		});
-		let iter = prefix_iter.expect("deserialize").into_iter();
-		Box::new(iter)
+		let iter = prefix_iter?.into_iter();
+		Ok(Box::new(iter))
 	}
 
 	pub fn archive_mwctx_data(&self, tx: &TxLogEntry) -> Result<(), Error> {
@@ -262,7 +286,7 @@ where
 		use_test_rng: bool,
 	) -> Result<Option<SecretKey>, Error> {
 		// store hash of master key, so it can be verified later after unmasking
-		let root_key = k.derive_key(0, &K::root_key_id(), SwitchCommitmentType::Regular)?;
+		let root_key = k.derive_key(0, &K::root_key_id()?, SwitchCommitmentType::Regular)?;
 		let mut hasher = Blake2b::new(SECRET_KEY_SIZE);
 		hasher.update(&root_key.0[..]);
 		self.master_checksum = Box::new(Some(hasher.finalize()));
@@ -307,7 +331,7 @@ where
 				}
 				// Check if master seed is what is expected (especially if it's been xored)
 				let root_key =
-					k_masked.derive_key(0, &K::root_key_id(), SwitchCommitmentType::Regular)?;
+					k_masked.derive_key(0, &K::root_key_id()?, SwitchCommitmentType::Regular)?;
 				let mut hasher = Blake2b::new(SECRET_KEY_SIZE);
 				hasher.update(&root_key.0[..]);
 				if *self.master_checksum != Some(hasher.finalize()) {
@@ -340,7 +364,7 @@ where
 	/// Set parent path by account name
 	fn set_parent_key_id_by_name(&mut self, label: &str) -> Result<(), Error> {
 		let label = label.to_owned();
-		let res = self.acct_path_iter().find(|l| l.label == label);
+		let res = self.acct_path_iter()?.find(|l| l.label == label);
 		if let Some(a) = res {
 			self.set_parent_key_id(a.path);
 			Ok(())
@@ -360,26 +384,28 @@ where
 
 	fn get(&self, id: &Identifier, mmr_index: &Option<u64>) -> Result<OutputData, Error> {
 		let key = match mmr_index {
-			Some(i) => to_key_u64(OUTPUT_PREFIX, &mut id.to_bytes().to_vec(), *i),
+			Some(i) => to_key_u64(OUTPUT_PREFIX, &mut id.to_bytes().to_vec(), *i)?,
 			None => to_key(OUTPUT_PREFIX, &mut id.to_bytes().to_vec()),
 		};
 		option_to_not_found(self.db.get_ser(&key, None), || format!("Key Id: {}", id))
 			.map_err(|e| e.into())
 	}
 
-	fn iter<'a>(&'a self) -> Box<dyn Iterator<Item = OutputData> + 'a> {
+	fn iter<'a>(&'a self) -> Result<Box<dyn Iterator<Item = OutputData> + 'a>, Error> {
 		self.iter_impl(OUTPUT_PREFIX)
 	}
 
-	fn archive_iter<'a>(&'a self) -> Box<dyn Iterator<Item = OutputData> + 'a> {
+	fn archive_iter<'a>(&'a self) -> Result<Box<dyn Iterator<Item = OutputData> + 'a>, Error> {
 		self.iter_impl(OUTPUT_ARCHIVE_PREFIX)
 	}
 
-	fn tx_log_iter<'a>(&'a self) -> Box<dyn Iterator<Item = TxLogEntry> + 'a> {
+	fn tx_log_iter<'a>(&'a self) -> Result<Box<dyn Iterator<Item = TxLogEntry> + 'a>, Error> {
 		self.iter_impl(TX_LOG_ENTRY_PREFIX)
 	}
 
-	fn tx_log_archive_iter<'a>(&'a self) -> Box<dyn Iterator<Item = TxLogEntry> + 'a> {
+	fn tx_log_archive_iter<'a>(
+		&'a self,
+	) -> Result<Box<dyn Iterator<Item = TxLogEntry> + 'a>, Error> {
 		self.iter_impl(TX_ARCHIVE_LOG_ENTRY_PREFIX)
 	}
 
@@ -393,7 +419,7 @@ where
 			PRIVATE_TX_CONTEXT_PREFIX,
 			&mut slate_id.to_vec(),
 			participant_id as u64,
-		);
+		)?;
 		let (blind_xor_key, nonce_xor_key) =
 			private_ctx_xor_keys(&self.keychain(keychain_mask)?, slate_id)?;
 
@@ -409,7 +435,9 @@ where
 		Ok(ctx)
 	}
 
-	fn acct_path_iter<'a>(&'a self) -> Box<dyn Iterator<Item = AcctPathMapping> + 'a> {
+	fn acct_path_iter<'a>(
+		&'a self,
+	) -> Result<Box<dyn Iterator<Item = AcctPathMapping> + 'a>, Error> {
 		let protocol_version = self.db.protocol_version();
 		let prefix_iter = self
 			.db
@@ -422,8 +450,8 @@ where
 				)
 				.map_err(From::from)
 			});
-		let iter = prefix_iter.expect("deserialize").into_iter();
-		Box::new(iter)
+		let iter = prefix_iter?.into_iter();
+		Ok(Box::new(iter))
 	}
 
 	fn get_acct_path(&self, label: String) -> Result<Option<AcctPathMapping>, Error> {
@@ -438,7 +466,7 @@ where
 			.join(filename);
 		let path_buf = Path::new(&path).to_path_buf();
 		let mut stored_tx = File::create(path_buf)?;
-		let tx_hex = ser::ser_vec(tx, ser::ProtocolVersion(1)).unwrap().to_hex();
+		let tx_hex = ser::ser_vec(tx, ser::ProtocolVersion(1))?.to_hex();
 		stored_tx.write_all(&tx_hex.as_bytes())?;
 		stored_tx.sync_all()?;
 		Ok(())
@@ -573,7 +601,7 @@ where
 				None => 0,
 			}
 		};
-		let mut return_path = parent_key_id.to_path();
+		let mut return_path = parent_key_id.to_path()?;
 		return_path.depth += 1;
 		return_path.path[return_path.depth as usize - 1] = ChildNumber::from(deriv_idx);
 		if let Some(hei) = height {
@@ -584,7 +612,7 @@ where
 		deriv_idx += 1;
 		batch.put_ser(&child_db_key, &deriv_idx)?;
 		batch.commit()?;
-		Ok(Identifier::from_path(&return_path))
+		Ok(Identifier::from_path(&return_path)?)
 	}
 
 	fn last_confirmed_height<'a>(&mut self) -> Result<u64, Error> {
@@ -626,6 +654,7 @@ where
 	}
 
 	/// set ethereum wallet instance
+	#[cfg(feature = "swaps")]
 	fn set_ethereum_wallet(
 		&mut self,
 		ethereum_wallet: Option<EthereumWallet>,
@@ -635,14 +664,12 @@ where
 	}
 
 	/// get ethereum wallet instance
+	#[cfg(feature = "swaps")]
 	fn get_ethereum_wallet(&self) -> Result<EthereumWallet, Error> {
-		if self.ethereum_wallet.is_some() {
-			Ok(self.ethereum_wallet.clone().unwrap())
-		} else {
-			Err(Error::EthereumWalletError(
-				"Ethereum Wallet Not Generated!!!".to_string(),
-			))
-		}
+		Ok(self
+			.ethereum_wallet
+			.clone()
+			.ok_or(Error::SwapError("Ethereum Wallet Not Generated!!!".into()))?)
 	}
 }
 
@@ -664,9 +691,14 @@ where
 	C: NodeClient,
 	K: Keychain,
 {
-	fn iter_impl<T: Readable + 'static>(&self, prefix: u8) -> Box<dyn Iterator<Item = T>> {
+	fn iter_impl<T: Readable + 'static>(
+		&self,
+		prefix: u8,
+	) -> Result<Box<dyn Iterator<Item = T>>, Error> {
 		let db = self.db.borrow();
-		let db = db.as_ref().unwrap();
+		let db = db
+			.as_ref()
+			.ok_or(Error::Backend("db is not initialized".into()))?;
 		let protocol_version = db.protocol_version();
 		let context_id = self.store.get_context_id();
 		let prefix_iter = db.iter(&[prefix], move |_, mut v| {
@@ -678,8 +710,8 @@ where
 			)
 			.map_err(From::from)
 		});
-		let iter = prefix_iter.expect("deserialize").into_iter();
-		Box::new(iter)
+		let iter = prefix_iter?.into_iter();
+		Ok(Box::new(iter))
 	}
 }
 
@@ -689,45 +721,58 @@ where
 	C: NodeClient,
 	K: Keychain,
 {
-	fn keychain(&mut self) -> &mut K {
-		self.keychain.as_mut().unwrap()
+	fn keychain(&mut self) -> Result<&mut K, Error> {
+		Ok(self
+			.keychain
+			.as_mut()
+			.ok_or(Error::Backend("keychain is not set".into()))?)
 	}
 
 	fn save(&mut self, out: OutputData) -> Result<(), Error> {
 		// Save the output data to the db.
 		let key = match out.mmr_index {
-			Some(i) => to_key_u64(OUTPUT_PREFIX, &mut out.key_id.to_bytes().to_vec(), i),
+			Some(i) => to_key_u64(OUTPUT_PREFIX, &mut out.key_id.to_bytes().to_vec(), i)?,
 			None => to_key(OUTPUT_PREFIX, &mut out.key_id.to_bytes().to_vec()),
 		};
-		self.db.borrow().as_ref().unwrap().put_ser(&key, &out)?;
+		self.db
+			.borrow()
+			.as_ref()
+			.ok_or(Error::Backend("db is not initialized".into()))?
+			.put_ser(&key, &out)?;
 
 		Ok(())
 	}
 
 	fn get(&self, id: &Identifier, mmr_index: &Option<u64>) -> Result<OutputData, Error> {
 		let key = match mmr_index {
-			Some(i) => to_key_u64(OUTPUT_PREFIX, &mut id.to_bytes().to_vec(), *i),
+			Some(i) => to_key_u64(OUTPUT_PREFIX, &mut id.to_bytes().to_vec(), *i)?,
 			None => to_key(OUTPUT_PREFIX, &mut id.to_bytes().to_vec()),
 		};
 		option_to_not_found(
-			self.db.borrow().as_ref().unwrap().get_ser(&key, None),
+			self.db
+				.borrow()
+				.as_ref()
+				.ok_or(Error::Backend("db is not initialized".into()))?
+				.get_ser(&key, None),
 			|| format!("Key ID: {}", id),
 		)
 		.map_err(|e| e.into())
 	}
 
-	fn iter(&self) -> Box<dyn Iterator<Item = OutputData>> {
+	fn iter(&self) -> Result<Box<dyn Iterator<Item = OutputData>>, Error> {
 		self.iter_impl(OUTPUT_PREFIX)
 	}
 
 	fn archive_output(&mut self, out: &OutputData) -> Result<(), Error> {
 		let mut key = match out.mmr_index {
-			Some(i) => to_key_u64(OUTPUT_PREFIX, out.key_id.to_bytes().to_vec(), i),
+			Some(i) => to_key_u64(OUTPUT_PREFIX, out.key_id.to_bytes().to_vec(), i)?,
 			None => to_key(OUTPUT_PREFIX, out.key_id.to_bytes().to_vec()),
 		};
 
 		let db = self.db.borrow();
-		let db = db.as_ref().unwrap();
+		let db = db
+			.as_ref()
+			.ok_or(Error::Backend("db is not initialized".into()))?;
 
 		db.delete(&key)?;
 
@@ -740,16 +785,26 @@ where
 	fn delete(&mut self, id: &Identifier, mmr_index: &Option<u64>) -> Result<(), Error> {
 		// Delete the output data.
 		let key = match mmr_index {
-			Some(i) => to_key_u64(OUTPUT_PREFIX, &mut id.to_bytes().to_vec(), *i),
+			Some(i) => to_key_u64(OUTPUT_PREFIX, &mut id.to_bytes().to_vec(), *i)?,
 			None => to_key(OUTPUT_PREFIX, &mut id.to_bytes().to_vec()),
 		};
-		let _ = self.db.borrow().as_ref().unwrap().delete(&key);
+		let _ = self
+			.db
+			.borrow()
+			.as_ref()
+			.ok_or(Error::Backend("db is not initialized".into()))?
+			.delete(&key);
 
 		let key = match mmr_index {
-			Some(i) => to_key_u64(OUTPUT_ARCHIVE_PREFIX, &mut id.to_bytes().to_vec(), *i),
+			Some(i) => to_key_u64(OUTPUT_ARCHIVE_PREFIX, &mut id.to_bytes().to_vec(), *i)?,
 			None => to_key(OUTPUT_ARCHIVE_PREFIX, &mut id.to_bytes().to_vec()),
 		};
-		let _ = self.db.borrow().as_ref().unwrap().delete(&key);
+		let _ = self
+			.db
+			.borrow()
+			.as_ref()
+			.ok_or(Error::Backend("db is not initialized".into()))?
+			.delete(&key);
 
 		Ok(())
 	}
@@ -760,7 +815,7 @@ where
 			.db
 			.borrow()
 			.as_ref()
-			.unwrap()
+			.ok_or(Error::Backend("db is not initialized".into()))?
 			.get_ser(&tx_id_key, None)?
 		{
 			Some(t) => t,
@@ -769,16 +824,16 @@ where
 		self.db
 			.borrow()
 			.as_ref()
-			.unwrap()
+			.ok_or(Error::Backend("db is not initialized".into()))?
 			.put_ser(&tx_id_key, &(last_tx_log_id + 1))?;
 		Ok(last_tx_log_id)
 	}
 
-	fn tx_log_iter(&self) -> Box<dyn Iterator<Item = TxLogEntry>> {
+	fn tx_log_iter(&self) -> Result<Box<dyn Iterator<Item = TxLogEntry>>, Error> {
 		self.iter_impl(TX_LOG_ENTRY_PREFIX)
 	}
 
-	fn tx_log_archive_iter(&self) -> Box<dyn Iterator<Item = TxLogEntry>> {
+	fn tx_log_archive_iter(&self) -> Result<Box<dyn Iterator<Item = TxLogEntry>>, Error> {
 		self.iter_impl(TX_ARCHIVE_LOG_ENTRY_PREFIX)
 	}
 
@@ -788,10 +843,12 @@ where
 			TX_LOG_ENTRY_PREFIX,
 			tx.parent_key_id.to_bytes().to_vec(),
 			tx.id as u64,
-		);
+		)?;
 
 		let db = self.db.borrow();
-		let db = db.as_ref().unwrap();
+		let db = db
+			.as_ref()
+			.ok_or(Error::Backend("db is not initialized".into()))?;
 
 		db.delete(&tx_log_key)?;
 
@@ -815,7 +872,7 @@ where
 		self.db
 			.borrow()
 			.as_ref()
-			.unwrap()
+			.ok_or(Error::Backend("db is not initialized".into()))?
 			.put_ser(&height_key, &height)?;
 		Ok(())
 	}
@@ -828,7 +885,9 @@ where
 		debug_assert!(block_info.first().unwrap().height >= block_info.last().unwrap().height);
 
 		let br = self.db.borrow();
-		let db = br.as_ref().unwrap();
+		let db = br
+			.as_ref()
+			.ok_or(Error::Backend("db is not initialized".into()))?;
 		let protocol_version = db.protocol_version();
 		let context_id = self.store.get_context_id();
 
@@ -849,7 +908,7 @@ where
 
 		for h in &heights {
 			if *h >= first_scanned_block_height {
-				db.delete(&u64_to_key(LAST_SCANNED_BLOCK, *h))?;
+				db.delete(&u64_to_key(LAST_SCANNED_BLOCK, *h)?)?;
 			}
 		}
 
@@ -857,7 +916,7 @@ where
 
 		// Inserting the new data
 		for bl_info in block_info {
-			let scan_block_key = u64_to_key(LAST_SCANNED_BLOCK, bl_info.height);
+			let scan_block_key = u64_to_key(LAST_SCANNED_BLOCK, bl_info.height)?;
 			db.put_ser(&scan_block_key, bl_info)?;
 		}
 
@@ -870,7 +929,7 @@ where
 		while let Some(h) = heights.pop() {
 			assert!(h < start);
 			if start - h < step {
-				db.delete(&u64_to_key(LAST_SCANNED_BLOCK, h))?;
+				db.delete(&u64_to_key(LAST_SCANNED_BLOCK, h)?)?;
 			} else {
 				start = h;
 				step *= 2;
@@ -882,9 +941,13 @@ where
 
 	/// Save safe flag into DB
 	fn save_flag(&mut self, flag: u64) -> Result<(), Error> {
-		let key = u64_to_key(FLAGS, flag);
+		let key = u64_to_key(FLAGS, flag)?;
 
-		self.db.borrow().as_ref().unwrap().put_ser(&key, &flag)?;
+		self.db
+			.borrow()
+			.as_ref()
+			.ok_or(Error::Backend("db is not initialized".into()))?
+			.put_ser(&key, &flag)?;
 
 		Ok(())
 	}
@@ -892,9 +955,11 @@ where
 	/// Load and optionally delete the flag from DB
 	fn load_flag(&mut self, flag: u64, delete: bool) -> Result<bool, Error> {
 		let br = self.db.borrow();
-		let db = br.as_ref().unwrap();
+		let db = br
+			.as_ref()
+			.ok_or(Error::Backend("db is not initialized".into()))?;
 
-		let key = u64_to_key(FLAGS, flag);
+		let key = u64_to_key(FLAGS, flag)?;
 		let index: Option<u64> = db.get_ser(&key, None)?;
 
 		let has_flag = index.is_some();
@@ -907,24 +972,24 @@ where
 
 	/// Save the last used good node index
 	fn save_u64(&mut self, index: u64, value: u64) -> Result<(), Error> {
-		let node_index_key = u64_to_key(U64_DATA, index);
+		let node_index_key = u64_to_key(U64_DATA, index)?;
 		self.db
 			.borrow()
 			.as_ref()
-			.unwrap()
+			.ok_or(Error::Backend("db is not initialized".into()))?
 			.put_ser(&node_index_key, &value)?;
 		Ok(())
 	}
 
 	/// Save the last used good node index
 	fn load_u64(&mut self, index: u64, default: u64) -> Result<u64, Error> {
-		let node_index_key = u64_to_key(U64_DATA, index);
+		let node_index_key = u64_to_key(U64_DATA, index)?;
 
 		let index: Option<u64> = self
 			.db
 			.borrow()
 			.as_ref()
-			.unwrap()
+			.ok_or(Error::Backend("db is not initialized".into()))?
 			.get_ser(&node_index_key, None)?;
 		let last_working_node_index = match index {
 			Some(ind) => ind, //the normal index started from 1. 0 is error
@@ -938,7 +1003,7 @@ where
 		self.db
 			.borrow()
 			.as_ref()
-			.unwrap()
+			.ok_or(Error::Backend("db is not initialized".into()))?
 			.put_ser(&deriv_key, &child_n)?;
 		Ok(())
 	}
@@ -952,11 +1017,11 @@ where
 			TX_LOG_ENTRY_PREFIX,
 			&mut parent_id.to_bytes().to_vec(),
 			tx_in.id as u64,
-		);
+		)?;
 		self.db
 			.borrow()
 			.as_ref()
-			.unwrap()
+			.ok_or(Error::Backend("db is not initialized".into()))?
 			.put_ser(&tx_log_key, &tx_in)?;
 		Ok(())
 	}
@@ -966,15 +1031,25 @@ where
 			TX_LOG_ENTRY_PREFIX,
 			&mut parent_id.to_bytes().to_vec(),
 			tx_id as u64,
-		);
-		let res1 = self.db.borrow().as_ref().unwrap().delete(&tx_log_key);
+		)?;
+		let res1 = self
+			.db
+			.borrow()
+			.as_ref()
+			.ok_or(Error::Backend("db is not initialized".into()))?
+			.delete(&tx_log_key);
 
 		let tx_log_key = to_key_u64(
 			TX_ARCHIVE_LOG_ENTRY_PREFIX,
 			&mut parent_id.to_bytes().to_vec(),
 			tx_id as u64,
-		);
-		let res2 = self.db.borrow().as_ref().unwrap().delete(&tx_log_key);
+		)?;
+		let res2 = self
+			.db
+			.borrow()
+			.as_ref()
+			.ok_or(Error::Backend("db is not initialized".into()))?
+			.delete(&tx_log_key);
 
 		if res1.is_ok() || res2.is_ok() {
 			Ok(())
@@ -996,7 +1071,11 @@ where
 					ACCOUNT_PATH_MAPPING_PREFIX,
 					&mut acc.label.as_bytes().to_vec(),
 				);
-				self.db.borrow().as_ref().unwrap().delete(&old_key)?;
+				self.db
+					.borrow()
+					.as_ref()
+					.ok_or(Error::Backend("db is not initialized".into()))?
+					.delete(&old_key)?;
 				nacc.label = new_name.to_string();
 				let acct_key = to_key(
 					ACCOUNT_PATH_MAPPING_PREFIX,
@@ -1005,7 +1084,7 @@ where
 				self.db
 					.borrow()
 					.as_ref()
-					.unwrap()
+					.ok_or(Error::Backend("db is not initialized".into()))?
 					.put_ser(&acct_key, &nacc)?;
 
 				break;
@@ -1025,14 +1104,16 @@ where
 		self.db
 			.borrow()
 			.as_ref()
-			.unwrap()
+			.ok_or(Error::Backend("db is not initialized".into()))?
 			.put_ser(&acct_key, &mapping)?;
 		Ok(())
 	}
 
-	fn acct_path_iter(&self) -> Box<dyn Iterator<Item = AcctPathMapping>> {
+	fn acct_path_iter(&self) -> Result<Box<dyn Iterator<Item = AcctPathMapping>>, Error> {
 		let db = self.db.borrow();
-		let db = db.as_ref().unwrap();
+		let db = db
+			.as_ref()
+			.ok_or(Error::Backend("db is not initialized".into()))?;
 		let protocol_version = db.protocol_version();
 		let context_id = self.store.get_context_id();
 
@@ -1045,8 +1126,8 @@ where
 			)
 			.map_err(From::from)
 		});
-		let iter = prefix_iter.expect("deserialize").into_iter();
-		Box::new(iter)
+		let iter = prefix_iter?.into_iter();
+		Ok(Box::new(iter))
 	}
 
 	fn lock_output(&mut self, out: &mut OutputData) -> Result<(), Error> {
@@ -1064,8 +1145,8 @@ where
 			PRIVATE_TX_CONTEXT_PREFIX,
 			&mut slate_id.to_vec(),
 			participant_id as u64,
-		);
-		let (blind_xor_key, nonce_xor_key) = private_ctx_xor_keys(self.keychain(), slate_id)?;
+		)?;
+		let (blind_xor_key, nonce_xor_key) = private_ctx_xor_keys(self.keychain()?, slate_id)?;
 
 		let mut s_ctx = ctx.clone();
 		for i in 0..SECRET_KEY_SIZE {
@@ -1076,7 +1157,7 @@ where
 		self.db
 			.borrow()
 			.as_ref()
-			.unwrap()
+			.ok_or(Error::Backend("db is not initialized".into()))?
 			.put_ser(&ctx_key, &s_ctx)?;
 		Ok(())
 	}
@@ -1090,18 +1171,20 @@ where
 			PRIVATE_TX_CONTEXT_PREFIX,
 			&mut slate_id.to_vec(),
 			participant_id as u64,
-		);
+		)?;
 		self.db
 			.borrow()
 			.as_ref()
-			.unwrap()
+			.ok_or(Error::Backend("db is not initialized".into()))?
 			.delete(&ctx_key)
 			.map_err(|e| e.into())
 	}
 
-	fn private_context_iter(&self) -> Box<dyn Iterator<Item = (Vec<u8>, Context)>> {
+	fn private_context_iter(&self) -> Result<Box<dyn Iterator<Item = (Vec<u8>, Context)>>, Error> {
 		let db = self.db.borrow();
-		let db = db.as_ref().unwrap();
+		let db = db
+			.as_ref()
+			.ok_or(Error::Backend("db is not initialized".into()))?;
 		let protocol_version = db.protocol_version();
 		let context_id = self.store.get_context_id();
 
@@ -1118,13 +1201,14 @@ where
 			)?;
 			Ok((slate_id, context))
 		});
-		let iter = prefix_iter.expect("deserialize").into_iter();
-		Box::new(iter)
+		let iter = prefix_iter?.into_iter();
+		Ok(Box::new(iter))
 	}
 
 	fn commit(&self) -> Result<(), Error> {
 		let db = self.db.replace(None);
-		db.unwrap().commit()?;
+		db.ok_or(Error::Backend("db is not initialized".into()))?
+			.commit()?;
 		Ok(())
 	}
 
@@ -1135,7 +1219,7 @@ where
 		ctx: &IntegrityContext,
 	) -> Result<(), Error> {
 		let ctx_key = to_key(INTEGRITY_CONTEXT_PREFIX, &mut slate_id.to_vec());
-		let (blind_xor_key, _nonce_xor_key) = private_ctx_xor_keys(self.keychain(), slate_id)?;
+		let (blind_xor_key, _nonce_xor_key) = private_ctx_xor_keys(self.keychain()?, slate_id)?;
 
 		let mut s_ctx = ctx.clone();
 		for i in 0..SECRET_KEY_SIZE {
@@ -1145,7 +1229,7 @@ where
 		self.db
 			.borrow()
 			.as_ref()
-			.unwrap()
+			.ok_or(Error::Backend("db is not initialized".into()))?
 			.put_ser(&ctx_key, &s_ctx)?;
 		Ok(())
 	}
@@ -1153,10 +1237,14 @@ where
 	#[cfg(feature = "libp2p")]
 	fn load_integrity_context(&mut self, slate_id: &[u8]) -> Result<IntegrityContext, Error> {
 		let ctx_key = to_key(INTEGRITY_CONTEXT_PREFIX, &mut slate_id.to_vec());
-		let (blind_xor_key, _nonce_xor_key) = private_ctx_xor_keys(self.keychain(), slate_id)?;
+		let (blind_xor_key, _nonce_xor_key) = private_ctx_xor_keys(self.keychain()?, slate_id)?;
 
 		let mut ctx: IntegrityContext = option_to_not_found(
-			self.db.borrow().as_ref().unwrap().get_ser(&ctx_key, None),
+			self.db
+				.borrow()
+				.as_ref()
+				.ok_or(Error::Backend("db is not initialized".into()))?
+				.get_ser(&ctx_key, None),
 			|| format!("Slate id: {:x?}", slate_id.to_vec()),
 		)?;
 

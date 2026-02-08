@@ -88,7 +88,7 @@ impl Builder {
 		}
 		let partial_commitment = secp.commit(0, secret_key.clone())?;
 		self.participants.push(if self.commit_reveal {
-			ParticipantData::new_commit(partial_commitment)
+			ParticipantData::new_commit(partial_commitment)?
 		} else {
 			ParticipantData::new_revealed(partial_commitment)
 		});
@@ -362,9 +362,9 @@ impl Builder {
 			return Err(Error::MultiSigIncomplete);
 		}
 
-		tau_xs
-			.iter()
-			.for_each(|x| sum_tau_x.add_assign(secp, *x).unwrap());
+		for x in tau_xs {
+			sum_tau_x.add_assign(secp, x)?;
+		}
 		Ok(sum_tau_x)
 	}
 }
@@ -411,14 +411,14 @@ pub struct ParticipantData {
 
 impl ParticipantData {
 	/// Build from commitment as not revealed
-	pub fn new_commit(partial_commitment: Commitment) -> Self {
-		ParticipantData {
-			partial_commitment_hash: Some(partial_commitment.hash().unwrap()),
+	pub fn new_commit(partial_commitment: Commitment) -> Result<Self, Error> {
+		Ok(ParticipantData {
+			partial_commitment_hash: Some(partial_commitment.hash()?),
 			partial_commitment: None,
 			t_1: None,
 			t_2: None,
 			tau_x: None,
-		}
+		})
 	}
 
 	/// Build from commitment as revealed

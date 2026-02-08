@@ -17,7 +17,6 @@
 
 use chrono::prelude::*;
 use ed25519_dalek::PublicKey as DalekPublicKey;
-use std::cell::RefCell;
 use std::path::Path;
 use uuid::Uuid;
 
@@ -29,18 +28,25 @@ use crate::impls::create_sender;
 use crate::keychain::{Identifier, Keychain};
 use crate::libwallet::api_impl::foreign;
 use crate::libwallet::api_impl::owner_updater::{start_updater_log_thread, StatusMessage};
-use crate::libwallet::api_impl::{owner, owner_eth, owner_swap, owner_updater};
+use crate::libwallet::api_impl::{owner, owner_updater};
+#[cfg(feature = "swaps")]
+use crate::libwallet::api_impl::{owner_eth, owner_swap};
 use crate::libwallet::proof::proofaddress;
 use crate::libwallet::proof::tx_proof::TxProof;
+#[cfg(feature = "swaps")]
 use crate::libwallet::swap::fsm::state::{StateEtaInfo, StateId, StateProcessRespond};
+#[cfg(feature = "swaps")]
 use crate::libwallet::swap::types::{Action, Currency, SwapTransactionsConfirmations};
+#[cfg(feature = "swaps")]
 use crate::libwallet::swap::{message::Message, swap::Swap, swap::SwapJournalRecord};
 #[cfg(feature = "grin_proof")]
 use crate::libwallet::PaymentProof;
+#[cfg(feature = "grin_proof")]
+use crate::libwallet::SwapStartArgs;
 use crate::libwallet::{
 	AcctPathMapping, BuiltOutput, Error, InitTxArgs, IssueInvoiceTxArgs, NodeClient,
-	NodeHeightResult, OutputCommitMapping, Slate, SlatePurpose, SlateVersion, SwapStartArgs,
-	TxLogEntry, VersionedSlate, ViewWallet, WalletInfo, WalletInst, WalletLCProvider,
+	NodeHeightResult, OutputCommitMapping, Slate, SlatePurpose, SlateVersion, TxLogEntry,
+	VersionedSlate, ViewWallet, WalletInfo, WalletInst, WalletLCProvider,
 };
 
 use crate::util::logger::LoggingConfig;
@@ -144,7 +150,12 @@ where
 			let _ = thr_info.join();
 		}
 
-		if let Some(thr) = self.updater_thread.lock().expect("Mutex failure").take() {
+		if let Some(thr) = self
+			.updater_thread
+			.lock()
+			.unwrap_or_else(|e| e.into_inner())
+			.take()
+		{
 			let _ = thr.join();
 		}
 	}
@@ -290,7 +301,7 @@ where
 	/// * Nothing
 
 	pub fn set_tor_config(&self, tor_config: Option<TorConfig>) {
-		let mut lock = self.tor_config.lock().expect("Mutex failure");
+		let mut lock = self.tor_config.lock().unwrap_or_else(|e| e.into_inner());
 		*lock = tor_config;
 	}
 
@@ -487,7 +498,7 @@ where
 		tx_id: Option<u32>,
 	) -> Result<(bool, Vec<OutputCommitMapping>), Error> {
 		let tx = {
-			let t = self.status_tx.lock().expect("Mutex failure");
+			let t = self.status_tx.lock().unwrap_or_else(|e| e.into_inner());
 			t.clone()
 		};
 		let refresh_from_node = match self.updater_running.load(Ordering::Relaxed) {
@@ -561,7 +572,7 @@ where
 		show_last_four_days: Option<bool>,
 	) -> Result<(bool, Vec<TxLogEntry>), Error> {
 		let tx = {
-			let t = self.status_tx.lock().expect("Mutex failure");
+			let t = self.status_tx.lock().unwrap_or_else(|e| e.into_inner());
 			t.clone()
 		};
 		let refresh_from_node = match self.updater_running.load(Ordering::Relaxed) {
@@ -638,7 +649,7 @@ where
 		minimum_confirmations: u64,
 	) -> Result<(bool, WalletInfo), Error> {
 		let tx = {
-			let t = self.status_tx.lock().expect("Mutex failure");
+			let t = self.status_tx.lock().unwrap_or_else(|e| e.into_inner());
 			t.clone()
 		};
 		let refresh_from_node = match self.updater_running.load(Ordering::Relaxed) {
@@ -719,7 +730,7 @@ where
 	/// };
 	/// let result = api_owner.init_send_tx(
 	/// 	None,
-	/// 	&None,
+	/// 	None,
 	/// 	&args,
 	/// 	1,
 	/// );
@@ -728,14 +739,14 @@ where
 	/// 	// Send slate somehow
 	/// 	// ...
 	/// 	// Lock our outputs if we're happy the slate was (or is being) sent
-	/// 	api_owner.tx_lock_outputs(None, &None, &slate, None, 0);
+	/// 	api_owner.tx_lock_outputs(None, None, &slate, None, 0);
 	/// }
 	/// ```
 
 	pub fn init_send_tx(
 		&self,
 		keychain_mask: Option<&SecretKey>,
-		tx_session: &Option<RefCell<TxSession>>,
+		mut tx_session: Option<&mut TxSession>,
 		args: &InitTxArgs,
 		routputs: usize, // Number of resulting outputs. Normally it is 1
 	) -> Result<Slate, Error> {
@@ -777,7 +788,7 @@ where
 						wallet_lock!(self.wallet_inst, w);
 						(w.get_data_file_dir().to_string(), w.get_context_id())
 					};
-					let tor_config_lock = self.tor_config.lock().expect("Mutex failure");
+					let tor_config_lock = self.tor_config.lock().unwrap_or_else(|e| e.into_inner());
 					let comm_adapter = create_sender(
 						context_id,
 						&sa.method,
@@ -812,7 +823,9 @@ where
 
 		// Using it as a global lock for the API
 		// Without usage it still works until the end of the block
-		let _send_lock = INIT_SEND_FINALIZE_TX_LOCK.lock().expect("Mutex failure");
+		let _send_lock = INIT_SEND_FINALIZE_TX_LOCK
+			.lock()
+			.unwrap_or_else(|e| e.into_inner());
 
 		let (mut slate, slatepack_secret, secp) = {
 			wallet_lock!(self.wallet_inst, w);
@@ -822,7 +835,7 @@ where
 				owner::init_send_tx(
 					&mut **w,
 					keychain_mask,
-					tx_session,
+					&mut tx_session,
 					&args,
 					self.doctest_mode,
 					routputs,
@@ -893,7 +906,7 @@ where
 					owner::tx_lock_outputs(
 						&mut **w,
 						keychain_mask,
-						&tx_session,
+						&mut tx_session,
 						&slate,
 						address,
 						0,
@@ -905,7 +918,7 @@ where
 							let (slate_res, _context) = owner::finalize_tx(
 								&mut **w,
 								keychain_mask,
-								&tx_session,
+								&mut tx_session,
 								&slate,
 								true,
 								self.doctest_mode,
@@ -981,7 +994,7 @@ where
 	///     amount: 60_000_000_000,
 	///     ..Default::default()
 	/// };
-	/// let result = api_owner.issue_invoice_tx(None, &None, &args);
+	/// let result = api_owner.issue_invoice_tx(None, None, &args);
 	///
 	/// if let Ok(slate) = result {
 	///     // if okay, send to the payer to add their inputs
@@ -991,12 +1004,14 @@ where
 	pub fn issue_invoice_tx(
 		&self,
 		keychain_mask: Option<&SecretKey>,
-		tx_session: &Option<RefCell<TxSession>>,
+		tx_session: Option<&mut TxSession>,
 		args: &IssueInvoiceTxArgs,
 	) -> Result<Slate, Error> {
 		// Using it as a global lock for the API
 		// Without usage it still works until the end of the block
-		let mut _send_lock = INIT_SEND_FINALIZE_TX_LOCK.lock().expect("Mutex failure");
+		let mut _send_lock = INIT_SEND_FINALIZE_TX_LOCK
+			.lock()
+			.unwrap_or_else(|e| e.into_inner());
 
 		wallet_lock!(self.wallet_inst, w);
 		owner::issue_invoice_tx(
@@ -1013,11 +1028,13 @@ where
 		&self,
 		keychain_mask: Option<&SecretKey>,
 		amount: u64,
-		tx_session: &Option<RefCell<TxSession>>,
+		tx_session: Option<&mut TxSession>,
 	) -> Result<(Slate, Context), Error> {
 		// Using it as a global lock for the API
 		// Without usage it still works until the end of the block
-		let mut _send_lock = INIT_SEND_FINALIZE_TX_LOCK.lock().expect("Mutex failure");
+		let mut _send_lock = INIT_SEND_FINALIZE_TX_LOCK
+			.lock()
+			.unwrap_or_else(|e| e.into_inner());
 
 		wallet_lock!(self.wallet_inst, w);
 		owner::generate_invoice_slate(&mut **w, keychain_mask, amount, tx_session)
@@ -1070,7 +1087,7 @@ where
 	///     ..Default::default()
 	/// };
 	///
-	/// let result = api_owner.process_invoice_tx(None, &None, &slate, &args);
+	/// let result = api_owner.process_invoice_tx(None, None, &slate, &args);
 	///
 	/// if let Ok(slate) = result {
 	/// // If result okay, send back to the invoicer
@@ -1081,13 +1098,15 @@ where
 	pub fn process_invoice_tx(
 		&self,
 		keychain_mask: Option<&SecretKey>,
-		tx_session: &Option<RefCell<TxSession>>,
+		mut tx_session: Option<&mut TxSession>,
 		slate: &Slate,
 		args: &InitTxArgs,
 	) -> Result<Slate, Error> {
 		// Using it as a global lock for the API
 		// Without usage it still works until the end of the block
-		let mut _send_lock = INIT_SEND_FINALIZE_TX_LOCK.lock().expect("Mutex failure");
+		let mut _send_lock = INIT_SEND_FINALIZE_TX_LOCK
+			.lock()
+			.unwrap_or_else(|e| e.into_inner());
 
 		wallet_lock!(self.wallet_inst, w);
 
@@ -1103,7 +1122,7 @@ where
 		owner::process_invoice_tx(
 			&mut **w,
 			keychain_mask,
-			tx_session,
+			&mut tx_session,
 			slate,
 			args,
 			self.doctest_mode,
@@ -1155,7 +1174,7 @@ where
 	/// };
 	/// let result = api_owner.init_send_tx(
 	/// 	None,
-	/// 	&None,
+	/// 	None,
 	/// 	&args,
 	/// 	1,
 	/// );
@@ -1164,14 +1183,14 @@ where
 	///		// Send slate somehow
 	///		// ...
 	///		// Lock our outputs if we're happy the slate was (or is being) sent
-	///		api_owner.tx_lock_outputs(None, &None, &slate, None, 0);
+	///		api_owner.tx_lock_outputs(None, None, &slate, None, 0);
 	/// }
 	/// ```
 
 	pub fn tx_lock_outputs(
 		&self,
 		keychain_mask: Option<&SecretKey>,
-		tx_session: &Option<RefCell<TxSession>>,
+		mut tx_session: Option<&mut TxSession>,
 		slate: &Slate,
 		address: Option<String>,
 		participant_id: usize,
@@ -1180,7 +1199,7 @@ where
 		owner::tx_lock_outputs(
 			&mut **w,
 			keychain_mask,
-			tx_session,
+			&mut tx_session,
 			slate,
 			address,
 			participant_id,
@@ -1232,7 +1251,7 @@ where
 	/// };
 	/// let result = api_owner.init_send_tx(
 	/// 	None,
-	///     &None,
+	///     None,
 	/// 	&args,
 	/// 	1,
 	/// );
@@ -1241,30 +1260,32 @@ where
 	///		// Send slate somehow
 	///		// ...
 	///		// Lock our outputs if we're happy the slate was (or is being) sent
-	///		let res = api_owner.tx_lock_outputs(None, &None, &slate, None, 0);
+	///		let res = api_owner.tx_lock_outputs(None, None, &slate, None, 0);
 	///		//
 	///		// Retrieve slate back from recipient
 	///		//
-	///		let res = api_owner.finalize_tx(None, &None, &slate, true);
+	///		let res = api_owner.finalize_tx(None, None, &slate, true);
 	/// }
 	/// ```
 
 	pub fn finalize_tx(
 		&self,
 		keychain_mask: Option<&SecretKey>,
-		tx_session: &Option<RefCell<TxSession>>,
+		mut tx_session: Option<&mut TxSession>,
 		slate: &Slate,
 		do_proof: bool,
 	) -> Result<Slate, Error> {
 		// Using it as a global lock for the API
 		// Without usage it still works until the end of the block
-		let mut _send_lock = INIT_SEND_FINALIZE_TX_LOCK.lock().expect("Mutex failure");
+		let mut _send_lock = INIT_SEND_FINALIZE_TX_LOCK
+			.lock()
+			.unwrap_or_else(|e| e.into_inner());
 
 		wallet_lock!(self.wallet_inst, w);
 		let (slate_res, _context) = owner::finalize_tx(
 			&mut **w,
 			keychain_mask,
-			tx_session,
+			&mut tx_session,
 			slate,
 			true,
 			self.doctest_mode,
@@ -1309,7 +1330,7 @@ where
 	/// };
 	/// let result = api_owner.init_send_tx(
 	/// 	None,
-	///     &None,
+	///     None,
 	/// 	&args,
 	/// 	1,
 	/// );
@@ -1318,11 +1339,11 @@ where
 	///		// Send slate somehow
 	///		// ...
 	///		// Lock our outputs if we're happy the slate was (or is being) sent
-	///		let res = api_owner.tx_lock_outputs(None, &None, &slate, None, 0);
+	///		let res = api_owner.tx_lock_outputs(None, None, &slate, None, 0);
 	///		//
 	///		// Retrieve slate back from recipient
 	///		//
-	///		let res = api_owner.finalize_tx(None, &None, &slate, false);
+	///		let res = api_owner.finalize_tx(None, None, &slate, false);
 	///		let res = api_owner.post_tx(None, slate.tx_or_err().unwrap(), true);
 	/// }
 	/// ```
@@ -1382,7 +1403,7 @@ where
 	/// };
 	/// let result = api_owner.init_send_tx(
 	/// 	None,
-	///     &None,
+	///     None,
 	/// 	&args,
 	/// 	1,
 	/// );
@@ -1391,7 +1412,7 @@ where
 	///		// Send slate somehow
 	///		// ...
 	///		// Lock our outputs if we're happy the slate was (or is being) sent
-	///		let res = api_owner.tx_lock_outputs(None, &None, &slate, None, 0);
+	///		let res = api_owner.tx_lock_outputs(None, None, &slate, None, 0);
 	///		//
 	///		// We didn't get the slate back, or something else went wrong
 	///		//
@@ -1406,7 +1427,7 @@ where
 		tx_slate_id: Option<Uuid>,
 	) -> Result<(), Error> {
 		let tx = {
-			let t = self.status_tx.lock().expect("Mutex failure");
+			let t = self.status_tx.lock().unwrap_or_else(|e| e.into_inner());
 			t.clone()
 		};
 		owner::cancel_tx(
@@ -1505,7 +1526,7 @@ where
 	/// };
 	/// let result = api_owner.init_send_tx(
 	/// 	None,
-	/// 	&None,
+	/// 	None,
 	/// 	&args,
 	/// 	1,
 	/// );
@@ -1514,7 +1535,7 @@ where
 	///		// Send slate somehow
 	///		// ...
 	///		// Lock our outputs if we're happy the slate was (or is being) sent
-	///		let res = api_owner.tx_lock_outputs(None, &None, &slate, None, 0);
+	///		let res = api_owner.tx_lock_outputs(None, None, &slate, None, 0);
 	///		//
 	///		// Retrieve slate back from recipient
 	///		//
@@ -1610,7 +1631,7 @@ where
 		start_height: Option<u64>,
 	) -> Result<ViewWallet, Error> {
 		let tx = {
-			let t = self.status_tx.lock().expect("Mutex failure");
+			let t = self.status_tx.lock().unwrap_or_else(|e| e.into_inner());
 			t.clone()
 		};
 		owner::scan_rewind_hash(self.wallet_inst.clone(), rewind_hash, start_height, &tx)
@@ -1675,7 +1696,7 @@ where
 		delete_unconfirmed: bool,
 	) -> Result<u64, Error> {
 		let tx = {
-			let t = self.status_tx.lock().expect("Mutex failure");
+			let t = self.status_tx.lock().unwrap_or_else(|e| e.into_inner());
 			t.clone()
 		};
 		owner::scan(
@@ -1691,11 +1712,15 @@ where
 	/// Dump wallet data (outputs,transactions) into the logs
 	pub fn dump_wallet_data(&self, file_name: Option<String>) -> Result<(), Error> {
 		let tx = {
-			let t = self.status_tx.lock().expect("Mutex failure");
+			let t = self.status_tx.lock().unwrap_or_else(|e| e.into_inner());
 			t.clone()
 		};
 
-		owner::dump_wallet_data(self.wallet_inst.clone(), &tx.unwrap(), file_name)
+		owner::dump_wallet_data(
+			self.wallet_inst.clone(),
+			&tx.ok_or(Error::GenericError("Status sender is not set".into()))?,
+			file_name,
+		)
 	}
 
 	/// Retrieves the last known height known by the wallet. This is determined as follows:
@@ -1790,7 +1815,7 @@ where
 	/// ```
 
 	pub fn get_top_level_directory(&self) -> Result<String, Error> {
-		let mut w_lock = self.wallet_inst.lock().expect("Mutex failure");
+		let mut w_lock = self.wallet_inst.lock().unwrap_or_else(|e| e.into_inner());
 		let lc = w_lock.lc_provider()?;
 		if self.doctest_mode && !self.doctest_retain_tld {
 			Ok("/doctest/dir".to_owned())
@@ -1837,7 +1862,7 @@ where
 	/// ```
 
 	pub fn set_top_level_directory(&self, dir: &str) -> Result<(), Error> {
-		let mut w_lock = self.wallet_inst.lock().expect("Mutex failure");
+		let mut w_lock = self.wallet_inst.lock().unwrap_or_else(|e| e.into_inner());
 		let lc = w_lock.lc_provider()?;
 		lc.set_top_level_directory(dir)
 	}
@@ -1896,7 +1921,7 @@ where
 		tor_config: Option<TorConfig>,
 		mqs_config: Option<MQSConfig>,
 	) -> Result<(), Error> {
-		let mut w_lock = self.wallet_inst.lock().expect("Mutex failure");
+		let mut w_lock = self.wallet_inst.lock().unwrap_or_else(|e| e.into_inner());
 		let lc = w_lock.lc_provider()?;
 		lc.create_config(
 			chain_type,
@@ -1973,7 +1998,7 @@ where
 		wallet_data_dir: Option<&str>,
 		show_seed: bool,
 	) -> Result<ZeroingString, Error> {
-		let mut w_lock = self.wallet_inst.lock().expect("Mutex failure");
+		let mut w_lock = self.wallet_inst.lock().unwrap_or_else(|e| e.into_inner());
 		let lc = w_lock.lc_provider()?;
 		lc.create_wallet(
 			name,
@@ -2048,14 +2073,14 @@ where
 		// just return a representative string for doctest mode
 		if self.doctest_mode {
 			let secp_inst = static_secp_instance();
-			let secp = secp_inst.lock().expect("Mutex failure");
+			let secp = secp_inst.lock().unwrap_or_else(|e| e.into_inner());
 			return Ok(Some(SecretKey::from_slice(
 				&secp,
 				&from_hex("d096b3cb75986b3b13f80b8f5243a9edf0af4c74ac37578c5a12cfb5b59b1868")
 					.unwrap(),
 			)?));
 		}
-		let mut w_lock = self.wallet_inst.lock().expect("Mutex failure");
+		let mut w_lock = self.wallet_inst.lock().unwrap_or_else(|e| e.into_inner());
 		let lc = w_lock.lc_provider()?;
 		lc.open_wallet(name, password, use_mask, self.doctest_mode, wallet_data_dir)
 	}
@@ -2088,7 +2113,7 @@ where
 	/// ```
 
 	pub fn close_wallet(&self, name: Option<&str>) -> Result<(), Error> {
-		let mut w_lock = self.wallet_inst.lock().expect("Mutex failure");
+		let mut w_lock = self.wallet_inst.lock().unwrap_or_else(|e| e.into_inner());
 		let lc = w_lock.lc_provider()?;
 		lc.close_wallet(name)
 	}
@@ -2129,7 +2154,7 @@ where
 		password: ZeroingString,
 		wallet_data_dir: Option<&str>,
 	) -> Result<ZeroingString, Error> {
-		let mut w_lock = self.wallet_inst.lock().expect("Mutex failure");
+		let mut w_lock = self.wallet_inst.lock().unwrap_or_else(|e| e.into_inner());
 		let lc = w_lock.lc_provider()?;
 		lc.get_mnemonic(name, password, wallet_data_dir)
 	}
@@ -2177,7 +2202,7 @@ where
 		new: ZeroingString,
 		wallet_data_dir: Option<&str>,
 	) -> Result<(), Error> {
-		let mut w_lock = self.wallet_inst.lock().expect("Mutex failure");
+		let mut w_lock = self.wallet_inst.lock().unwrap_or_else(|e| e.into_inner());
 		let lc = w_lock.lc_provider()?;
 		lc.change_password(name, old, new, wallet_data_dir)
 	}
@@ -2214,7 +2239,7 @@ where
 	/// ```
 
 	pub fn delete_wallet(&self, name: Option<&str>) -> Result<(), Error> {
-		let mut w_lock = self.wallet_inst.lock().expect("Mutex failure");
+		let mut w_lock = self.wallet_inst.lock().unwrap_or_else(|e| e.into_inner());
 		let lc = w_lock.lc_provider()?;
 		lc.delete_wallet(name)
 	}
@@ -2274,7 +2299,10 @@ where
 		keychain_mask: Option<&SecretKey>,
 		frequency: Duration,
 	) -> Result<(), Error> {
-		let mut updater_thread = self.updater_thread.lock().expect("Mutex failure");
+		let mut updater_thread = self
+			.updater_thread
+			.lock()
+			.unwrap_or_else(|e| e.into_inner());
 
 		if updater_thread.is_some() {
 			return Err(Error::Lifecycle("Updater thread is already started".into()));
@@ -2282,7 +2310,7 @@ where
 
 		let updater_inner = self.updater.clone();
 		let tx_inner = {
-			let t = self.status_tx.lock().expect("Mutex failure");
+			let t = self.status_tx.lock().unwrap_or_else(|e| e.into_inner());
 			t.clone()
 		};
 		let keychain_mask = match keychain_mask {
@@ -2293,7 +2321,7 @@ where
 		let updater_thr = thread::Builder::new()
 			.name(format!("wallet-updater-{}", self.context_id))
 			.spawn(move || {
-				let u = updater_inner.lock().expect("Mutex failure");
+				let u = updater_inner.lock().unwrap_or_else(|e| e.into_inner());
 				if let Err(e) = u.run(frequency, keychain_mask, &tx_inner) {
 					error!("Wallet state updater failed with error: {}", e);
 				}
@@ -2337,7 +2365,12 @@ where
 
 	pub fn stop_updater(&self) -> Result<(), Error> {
 		self.updater_running.store(false, Ordering::Relaxed);
-		if let Some(thr) = self.updater_thread.lock().expect("Mutex failure").take() {
+		if let Some(thr) = self
+			.updater_thread
+			.lock()
+			.unwrap_or_else(|e| e.into_inner())
+			.take()
+		{
 			let _ = thr.join();
 		}
 		Ok(())
@@ -2382,7 +2415,10 @@ where
 	/// ```
 
 	pub fn get_updater_messages(&self, count: Option<u32>) -> Result<Vec<StatusMessage>, Error> {
-		let mut q = self.updater_messages.lock().expect("Mutex failure");
+		let mut q = self
+			.updater_messages
+			.lock()
+			.unwrap_or_else(|e| e.into_inner());
 		let index = match count {
 			Some(count) => q.len().saturating_sub(count as usize),
 			None => 0,
@@ -2518,7 +2554,7 @@ where
 		tx_slate_id: Option<Uuid>,
 	) -> Result<PaymentProof, Error> {
 		let tx = {
-			let t = self.status_tx.lock().expect("Mutex failure");
+			let t = self.status_tx.lock().unwrap_or_else(|e| e.into_inner());
 			t.clone()
 		};
 		let refresh_from_node = match self.updater_running.load(Ordering::Relaxed) {
@@ -2656,6 +2692,7 @@ where
 	}
 
 	/// Start swap trade process. Return SwapID that can be used to check the status or perform further action.
+	#[cfg(feature = "swaps")]
 	pub fn swap_start(
 		&self,
 		keychain_mask: Option<&SecretKey>,
@@ -2670,6 +2707,7 @@ where
 			.map_err(|e| e.into())
 	}
 
+	#[cfg(feature = "swaps")]
 	pub fn swap_create_from_offer(
 		&self,
 		keychain_mask: Option<&SecretKey>,
@@ -2684,6 +2722,7 @@ where
 	}
 
 	/// List all available swap operations. SwapId & Status
+	#[cfg(feature = "swaps")]
 	pub fn swap_list(
 		&self,
 		keychain_mask: Option<&SecretKey>,
@@ -2694,6 +2733,7 @@ where
 	}
 
 	/// Delete swap trade
+	#[cfg(feature = "swaps")]
 	pub fn swap_delete(
 		&self,
 		keychain_mask: Option<&SecretKey>,
@@ -2703,6 +2743,7 @@ where
 			.map_err(|e| e.into())
 	}
 	/// Retrieve swap trade
+	#[cfg(feature = "swaps")]
 	pub fn swap_get(
 		&self,
 		keychain_mask: Option<&SecretKey>,
@@ -2714,6 +2755,7 @@ where
 
 	/// Adjust the sate of swap trade.
 	/// method & destination required for adjust_cmd='destination'
+	#[cfg(feature = "swaps")]
 	pub fn swap_adjust(
 		&self,
 		keychain_mask: Option<&SecretKey>,
@@ -2746,6 +2788,7 @@ where
 	}
 
 	/// Dump swap file content
+	#[cfg(feature = "swaps")]
 	pub fn swap_dump(
 		&self,
 		keychain_mask: Option<&SecretKey>,
@@ -2756,16 +2799,18 @@ where
 	}
 
 	/// dump ethereum info
+	#[cfg(feature = "swaps")]
 	pub fn eth_info(&self, currency: Currency) -> Result<(String, String, String), Error> {
 		owner_eth::info(self.wallet_inst.clone(), currency).map_err(|e| e.into())
 	}
 
 	/// ethereum transfer
+	#[cfg(feature = "swaps")]
 	pub fn eth_transfer(
 		&self,
-		dest: Option<String>,
+		dest: String,
 		currency: Currency,
-		amount: Option<String>,
+		amount: &String,
 	) -> Result<(), libwallet::swap::Error> {
 		owner_eth::transfer(self.wallet_inst.clone(), currency, dest, amount)
 	}
@@ -2773,6 +2818,7 @@ where
 	/// Refresh and get a status and current expected action for the swap.
 	/// return: <state>, <Action>, <time limit>, <Roadmap lines>, <Journal records>, <last error> , <mkt place cancelled trades>
 	/// time limit shows when this action will be expired
+	#[cfg(feature = "swaps")]
 	pub fn update_swap_status_action(
 		&self,
 		keychain_mask: Option<&SecretKey>,
@@ -2809,6 +2855,7 @@ where
 	}
 
 	/// Get a status of the transactions that involved into the swap.
+	#[cfg(feature = "swaps")]
 	pub fn get_swap_tx_tstatus(
 		&self,
 		keychain_mask: Option<&SecretKey>,
@@ -2832,6 +2879,7 @@ where
 		.map_err(|e| e.into())
 	}
 
+	#[cfg(feature = "swaps")]
 	pub fn swap_process<F>(
 		&self,
 		keychain_mask: Option<&SecretKey>,
@@ -2867,6 +2915,7 @@ where
 	}
 
 	/// Process swap income message
+	#[cfg(feature = "swaps")]
 	pub fn swap_income_message(
 		&self,
 		keychain_mask: Option<&SecretKey>,

@@ -89,7 +89,13 @@ impl InfuraNodeClient {
 	/// get ether balance
 	pub fn ether_balance(&self) -> Result<(String, u64), Error> {
 		let task = async move {
-			let account = to_eth_address(self.wallet.address.clone().unwrap()).unwrap();
+			let account = to_eth_address(
+				self.wallet
+					.address
+					.clone()
+					.ok_or(mwc_web3::Error::Internal)?,
+			)
+			.map_err(|_| mwc_web3::Error::Internal)?;
 			let url = format!("wss://{}.infura.io/ws/v3/{}", self.chain, self.project_id);
 			let transport = mwc_web3::transports::WebSocket::new(url.as_str()).await;
 			match transport {
@@ -117,7 +123,10 @@ impl InfuraNodeClient {
 				Ok(res) => match res {
 					Ok(balance) => {
 						let balance_gwei = balance / U256::exp10(9);
-						let balance = to_norm(balance_gwei.to_string().as_str(), "9");
+						let balance =
+							to_norm(balance_gwei.to_string().as_str(), "9").map_err(|e| {
+								Error::Generic(format!("Unable to construct the balance, {}", e))
+							})?;
 						Ok((format!("{}", balance.with_scale(6)), balance_gwei.as_u64()))
 					}
 					_ => Err(Error::EthContractCallError(
@@ -147,13 +156,18 @@ impl InfuraNodeClient {
 						mwc_web3.eth(),
 						token_address,
 						ERC20_TOKEN_CONTRACT.as_bytes(),
-					)
-					.unwrap();
+					)?;
 
 					let res = contract
 						.query(
 							"balanceOf",
-							(to_eth_address(self.wallet.address.clone().unwrap()).unwrap(),),
+							to_eth_address(
+								self.wallet
+									.address
+									.clone()
+									.ok_or(mwc_web3::Error::Internal)?,
+							)
+							.map_err(|_| mwc_web3::Error::Internal)?,
 							None,
 							Options::default(),
 							None,
@@ -192,7 +206,15 @@ impl InfuraNodeClient {
 						let balance_norm = to_norm(
 							balance.to_string().as_str(),
 							currency.exponent().to_string().as_str(),
-						);
+						)
+						.map_err(|e| {
+							Error::Generic(format!(
+								"Invalid balance value {} with exponent {}, {}",
+								balance.to_string(),
+								currency.exponent(),
+								e
+							))
+						})?;
 						Ok((format!("{}", balance_norm), balance.as_u64()))
 					}
 					_ => Err(Error::EthContractCallError(
@@ -219,19 +241,31 @@ impl InfuraNodeClient {
 				Ok(tx_socket) => {
 					let mwc_web3 = mwc_web3::Web3::new(tx_socket);
 					let key = mwc_web3::signing::SecretKey::from_slice(
-						&from_hex(self.wallet.private_key.clone().unwrap().as_str()).unwrap(),
+						&from_hex(
+							self.wallet
+								.private_key
+								.clone()
+								.ok_or(mwc_web3::Error::Internal)?
+								.as_str(),
+						)
+						.map_err(|_| mwc_web3::Error::Internal)?,
 					)
-					.unwrap();
+					.map_err(|_| mwc_web3::Error::Internal)?;
 					let accounts_sign = Accounts::new(mwc_web3.eth().transport().clone());
 					let nonce = mwc_web3
 						.eth()
 						.transaction_count(
-							to_eth_address(self.wallet.address.clone().unwrap()).unwrap(),
+							to_eth_address(
+								self.wallet
+									.address
+									.clone()
+									.ok_or(mwc_web3::Error::Internal)?,
+							)
+							.map_err(|_| mwc_web3::Error::Internal)?,
 							None,
 						)
-						.await
-						.unwrap();
-					let gas_price = mwc_web3.eth().gas_price().await.unwrap();
+						.await?;
+					let gas_price = mwc_web3.eth().gas_price().await?;
 					let tx = TransactionParameters {
 						nonce: Some(nonce),
 						to: Some(to),
@@ -245,7 +279,7 @@ impl InfuraNodeClient {
 						max_fee_per_gas: None,
 						max_priority_fee_per_gas: None,
 					};
-					let signed = accounts_sign.sign_transaction(tx, &key).await.unwrap();
+					let signed = accounts_sign.sign_transaction(tx, &key).await?;
 					mwc_web3
 						.eth()
 						.send_raw_transaction(signed.raw_transaction)
@@ -312,17 +346,22 @@ impl InfuraNodeClient {
 						token_address,
 						ERC20_TOKEN_CONTRACT.as_bytes(),
 					)
-					.unwrap();
+					.map_err(|_| mwc_web3::Error::Internal)?;
 
 					let nonce = mwc_web3
 						.eth()
 						.transaction_count(
-							to_eth_address(self.wallet.address.clone().unwrap()).unwrap(),
+							to_eth_address(
+								self.wallet
+									.address
+									.clone()
+									.ok_or(mwc_web3::Error::Internal)?,
+							)
+							.map_err(|_| mwc_web3::Error::Internal)?,
 							None,
 						)
-						.await
-						.unwrap();
-					let gas_price = mwc_web3.eth().gas_price().await.unwrap();
+						.await?;
+					let gas_price = mwc_web3.eth().gas_price().await?;
 					let gas_price = gas_price + gas_price / 2;
 					let mut options = Options::default();
 					options.gas_price = Some(gas_price);
@@ -330,9 +369,16 @@ impl InfuraNodeClient {
 					options.nonce = Some(nonce);
 
 					let key = mwc_web3::signing::SecretKey::from_slice(
-						&from_hex(self.wallet.private_key.clone().unwrap().as_str()).unwrap(),
+						&from_hex(
+							self.wallet
+								.private_key
+								.clone()
+								.ok_or(mwc_web3::Error::Internal)?
+								.as_str(),
+						)
+						.map_err(|_| mwc_web3::Error::Internal)?,
 					)
-					.unwrap();
+					.map_err(|_| mwc_web3::Error::Internal)?;
 					contract
 						.signed_call("transfer", (to, value), options, SecretKeyRef::new(&key))
 						.await
@@ -388,23 +434,29 @@ impl InfuraNodeClient {
 			match transport {
 				Ok(tx_socket) => {
 					let mwc_web3 = mwc_web3::Web3::new(tx_socket);
-					let contract_address = to_eth_address(self.contract_addr.clone()).unwrap();
+					let contract_address = to_eth_address(self.contract_addr.clone())
+						.map_err(|_| mwc_web3::Error::Internal)?;
 					let contract = Contract::from_json(
 						mwc_web3.eth(),
 						contract_address,
 						ETH_SWAP_CONTRACT.as_bytes(),
 					)
-					.unwrap();
+					.map_err(|_| mwc_web3::Error::Internal)?;
 
 					let nonce = mwc_web3
 						.eth()
 						.transaction_count(
-							to_eth_address(self.wallet.address.clone().unwrap()).unwrap(),
+							to_eth_address(
+								self.wallet
+									.address
+									.clone()
+									.ok_or(mwc_web3::Error::Internal)?,
+							)
+							.map_err(|_| mwc_web3::Error::Internal)?,
 							None,
 						)
-						.await
-						.unwrap();
-					let gas_price = mwc_web3.eth().gas_price().await.unwrap();
+						.await?;
+					let gas_price = mwc_web3.eth().gas_price().await?;
 					let gas_price = gas_price + gas_price / 2;
 					let mut options = Options::default();
 					options.value = Some(value);
@@ -413,9 +465,16 @@ impl InfuraNodeClient {
 					options.nonce = Some(nonce);
 
 					let key = mwc_web3::signing::SecretKey::from_slice(
-						&from_hex(self.wallet.private_key.clone().unwrap().as_str()).unwrap(),
+						&from_hex(
+							self.wallet
+								.private_key
+								.clone()
+								.ok_or(mwc_web3::Error::Internal)?
+								.as_str(),
+						)
+						.map_err(|_| mwc_web3::Error::Internal)?,
 					)
-					.unwrap();
+					.map_err(|_| mwc_web3::Error::Internal)?;
 					contract
 						.signed_call(
 							"initiate",
@@ -478,24 +537,29 @@ impl InfuraNodeClient {
 			match transport {
 				Ok(tx_socket) => {
 					let mwc_web3 = mwc_web3::Web3::new(tx_socket);
-					let contract_address =
-						to_eth_address(self.erc20_contract_addr.clone()).unwrap();
+					let contract_address = to_eth_address(self.erc20_contract_addr.clone())
+						.map_err(|_| mwc_web3::Error::Internal)?;
 					let contract = Contract::from_json(
 						mwc_web3.eth(),
 						contract_address,
 						ERC20_SWAP_CONTRACT.as_bytes(),
 					)
-					.unwrap();
+					.map_err(|_| mwc_web3::Error::Internal)?;
 
 					let nonce = mwc_web3
 						.eth()
 						.transaction_count(
-							to_eth_address(self.wallet.address.clone().unwrap()).unwrap(),
+							to_eth_address(
+								self.wallet
+									.address
+									.clone()
+									.ok_or(mwc_web3::Error::Internal)?,
+							)
+							.map_err(|_| mwc_web3::Error::Internal)?,
 							None,
 						)
-						.await
-						.unwrap();
-					let gas_price = mwc_web3.eth().gas_price().await.unwrap();
+						.await?;
+					let gas_price = mwc_web3.eth().gas_price().await?;
 					let gas_price = gas_price + gas_price / 2;
 					let mut options = Options::default();
 					options.gas_price = Some(gas_price);
@@ -503,9 +567,16 @@ impl InfuraNodeClient {
 					options.nonce = Some(nonce);
 
 					let key = mwc_web3::signing::SecretKey::from_slice(
-						&from_hex(self.wallet.private_key.clone().unwrap().as_str()).unwrap(),
+						&from_hex(
+							self.wallet
+								.private_key
+								.clone()
+								.ok_or(mwc_web3::Error::Internal)?
+								.as_str(),
+						)
+						.map_err(|_| mwc_web3::Error::Internal)?,
 					)
-					.unwrap();
+					.map_err(|_| mwc_web3::Error::Internal)?;
 					contract
 						.signed_call(
 							"initiate",
@@ -573,22 +644,28 @@ impl InfuraNodeClient {
 			match transport {
 				Ok(tx_socket) => {
 					let mwc_web3 = mwc_web3::Web3::new(tx_socket);
-					let contract_address = to_eth_address(self.contract_addr.clone()).unwrap();
+					let contract_address = to_eth_address(self.contract_addr.clone())
+						.map_err(|_| mwc_web3::Error::Internal)?;
 					let contract = Contract::from_json(
 						mwc_web3.eth(),
 						contract_address,
 						ETH_SWAP_CONTRACT.as_bytes(),
 					)
-					.unwrap();
+					.map_err(|_| mwc_web3::Error::Internal)?;
 
 					let nonce = mwc_web3
 						.eth()
 						.transaction_count(
-							to_eth_address(self.wallet.address.clone().unwrap()).unwrap(),
+							to_eth_address(
+								self.wallet
+									.address
+									.clone()
+									.ok_or(mwc_web3::Error::Internal)?,
+							)
+							.map_err(|_| mwc_web3::Error::Internal)?,
 							None,
 						)
-						.await
-						.unwrap();
+						.await?;
 
 					//0: refundTimeInBlocks, 1: initiator, 2: participant, 3: value
 					let swap_details: (U256, Address, Address, U256) = contract
@@ -600,8 +677,8 @@ impl InfuraNodeClient {
 							None,
 						)
 						.await
-						.unwrap();
-					let gas_price = mwc_web3.eth().gas_price().await.unwrap();
+						.map_err(|_| mwc_web3::Error::Internal)?;
+					let gas_price = mwc_web3.eth().gas_price().await?;
 					let gas_price = gas_price + gas_price / 2;
 					let mut options = Options::default();
 					options.gas_price = Some(gas_price);
@@ -624,9 +701,16 @@ impl InfuraNodeClient {
 
 					#[allow(unused_mut)]
 					let mut key = mwc_web3::signing::SecretKey::from_slice(
-						&from_hex(self.wallet.private_key.clone().unwrap().as_str()).unwrap(),
+						&from_hex(
+							self.wallet
+								.private_key
+								.clone()
+								.ok_or(mwc_web3::Error::Internal)?
+								.as_str(),
+						)
+						.map_err(|_| mwc_web3::Error::Internal)?,
 					)
-					.unwrap();
+					.map_err(|_| mwc_web3::Error::Internal)?;
 
 					#[cfg(test)]
 					{
@@ -643,9 +727,9 @@ impl InfuraNodeClient {
 										.unwrap()
 										.as_str(),
 								)
-								.unwrap(),
+								.map_err(|_| mwc_web3::Error::Internal)?,
 							)
-							.unwrap();
+							.map_err(|_| mwc_web3::Error::Internal)?;
 						}
 					}
 
@@ -713,23 +797,28 @@ impl InfuraNodeClient {
 			match transport {
 				Ok(tx_socket) => {
 					let mwc_web3 = mwc_web3::Web3::new(tx_socket);
-					let contract_address =
-						to_eth_address(self.erc20_contract_addr.clone()).unwrap();
+					let contract_address = to_eth_address(self.erc20_contract_addr.clone())
+						.map_err(|_| mwc_web3::Error::Internal)?;
 					let contract = Contract::from_json(
 						mwc_web3.eth(),
 						contract_address,
 						ERC20_SWAP_CONTRACT.as_bytes(),
 					)
-					.unwrap();
+					.map_err(|_| mwc_web3::Error::Internal)?;
 
 					let nonce = mwc_web3
 						.eth()
 						.transaction_count(
-							to_eth_address(self.wallet.address.clone().unwrap()).unwrap(),
+							to_eth_address(
+								self.wallet
+									.address
+									.clone()
+									.ok_or(mwc_web3::Error::Internal)?,
+							)
+							.map_err(|_| mwc_web3::Error::Internal)?,
 							None,
 						)
-						.await
-						.unwrap();
+						.await?;
 					//0: refundBlock, 1: contractAddress, 2: initiator, 3: participant, 4: value
 					let swap_details: (U256, Address, Address, Address, U256) = contract
 						.query(
@@ -740,8 +829,8 @@ impl InfuraNodeClient {
 							None,
 						)
 						.await
-						.unwrap();
-					let gas_price = mwc_web3.eth().gas_price().await.unwrap();
+						.map_err(|_| mwc_web3::Error::Internal)?;
+					let gas_price = mwc_web3.eth().gas_price().await?;
 					let gas_price = gas_price + gas_price / 2;
 					let mut options = Options::default();
 					options.gas_price = Some(gas_price);
@@ -764,9 +853,16 @@ impl InfuraNodeClient {
 
 					#[allow(unused_mut)]
 					let mut key = mwc_web3::signing::SecretKey::from_slice(
-						&from_hex(self.wallet.private_key.clone().unwrap().as_str()).unwrap(),
+						&from_hex(
+							self.wallet
+								.private_key
+								.clone()
+								.ok_or(mwc_web3::Error::Internal)?
+								.as_str(),
+						)
+						.map_err(|_| mwc_web3::Error::Internal)?,
 					)
-					.unwrap();
+					.map_err(|_| mwc_web3::Error::Internal)?;
 
 					#[cfg(test)]
 					{
@@ -783,9 +879,9 @@ impl InfuraNodeClient {
 										.unwrap()
 										.as_str(),
 								)
-								.unwrap(),
+								.map_err(|_| mwc_web3::Error::Internal)?,
 							)
-							.unwrap();
+							.map_err(|_| mwc_web3::Error::Internal)?;
 						}
 					}
 
@@ -1010,24 +1106,29 @@ impl EthNodeClient for InfuraNodeClient {
 			match transport {
 				Ok(tx_socket) => {
 					let mwc_web3 = mwc_web3::Web3::new(tx_socket);
-					let contract_swap_address =
-						to_eth_address(self.erc20_contract_addr.clone()).unwrap();
+					let contract_swap_address = to_eth_address(self.erc20_contract_addr.clone())
+						.map_err(|_| mwc_web3::Error::Internal)?;
 					let contract_token = Contract::from_json(
 						mwc_web3.eth(),
 						token_address,
 						ERC20_TOKEN_CONTRACT.as_bytes(),
 					)
-					.unwrap();
+					.map_err(|_| mwc_web3::Error::Internal)?;
 
 					let nonce = mwc_web3
 						.eth()
 						.transaction_count(
-							to_eth_address(self.wallet.address.clone().unwrap()).unwrap(),
+							to_eth_address(
+								self.wallet
+									.address
+									.clone()
+									.ok_or(mwc_web3::Error::Internal)?,
+							)
+							.map_err(|_| mwc_web3::Error::Internal)?,
 							None,
 						)
-						.await
-						.unwrap();
-					let gas_price = mwc_web3.eth().gas_price().await.unwrap();
+						.await?;
+					let gas_price = mwc_web3.eth().gas_price().await?;
 					let gas_price = gas_price + gas_price / 2;
 					let mut options = Options::default();
 					options.gas_price = Some(gas_price);
@@ -1035,9 +1136,16 @@ impl EthNodeClient for InfuraNodeClient {
 					options.nonce = Some(nonce);
 
 					let key = mwc_web3::signing::SecretKey::from_slice(
-						&from_hex(self.wallet.private_key.clone().unwrap().as_str()).unwrap(),
+						&from_hex(
+							self.wallet
+								.private_key
+								.clone()
+								.ok_or(mwc_web3::Error::Internal)?
+								.as_str(),
+						)
+						.map_err(|_| mwc_web3::Error::Internal)?,
 					)
-					.unwrap();
+					.map_err(|_| mwc_web3::Error::Internal)?;
 					contract_token
 						.signed_call(
 							"approve",
@@ -1191,8 +1299,10 @@ impl EthNodeClient for InfuraNodeClient {
 				Ok(tx_socket) => {
 					let mwc_web3 = mwc_web3::Web3::new(tx_socket);
 					let contract_address = match currency.is_erc20() {
-						true => to_eth_address(self.erc20_contract_addr.clone()).unwrap(),
-						_ => to_eth_address(self.contract_addr.clone()).unwrap(),
+						true => to_eth_address(self.erc20_contract_addr.clone())
+							.map_err(|_| mwc_web3::Error::Internal)?,
+						_ => to_eth_address(self.contract_addr.clone())
+							.map_err(|_| mwc_web3::Error::Internal)?,
 					};
 
 					let contract = match currency.is_erc20() {
@@ -1201,24 +1311,29 @@ impl EthNodeClient for InfuraNodeClient {
 							contract_address,
 							ERC20_SWAP_CONTRACT.as_bytes(),
 						)
-						.unwrap(),
+						.map_err(|_| mwc_web3::Error::Internal)?,
 						_ => Contract::from_json(
 							mwc_web3.eth(),
 							contract_address,
 							ETH_SWAP_CONTRACT.as_bytes(),
 						)
-						.unwrap(),
+						.map_err(|_| mwc_web3::Error::Internal)?,
 					};
 
 					let nonce = mwc_web3
 						.eth()
 						.transaction_count(
-							to_eth_address(self.wallet.address.clone().unwrap()).unwrap(),
+							to_eth_address(
+								self.wallet
+									.address
+									.clone()
+									.ok_or(mwc_web3::Error::Internal)?,
+							)
+							.map_err(|_| mwc_web3::Error::Internal)?,
 							None,
 						)
-						.await
-						.unwrap();
-					let gas_price = mwc_web3.eth().gas_price().await.unwrap();
+						.await?;
+					let gas_price = mwc_web3.eth().gas_price().await?;
 					let gas_price = gas_price + gas_price / 2;
 					let mut options = Options::default();
 					options.gas_price = Some(gas_price);
@@ -1226,9 +1341,16 @@ impl EthNodeClient for InfuraNodeClient {
 					options.nonce = Some(nonce);
 
 					let key = mwc_web3::signing::SecretKey::from_slice(
-						&from_hex(self.wallet.private_key.clone().unwrap().as_str()).unwrap(),
+						&from_hex(
+							self.wallet
+								.private_key
+								.clone()
+								.ok_or(mwc_web3::Error::Internal)?
+								.as_str(),
+						)
+						.map_err(|_| mwc_web3::Error::Internal)?,
 					)
-					.unwrap();
+					.map_err(|_| mwc_web3::Error::Internal)?;
 					contract
 						.signed_call(
 							"refund",
@@ -1290,8 +1412,10 @@ impl EthNodeClient for InfuraNodeClient {
 				Ok(tx_socket) => {
 					let mwc_web3 = mwc_web3::Web3::new(tx_socket);
 					let contract_address = match currency.is_erc20() {
-						true => to_eth_address(self.erc20_contract_addr.clone()).unwrap(),
-						_ => to_eth_address(self.contract_addr.clone()).unwrap(),
+						true => to_eth_address(self.erc20_contract_addr.clone())
+							.map_err(|_| mwc_web3::Error::Internal)?,
+						_ => to_eth_address(self.contract_addr.clone())
+							.map_err(|_| mwc_web3::Error::Internal)?,
 					};
 
 					let contract = match currency.is_erc20() {
@@ -1300,13 +1424,13 @@ impl EthNodeClient for InfuraNodeClient {
 							contract_address,
 							ERC20_SWAP_CONTRACT.as_bytes(),
 						)
-						.unwrap(),
+						.map_err(|_| mwc_web3::Error::Internal)?,
 						_ => Contract::from_json(
 							mwc_web3.eth(),
 							contract_address,
 							ETH_SWAP_CONTRACT.as_bytes(),
 						)
-						.unwrap(),
+						.map_err(|_| mwc_web3::Error::Internal)?,
 					};
 
 					//0: refundBlock, 1: contractAddress<Option>, 2: initiator, 3: participant, 4: value
@@ -1320,7 +1444,7 @@ impl EthNodeClient for InfuraNodeClient {
 								None,
 							)
 							.await
-							.unwrap();
+							.map_err(|_| mwc_web3::Error::Internal)?;
 						Ok((res.0, None, res.1, res.2, res.3))
 					} else {
 						let res: (U256, Address, Address, Address, U256) = contract
@@ -1332,7 +1456,7 @@ impl EthNodeClient for InfuraNodeClient {
 								None,
 							)
 							.await
-							.unwrap();
+							.map_err(|_| mwc_web3::Error::Internal)?;
 						Ok((res.0, Some(res.1), res.2, res.3, res.4))
 					}
 				}
@@ -1559,7 +1683,7 @@ mod tests {
 			generate_ethereum_wallet(CHAIN, REDEEM_MNMENOIC, PASSWORD, WALLET_PATH).unwrap();
 		REDEEM_WALLET
 			.write()
-			.expect("RwLock failure")
+			.unwrap_or_else(|e| e.into_inner())
 			.replace(redeem_wallet.clone());
 
 		//initiate swap offer

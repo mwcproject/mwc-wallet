@@ -36,7 +36,7 @@ use util::ZeroingString;
 #[macro_export]
 macro_rules! wallet_inst {
 	($wallet:ident, $w: ident) => {
-		let mut w_lock = $wallet.lock().expect("Mutex failure");
+		let mut w_lock = $wallet.lock().unwrap_or_else(|e| e.into_inner());
 		let lc = w_lock.lc_provider()?;
 		let $w = lc.wallet_inst()?;
 	};
@@ -45,7 +45,7 @@ macro_rules! wallet_inst {
 #[macro_export]
 macro_rules! wallet_inst_test {
 	($wallet:ident, $w: ident) => {
-		let mut w_lock = $wallet.lock().expect("Mutex failure");
+		let mut w_lock = $wallet.lock().unwrap_or_else(|e| e.into_inner());
 		let lc = w_lock.lc_provider().unwrap();
 		let $w = lc.wallet_inst().unwrap();
 	};

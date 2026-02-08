@@ -99,7 +99,10 @@ where
 
 	/// Get Eth Chain Height.
 	pub(crate) fn eth_height(&self) -> Result<u64, Error> {
-		let c = self.eth_node_client.lock().expect("Mutex failure");
+		let c = self
+			.eth_node_client
+			.lock()
+			.unwrap_or_else(|e| e.into_inner());
 		c.height()
 	}
 
@@ -109,12 +112,13 @@ where
 		swap: &Swap,
 		address_from_secret: Option<Address>,
 	) -> Result<(u64, Option<Address>, Address, Address, u64), Error> {
-		if address_from_secret.is_none() {
-			return Err(Error::InvalidEthSwapTradeIndex);
-		}
+		let address_from_secret = address_from_secret.ok_or(Error::InvalidEthSwapTradeIndex)?;
 
-		let c = self.eth_node_client.lock().expect("Mutex failure");
-		let res = c.get_swap_details(swap.secondary_currency, address_from_secret.unwrap());
+		let c = self
+			.eth_node_client
+			.lock()
+			.unwrap_or_else(|e| e.into_inner());
+		let res = c.get_swap_details(swap.secondary_currency, address_from_secret);
 		match res {
 			Ok((_refund_time, _contract_address, _initiator, _participant, _value)) => res,
 			_ => Err(Error::InvalidEthSwapTradeIndex),
@@ -123,13 +127,20 @@ where
 
 	/// Seller call contract function to redeem their Ethers, Status::Redeem
 	fn seller_post_redeem_tx<K: Keychain>(&self, keychain: &K, swap: &Swap) -> Result<H256, Error> {
-		let c = self.eth_node_client.lock().expect("Mutex failure");
+		let c = self
+			.eth_node_client
+			.lock()
+			.unwrap_or_else(|e| e.into_inner());
 		let eth_data = swap.secondary_data.unwrap_eth()?;
 		let redeem_secret = SellApi::calculate_redeem_secret(keychain, swap)?;
-		let secret_key = mwc_web3::signing::SecretKey::from_slice(&redeem_secret.0).unwrap();
+		let secret_key = mwc_web3::signing::SecretKey::from_slice(&redeem_secret.0)
+			.map_err(|e| Error::Generic(format!("Building mwc_web3 secret error, {}", e)))?;
 		c.redeem(
 			swap.secondary_currency,
-			eth_data.address_from_secret.clone().unwrap(),
+			eth_data
+				.address_from_secret
+				.clone()
+				.ok_or(Error::Generic("address_from_secret is not set".into()))?,
 			secret_key,
 			swap.secondary_fee,
 		)
@@ -137,11 +148,14 @@ where
 
 	/// Seller transfer eth from internal wallet to users' wallet
 	fn seller_transfer_secondary(&self, swap: &Swap) -> Result<H256, Error> {
-		let c = self.eth_node_client.lock().expect("Mutex failure");
-		let address = swap.unwrap_seller().unwrap().0;
+		let c = self
+			.eth_node_client
+			.lock()
+			.unwrap_or_else(|e| e.into_inner());
+		let address = swap.unwrap_seller()?.0;
 		c.transfer(
 			swap.secondary_currency,
-			to_eth_address(address).unwrap(),
+			to_eth_address(address)?,
 			swap.secondary_amount,
 		)
 	}
@@ -154,18 +168,27 @@ where
 		swap: &mut Swap,
 		_post_tx: bool,
 	) -> Result<H256, Error> {
-		let c = self.eth_node_client.lock().expect("Mutex failure");
+		let c = self
+			.eth_node_client
+			.lock()
+			.unwrap_or_else(|e| e.into_inner());
 		let eth_data = swap.secondary_data.unwrap_eth()?;
 		c.refund(
 			swap.secondary_currency,
-			eth_data.address_from_secret.clone().unwrap(),
+			eth_data
+				.address_from_secret
+				.clone()
+				.ok_or(Error::Generic("address_from_secret is not set".into()))?,
 			swap.secondary_fee,
 		)
 	}
 
 	/// buyer deposit eth to contract address
 	fn erc20_approve(&self, swap: &mut Swap) -> Result<H256, Error> {
-		let nc = self.eth_node_client.lock().expect("Mutex failure");
+		let nc = self
+			.eth_node_client
+			.lock()
+			.unwrap_or_else(|e| e.into_inner());
 		nc.erc20_approve(
 			swap.secondary_currency,
 			swap.secondary_amount,
@@ -207,11 +230,20 @@ where
 		if mwc_wallet_util::mwc_util::is_console_output_enabled() {
 			println!("height: {}, refund_time: {}", height, refund_time);
 		}
-		let address_from_secret = eth_data.address_from_secret.clone().unwrap();
-		let participant = eth_data.redeem_address.clone().unwrap();
+		let address_from_secret = eth_data
+			.address_from_secret
+			.clone()
+			.ok_or(Error::Generic("address_from_secret is not set".into()))?;
+		let participant = eth_data
+			.redeem_address
+			.clone()
+			.ok_or(Error::Generic("redeem_address is not set".into()))?;
 		let value = swap.secondary_amount;
 
-		let nc = self.eth_node_client.lock().expect("Mutex failure");
+		let nc = self
+			.eth_node_client
+			.lock()
+			.unwrap_or_else(|e| e.into_inner());
 		nc.initiate(
 			swap.secondary_currency,
 			refund_time,
@@ -266,12 +298,13 @@ where
 
 	/// Check transaction confirm status
 	pub(crate) fn check_eth_transaction_status(&self, tx_id: Option<H256>) -> Result<u64, Error> {
-		if tx_id.is_none() {
-			return Err(Error::InvalidTxHash);
-		}
+		let tx_id = tx_id.ok_or(Error::InvalidTxHash)?;
 
-		let c = self.eth_node_client.lock().expect("Mutex failure");
-		let res = c.retrieve_receipt(tx_id.unwrap());
+		let c = self
+			.eth_node_client
+			.lock()
+			.unwrap_or_else(|e| e.into_inner());
+		let res = c.retrieve_receipt(tx_id);
 		match res {
 			Ok(receipt) => match receipt.block_number {
 				Some(_block_number) => match receipt.status {
@@ -297,21 +330,20 @@ where
 		match self.eth_swap_details(swap, eth_data.address_from_secret.clone()) {
 			Ok((refund_time, erc20_token_addr, _, participant, value)) => {
 				if swap.secondary_currency.is_erc20() {
-					if erc20_token_addr.is_none() {
-						return Ok(0);
-					} else {
-						if swap.secondary_currency.erc20_token_address()?
-							!= erc20_token_addr.unwrap()
-						{
-							return Ok(0);
+					match erc20_token_addr {
+						None => return Ok(0),
+						Some(erc20_token_addr) => {
+							if swap.secondary_currency.erc20_token_address()? != erc20_token_addr {
+								return Ok(0);
+							}
 						}
 					}
 				}
 
-				if (eth_data.redeem_address.clone().unwrap() == participant)
-				&& (refund_time > eth_tip + 100u64) //100 about 25 minutes, make sure we have enough time to redeem ether
-				&& value == swap.secondary_amount
-				&& swap.redeem_public.is_some()
+				if (eth_data.redeem_address.clone().ok_or(Error::Generic("redeem_address is not set".into()))? == participant)
+						&& (refund_time > eth_tip + 100u64) //100 about 25 minutes, make sure we have enough time to redeem ether
+						&& value == swap.secondary_amount
+						&& swap.redeem_public.is_some()
 				{
 					let public_key = swap.redeem_public.clone().unwrap();
 					// convert mwc public key to ethereum public key format
@@ -332,10 +364,21 @@ where
 						.into_iter()
 						.chain(second_part.into_iter())
 						.collect();
-					let wallet =
-						EthereumWallet::from_public_key(to_hex(&pub_key_vec).as_str()).unwrap();
-					let address = to_eth_address(wallet.address.clone().unwrap()).unwrap();
-					if eth_data.address_from_secret.unwrap() == address {
+					let wallet = EthereumWallet::from_public_key(to_hex(&pub_key_vec).as_str())
+						.map_err(|e| {
+							Error::Generic(format!("Eth wallet build public key error, {}", e))
+						})?;
+					let address = to_eth_address(
+						wallet
+							.address
+							.clone()
+							.ok_or(Error::Generic("Eth wallet address is empty".into()))?,
+					)?;
+					if eth_data
+						.address_from_secret
+						.ok_or(Error::Generic("address_from_secret is not set".into()))?
+						== address
+					{
 						Ok(value)
 					} else {
 						Ok(0)
@@ -408,40 +451,65 @@ where
 		let secp = keychain.secp();
 		let mut keys = keys.into_iter();
 		let role_context = if is_seller {
-			let eth_address = to_eth_address(ethereum_wallet.unwrap().address.clone().unwrap())?;
+			let ethereum_wallet = ethereum_wallet.ok_or(Error::Generic(
+				"create_context param ethereum_wallet is empty".into(),
+			))?;
+			let eth_address = to_eth_address(
+				ethereum_wallet
+					.address
+					.clone()
+					.ok_or(Error::Generic("Eth wallet address is empty".into()))?,
+			)?;
 			RoleContext::Seller(SellerContext {
 				parent_key_id: parent_key_id,
 				inputs: inputs.ok_or(Error::UnexpectedRole(
 					"Fn create_context() for seller not found inputs".to_string(),
 				))?,
-				change_output: keys.next().unwrap(),
+				change_output: keys.next().ok_or(Error::Generic(
+					"create_context keys param is too short".into(),
+				))?,
 				change_amount,
-				refund_output: keys.next().unwrap(),
+				refund_output: keys.next().ok_or(Error::Generic(
+					"create_context keys param is too short".into(),
+				))?,
 				secondary_context: SecondarySellerContext::Eth(EthSellerContext {
 					redeem_address: Some(eth_address),
 				}),
 			})
 		} else {
-			let output = keys.next().unwrap();
-			let redeem = keys.next().unwrap();
+			let output = keys.next().ok_or(Error::Generic(
+				"create_context keys param is too short".into(),
+			))?;
+			let redeem = keys.next().ok_or(Error::Generic(
+				"create_context keys param is too short".into(),
+			))?;
 			let sec_key = keychain
 				.derive_key(0, &redeem, SwitchCommitmentType::None)
-				.unwrap();
-			let eth_rand_wallet =
-				EthereumWallet::from_private_key(to_hex(&sec_key.0).as_str()).unwrap();
-			let eth_address = to_eth_address(eth_rand_wallet.address.clone().unwrap())?;
+				.map_err(|e| Error::Generic(format!("Unbale to build redeem key, {}", e)))?;
+			let eth_rand_wallet = EthereumWallet::from_private_key(to_hex(&sec_key.0).as_str())
+				.map_err(|e| {
+					Error::Generic(format!(
+						"Unable to build Eth wallet from private key, {}",
+						e
+					))
+				})?;
+			let eth_address = to_eth_address(eth_rand_wallet.address.clone().ok_or(
+				Error::Generic("create_context Eth wallet address is emoty".into()),
+			)?)?;
 			RoleContext::Buyer(BuyerContext {
 				parent_key_id: parent_key_id,
 				output,
 				redeem,
 				secondary_context: SecondaryBuyerContext::Eth(EthBuyerContext {
-					address_from_secret: Some(eth_address),
+					address_from_secret: eth_address,
 				}),
 			})
 		};
 
 		Ok(Context {
-			multisig_key: keys.next().unwrap(),
+			multisig_key: keys.next().ok_or(Error::Generic(
+				"create_context keys param is too short".into(),
+			))?,
 			multisig_nonce: generate_nonce(secp)?,
 			lock_nonce: generate_nonce(secp)?,
 			refund_nonce: generate_nonce(secp)?,
@@ -529,12 +597,9 @@ where
 		&self,
 		_keychain: &K, // To make compiler happy
 		swap: &mut Swap,
-	) -> SecondaryUpdate {
-		let eth_data = swap
-			.secondary_data
-			.unwrap_eth()
-			.expect("Secondary data of unexpected type");
-		SecondaryUpdate::ETH(eth_data.offer_update())
+	) -> Result<SecondaryUpdate, Error> {
+		let eth_data = swap.secondary_data.unwrap_eth()?;
+		Ok(SecondaryUpdate::ETH(eth_data.offer_update()))
 	}
 
 	/// Build secondary update part of the accept offer message
@@ -542,12 +607,9 @@ where
 		&self,
 		_keychain: &K, // To make compiler happy
 		swap: &mut Swap,
-	) -> SecondaryUpdate {
-		let eth_data = swap
-			.secondary_data
-			.unwrap_eth()
-			.expect("Secondary data of unexpected type");
-		SecondaryUpdate::ETH(eth_data.accept_offer_update())
+	) -> Result<SecondaryUpdate, Error> {
+		let eth_data = swap.secondary_data.unwrap_eth()?;
+		Ok(SecondaryUpdate::ETH(eth_data.accept_offer_update()))
 	}
 
 	fn publish_secondary_transaction(
@@ -840,7 +902,10 @@ where
 
 	fn test_client_connections(&self) -> Result<(), Error> {
 		{
-			let c = self.eth_node_client.lock().expect("Mutex failure");
+			let c = self
+				.eth_node_client
+				.lock()
+				.unwrap_or_else(|e| e.into_inner());
 			let name = c.name();
 			let _ = c.height().map_err(|e| {
 				Error::InfuraNodeClient(format!(

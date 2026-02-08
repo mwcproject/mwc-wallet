@@ -98,7 +98,10 @@ fn invoice_tx_impl(test_dir: &str) -> Result<(), wallet::Error> {
 		mask1,
 		bh as usize,
 		false,
-		tx_pool.lock().expect("Mutex failure").deref_mut(),
+		tx_pool
+			.lock()
+			.unwrap_or_else(|e| e.into_inner())
+			.deref_mut(),
 	);
 
 	// Sanity check wallet 1 contents
@@ -118,7 +121,7 @@ fn invoice_tx_impl(test_dir: &str) -> Result<(), wallet::Error> {
 			amount: reward * 2,
 			..Default::default()
 		};
-		slate = api.issue_invoice_tx(m, &None, &args)?;
+		slate = api.issue_invoice_tx(m, None, &args)?;
 		Ok(())
 	})?;
 
@@ -133,15 +136,15 @@ fn invoice_tx_impl(test_dir: &str) -> Result<(), wallet::Error> {
 			selection_strategy_is_use_all: true,
 			..Default::default()
 		};
-		slate = api.process_invoice_tx(m, &None, &slate, &args)?;
-		api.tx_lock_outputs(m, &None, &slate, None, 1)?;
+		slate = api.process_invoice_tx(m, None, &slate, &args)?;
+		api.tx_lock_outputs(m, None, &slate, None, 1)?;
 		Ok(())
 	})?;
 
 	// wallet 2 finalizes and posts
 	wallet::controller::foreign_single_use(wallet2.clone(), mask2_i.clone(), |api| {
 		// Wallet 2 receives the invoice transaction
-		slate = api.finalize_invoice_tx(&None, &slate)?;
+		slate = api.finalize_invoice_tx(None, &slate)?;
 		Ok(())
 	})?;
 
@@ -157,7 +160,10 @@ fn invoice_tx_impl(test_dir: &str) -> Result<(), wallet::Error> {
 		mask1,
 		3,
 		false,
-		tx_pool.lock().expect("Mutex failure").deref_mut(),
+		tx_pool
+			.lock()
+			.unwrap_or_else(|e| e.into_inner())
+			.deref_mut(),
 	);
 	bh += 3;
 
@@ -197,7 +203,7 @@ fn invoice_tx_impl(test_dir: &str) -> Result<(), wallet::Error> {
 			amount: reward * 2,
 			..Default::default()
 		};
-		slate = api.issue_invoice_tx(m, &None, &args)?;
+		slate = api.issue_invoice_tx(m, None, &args)?;
 		// Wallet 1 receives the invoice transaction
 		let args = InitTxArgs {
 			src_acct_name: None,
@@ -208,15 +214,15 @@ fn invoice_tx_impl(test_dir: &str) -> Result<(), wallet::Error> {
 			selection_strategy_is_use_all: true,
 			..Default::default()
 		};
-		slate = api.process_invoice_tx(m, &None, &slate, &args)?;
-		api.tx_lock_outputs(m, &None, &slate, None, 1)?;
+		slate = api.process_invoice_tx(m, None, &slate, &args)?;
+		api.tx_lock_outputs(m, None, &slate, None, 1)?;
 		Ok(())
 	})?;
 
 	// wallet 1 finalizes and posts
 	wallet::controller::foreign_single_use(wallet1.clone(), mask1_i.clone(), |api| {
 		// Wallet 2 receives the invoice transaction
-		slate = api.finalize_invoice_tx(&None, &slate)?;
+		slate = api.finalize_invoice_tx(None, &slate)?;
 		Ok(())
 	})?;
 
@@ -227,7 +233,10 @@ fn invoice_tx_impl(test_dir: &str) -> Result<(), wallet::Error> {
 		mask1,
 		3,
 		false,
-		tx_pool.lock().expect("Mutex failure").deref_mut(),
+		tx_pool
+			.lock()
+			.unwrap_or_else(|e| e.into_inner())
+			.deref_mut(),
 	);
 	//bh += 3;
 
@@ -237,7 +246,7 @@ fn invoice_tx_impl(test_dir: &str) -> Result<(), wallet::Error> {
 			amount: reward * 2,
 			..Default::default()
 		};
-		slate = api.issue_invoice_tx(m, &None, &args)?;
+		slate = api.issue_invoice_tx(m, None, &args)?;
 		Ok(())
 	})?;
 
@@ -254,14 +263,14 @@ fn invoice_tx_impl(test_dir: &str) -> Result<(), wallet::Error> {
 			selection_strategy_is_use_all: true,
 			..Default::default()
 		};
-		slate = api.process_invoice_tx(m, &None, &slate, &args)?;
-		api.tx_lock_outputs(m, &None, &slate, None, 1)?;
+		slate = api.process_invoice_tx(m, None, &slate, &args)?;
+		api.tx_lock_outputs(m, None, &slate, None, 1)?;
 
 		// Wallet 1 cancels the invoice transaction
 		api.cancel_tx(m, None, Some(slate.id))?;
 
 		// Wallet 1 attempts to repay again
-		let res = api.process_invoice_tx(m, &None, &orig_slate, &args);
+		let res = api.process_invoice_tx(m, None, &orig_slate, &args);
 		assert!(res.is_err());
 
 		Ok(())

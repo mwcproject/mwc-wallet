@@ -294,7 +294,7 @@ impl BtcData {
 
 	// Because BCH library can calculate the hash, but for the core we are using BTC, that is
 	// why we have this ugly solution. In any case it is better then have 2 separate implemenattions.
-	fn convert_tx_to_bch(tx: &Transaction) -> BchTx {
+	fn convert_tx_to_bch(tx: &Transaction) -> Result<BchTx, Error> {
 		let mut inputs: Vec<BchTxIn> = vec![];
 		let mut outputs: Vec<BchTxOut> = vec![];
 
@@ -304,7 +304,9 @@ impl BtcData {
 
 			let prev_output = mwc_bch::messages::OutPoint {
 				hash: mwc_bch::util::Hash256::decode(tx_in.previous_output.txid.to_hex().as_str())
-					.unwrap(),
+					.map_err(|e| {
+						Error::Generic(format!("Unable to decode transaction outputs, {}", e))
+					})?,
 				index: tx_in.previous_output.vout,
 			};
 
@@ -324,12 +326,12 @@ impl BtcData {
 			})
 		}
 
-		BchTx {
+		Ok(BchTx {
 			lock_time: tx.lock_time,
 			version: tx.version as u32,
 			inputs,
 			outputs,
-		}
+		})
 	}
 
 	pub(crate) fn redeem_script_sig(
@@ -457,7 +459,7 @@ impl BtcData {
 				}
 			}
 			Currency::Bch => {
-				let bch_tx = Self::convert_tx_to_bch(&tx);
+				let bch_tx = Self::convert_tx_to_bch(&tx)?;
 
 				// Sign for inputs
 				for idx in 0..tx.input.len() {
@@ -529,7 +531,12 @@ impl BtcData {
 						),
 					));
 
-					let msg = Message::from_slice(&sighash).expect("32 bytes");
+					let msg = Message::from_slice(&sighash).map_err(|e| {
+						Error::Generic(format!(
+							"ZCash, unable to build a message from sighash (32 bytes), {}",
+							e
+						))
+					})?;
 
 					zcash_tx_data.vin[idx].script_sig =
 						mwc_zcash_primitives::legacy::Script(script_sig(&msg)?.to_bytes());
@@ -642,13 +649,15 @@ impl BtcData {
 	}
 
 	/// Seller apply respond for the Buyer.
-	pub(crate) fn accept_offer_update(&self) -> BtcUpdate {
-		BtcUpdate::AcceptOffer(BtcAcceptOfferUpdate {
+	pub(crate) fn accept_offer_update(&self) -> Result<BtcUpdate, Error> {
+		Ok(BtcUpdate::AcceptOffer(BtcAcceptOfferUpdate {
 			refund: self
 				.refund
-				.expect("BTC refund pubkey is not defined at BtcAcceptOfferUpdate payload")
+				.ok_or(Error::Generic(
+					"BTC refund pubkey is not defined at BtcAcceptOfferUpdate payload".into(),
+				))?
 				.clone(),
-		})
+		}))
 	}
 }
 
@@ -753,7 +762,7 @@ mod tests {
 		let lock_time = 1541355813;
 
 		let secp_inst = static_secp_instance();
-		let secp = secp_inst.lock().expect("Mutex failure");
+		let secp = secp_inst.lock().unwrap_or_else(|e| e.into_inner());
 
 		let data = BtcData {
 			cosign: PublicKey::from_slice(

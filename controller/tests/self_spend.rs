@@ -87,7 +87,10 @@ fn self_spend_impl(test_dir: &str) -> Result<(), wallet::Error> {
 		mask1,
 		bh as usize,
 		false,
-		tx_pool.lock().expect("Mutex failure").deref_mut(),
+		tx_pool
+			.lock()
+			.unwrap_or_else(|e| e.into_inner())
+			.deref_mut(),
 	);
 
 	// Check wallet 1 contents are as expected
@@ -144,7 +147,10 @@ fn self_spend_impl(test_dir: &str) -> Result<(), wallet::Error> {
 		mask1,
 		2,
 		false,
-		tx_pool.lock().expect("Mutex failure").deref_mut(),
+		tx_pool
+			.lock()
+			.unwrap_or_else(|e| e.into_inner())
+			.deref_mut(),
 	);
 
 	let _fee = core::libtx::tx_fee(0, 1, 1, 1); //there is only one input and one output and one kernel

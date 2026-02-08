@@ -80,7 +80,7 @@ fn owner_v3_lifecycle() -> Result<(), mwc_wallet_controller::Error> {
 		tx_pool.clone(),
 	)));
 	let (chain, wallet2, mask2_i) = {
-		let mut wallet_proxy = wallet_proxy_a.lock().expect("Mutex failure");
+		let mut wallet_proxy = wallet_proxy_a.lock().unwrap_or_else(|e| e.into_inner());
 		let chain = wallet_proxy.chain.clone();
 
 		// Create wallet 2 manually, which will mine a bit and insert some
@@ -90,7 +90,7 @@ fn owner_v3_lifecycle() -> Result<(), mwc_wallet_controller::Error> {
 		execute_command(&app, test_dir, "wallet2", &client2, arg_vec.clone())?;
 
 		let config2 = initial_setup_wallet(test_dir, "wallet2");
-		let wallet_config2 = config2.clone().members.unwrap().wallet;
+		let wallet_config2 = config2.clone().members.wallet;
 		//config2.api_listen_port = 23415;
 		let (wallet2, mask2_i) = instantiate_wallet(
 			wallet_config2.clone(),
@@ -123,7 +123,7 @@ fn owner_v3_lifecycle() -> Result<(), mwc_wallet_controller::Error> {
 				&client1,
 				arg_vec.clone(),
 				|wallet_inst| {
-					let mut wallet_proxy = p.lock().expect("Mutex failure");
+					let mut wallet_proxy = p.lock().unwrap_or_else(|e| e.into_inner());
 					wallet_proxy.add_wallet(
 						"wallet1",
 						client1.get_send_instance(),
@@ -144,7 +144,7 @@ fn owner_v3_lifecycle() -> Result<(), mwc_wallet_controller::Error> {
 	// Set the wallet proxy listener running
 	thread::spawn(move || {
 		global::set_local_chain_type(global::ChainTypes::AutomatedTesting);
-		let mut p = wallet_proxy.lock().expect("Mutex failure");
+		let mut p = wallet_proxy.lock().unwrap_or_else(|e| e.into_inner());
 		if let Err(e) = p.run() {
 			error!("Wallet Proxy error: {}", e);
 		}
@@ -158,7 +158,10 @@ fn owner_v3_lifecycle() -> Result<(), mwc_wallet_controller::Error> {
 		mask2,
 		bh as usize,
 		false,
-		tx_pool.lock().expect("Mutex failure").deref_mut(),
+		tx_pool
+			.lock()
+			.unwrap_or_else(|e| e.into_inner())
+			.deref_mut(),
 	);
 
 	// We have an owner API with no wallet initialized. Init the secure API
@@ -419,10 +422,10 @@ fn owner_v3_lifecycle() -> Result<(), mwc_wallet_controller::Error> {
 				selection_strategy_is_use_all: false,
 				..Default::default()
 			};
-			let res = api.process_invoice_tx(m, &None, &slate, &args);
+			let res = api.process_invoice_tx(m, None, &slate, &args);
 			assert!(res.is_ok());
 			slate = res.unwrap();
-			api.tx_lock_outputs(m, &None, &slate, None, 1)?;
+			api.tx_lock_outputs(m, None, &slate, None, 1)?;
 
 			Ok(())
 		},

@@ -17,9 +17,12 @@ use crate::adapters::MarketplaceMessageSender;
 /// HTTP Wallet 'plugin' implementation
 use crate::error::Error;
 use crate::libwallet::slate_versions::{SlateVersion, VersionedSlate};
+#[cfg(feature = "swaps")]
 use crate::libwallet::swap::message::Message;
 use crate::libwallet::Slate;
-use crate::{SlateSender, SwapMessageSender};
+use crate::SlateSender;
+#[cfg(feature = "swaps")]
+use crate::SwapMessageSender;
 use ed25519_dalek::{PublicKey as DalekPublicKey, SecretKey as DalekSecretKey};
 use mwc_wallet_libwallet::address;
 use mwc_wallet_libwallet::proof::proofaddress::ProvableAddress;
@@ -166,7 +169,7 @@ impl HttpDataSender {
 		if tor_config.is_tor_internal_arti() {
 			if !arti::is_arti_started() {
 				// Starting tor service. Start once and never stop after. We have a single tor core, let's keep it running
-				arti::start_arti(&tor_config, base_dir)
+				arti::start_arti(&tor_config, base_dir, false, false)
 					.map_err(|e| Error::Arti(format!("Unable to start Tor (Arti), {}", e)))?;
 				need_stop_arti = true;
 			}
@@ -439,7 +442,10 @@ impl HttpDataSender {
 			Error::ConnectionError(format!("Invalid base url {}, {}", self.base_url, e))
 		})?;
 
-		let mut stream = self.connection_cache.write().expect("RwLock failure");
+		let mut stream = self
+			.connection_cache
+			.write()
+			.unwrap_or_else(|e| e.into_inner());
 
 		let strm = stream.take();
 
@@ -516,14 +522,11 @@ impl SlateSender for HttpDataSender {
 		other_wallet_version: Option<(SlateVersion, Option<String>)>,
 		secp: &Secp256k1,
 	) -> Result<Slate, Error> {
-		if other_wallet_version.is_none() {
-			return Err(Error::GenericError(
+		let (mut slate_version, slatepack_address) =
+			other_wallet_version.ok_or(Error::GenericError(
 				"Internal error, http based send_tx get empty value for other_wallet_version"
 					.to_string(),
-			));
-		}
-
-		let (mut slate_version, slatepack_address) = other_wallet_version.unwrap();
+			))?;
 
 		// Slate can't be slatepack if it is not a compact. Let's handle that here.
 		if slate_version == SlateVersion::SP && !slate.compact_slate {
@@ -696,6 +699,7 @@ impl SlateSender for HttpDataSender {
 	}
 }
 
+#[cfg(feature = "swaps")]
 impl SwapMessageSender for HttpDataSender {
 	/// Send a swap message. Return true is message delivery acknowledge can be set (message was delivered and processed)
 	fn send_swap_message(&self, swap_message: &Message, _secp: &Secp256k1) -> Result<bool, Error> {

@@ -143,13 +143,23 @@ impl LineStream {
 		// It is fine for RPC. If there are some non read lines - they will be lost.
 		let res = match &mut self.reader {
 			StreamReader::SSLReader(reader) => {
-				let mut stream = reader.take().unwrap().into_inner();
+				let mut stream = reader
+					.take()
+					.ok_or(crate::swap::error::Error::Generic(
+						"Reader is not set".into(),
+					))?
+					.into_inner();
 				let res = stream.write_all(&bytes);
 				reader.replace(BufReader::new(stream));
 				res
 			}
 			StreamReader::PlainReader(reader) => {
-				let mut stream = reader.take().unwrap().into_inner();
+				let mut stream = reader
+					.take()
+					.ok_or(crate::swap::error::Error::Generic(
+						"Reader is not set".into(),
+					))?
+					.into_inner();
 				let res = stream.write_all(&bytes);
 				reader.replace(BufReader::new(stream));
 				res

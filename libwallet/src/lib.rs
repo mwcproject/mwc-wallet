@@ -60,14 +60,20 @@ mod slate;
 pub mod slate_versions;
 pub mod slatepack;
 /// Atomic Swap library
+#[cfg(feature = "swaps")]
 pub mod swap;
 pub mod types;
+
+#[cfg(feature = "swaps")]
 extern crate bitcoin as bitcoin_lib;
+#[cfg(feature = "swaps")]
 extern crate bitcoin_hashes;
+#[cfg(feature = "swaps")]
 extern crate mwc_zcash_primitives as zcash;
 
 pub use crate::slatepack::{SlatePurpose, Slatepack, SlatepackArmor, Slatepacker};
 
+#[cfg(feature = "swaps")]
 pub use bitcoin::Address as BitcoinAddress;
 
 pub use crate::error::Error;
@@ -80,10 +86,8 @@ pub use crate::slate_versions::{
 };
 pub use api_impl::foreign;
 pub use api_impl::owner;
-pub use api_impl::owner_eth;
 #[cfg(feature = "libp2p")]
 pub use api_impl::owner_libp2p;
-pub use api_impl::owner_swap;
 pub use api_impl::owner_updater::StatusMessage;
 pub use api_impl::types::{
 	Amount, BlockFees, BuiltOutput, InitTxArgs, InitTxSendArgs, IssueInvoiceTxArgs,
@@ -116,7 +120,7 @@ pub use api_impl::owner_libp2p::IntegrityContext;
 macro_rules! wallet_lock {
 	($wallet_inst: expr, $wallet: ident) => {
 		let inst = $wallet_inst.clone();
-		let mut w_lock = inst.lock().expect("Mutex failure");
+		let mut w_lock = inst.lock().unwrap_or_else(|e| e.into_inner());
 		let w_provider = w_lock.lc_provider()?;
 		let $wallet = w_provider.wallet_inst()?;
 	};
@@ -127,7 +131,7 @@ macro_rules! wallet_lock {
 macro_rules! wallet_lock_test {
 	($wallet_inst: expr, $wallet: ident) => {
 		let inst = $wallet_inst.clone();
-		let mut w_lock = inst.lock().expect("Mutex failure");
+		let mut w_lock = inst.lock().unwrap_or_else(|e| e.into_inner());
 		let w_provider = w_lock.lc_provider().unwrap();
 		let $wallet = w_provider.wallet_inst().unwrap();
 	};

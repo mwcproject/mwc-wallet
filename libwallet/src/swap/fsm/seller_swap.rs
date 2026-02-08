@@ -25,7 +25,7 @@ use crate::swap::message::Message;
 use crate::swap::types::{check_txs_confirmed, Action, Currency, SwapTransactionsConfirmations};
 use crate::swap::{swap, Context, Error, SellApi, Swap, SwapApi};
 use crate::NodeClient;
-use chrono::{Local, TimeZone};
+use chrono::Local;
 use mwc_wallet_util::mwc_util::secp::Secp256k1;
 use std::marker::PhantomData;
 use std::sync::Arc;
@@ -43,7 +43,7 @@ impl State for SellerOfferCreated {
 		StateId::SellerOfferCreated
 	}
 	fn get_eta(&self, swap: &Swap, _secp: &Secp256k1) -> Option<StateEtaInfo> {
-		let dt = Local.timestamp_opt(swap.started.timestamp(), 0).unwrap();
+		let dt = swap.started.with_timezone(&Local);
 		let time_str = dt.format("%B %e %H:%M:%S").to_string();
 		Some(StateEtaInfo::new(&format!("Offer Created at {}", time_str)))
 	}
@@ -149,14 +149,14 @@ where
 						if self.message.is_none() {
 							let sec_update = self
 								.swap_api
-								.build_offer_message_secondary_update(&*self.keychain, swap);
+								.build_offer_message_secondary_update(&*self.keychain, swap)?;
 							self.message =
 								Some(SellApi::offer_message(self.context_id, swap, sec_update)?);
 						}
 						Ok(StateProcessRespond::new(StateId::SellerSendingOffer)
-							.action(Action::SellerSendOfferMessage(
-								self.message.clone().unwrap(),
-							))
+							.action(Action::SellerSendOfferMessage(self.message.clone().ok_or(
+								Error::Generic("Internal error, message is empty".into()),
+							)?))
 							.time_limit(time_limit))
 					} else {
 						swap.add_journal_message(JOURNAL_CANCELLED_BY_TIMEOUT.to_string());
@@ -172,7 +172,11 @@ where
 			Input::Execute => {
 				debug_assert!(self.message.is_some()); // Check expected to be called first
 				if swap.message1.is_none() {
-					swap.message1 = Some(self.message.clone().unwrap());
+					swap.message1 = Some(
+						self.message
+							.clone()
+							.ok_or(Error::Generic("Internal error, message is empty".into()))?,
+					);
 				}
 				swap.posted_msg1 = Some(swap::get_cur_time());
 
@@ -1039,7 +1043,9 @@ where
 						Ok(
 							StateProcessRespond::new(StateId::SellerSendingInitRedeemMessage)
 								.action(Action::SellerSendRedeemMessage(
-									self.message.clone().unwrap(),
+									self.message.clone().ok_or(Error::Generic(
+										"Internal error, message is empty".into(),
+									))?,
 								))
 								.time_limit(time_limit),
 						)
@@ -1062,7 +1068,11 @@ where
 			Input::Execute => {
 				debug_assert!(self.message.is_some()); // Check expected to be called first
 				if swap.message2.is_none() {
-					swap.message2 = Some(self.message.clone().unwrap());
+					swap.message2 = Some(
+						self.message
+							.clone()
+							.ok_or(Error::Generic("Internal error, message is empty".into()))?,
+					);
 				}
 				swap.posted_msg2 = Some(swap::get_cur_time());
 				swap.add_journal_message("Send response to Redeem message".to_string());
@@ -1363,13 +1373,14 @@ where
 				}
 
 				// Check if already processed
-				if tx_conf.secondary_redeem_conf.is_some()
-					&& (tx_conf.secondary_redeem_conf.unwrap() > 0
-						|| !self.swap_api.is_secondary_tx_fee_changed(swap)?)
-				{
-					return Ok(StateProcessRespond::new(
-						StateId::SellerWaitingForRedeemConfirmations,
-					));
+				if let Some(secondary_redeem_conf) = tx_conf.secondary_redeem_conf {
+					if secondary_redeem_conf > 0
+						|| !self.swap_api.is_secondary_tx_fee_changed(swap)?
+					{
+						return Ok(StateProcessRespond::new(
+							StateId::SellerWaitingForRedeemConfirmations,
+						));
+					}
 				}
 
 				// Ready to redeem BTC.
@@ -1500,8 +1511,11 @@ where
 				if secondary_redeem_conf {
 					//for eth, now we try to transfer ethers from interal wallet to buyers' eth wallet.
 					if !swap.secondary_currency.is_btc_family()
-						&& swap.eth_redirect_to_private_wallet.unwrap()
-					{
+						&& swap.eth_redirect_to_private_wallet.ok_or(
+							crate::swap::error::Error::Generic(
+								"Internal erro, eth_redirect_to_private_wallet is empty".into(),
+							),
+						)? {
 						self.swap_api.transfer_scondary(swap)?;
 					}
 					// We are done

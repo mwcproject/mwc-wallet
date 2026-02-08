@@ -60,7 +60,7 @@ where
 {
 	// just read the wallet here, no need for a write lock
 	let mut outputs = wallet
-		.iter()
+		.iter()?
 		.filter(|out| show_spent || out.status != OutputStatus::Spent)
 		.collect::<Vec<_>>();
 
@@ -76,7 +76,7 @@ where
 	};
 
 	if show_spent || need_archived {
-		for out in wallet.archive_iter() {
+		for out in wallet.archive_iter()? {
 			if out.status == OutputStatus::Spent {
 				outputs.push(out);
 			}
@@ -113,7 +113,7 @@ where
 
 	// Key: tx_log id;  Value: true if active, false if cancelled
 	let tx_log_is_active: HashMap<u32, bool> = wallet
-		.tx_log_iter()
+		.tx_log_iter()?
 		.filter(|tx_log| tx_log.parent_key_id == *parent_key_id)
 		.map(|tx_log| (tx_log.id, !tx_log.is_cancelled()))
 		.collect();
@@ -294,7 +294,7 @@ pub fn apply_advanced_tx_list_filtering<'a, T: ?Sized, C, K>(
 	wallet: &mut T,
 	query_args: &RetrieveTxQueryArgs,
 	height_limit: u64,
-) -> Vec<TxLogEntry>
+) -> Result<Vec<TxLogEntry>, Error>
 where
 	T: WalletBackend<'a, C, K>,
 	C: NodeClient + 'a,
@@ -302,14 +302,14 @@ where
 {
 	let mut return_txs: Vec<TxLogEntry> = Vec::new();
 	// Apply simple bool, GTE or LTE fields
-	for tx in wallet.tx_log_iter() {
+	for tx in wallet.tx_log_iter()? {
 		if filter_tx_entry(&tx, query_args) {
 			return_txs.push(tx);
 		}
 	}
 
 	if height_limit == 0 {
-		for tx in wallet.tx_log_archive_iter() {
+		for tx in wallet.tx_log_archive_iter()? {
 			if filter_tx_entry(&tx, query_args) {
 				return_txs.push(tx);
 			}
@@ -366,7 +366,7 @@ where
 		return_txs = return_txs.into_iter().take(l as usize).collect()
 	}
 
-	return_txs
+	Ok(return_txs)
 }
 
 fn filter_tx_entry2(
@@ -439,10 +439,10 @@ where
 	// Adding in new transaction list query logic. If `tx_id` or `tx_slate_id`
 	// is provided, then `query_args` is ignored and old logic is followed.
 	if query_args.is_some() && tx_id.is_none() && tx_slate_id.is_none() {
-		txs = apply_advanced_tx_list_filtering(wallet, &query_args.unwrap(), height_limit)
+		txs = apply_advanced_tx_list_filtering(wallet, &query_args.unwrap(), height_limit)?
 	} else {
 		txs = wallet
-			.tx_log_iter()
+			.tx_log_iter()?
 			.filter(|tx_entry| {
 				filter_tx_entry2(
 					tx_entry,
@@ -455,7 +455,7 @@ where
 			.collect();
 
 		if !(((tx_id.is_some() || tx_slate_id.is_some()) && !txs.is_empty()) || height_limit > 0) {
-			for tx_entry in wallet.tx_log_archive_iter() {
+			for tx_entry in wallet.tx_log_archive_iter()? {
 				if filter_tx_entry2(
 					&tx_entry,
 					parent_key_id,
@@ -574,12 +574,12 @@ where
 		println!("updater: the current_height is {}", current_height);
 	}
 	let outputs = wallet
-		.iter()
+		.iter()?
 		.filter(|out| out.root_key_id == *parent_key_id);
 
 	// Key: tx_log id;  Value: true if active, false if cancelled
 	let tx_log_cancellation_status: HashMap<u32, bool> = wallet
-		.tx_log_iter()
+		.tx_log_iter()?
 		.filter(|tx_log| tx_log.parent_key_id == *parent_key_id)
 		.map(|tx_log| (tx_log.id, !tx_log.is_cancelled()))
 		.collect();
@@ -704,7 +704,7 @@ where
 		batch.save(OutputData {
 			root_key_id: parent_key_id,
 			key_id: key_id.clone(),
-			n_child: key_id.to_path().last_path_index(),
+			n_child: key_id.to_path()?.last_path_index(),
 			mmr_index: None,
 			commit: Some(commit.to_hex()),
 			value: amount,
@@ -732,7 +732,7 @@ where
 	let (out, kern) = reward::output(
 		contect_id,
 		&keychain,
-		&ProofBuilder::new(&keychain),
+		&ProofBuilder::new(&keychain)?,
 		&key_id,
 		block_fees.fees,
 		test_mode,

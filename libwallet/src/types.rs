@@ -16,7 +16,6 @@
 //! Types and traits that should be provided by a wallet
 //! implementation
 
-use super::swap::ethereum::EthereumWallet;
 use crate::config::{MQSConfig, WalletConfig};
 use crate::error::Error;
 use crate::mwc_api::{Libp2pMessages, Libp2pPeers};
@@ -212,13 +211,13 @@ where
 	fn parent_key_id(&self) -> Identifier;
 
 	/// Iterate over all output data stored by the backend
-	fn iter<'a>(&'a self) -> Box<dyn Iterator<Item = OutputData> + 'a>;
+	fn iter<'a>(&'a self) -> Result<Box<dyn Iterator<Item = OutputData> + 'a>, Error>;
 
 	/// Get output data by id
 	fn get(&self, id: &Identifier, mmr_index: &Option<u64>) -> Result<OutputData, Error>;
 
 	/// Iterate over archive outputs data stored by the backend
-	fn archive_iter<'a>(&'a self) -> Box<dyn Iterator<Item = OutputData> + 'a>;
+	fn archive_iter<'a>(&'a self) -> Result<Box<dyn Iterator<Item = OutputData> + 'a>, Error>;
 
 	/// Retrieves the private context associated with a given slate id
 	fn get_private_context(
@@ -229,13 +228,17 @@ where
 	) -> Result<Context, Error>;
 
 	/// Iterate over all output data stored by the backend
-	fn tx_log_iter<'a>(&'a self) -> Box<dyn Iterator<Item = TxLogEntry> + 'a>;
+	fn tx_log_iter<'a>(&'a self) -> Result<Box<dyn Iterator<Item = TxLogEntry> + 'a>, Error>;
 
 	/// Iterate over all output data stored by the backend
-	fn tx_log_archive_iter<'a>(&'a self) -> Box<dyn Iterator<Item = TxLogEntry> + 'a>;
+	fn tx_log_archive_iter<'a>(
+		&'a self,
+	) -> Result<Box<dyn Iterator<Item = TxLogEntry> + 'a>, Error>;
 
 	/// Iterate over all stored account paths
-	fn acct_path_iter<'a>(&'a self) -> Box<dyn Iterator<Item = AcctPathMapping> + 'a>;
+	fn acct_path_iter<'a>(
+		&'a self,
+	) -> Result<Box<dyn Iterator<Item = AcctPathMapping> + 'a>, Error>;
 
 	/// Gets an account path for a given label
 	fn get_acct_path(&self, label: String) -> Result<Option<AcctPathMapping>, Error>;
@@ -278,10 +281,12 @@ where
 	fn last_scanned_blocks(&mut self) -> Result<Vec<ScannedBlockInfo>, Error>;
 
 	/// set ethereum wallet instance
+	#[cfg(feature = "swaps")]
 	fn set_ethereum_wallet(&mut self, ethereum_wallet: Option<EthereumWallet>)
 		-> Result<(), Error>;
 
 	/// get ethereum wallet instance
+	#[cfg(feature = "swaps")]
 	fn get_ethereum_wallet(&self) -> Result<EthereumWallet, Error>;
 }
 
@@ -308,7 +313,7 @@ where
 	K: Keychain,
 {
 	/// Return the keychain being used
-	fn keychain(&mut self) -> &mut K;
+	fn keychain(&mut self) -> Result<&mut K, Error>;
 
 	/// Add or update data about an output to the backend
 	fn save(&mut self, out: OutputData) -> Result<(), Error>;
@@ -317,7 +322,7 @@ where
 	fn get(&self, id: &Identifier, mmr_index: &Option<u64>) -> Result<OutputData, Error>;
 
 	/// Iterate over all output data stored by the backend
-	fn iter(&self) -> Box<dyn Iterator<Item = OutputData>>;
+	fn iter(&self) -> Result<Box<dyn Iterator<Item = OutputData>>, Error>;
 
 	/// Delete data about an output from the backend
 	fn delete(&mut self, id: &Identifier, mmr_index: &Option<u64>) -> Result<(), Error>;
@@ -358,10 +363,10 @@ where
 	fn next_tx_log_id(&mut self, parent_key_id: &Identifier) -> Result<u32, Error>;
 
 	/// Iterate over tx log data stored by the backend
-	fn tx_log_iter(&self) -> Box<dyn Iterator<Item = TxLogEntry>>;
+	fn tx_log_iter(&self) -> Result<Box<dyn Iterator<Item = TxLogEntry>>, Error>;
 
 	/// Iterate over tx log archived data
-	fn tx_log_archive_iter(&self) -> Box<dyn Iterator<Item = TxLogEntry>>;
+	fn tx_log_archive_iter(&self) -> Result<Box<dyn Iterator<Item = TxLogEntry>>, Error>;
 
 	/// Move transaction into archive
 	fn archive_transaction(&mut self, tx: &TxLogEntry) -> Result<(), Error>;
@@ -384,13 +389,13 @@ where
 	fn save_acct_path(&mut self, mapping: AcctPathMapping) -> Result<(), Error>;
 
 	/// Iterate over account names stored in backend
-	fn acct_path_iter(&self) -> Box<dyn Iterator<Item = AcctPathMapping>>;
+	fn acct_path_iter(&self) -> Result<Box<dyn Iterator<Item = AcctPathMapping>>, Error>;
 
 	/// Save an output as locked in the backend
 	fn lock_output(&mut self, out: &mut OutputData) -> Result<(), Error>;
 
 	/// Iterate through all private context. Return tx uuid from the key and the Context
-	fn private_context_iter(&self) -> Box<dyn Iterator<Item = (Vec<u8>, Context)>>;
+	fn private_context_iter(&self) -> Result<Box<dyn Iterator<Item = (Vec<u8>, Context)>>, Error>;
 
 	/// Saves the private context associated with a slate id
 	fn save_private_context(
@@ -779,7 +784,7 @@ impl Context {
 		kernel_features: u8,
 		ttl_cutoff_height: Option<u64>,
 		compact_slate: bool,
-	) -> Context {
+	) -> Result<Context, Error> {
 		let sec_key = match use_test_rng {
 			false => SecretKey::new(secp, &mut thread_rng()),
 			true => {
@@ -822,12 +827,12 @@ impl Context {
 		kernel_features: u8,
 		ttl_cutoff_height: Option<u64>,
 		compact_slate: bool,
-	) -> Context {
+	) -> Result<Context, Error> {
 		let sec_nonce = match use_test_rng {
-			false => aggsig::create_secnonce(secp).unwrap(),
-			true => SecretKey::from_slice(secp, &[1; 32]).unwrap(),
+			false => aggsig::create_secnonce(secp)?,
+			true => SecretKey::from_slice(secp, &[1; 32])?,
 		};
-		Context {
+		Ok(Context {
 			parent_key_id: parent_key_id.clone(),
 			sec_key: sec_key.clone(),
 			sec_nonce: sec_nonce.clone(),
@@ -848,7 +853,7 @@ impl Context {
 			kernel_features,
 			ttl_cutoff_height,
 			compact_slate,
-		}
+		})
 	}
 
 	/// Call it if you really understand what you are doing. This method will not be able to
@@ -1009,11 +1014,11 @@ impl Context {
 	}
 
 	/// Returns public key, public nonce
-	pub fn get_public_keys(&self, secp: &Secp256k1) -> (PublicKey, PublicKey) {
-		(
-			PublicKey::from_secret_key(secp, &self.sec_key).unwrap(),
-			PublicKey::from_secret_key(secp, &self.sec_nonce).unwrap(),
-		)
+	pub fn get_public_keys(&self, secp: &Secp256k1) -> Result<(PublicKey, PublicKey), Error> {
+		Ok((
+			PublicKey::from_secret_key(secp, &self.sec_key)?,
+			PublicKey::from_secret_key(secp, &self.sec_nonce)?,
+		))
 	}
 }
 
@@ -1359,18 +1364,22 @@ impl TxLogEntry {
 	}
 
 	/// Update confirmation TS with now
-	pub fn update_confirmation_ts(&mut self, time: String) {
+	pub fn update_confirmation_ts(&mut self, time: String) -> Result<(), Error> {
 		//
 		if time.is_empty() {
 			self.confirmation_ts = Some(Utc::now());
 		} else {
 			//sample time string: 2020-10-07T23:57:00+00:00
-			let time_converted = DateTime::parse_from_rfc3339(&time);
-			let time_stamp = time_converted.unwrap().timestamp();
-			let confirmed_t = Utc.timestamp_opt(time_stamp, 0).unwrap();
+			let time_converted = DateTime::parse_from_rfc3339(&time).map_err(|e| {
+				Error::GenericError(format!("Invalid time to parse: {}, {}", time, e))
+			})?;
+			let time_stamp = time_converted.timestamp();
+			let confirmed_t = Utc.timestamp_opt(time_stamp, 0).single().ok_or_else(|| {
+				Error::GenericError(format!("Invalid UNIX timestamp: {}", time_stamp))
+			})?;
 			self.confirmation_ts = Some(confirmed_t);
 		}
-		//query the node to get the confirmation time
+		Ok(())
 	}
 
 	/// Return zero height - mean unknown. Needed for backward compatibility
@@ -1411,22 +1420,21 @@ impl TxLogEntry {
 
 	/// Append message from the slate.
 	pub fn update_messages(&mut self, messages: &ParticipantMessages) {
-		if self.messages.is_none() {
-			self.messages = Some(messages.clone())
-		} else {
-			let exist_messages = self.messages.clone().unwrap().messages;
-			let mut messages = messages.clone();
-			for msg in exist_messages {
-				if !messages
-					.messages
-					.iter()
-					.any(|m| m.message.as_ref().map(|m| m.len()).unwrap_or(0) > 0 && m.id == msg.id)
-				{
-					messages.messages.push(msg.clone());
+		match &self.messages {
+			None => self.messages = Some(messages.clone()),
+			Some(exist_messages_obj) => {
+				let exist_messages = &exist_messages_obj.messages;
+				let mut messages = messages.clone();
+				for msg in exist_messages {
+					if !messages.messages.iter().any(|m| {
+						m.message.as_ref().map(|m| m.len()).unwrap_or(0) > 0 && m.id == msg.id
+					}) {
+						messages.messages.push(msg.clone());
+					}
 				}
+				messages.messages.sort_by_key(|m| m.id);
+				self.messages = Some(messages.clone());
 			}
-			messages.messages.sort_by_key(|m| m.id);
-			self.messages = Some(messages.clone());
 		}
 	}
 }
@@ -1652,7 +1660,9 @@ lazy_static::lazy_static! {
 /// Returns `true` if the given commitment is **not** taken
 /// (i.e. no live `TxSession` is using it).
 pub fn input_is_free(commit: &String) -> bool {
-	let mut map = TX_SESSIONS_USED_INPUTS.write().expect("RwLock failure");
+	let mut map = TX_SESSIONS_USED_INPUTS
+		.write()
+		.unwrap_or_else(|e| e.into_inner());
 	// Look up the commitment.
 	match map.get(commit) {
 		Some(weak) => {
@@ -1732,7 +1742,9 @@ impl TxSession {
 	/// Se locked inputs
 	pub fn set_input_commits(&mut self, inputs: Vec<(Identifier, Option<u64>, Commitment, u64)>) {
 		self.input_commits = inputs;
-		let mut used_inputs = TX_SESSIONS_USED_INPUTS.write().expect("RwLock failure");
+		let mut used_inputs = TX_SESSIONS_USED_INPUTS
+			.write()
+			.unwrap_or_else(|e| e.into_inner());
 		for (_id, _mmr, inp, _amount) in &self.input_commits {
 			used_inputs.insert(inp.to_hex(), Arc::downgrade(&self.exist));
 		}
@@ -1790,7 +1802,12 @@ impl TxSession {
 			// Store transaction body for repost & other info
 			if let Some(transaction) = &self.transaction {
 				wallet.store_tx(
-					&format!("{}", tx_log_entry.tx_slate_id.expect("Tx UUID is expected")),
+					&format!(
+						"{}",
+						tx_log_entry
+							.tx_slate_id
+							.ok_or(Error::GenericError("Tx UUID is expected".into()))?
+					),
 					transaction,
 				)?;
 			}

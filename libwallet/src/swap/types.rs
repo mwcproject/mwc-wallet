@@ -1303,31 +1303,26 @@ impl fmt::Display for Action {
 				};
 
 				let sec_str = if *sec_expected_to_be_posted==0 {
-						if sec_actual.is_none() {
-							format!("{} {}, hasn't been posted", currency, address.join(","))
-						} else {
-							if !currency.is_btc_family() {
-								if sec_actual.unwrap() == 0 {
-									format!("{} {} are in memory pool", currency, address.join(","))
-								}
-								else if sec_actual.unwrap() >= *sec_required {
-									format!("{} {}, are locked", currency, address.join(","))
-								}
-								else {
-									format!("{} {}, {}/{}", currency, address.join(","), sec_actual.unwrap(), sec_required)
-								}
+					if let Some(sec_actual) = sec_actual {
+						if !currency.is_btc_family() {
+							if *sec_actual == 0 {
+								format!("{} {} are in memory pool", currency, address.join(","))
+							} else if *sec_actual >= *sec_required {
+								format!("{} {}, are locked", currency, address.join(","))
+							} else {
+								format!("{} {}, {}/{}", currency, address.join(","), sec_actual, sec_required)
 							}
-							else {
-								if sec_actual.unwrap() == 0 {
-									format!("{} {} are in memory pool", currency, address.join(","))
-								}
-								else {
-									format!("{} {}, are locked", currency, address.join(","))
-								}
+						} else {
+							if *sec_actual == 0 {
+								format!("{} {} are in memory pool", currency, address.join(","))
+							} else {
+								format!("{} {}, are locked", currency, address.join(","))
 							}
 						}
-				}
-				else {
+					} else {
+						format!("{} {}, hasn't been posted", currency, address.join(","))
+					}
+				} else {
 					let sec_posted_str = currency.amount_to_hr_string(*sec_expected_to_be_posted, true);
 					debug_assert!(address.len()>0);
 					debug_assert!(address.len()<=2);

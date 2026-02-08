@@ -31,11 +31,11 @@ lazy_static! {
 pub fn tor_status_clean_context(context_id: u32) {
 	TOR_ONION_ADDRESS
 		.write()
-		.expect("RwLock failure")
+		.unwrap_or_else(|e| e.into_inner())
 		.remove(&context_id);
 	TOR_SENDER_RUNNING
 		.write()
-		.expect("RwLock failure")
+		.unwrap_or_else(|e| e.into_inner())
 		.remove(&context_id);
 }
 
@@ -43,11 +43,11 @@ pub fn set_tor_address(context_id: u32, address: Option<String>) {
 	match address {
 		Some(address) => TOR_ONION_ADDRESS
 			.write()
-			.expect("RwLock failure")
+			.unwrap_or_else(|e| e.into_inner())
 			.insert(context_id, address),
 		None => TOR_ONION_ADDRESS
 			.write()
-			.expect("RwLock failure")
+			.unwrap_or_else(|e| e.into_inner())
 			.remove(&context_id),
 	};
 }
@@ -55,7 +55,7 @@ pub fn set_tor_address(context_id: u32, address: Option<String>) {
 pub fn get_tor_address(context_id: u32) -> Option<String> {
 	TOR_ONION_ADDRESS
 		.read()
-		.expect("RwLock failure")
+		.unwrap_or_else(|e| e.into_inner())
 		.get(&context_id)
 		.cloned()
 }
@@ -63,14 +63,14 @@ pub fn get_tor_address(context_id: u32) -> Option<String> {
 pub fn set_tor_sender_running(context_id: u32, running: bool) {
 	TOR_SENDER_RUNNING
 		.write()
-		.expect("RwLock failure")
+		.unwrap_or_else(|e| e.into_inner())
 		.insert(context_id, running);
 }
 
 pub fn get_tor_sender_running(context_id: u32) -> bool {
 	TOR_SENDER_RUNNING
 		.read()
-		.expect("RwLock failure")
+		.unwrap_or_else(|e| e.into_inner())
 		.get(&context_id)
 		.cloned()
 		.unwrap_or(false)

@@ -95,7 +95,10 @@ fn broken_change_test_impl(
 		mask1,
 		4 + 3,
 		false,
-		tx_pool.lock().expect("Mutex failure").deref_mut(),
+		tx_pool
+			.lock()
+			.unwrap_or_else(|e| e.into_inner())
+			.deref_mut(),
 	);
 	let fee = core::libtx::tx_fee(0, inputs_num, output_num + 1, 1);
 
@@ -112,10 +115,10 @@ fn broken_change_test_impl(
 				selection_strategy_is_use_all: false,
 				..Default::default()
 			};
-			slate = api.init_send_tx(m, &None, &args, 1)?;
+			slate = api.init_send_tx(m, None, &args, 1)?;
 			slate = client1.send_tx_slate_direct("wallet2", &slate)?;
-			api.tx_lock_outputs(m, &None, &slate, None, 0)?;
-			slate = api.finalize_tx(m, &None, &slate, true)?;
+			api.tx_lock_outputs(m, None, &slate, None, 0)?;
+			slate = api.finalize_tx(m, None, &slate, true)?;
 			assert!(slate.tx.clone().unwrap().body.inputs.len() == inputs_num);
 			assert!(slate.tx.clone().unwrap().body.outputs.len() == expected_outputs);
 			api.post_tx(m, slate.tx_or_err()?, false)?;
@@ -129,7 +132,7 @@ fn broken_change_test_impl(
 				amount: reward * inputs_num as u64 - fee - put_into_change,
 				..Default::default()
 			};
-			slate = api.issue_invoice_tx(m, &None, &args)?;
+			slate = api.issue_invoice_tx(m, None, &args)?;
 			Ok(())
 		})?;
 
@@ -144,8 +147,8 @@ fn broken_change_test_impl(
 				selection_strategy_is_use_all: false,
 				..Default::default()
 			};
-			slate = api.process_invoice_tx(m, &None, &slate, &args)?;
-			api.tx_lock_outputs(m, &None, &slate, None, 1)?;
+			slate = api.process_invoice_tx(m, None, &slate, &args)?;
+			api.tx_lock_outputs(m, None, &slate, None, 1)?;
 			assert!(slate.tx.clone().unwrap().body.inputs.len() == inputs_num);
 			assert!(slate.tx.clone().unwrap().body.outputs.len() == expected_outputs);
 			Ok(())

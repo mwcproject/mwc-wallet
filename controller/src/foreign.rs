@@ -62,14 +62,14 @@ impl ForeignApiServer {
 		let close_connection_callback = move |connection_name| {
 			let _ = connections
 				.write()
-				.expect("RwLock failure")
+				.unwrap_or_else(|e| e.into_inner())
 				.remove(&connection_name);
 			info!("Foreign api connection {} is closed", connection_name);
 		};
 
 		// Lock before creating the thread to gurantee that we will be able
 		// to write handler before thread can be finished
-		let mut connections_locked = self.connections.write().expect("RwLock failure");
+		let mut connections_locked = self.connections.write().unwrap_or_else(|e| e.into_inner());
 
 		let handler = thread::Builder::new()
 			.name(connection_name2.clone())
@@ -91,7 +91,12 @@ impl ForeignApiServer {
 						Ok((request, close_connection)) => {
 							// request is here, so we should be able to process it.
 							// Response need to send back in any case, even if it is error
-							let res = { handlers.lock().expect("Mutex failure").call(request) };
+							let res = {
+								handlers
+									.lock()
+									.unwrap_or_else(|e| e.into_inner())
+									.call(request)
+							};
 
 							let response = futures::executor::block_on(res);
 							let response = match response {
@@ -145,23 +150,39 @@ impl ForeignApiServer {
 		debug_assert!(self
 			.listener_thread
 			.lock()
-			.expect("Mutex failure")
+			.unwrap_or_else(|e| e.into_inner())
 			.is_none());
-		*self.listener_thread.lock().expect("Mutex failure") = Some(listener_handle);
+		*self
+			.listener_thread
+			.lock()
+			.unwrap_or_else(|e| e.into_inner()) = Some(listener_handle);
 	}
 
 	pub fn take_listener_thread(&self) -> Option<JoinHandle<()>> {
-		self.listener_thread.lock().expect("Mutex failure").take()
+		self.listener_thread
+			.lock()
+			.unwrap_or_else(|e| e.into_inner())
+			.take()
 	}
 
 	pub fn stop(&self) {
 		self.stop_state.stop();
 		// Waiting for all connections to close
-		while self.connections.read().expect("RwLock failure").len() > 0 {
+		while self
+			.connections
+			.read()
+			.unwrap_or_else(|e| e.into_inner())
+			.len() > 0
+		{
 			thread::sleep(Duration::from_millis(200));
 		}
 
-		if let Some(thr) = self.listener_thread.lock().expect("Mutex failure").take() {
+		if let Some(thr) = self
+			.listener_thread
+			.lock()
+			.unwrap_or_else(|e| e.into_inner())
+			.take()
+		{
 			let _ = thr.join();
 		}
 	}

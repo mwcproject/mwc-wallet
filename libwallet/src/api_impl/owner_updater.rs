@@ -67,7 +67,7 @@ pub fn start_updater_log_thread(
 				while let Ok(m) = rx.try_recv() {
 					// save to our message queue to be read by other consumers
 					{
-						let mut q = queue.lock().expect("Mutex failure");
+						let mut q = queue.lock().unwrap_or_else(|e| e.into_inner());
 						q.insert(0, m.clone());
 						while q.len() > MESSAGE_QUEUE_MAX_LEN {
 							q.pop();
@@ -193,7 +193,7 @@ where
 		self.is_running.store(true, Ordering::Relaxed);
 		loop {
 			let wallet_opened = {
-				let mut w_lock = self.wallet_inst.lock().expect("Mutex failure");
+				let mut w_lock = self.wallet_inst.lock().unwrap_or_else(|e| e.into_inner());
 				let w_provider = w_lock.lc_provider()?;
 				w_provider.wallet_inst().is_ok()
 			};

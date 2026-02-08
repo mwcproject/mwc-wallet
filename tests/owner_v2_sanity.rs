@@ -67,7 +67,10 @@ fn owner_v2_sanity() -> Result<(), mwc_wallet_controller::Error> {
 		mask1,
 		bh as usize,
 		false,
-		tx_pool.lock().expect("Mutex failure").deref_mut(),
+		tx_pool
+			.lock()
+			.unwrap_or_else(|e| e.into_inner())
+			.deref_mut(),
 	);
 	let client1_2 = client1.clone();
 

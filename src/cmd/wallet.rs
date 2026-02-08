@@ -32,14 +32,19 @@ pub fn wallet_command(
 	mut node_client: HTTPNodeClient,
 ) -> i32 {
 	// just get defaults from the global config
-	let wallet_config = config.members.clone().unwrap().wallet;
+	let wallet_config = config.members.wallet;
 
-	let tor_config = config.members.clone().unwrap().tor;
-	let mqs_config = config.members.unwrap().mqs;
+	let tor_config = config.members.tor;
+	let mqs_config = config.members.mqs;
 
 	// Check the node version info, and exit with report if we're not compatible
-	let global_wallet_args = wallet_args::parse_global_args(&wallet_config, &wallet_args)
-		.expect("Can't read configuration file");
+	let global_wallet_args = match wallet_args::parse_global_args(&wallet_config, &wallet_args) {
+		Ok(args) => args,
+		Err(e) => {
+			println!("Error. Can't read configuration file. {}", e);
+			return 1;
+		}
+	};
 	node_client.set_node_api_secret(global_wallet_args.node_api_secret.clone());
 	//parse the nodes address and put them in a vec
 	let check_node_api_http_addr = match &wallet_config.check_node_api_http_addr {

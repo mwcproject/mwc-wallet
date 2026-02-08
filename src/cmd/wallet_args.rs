@@ -15,7 +15,6 @@
 
 use crate::api::TLSConfig;
 use crate::cli::command_loop;
-use crate::cmd::wallet_args::ParseError::ArgumentError;
 use crate::config::MWC_WALLET_DIR;
 use crate::util::file::get_first_line;
 use crate::util::secp::key::SecretKey;
@@ -37,12 +36,13 @@ use mwc_wallet_impls::{DefaultLCProvider, DefaultWalletImpl};
 use mwc_wallet_impls::{PathToSlateGetter, SlateGetter};
 use mwc_wallet_libwallet::proof::proofaddress;
 use mwc_wallet_libwallet::proof::proofaddress::ProvableAddress;
+#[cfg(feature = "swaps")]
+use mwc_wallet_libwallet::swap::types::Currency;
 use mwc_wallet_libwallet::types::{
 	U64_DATA_IDX_ADDRESS_INDEX, U64_DATA_IDX_LAST_WORKING_NODE_INDEX,
 };
 use mwc_wallet_libwallet::{
-	swap::types::Currency, wallet_lock, IssueInvoiceTxArgs, NodeClient, SwapStartArgs, WalletInst,
-	WalletLCProvider,
+	wallet_lock, IssueInvoiceTxArgs, NodeClient, SwapStartArgs, WalletInst, WalletLCProvider,
 };
 use mwc_wallet_libwallet::{Slate, SlatePurpose};
 use mwc_wallet_util::mwc_core::core::amount_to_hr_string;
@@ -53,11 +53,13 @@ use mwc_wallet_util::{mwc_core as core, OnionV3Address};
 use rpassword;
 use semver::Version;
 use std::collections::HashSet;
+#[cfg(feature = "swaps")]
+use std::convert::TryFrom;
+use std::fmt::Display;
+use std::path::{Path, PathBuf};
+use std::str::FromStr;
 use std::sync::Arc;
-use std::{
-	convert::TryFrom,
-	path::{Path, PathBuf},
-};
+#[cfg(feature = "swaps")]
 use uuid::Uuid;
 
 // define what to do on argument error
@@ -84,6 +86,8 @@ pub enum ParseError {
 	WalletExists(String),
 	#[error("User Cancelled")]
 	CancelledError,
+	#[error("Wallet error: {0}")]
+	LibWallet(#[from] mwc_wallet_libwallet::Error),
 }
 
 impl From<std::io::Error> for ParseError {
@@ -92,25 +96,27 @@ impl From<std::io::Error> for ParseError {
 	}
 }
 
-fn prompt_password_stdout(prompt: &str) -> ZeroingString {
-	ZeroingString::from(rpassword::prompt_password_stdout(prompt).unwrap())
+fn prompt_password_stdout(prompt: &str) -> Result<ZeroingString, ParseError> {
+	Ok(ZeroingString::from(rpassword::prompt_password_stdout(
+		prompt,
+	)?))
 }
 
-pub fn prompt_password(password: &Option<ZeroingString>) -> ZeroingString {
+pub fn prompt_password(password: &Option<ZeroingString>) -> Result<ZeroingString, ParseError> {
 	match password {
 		None => prompt_password_stdout("Password: "),
-		Some(p) => p.clone(),
+		Some(p) => Ok(p.clone()),
 	}
 }
 
-fn prompt_password_confirm() -> ZeroingString {
+fn prompt_password_confirm() -> Result<ZeroingString, ParseError> {
 	let mut first = ZeroingString::from("first");
 	let mut second = ZeroingString::from("second");
 	while first != second {
-		first = prompt_password_stdout("Password: ");
-		second = prompt_password_stdout("Confirm Password: ");
+		first = prompt_password_stdout("Password: ")?;
+		second = prompt_password_stdout("Confirm Password: ")?;
 	}
-	first
+	Ok(first)
 }
 
 fn prompt_recovery_phrase<L, C, K>(
@@ -138,8 +144,8 @@ where
 				}
 			}
 			ReadResult::Input(line) => {
-				let mut w_lock = wallet.lock().expect("Mutex failure");
-				let p = w_lock.lc_provider().unwrap();
+				let mut w_lock = wallet.lock().unwrap_or_else(|e| e.into_inner());
+				let p = w_lock.lc_provider()?;
 				if p.validate_mnemonic(ZeroingString::from(line.clone()))
 					.is_ok()
 				{
@@ -230,7 +236,7 @@ where
 		context_id,
 		node_client.clone(),
 	)) as Box<dyn WalletInst<'static, L, C, K>>;
-	let lc = wallet.lc_provider().unwrap();
+	let lc = wallet.lc_provider()?;
 	let _ = lc.set_top_level_directory(&config.data_file_dir);
 	Ok(Arc::new(Mutex::new(wallet)))
 }
@@ -263,33 +269,28 @@ fn parse_optional(args: &ArgMatches, name: &str) -> Result<Option<String>, Parse
 }
 
 // parses a number, or throws error with message otherwise
-fn parse_u64(arg: &str, name: &str) -> Result<u64, ParseError> {
-	let val = arg.parse::<u64>();
+fn parse_number<T>(arg: &str, name: &str) -> Result<T, ParseError>
+where
+	T: FromStr,
+	T::Err: Display,
+{
+	let val = arg.parse::<T>();
 	match val {
 		Ok(v) => Ok(v),
 		Err(e) => {
-			let msg = format!("Could not parse {} as a whole number. e={}", name, e);
-			Err(ParseError::ArgumentError(msg))
-		}
-	}
-}
-
-// parses a number, or throws error with message otherwise
-fn parse_f32(arg: &str, name: &str) -> Result<f32, ParseError> {
-	let val = arg.parse::<f32>();
-	match val {
-		Ok(v) => Ok(v),
-		Err(e) => {
-			let msg = format!("Could not parse {} as a decimal number. e={}", name, e);
+			let msg = format!("Could not parse {} as a number. e={}", name, e);
 			Err(ParseError::ArgumentError(msg))
 		}
 	}
 }
 
 // As above, but optional
-fn parse_u64_or_none(arg: Option<&str>) -> Option<u64> {
+fn parse_number_or_none<T>(arg: Option<&str>) -> Option<T>
+where
+	T: FromStr,
+{
 	let val = match arg {
-		Some(a) => a.parse::<u64>(),
+		Some(a) => a.parse::<T>(),
 		None => return None,
 	};
 	match val {
@@ -377,7 +378,7 @@ where
 
 	let password = match g_args.password.clone() {
 		Some(p) => p,
-		None => prompt_password_confirm(),
+		None => prompt_password_confirm()?,
 	};
 
 	Ok(command::InitArgs {
@@ -394,7 +395,7 @@ pub fn parse_recover_args(
 ) -> Result<command::RecoverArgs, ParseError>
 where
 {
-	let passphrase = prompt_password(&g_args.password);
+	let passphrase = prompt_password(&g_args.password)?;
 	Ok(command::RecoverArgs {
 		passphrase: passphrase,
 	})
@@ -406,13 +407,17 @@ pub fn parse_listen_args(
 	args: &ArgMatches,
 ) -> Result<command::ListenArgs, ParseError> {
 	if let Some(port) = args.value_of("port") {
-		config.api_listen_port = Some(port.parse().unwrap());
+		config.api_listen_port = Some(port.parse().map_err(|_| {
+			ParseError::ArgumentError(format!("port, unable to parse value {}", port))
+		})?);
 		if config.api_listen_interface.is_none() {
 			config.api_listen_interface = Some("127.0.0.1".to_string());
 		}
 	}
 	if let Some(port) = args.value_of("libp2p_port") {
-		config.libp2p_listen_port = Some(port.parse().unwrap());
+		config.libp2p_listen_port = Some(port.parse().map_err(|_| {
+			ParseError::ArgumentError(format!("libp2p_port, unable to parse value {}", port))
+		})?);
 	}
 
 	let method = parse_required(args, "method")?;
@@ -432,7 +437,9 @@ pub fn parse_owner_api_args(
 	args: &ArgMatches,
 ) -> Result<(), ParseError> {
 	if let Some(port) = args.value_of("port") {
-		config.owner_api_listen_port = Some(port.parse().unwrap());
+		config.owner_api_listen_port = Some(port.parse().map_err(|_| {
+			ParseError::ArgumentError(format!("port, unable to parse value {}", port))
+		})?);
 	}
 	if args.is_present("run_foreign") {
 		config.owner_api_include_foreign = Some(true);
@@ -444,8 +451,8 @@ pub fn parse_scan_rewind_hash_args(
 	args: &ArgMatches,
 ) -> Result<command::ViewWalletScanArgs, ParseError> {
 	let rewind_hash = parse_required(args, "rewind_hash")?;
-	let start_height = parse_u64_or_none(args.value_of("start_height"));
-	let backwards_from_tip = parse_u64_or_none(args.value_of("backwards_from_tip"));
+	let start_height: Option<u64> = parse_number_or_none(args.value_of("start_height"));
+	let backwards_from_tip: Option<u64> = parse_number_or_none(args.value_of("backwards_from_tip"));
 	if backwards_from_tip.is_some() && start_height.is_some() {
 		let msg = format!("backwards_from tip and start_height cannot both be present");
 		return Err(ParseError::ArgumentError(msg));
@@ -489,14 +496,11 @@ pub fn parse_send_args(
 	let amount_includes_fee = args.is_present("amount_includes_fee") || spend_max;
 
 	// message
-	let message = match args.is_present("message") {
-		true => Some(args.value_of("message").unwrap().to_owned()),
-		false => None,
-	};
+	let message = args.value_of("message").map(|s| String::from(s));
 
 	// minimum_confirmations
 	let min_c = parse_required(args, "minimum_confirmations")?;
-	let min_c = parse_u64(min_c, "minimum_confirmations")?;
+	let min_c: u64 = parse_number(min_c, "minimum_confirmations")?;
 
 	// selection_strategy
 	let selection_strategy = parse_required(args, "selection_strategy")?;
@@ -554,13 +558,13 @@ pub fn parse_send_args(
 
 	// change_outputs
 	let change_outputs = parse_required(args, "change_outputs")?;
-	let change_outputs = parse_u64(change_outputs, "change_outputs")? as usize;
+	let change_outputs: usize = parse_number(change_outputs, "change_outputs")?;
 
 	// fluff
 	let fluff = args.is_present("fluff");
 
 	// ttl_blocks
-	let ttl_blocks = parse_u64_or_none(args.value_of("ttl_blocks"));
+	let ttl_blocks: Option<u64> = parse_number_or_none(args.value_of("ttl_blocks"));
 
 	// max_outputs
 	let max_outputs = 500;
@@ -570,7 +574,7 @@ pub fn parse_send_args(
 		match args.is_present("slate_version") {
 			true => {
 				let v = parse_required(args, "slate_version")?;
-				Some(parse_u64(v, "slate_version")? as u16)
+				Some(parse_number::<u16>(v, "slate_version")?)
 			}
 			false => {
 				if method == "slatepack" {
@@ -616,21 +620,20 @@ pub fn parse_send_args(
 		args.occurrences_of("minimum_confirmations_change_outputs") != 0;
 	let minimum_confirmations_change_outputs =
 		parse_required(args, "minimum_confirmations_change_outputs")?;
-	let minimum_confirmations_change_outputs = parse_u64(
+	let minimum_confirmations_change_outputs: u64 = parse_number(
 		minimum_confirmations_change_outputs,
 		"minimum_confirmations_change_outputs",
 	)?;
 	let exclude_change_outputs = args.is_present("exclude_change_outputs");
 
-	let outputs = match args.is_present("outputs") {
-		true => Some(
-			args.value_of("outputs")
-				.unwrap()
+	let outputs = match args.value_of("outputs") {
+		Some(outputs) => Some(
+			outputs
 				.split(",")
 				.map(|s| s.to_string())
 				.collect::<HashSet<String>>(),
 		),
-		false => None,
+		None => None,
 	};
 
 	let slatepack_recipient: Option<ProvableAddress> = match args.value_of("slatepack_recipient") {
@@ -665,7 +668,7 @@ pub fn parse_send_args(
 	let slatepack_qr = args.is_present("slatepack_qr");
 
 	if minimum_confirmations_change_outputs_is_present && !exclude_change_outputs {
-		Err(ArgumentError("minimum_confirmations_change_outputs may only be specified if exclude_change_outputs is set".to_string()))
+		Err(ParseError::ArgumentError("minimum_confirmations_change_outputs may only be specified if exclude_change_outputs is set".to_string()))
 	} else {
 		Ok(command::SendArgs {
 			amount: amount,
@@ -722,17 +725,16 @@ pub fn parse_faucet_request_args(args: &ArgMatches) -> Result<u64, ParseError> {
 
 pub fn parse_receive_unpack_args(args: &ArgMatches) -> Result<command::ReceiveArgs, ParseError> {
 	// input file
-	let input_file = match args.is_present("file") {
-		true => {
-			let file = args.value_of("file").unwrap().to_owned();
+	let input_file = match args.value_of("file") {
+		Some(file) => {
 			// validate input
 			if !Path::new(&file).is_file() {
 				let msg = format!("File {} not found.", &file);
 				return Err(ParseError::ArgumentError(msg));
 			}
-			Some(file)
+			Some(String::from(file))
 		}
-		false => None,
+		None => None,
 	};
 
 	let slatepack_qr = args.is_present("slatepack_qr");
@@ -748,17 +750,16 @@ pub fn parse_receive_unpack_args(args: &ArgMatches) -> Result<command::ReceiveAr
 
 pub fn parse_finalize_args(args: &ArgMatches) -> Result<command::FinalizeArgs, ParseError> {
 	// input file
-	let input_file = match args.is_present("file") {
-		true => {
-			let file = args.value_of("file").unwrap().to_owned();
+	let input_file = match args.value_of("file") {
+		Some(file) => {
 			// validate input
 			if !Path::new(&file).is_file() {
 				let msg = format!("File {} not found.", &file);
 				return Err(ParseError::ArgumentError(msg));
 			}
-			Some(file)
+			Some(String::from(file))
 		}
-		false => None,
+		None => None,
 	};
 
 	Ok(command::FinalizeArgs {
@@ -787,16 +788,13 @@ pub fn parse_issue_invoice_args(
 		}
 	};
 	// message
-	let message = match args.is_present("message") {
-		true => Some(args.value_of("message").unwrap().to_owned()),
-		false => None,
-	};
+	let message = args.value_of("message").map(|m| String::from(m));
 	// target slate version to create
 	let target_slate_version = {
 		match args.is_present("slate_version") {
 			true => {
 				let v = parse_required(args, "slate_version")?;
-				Some(parse_u64(v, "slate_version")? as u16)
+				Some(parse_number::<u16>(v, "slate_version")?)
 			}
 			false => None,
 		}
@@ -845,14 +843,11 @@ pub fn parse_process_invoice_args(
 ) -> Result<command::ProcessInvoiceArgs, ParseError> {
 	// TODO: display and prompt for confirmation of what we're doing
 	// message
-	let message = match args.is_present("message") {
-		true => Some(args.value_of("message").unwrap().to_owned()),
-		false => None,
-	};
+	let message = args.value_of("message").map(|m| String::from(m));
 
 	// minimum_confirmations
 	let min_c = parse_required(args, "minimum_confirmations")?;
-	let min_c = parse_u64(min_c, "minimum_confirmations")?;
+	let min_c: u64 = parse_number(min_c, "minimum_confirmations")?;
 
 	// selection_strategy
 	let selection_strategy = parse_required(args, "selection_strategy")?;
@@ -880,7 +875,7 @@ pub fn parse_process_invoice_args(
 	};
 
 	// ttl_blocks
-	let ttl_blocks = parse_u64_or_none(args.value_of("ttl_blocks"));
+	let ttl_blocks: Option<u64> = parse_number_or_none(args.value_of("ttl_blocks"));
 
 	// max_outputs
 	let max_outputs = 500;
@@ -956,7 +951,13 @@ pub fn parse_process_invoice_args(
 	if prompt {
 		// Now we need to prompt the user whether they want to do this,
 		// which requires reading the slate
-		prompt_pay_invoice(&slate, method, dest.as_ref().unwrap())?;
+		prompt_pay_invoice(
+			&slate,
+			method,
+			dest.as_ref().ok_or(ParseError::ArgumentError(
+				"Destination address is not found".into(),
+			))?,
+		)?;
 	}
 
 	let slatepack_qr = args.is_present("slatepack_qr");
@@ -979,7 +980,7 @@ pub fn parse_process_invoice_args(
 pub fn parse_info_args(args: &ArgMatches) -> Result<command::InfoArgs, ParseError> {
 	// minimum_confirmations
 	let mc = parse_required(args, "minimum_confirmations")?;
-	let mc = parse_u64(mc, "minimum_confirmations")?;
+	let mc: u64 = parse_number(mc, "minimum_confirmations")?;
 	Ok(command::InfoArgs {
 		minimum_confirmations: mc,
 	})
@@ -987,9 +988,9 @@ pub fn parse_info_args(args: &ArgMatches) -> Result<command::InfoArgs, ParseErro
 
 pub fn parse_check_args(args: &ArgMatches) -> Result<command::CheckArgs, ParseError> {
 	let delete_unconfirmed = args.is_present("delete_unconfirmed");
-	let start_height = parse_u64_or_none(args.value_of("start_height"));
+	let start_height: Option<u64> = parse_number_or_none(args.value_of("start_height"));
 
-	let backwards_from_tip = parse_u64_or_none(args.value_of("backwards_from_tip"));
+	let backwards_from_tip: Option<u64> = parse_number_or_none(args.value_of("backwards_from_tip"));
 	if backwards_from_tip.is_some() && start_height.is_some() {
 		let msg = format!("backwards_from tip and start_height cannot both be present");
 		return Err(ParseError::ArgumentError(msg));
@@ -1010,7 +1011,7 @@ pub fn parse_outputs_args(args: &ArgMatches) -> Result<command::OutputsArgs, Par
 pub fn parse_txs_args(args: &ArgMatches) -> Result<command::TxsArgs, ParseError> {
 	let tx_id = match args.value_of("id") {
 		None => None,
-		Some(tx) => Some(parse_u64(tx, "id")? as u32),
+		Some(tx) => Some(parse_number::<u32>(tx, "id")?),
 	};
 	let tx_slate_id = match args.value_of("txid") {
 		None => None,
@@ -1028,7 +1029,7 @@ pub fn parse_txs_args(args: &ArgMatches) -> Result<command::TxsArgs, ParseError>
 	}
 	let count = match args.value_of("count") {
 		None => None,
-		Some(c) => Some(parse_u64(c, "count")? as u32),
+		Some(c) => Some(parse_number::<u32>(c, "count")?),
 	};
 
 	let show_last_four_days = args.is_present("show_last_four_days");
@@ -1073,10 +1074,7 @@ pub fn parse_submit_args(args: &ArgMatches) -> Result<command::SubmitArgs, Parse
 }
 
 pub fn parse_repost_args(args: &ArgMatches) -> Result<command::RepostArgs, ParseError> {
-	let tx_id = match args.value_of("id") {
-		None => None,
-		Some(tx) => Some(parse_u64(tx, "id")? as u32),
-	};
+	let tx_id: u32 = parse_number(parse_required(args, "id")?, "id")?;
 
 	let fluff = args.is_present("fluff");
 	let dump_file = match args.value_of("dumpfile") {
@@ -1085,7 +1083,7 @@ pub fn parse_repost_args(args: &ArgMatches) -> Result<command::RepostArgs, Parse
 	};
 
 	Ok(command::RepostArgs {
-		id: tx_id.unwrap(),
+		id: tx_id,
 		dump_file: dump_file,
 		fluff: fluff,
 	})
@@ -1095,7 +1093,7 @@ pub fn parse_cancel_args(args: &ArgMatches) -> Result<command::CancelArgs, Parse
 	let mut tx_id_string = "";
 	let tx_id = match args.value_of("id") {
 		None => None,
-		Some(tx) => Some(parse_u64(tx, "id")? as u32),
+		Some(tx) => Some(parse_number::<u32>(tx, "id")?),
 	};
 	let tx_slate_id = match args.value_of("txid") {
 		None => None,
@@ -1125,7 +1123,7 @@ pub fn parse_export_proof_args(args: &ArgMatches) -> Result<command::ProofExport
 	let output_file = parse_required(args, "output")?;
 	let tx_id = match args.value_of("id") {
 		None => None,
-		Some(tx) => Some(parse_u64(tx, "id")? as u32),
+		Some(tx) => Some(parse_number::<u32>(tx, "id")?),
 	};
 	let tx_slate_id = match args.value_of("txid") {
 		None => None,
@@ -1174,7 +1172,7 @@ pub fn parse_swap_start_args(args: &ArgMatches) -> Result<SwapStartArgs, ParseEr
 	};
 
 	let min_c = parse_required(args, "minimum_confirmations")?;
-	let min_c = parse_u64(min_c, "minimum_confirmations")?;
+	let min_c: u64 = parse_number(min_c, "minimum_confirmations")?;
 
 	let secondary_currency = parse_required(args, "secondary_currency")?;
 	let secondary_currency = secondary_currency.to_lowercase();
@@ -1202,16 +1200,16 @@ pub fn parse_swap_start_args(args: &ArgMatches) -> Result<SwapStartArgs, ParseEr
 	}
 
 	let mwc_lock = parse_required(args, "mwc_confirmations")?;
-	let mwc_lock = parse_u64(mwc_lock, "mwc_confirmations")?;
+	let mwc_lock: u64 = parse_number(mwc_lock, "mwc_confirmations")?;
 
 	let btc_lock = parse_required(args, "secondary_confirmations")?;
-	let btc_lock = parse_u64(btc_lock, "secondary_confirmations")?;
+	let btc_lock: u64 = parse_number(btc_lock, "secondary_confirmations")?;
 
 	let message_exchange_time = parse_required(args, "message_exchange_time")?;
-	let message_exchange_time = parse_u64(message_exchange_time, "message_exchange_time")?;
+	let message_exchange_time: u64 = parse_number(message_exchange_time, "message_exchange_time")?;
 
 	let redeem_time = parse_required(args, "redeem_time")?;
-	let redeem_time = parse_u64(redeem_time, "redeem_time")?;
+	let redeem_time: u64 = parse_number(redeem_time, "redeem_time")?;
 
 	let method = parse_required(args, "method")?;
 	let destination = parse_required(args, "dest")?;
@@ -1276,6 +1274,7 @@ pub fn parse_swap_start_args(args: &ArgMatches) -> Result<SwapStartArgs, ParseEr
 	})
 }
 
+#[cfg(feature = "swaps")]
 pub fn parse_swap_args(args: &ArgMatches) -> Result<command::SwapArgs, ParseError> {
 	let swap_id = args.value_of("swap_id").map(|s| String::from(s));
 	let adjust = args
@@ -1286,7 +1285,7 @@ pub fn parse_swap_args(args: &ArgMatches) -> Result<command::SwapArgs, ParseErro
 	let mut destination = args.value_of("dest").map(|s| String::from(s));
 	let apisecret = args.value_of("apisecret").map(|s| String::from(s));
 	let secondary_fee = match args.value_of("secondary_fee") {
-		Some(s) => Some(parse_f32(s, "secondary_fee")?),
+		Some(s) => Some(parse_number::<f32>(s, "secondary_fee")?),
 		None => None,
 	};
 	let message_file_name = args.value_of("message_file_name").map(|s| String::from(s));
@@ -1365,6 +1364,7 @@ pub fn parse_swap_args(args: &ArgMatches) -> Result<command::SwapArgs, ParseErro
 	})
 }
 
+#[cfg(feature = "swaps")]
 pub fn parse_integrity_args(args: &ArgMatches) -> Result<command::IntegrityArgs, ParseError> {
 	let mut fee = vec![];
 	let subcommand = if args.is_present("check") {
@@ -1403,6 +1403,7 @@ pub fn parse_integrity_args(args: &ArgMatches) -> Result<command::IntegrityArgs,
 	})
 }
 
+#[cfg(feature = "swaps")]
 pub fn parse_messaging_args(args: &ArgMatches) -> Result<command::MessagingArgs, ParseError> {
 	let fee = match args.value_of("fee") {
 		Some(s) => Some(core::core::amount_from_hr_string(s).map_err(|e| {
@@ -1442,6 +1443,7 @@ pub fn parse_messaging_args(args: &ArgMatches) -> Result<command::MessagingArgs,
 	})
 }
 
+#[cfg(feature = "swaps")]
 pub fn parse_send_marketplace_message(
 	args: &ArgMatches,
 ) -> Result<command::SendMarketplaceMessageArgs, ParseError> {
@@ -1452,6 +1454,7 @@ pub fn parse_send_marketplace_message(
 	})
 }
 
+#[cfg(feature = "swaps")]
 pub fn parse_eth_args(args: &ArgMatches) -> Result<command::EthArgs, ParseError> {
 	let subcommand = if args.is_present("info") {
 		command::EthSubcommand::Info
@@ -1467,19 +1470,15 @@ pub fn parse_eth_args(args: &ArgMatches) -> Result<command::EthArgs, ParseError>
 		None => "ether",
 		Some(token) => token,
 	};
-	let currency = Currency::try_from(currency);
-	if currency.is_err() {
-		return Err(ParseError::ArgumentError(format!(
-			"Please specify correct token!"
-		)));
-	}
+	let currency = Currency::try_from(currency)
+		.map_err(|_| ParseError::ArgumentError(format!("Please specify correct token")))?;
 
 	let dest = args.value_of("dest").map(|s| String::from(s));
 	let amount = args.value_of("amount").map(|s| String::from(s));
 
 	Ok(command::EthArgs {
 		subcommand,
-		currency: currency.unwrap(),
+		currency,
 		dest,
 		amount,
 	})
@@ -1543,7 +1542,12 @@ where
 	let mut top_level_wallet_dir = PathBuf::from(wallet_config.clone().data_file_dir);
 	if top_level_wallet_dir.ends_with(MWC_WALLET_DIR) {
 		top_level_wallet_dir.pop();
-		wallet_config.data_file_dir = top_level_wallet_dir.to_str().unwrap().into();
+		wallet_config.data_file_dir = top_level_wallet_dir
+			.to_str()
+			.ok_or(Error::GenericError(
+				"Unable to build data_file_dir, Invalid top_level_wallet_dir value".into(),
+			))?
+			.into();
 	}
 
 	// for backwards compatibility: If tor config doesn't exist in the file, assume
@@ -1595,8 +1599,8 @@ where
 		("cli", _) => open_wallet = false,
 		("owner_api", _) => {
 			// If wallet exists and password is present then open it. Otherwise, that's fine too.
-			let mut wallet_lock = wallet.lock().expect("Mutex failure");
-			let lc = wallet_lock.lc_provider().unwrap();
+			let mut wallet_lock = wallet.lock().unwrap_or_else(|e| e.into_inner());
+			let lc = wallet_lock.lc_provider()?;
 			open_wallet = (wallet_args.is_present("pass")
 				&& lc.wallet_exists(None, wallet_config.wallet_data_dir.as_deref())?)
 				|| wallet_config.owner_api_include_foreign.unwrap_or(false)
@@ -1609,11 +1613,12 @@ where
 
 	let keychain_mask = match open_wallet {
 		true => {
-			let mut wallet_lock = wallet.lock().expect("Mutex failure");
-			let lc = wallet_lock.lc_provider().unwrap();
+			let mut wallet_lock = wallet.lock().unwrap_or_else(|e| e.into_inner());
+			let lc = wallet_lock.lc_provider()?;
 			let mask = lc.open_wallet(
 				None,
-				prompt_password(&global_wallet_args.password),
+				prompt_password(&global_wallet_args.password)
+					.map_err(|e| Error::IO(format!("Prompt password error, {}", e)))?,
 				false,
 				false,
 				wallet_config.wallet_data_dir.as_deref(),
@@ -1621,6 +1626,7 @@ where
 
 			let wallet_inst = lc.wallet_inst()?;
 
+			#[cfg(feature = "swaps")]
 			mwc_wallet_libwallet::swap::trades::init_swap_trade_backend(
 				context_id,
 				wallet_inst.get_data_file_dir(),
@@ -1628,7 +1634,7 @@ where
 				&wallet_config.eth_swap_contract_address,
 				&wallet_config.erc20_swap_contract_address,
 				&wallet_config.eth_infura_project_id,
-			);
+			)?;
 
 			//read or save the node index(the good node)
 			{
@@ -1764,7 +1770,7 @@ where
 		}
 		("set_address_index", Some(args)) => {
 			let address_index = arg_parse!(parse_required(args, "index"));
-			let address_index = arg_parse!(parse_u64(address_index, "index"));
+			let address_index = arg_parse!(parse_number::<u64>(address_index, "index"));
 
 			if address_index > 65535 {
 				return Err(Error::ArgumentError(
@@ -1774,7 +1780,7 @@ where
 
 			wallet_lock!(owner_api.wallet_inst, w);
 			let mut batch = w.batch(None)?;
-			batch.save_u64(U64_DATA_IDX_ADDRESS_INDEX, address_index as u64)?;
+			batch.save_u64(U64_DATA_IDX_ADDRESS_INDEX, address_index)?;
 			batch.commit()?;
 			Ok(())
 		}
@@ -1953,15 +1959,18 @@ where
 			// for CLI mode only, should be handled externally
 			Ok(())
 		}
+		#[cfg(feature = "swaps")]
 		("swap_start", Some(args)) => {
 			let a = arg_parse!(parse_swap_start_args(&args));
 			let _ = command::swap_start(owner_api, km, &a)?;
 			Ok(())
 		}
+		#[cfg(feature = "swaps")]
 		("swap_create_from_offer", Some(args)) => {
 			let mwc_amount = arg_parse!(parse_required(args, "file"));
 			command::swap_create_from_offer(owner_api, km, mwc_amount.to_string())
 		}
+		#[cfg(feature = "swaps")]
 		("swap", Some(args)) => {
 			let a = arg_parse!(parse_swap_args(&args));
 			command::swap(
@@ -1974,6 +1983,7 @@ where
 				cli_mode,
 			)
 		}
+		#[cfg(feature = "swaps")]
 		("integrity", Some(args)) => {
 			#[allow(unused_variables)]
 			let a = arg_parse!(parse_integrity_args(&args));
@@ -1983,6 +1993,7 @@ where
 			println!("integrity feature is not included in this release");
 			Ok(())
 		}
+		#[cfg(feature = "swaps")]
 		("messaging", Some(args)) => {
 			#[allow(unused_variables)]
 			let a = arg_parse!(parse_messaging_args(&args));
@@ -1992,6 +2003,7 @@ where
 			println!("messaging feature is not included in this release");
 			Ok(())
 		}
+		#[cfg(feature = "swaps")]
 		("send_marketplace_message", Some(args)) => {
 			let a = arg_parse!(parse_send_marketplace_message(&args));
 			command::send_marketplace_message(owner_api.wallet_inst.clone(), km, tor_config, a)
@@ -1999,6 +2011,7 @@ where
 		("check_tor_connection", _) => {
 			command::check_tor_connection(owner_api.wallet_inst.clone(), km, tor_config)
 		}
+		#[cfg(feature = "swaps")]
 		("eth", Some(args)) => {
 			let a = arg_parse!(parse_eth_args(&args));
 			command::eth(owner_api.wallet_inst.clone(), a)

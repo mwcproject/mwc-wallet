@@ -53,13 +53,16 @@ lazy_static! {
 pub fn push_proof_for_slate(uuid: &uuid::Uuid, proof: TxProof) {
 	SLATE_PROOFS
 		.lock()
-		.expect("Mutex failure")
+		.unwrap_or_else(|e| e.into_inner())
 		.insert(uuid.clone(), proof);
 }
 
 /// Get txProof form the mem storage. At step we suppose to Finalize
 pub fn pop_proof_for_slate(uuid: &uuid::Uuid) -> Option<TxProof> {
-	SLATE_PROOFS.lock().expect("Mutex failure").remove(uuid)
+	SLATE_PROOFS
+		.lock()
+		.unwrap_or_else(|e| e.into_inner())
+		.remove(uuid)
 }
 
 /// Tx Proof - the mwc713 based proof that can be made for any address that is a public key.
@@ -184,13 +187,18 @@ impl TxProof {
 		let encrypted_message: EncryptedMessage;
 		if let Some(_version) = &self.version {
 			//this is the newer version tx_proof
-			encrypted_message = serde_json::from_str(&self.slate_message.clone().unwrap())
-				.map_err(|e| {
-					Error::TxProofVerify(format!(
-						"Fail to convert Json to EncryptedMessage {}, {}",
-						self.message, e
-					))
-				})?;
+			encrypted_message = serde_json::from_str(
+				&self
+					.slate_message
+					.clone()
+					.ok_or(Error::PaymentProof("slate_message is empty".into()))?,
+			)
+			.map_err(|e| {
+				Error::TxProofVerify(format!(
+					"Fail to convert Json to EncryptedMessage {}, {}",
+					self.message, e
+				))
+			})?;
 		} else {
 			encrypted_message = serde_json::from_str(&self.message.clone()).map_err(|e| {
 				Error::TxProofVerify(format!(
@@ -203,13 +211,13 @@ impl TxProof {
 		// TODO: at some point, make this check required
 		let destination = &encrypted_message.destination; //sender address
 
-		if expected_destination.is_some()
-			&& destination.public_key != expected_destination.clone().unwrap().public_key
-		{
-			return Err(Error::TxProofVerifyDestination(
-				expected_destination.unwrap().public_key.clone(),
-				destination.public_key.clone(),
-			));
+		if let Some(expected_destination) = expected_destination {
+			if destination.public_key != expected_destination.public_key {
+				return Err(Error::TxProofVerifyDestination(
+					expected_destination.public_key.clone(),
+					destination.public_key.clone(),
+				));
+			}
 		}
 
 		let mut decrypted_message = encrypted_message
@@ -373,7 +381,7 @@ impl TxProof {
 					})?;
 					let key = encrypted_message
 						.key(
-							&expected_destination.public_key(context_id).unwrap(),
+							&expected_destination.public_key(context_id)?,
 							secret_key,
 							secp,
 						)
@@ -456,7 +464,7 @@ impl TxProof {
 					})?;
 					let key = encrypted_message
 						.key(
-							&expected_destination.public_key(context_id).unwrap(),
+							&expected_destination.public_key(context_id)?,
 							secret_key,
 							secp,
 						)
@@ -497,8 +505,13 @@ impl TxProof {
 	/// Init proff files storage
 	pub fn init_proof_backend(data_file_dir: &str) -> Result<(), Error> {
 		let stored_tx_proof_path = path::Path::new(data_file_dir).join(TX_PROOF_SAVE_DIR);
-		fs::create_dir_all(&stored_tx_proof_path)
-			.expect("Couldn't create wallet backend tx proof storage directory!");
+		fs::create_dir_all(&stored_tx_proof_path).map_err(|e| {
+			Error::Backend(format!(
+				"Couldn't create wallet backend tx proof storage directory {}, {}",
+				stored_tx_proof_path.to_string_lossy(),
+				e
+			))
+		})?;
 		Ok(())
 	}
 
@@ -669,7 +682,9 @@ pub fn verify_tx_proof(
 						let pk = tx_proof
 							.message
 							.get(prefix.len()..(tx_proof.message.len() - postfix.len()))
-							.expect("substring must exist");
+							.ok_or(Error::GenericError(
+								"Tx proof message, unable to extract PK".into(),
+							))?;
 						if PublicKey::from_base58_check(pk, version_bytes(context_id)).is_err() {
 							return Err(Error::TxProofVerify("Invalid message".into()));
 						}
@@ -767,7 +782,7 @@ pub fn verify_tx_proof(
 		tx_proof.address.clone(), // reciever address
 		tx_proof.amount,
 		outputs,
-		kernel.unwrap(),
+		kernel.ok_or(Error::PaymentProof("Unable to extract kernel".into()))?,
 		slate_str,
 	))
 }

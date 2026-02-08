@@ -27,6 +27,7 @@ use std::path::Path;
 
 use crate::config::WalletConfig;
 use crate::error::Error;
+#[cfg(feature = "swaps")]
 use crate::libwallet::swap::message::Message;
 use crate::libwallet::Slate;
 use crate::tor::config::complete_tor_address;
@@ -113,6 +114,7 @@ pub trait SlateGetter {
 }
 
 /// Swap Message Sender
+#[cfg(feature = "swaps")]
 pub trait SwapMessageSender {
 	/// Send a swap message. Return true is message delivery acknowledge can be set (message was delivered and procesed)
 	fn send_swap_message(&self, swap_message: &Message, secp: &Secp256k1) -> Result<bool, Error>;
@@ -221,6 +223,7 @@ pub fn create_sender(
 }
 
 /// create a Swap Message Sender
+#[cfg(feature = "swaps")]
 pub fn create_swap_message_sender(
 	context_id: u32,
 	method: &str,

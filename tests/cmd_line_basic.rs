@@ -69,7 +69,7 @@ fn command_line_test_impl(test_dir: &str) -> Result<(), mwc_wallet_controller::E
 	// add wallet to proxy
 	//let wallet1 = test_framework::create_wallet(&format!("{}/wallet1", test_dir), client1.clone());
 	let config1 = initial_setup_wallet(test_dir, "wallet1");
-	let wallet_config1 = config1.clone().members.unwrap().wallet;
+	let wallet_config1 = config1.clone().members.wallet;
 	let (wallet1, mask1_i) = instantiate_wallet(
 		wallet_config1.clone(),
 		client1.clone(),
@@ -89,7 +89,7 @@ fn command_line_test_impl(test_dir: &str) -> Result<(), mwc_wallet_controller::E
 	execute_command(&app, test_dir, "wallet2", &client2, arg_vec.clone())?;
 
 	let config2 = initial_setup_wallet(test_dir, "wallet2");
-	let wallet_config2 = config2.clone().members.unwrap().wallet;
+	let wallet_config2 = config2.clone().members.wallet;
 	let (wallet2, mask2_i) = instantiate_wallet(
 		wallet_config2.clone(),
 		client2.clone(),
@@ -157,7 +157,7 @@ fn command_line_test_impl(test_dir: &str) -> Result<(), mwc_wallet_controller::E
 
 	// Mine a bit into wallet 1 so we have something to send
 	// (TODO: Be able to stop listeners so we can test this better)
-	let wallet_config1 = config1.clone().members.unwrap().wallet;
+	let wallet_config1 = config1.clone().members.wallet;
 	let (wallet1, mask1_i) =
 		instantiate_wallet(wallet_config1, client1.clone(), "password1", "default")?;
 	let mask1 = (&mask1_i).as_ref();
@@ -178,7 +178,10 @@ fn command_line_test_impl(test_dir: &str) -> Result<(), mwc_wallet_controller::E
 		mask1,
 		bh as usize,
 		false,
-		tx_pool.lock().expect("Mutex failure").deref_mut(),
+		tx_pool
+			.lock()
+			.unwrap_or_else(|e| e.into_inner())
+			.deref_mut(),
 	);
 
 	let very_long_message = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef\
@@ -252,11 +255,14 @@ fn command_line_test_impl(test_dir: &str) -> Result<(), mwc_wallet_controller::E
 		mask1,
 		1,
 		false,
-		tx_pool.lock().expect("Mutex failure").deref_mut(),
+		tx_pool
+			.lock()
+			.unwrap_or_else(|e| e.into_inner())
+			.deref_mut(),
 	);
 	bh += 1;
 
-	let wallet_config1 = config1.clone().members.unwrap().wallet;
+	let wallet_config1 = config1.clone().members.wallet;
 	let (wallet1, mask1_i) = instantiate_wallet(
 		wallet_config1.clone(),
 		client1.clone(),
@@ -288,7 +294,10 @@ fn command_line_test_impl(test_dir: &str) -> Result<(), mwc_wallet_controller::E
 		mask1,
 		10,
 		false,
-		tx_pool.lock().expect("Mutex failure").deref_mut(),
+		tx_pool
+			.lock()
+			.unwrap_or_else(|e| e.into_inner())
+			.deref_mut(),
 	);
 	bh += 10;
 
@@ -300,7 +309,7 @@ fn command_line_test_impl(test_dir: &str) -> Result<(), mwc_wallet_controller::E
 	execute_command(&app, test_dir, "wallet2", &client1, arg_vec)?;
 
 	// check results in wallet 2
-	let wallet_config2 = config2.clone().members.unwrap().wallet;
+	let wallet_config2 = config2.clone().members.wallet;
 	let (wallet2, mask2_i) = instantiate_wallet(
 		wallet_config2.clone(),
 		client2.clone(),
@@ -397,7 +406,10 @@ fn command_line_test_impl(test_dir: &str) -> Result<(), mwc_wallet_controller::E
 		mask1,
 		10,
 		false,
-		tx_pool.lock().expect("Mutex failure").deref_mut(),
+		tx_pool
+			.lock()
+			.unwrap_or_else(|e| e.into_inner())
+			.deref_mut(),
 	);
 	bh += 10;
 
@@ -541,11 +553,14 @@ fn command_line_test_impl(test_dir: &str) -> Result<(), mwc_wallet_controller::E
 		mask1,
 		1,
 		false,
-		tx_pool.lock().expect("Mutex failure").deref_mut(),
+		tx_pool
+			.lock()
+			.unwrap_or_else(|e| e.into_inner())
+			.deref_mut(),
 	);
 
 	// Check our transaction log, should have bh entries
-	let wallet_config1 = config1.clone().members.unwrap().wallet;
+	let wallet_config1 = config1.clone().members.wallet;
 	let (wallet1, mask1_i) = instantiate_wallet(
 		wallet_config1.clone(),
 		client1.clone(),
@@ -594,11 +609,14 @@ fn command_line_test_impl(test_dir: &str) -> Result<(), mwc_wallet_controller::E
 		mask1,
 		1,
 		false,
-		tx_pool.lock().expect("Mutex failure").deref_mut(),
+		tx_pool
+			.lock()
+			.unwrap_or_else(|e| e.into_inner())
+			.deref_mut(),
 	);
 
 	// Check our transaction log, should have bh entries + 1 for self-seld
-	let wallet_config1 = config1.clone().members.unwrap().wallet;
+	let wallet_config1 = config1.clone().members.wallet;
 	let (wallet1, mask1_i) = instantiate_wallet(
 		wallet_config1.clone(),
 		client1.clone(),
@@ -772,7 +790,10 @@ fn command_line_test_impl(test_dir: &str) -> Result<(), mwc_wallet_controller::E
 		mask1,
 		5,
 		false,
-		tx_pool.lock().expect("Mutex failure").deref_mut(),
+		tx_pool
+			.lock()
+			.unwrap_or_else(|e| e.into_inner())
+			.deref_mut(),
 	);
 	bh += 5;
 	let _ = bh;
@@ -845,7 +866,10 @@ fn command_line_test_impl(test_dir: &str) -> Result<(), mwc_wallet_controller::E
 		mask1,
 		10,
 		false,
-		tx_pool.lock().expect("Mutex failure").deref_mut(),
+		tx_pool
+			.lock()
+			.unwrap_or_else(|e| e.into_inner())
+			.deref_mut(),
 	);
 
 	// Now let's check a balance at wallet2
@@ -912,7 +936,10 @@ fn command_line_test_impl(test_dir: &str) -> Result<(), mwc_wallet_controller::E
 		mask1,
 		10,
 		false,
-		tx_pool.lock().expect("Mutex failure").deref_mut(),
+		tx_pool
+			.lock()
+			.unwrap_or_else(|e| e.into_inner())
+			.deref_mut(),
 	);
 
 	// Check wallet 1 is now empty, except for immature coinbase outputs from recent mining),

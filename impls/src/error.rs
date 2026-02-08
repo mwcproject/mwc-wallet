@@ -126,8 +126,8 @@ pub enum Error {
 	AddressGenericError(String),
 
 	/// Get MQS invalid response
-	#[error("{0} Sender returned invalid response.")]
-	MqsInvalidRespose(String),
+	#[error("{0} Sender returned invalid response. {1}")]
+	MqsInvalidRespose(String, String),
 
 	/// Other
 	#[error("Generic error: {0}")]

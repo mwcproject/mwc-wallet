@@ -17,7 +17,7 @@
 macro_rules! wallet_lock {
 	($wallet_inst: expr, $wallet: ident) => {
 		let inst = $wallet_inst.clone();
-		let mut w_lock = inst.lock().expect("Mutex failure");
+		let mut w_lock = inst.lock().unwrap_or_else(|e| e.into_inner());
 		let w_provider = w_lock
 			.lc_provider()
 			.map_err(|e| format!("Wallet is not initialized, {}", e))?;
