@@ -32,26 +32,26 @@ thiserror = "1"
 # mwc_node_lib = { git = "https://github.com/mwcproject/mwc-node", version="5.3.10", tag = "5.3.10" }
 
 # For bleeding edge
-#mwc_core = { git = "https://github.com/mwcproject/mwc-node", branch = "master" }
-#mwc_keychain = { git = "https://github.com/mwcproject/mwc-node", branch = "master" }
-#mwc_chain = { git = "https://github.com/mwcproject/mwc-node", branch = "master" }
-#mwc_util = { git = "https://github.com/mwcproject/mwc-node", branch = "master" }
-#mwc_api = { git = "https://github.com/mwcproject/mwc-node", branch = "master" }
-#mwc_store = { git = "https://github.com/mwcproject/mwc-node", branch = "master" }
-#mwc_p2p = { git = "https://github.com/mwcproject/mwc-node", branch = "master" }
-#mwc_node_workflow = { git = "https://github.com/mwcproject/mwc-node", branch = "master" }
-#mwc_node_lib = { git = "https://github.com/mwcproject/mwc-node", branch = "master" }
+mwc_core = { git = "https://github.com/mwcproject/mwc-node", branch = "master" }
+mwc_keychain = { git = "https://github.com/mwcproject/mwc-node", branch = "master" }
+mwc_chain = { git = "https://github.com/mwcproject/mwc-node", branch = "master" }
+mwc_util = { git = "https://github.com/mwcproject/mwc-node", branch = "master" }
+mwc_api = { git = "https://github.com/mwcproject/mwc-node", branch = "master" }
+mwc_store = { git = "https://github.com/mwcproject/mwc-node", branch = "master" }
+mwc_p2p = { git = "https://github.com/mwcproject/mwc-node", branch = "master" }
+mwc_node_workflow = { git = "https://github.com/mwcproject/mwc-node", branch = "master" }
+mwc_node_lib = { git = "https://github.com/mwcproject/mwc-node", branch = "master" }
 
 # For local testing
-mwc_core = { path = "../../mwc-node/core"}
-mwc_keychain = { path = "../../mwc-node/keychain"}
-mwc_chain = { path = "../../mwc-node/chain"}
-mwc_util = { path = "../../mwc-node/util"}
-mwc_api = { path = "../../mwc-node/api"}
-mwc_store = { path = "../../mwc-node/store"}
-mwc_p2p = { path = "../../mwc-node/p2p"}
-mwc_node_workflow = { path = "../../mwc-node/node_workflow"}
-mwc_node_lib = { path = "../../mwc-node/mwc_node_lib"}
+#mwc_core = { path = "../../mwc-node/core"}
+#mwc_keychain = { path = "../../mwc-node/keychain"}
+#mwc_chain = { path = "../../mwc-node/chain"}
+#mwc_util = { path = "../../mwc-node/util"}
+#mwc_api = { path = "../../mwc-node/api"}
+#mwc_store = { path = "../../mwc-node/store"}
+#mwc_p2p = { path = "../../mwc-node/p2p"}
+#mwc_node_workflow = { path = "../../mwc-node/node_workflow"}
+#mwc_node_lib = { path = "../../mwc-node/mwc_node_lib"}
 
 [dev-dependencies]
 pretty_assertions = "0.6"

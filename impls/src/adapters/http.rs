@@ -19,10 +19,10 @@ use crate::error::Error;
 use crate::libwallet::slate_versions::{SlateVersion, VersionedSlate};
 #[cfg(feature = "swaps")]
 use crate::libwallet::swap::message::Message;
-#[cfg(feature = "swaps")]
-use crate::SwapMessageSender;
 use crate::libwallet::Slate;
 use crate::SlateSender;
+#[cfg(feature = "swaps")]
+use crate::SwapMessageSender;
 use ed25519_dalek::{PublicKey as DalekPublicKey, SecretKey as DalekSecretKey};
 use mwc_wallet_libwallet::address;
 use mwc_wallet_libwallet::proof::proofaddress::ProvableAddress;
@@ -169,7 +169,7 @@ impl HttpDataSender {
 		if tor_config.is_tor_internal_arti() {
 			if !arti::is_arti_started() {
 				// Starting tor service. Start once and never stop after. We have a single tor core, let's keep it running
-	upgraded			arti::start_arti(&tor_config, base_dir, false)
+				arti::start_arti(&tor_config, base_dir, false, false)
 					.map_err(|e| Error::Arti(format!("Unable to start Tor (Arti), {}", e)))?;
 				need_stop_arti = true;
 			}

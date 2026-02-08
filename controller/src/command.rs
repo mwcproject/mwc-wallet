@@ -478,6 +478,7 @@ where
 						tor_config,
 						std::path::Path::new(&config.data_file_dir),
 						true,
+						false,
 					)
 					.map_err(|e| {
 						error!("Unable to start TOR core, {}", e);
