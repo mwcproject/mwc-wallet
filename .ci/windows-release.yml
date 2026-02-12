@@ -12,6 +12,7 @@ steps:
       LLVM_CONFIG_PATH: C:\Program Files\LLVM\bin\llvm-config
       ROARING_ARCH: x86-64-v2
     displayName: Build Release
+    condition:  and(succeeded(), eq(variables['CI_JOB'], 'release' ))
   - script: |
       git clone --depth 1 https://gitlab.torproject.org/tpo/anti-censorship/pluggable-transports/webtunnel
       cd webtunnel\main\client
