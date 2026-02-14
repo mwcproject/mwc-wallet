@@ -665,9 +665,9 @@ checksum = "bef38d45163c2f1dde094a7dfd33ccf595c92905c8f8f4fdc18d06fb1037718a"
 
 [[package]]
 name = "bitflags"
-version = "2.10.0"
+version = "2.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "812e12b5285cc515a9c72a5c1d3b6d46a19dac5acfef5265968c166106e31dd3"
+checksum = "843867be96c8daad0d758b57df9392b6d8d271134fce549de6ce169ff98a92af"
 
 [[package]]
 name = "bitstream-io"
@@ -868,9 +868,9 @@ checksum = "37b2a672a2cb129a2e41c10b1224bb368f9f37a2b16b612598138befd7b37eb5"
 
 [[package]]
 name = "cc"
-version = "1.2.55"
+version = "1.2.56"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "47b26a0954ae34af09b50f0de26458fa95369a0d478d8236d3f93082b219bd29"
+checksum = "aebf35691d1bfb0ac386a69bac2fde4dd276fb618cf8bf4f5318fe285e821bb2"
 dependencies = [
  "find-msvc-tools",
  "jobserver",
@@ -2572,7 +2572,7 @@ version = "0.20.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7b88256088d75a56f8ecfa070513a775dd9107f6530ef14919dac831af9cfe2b"
 dependencies = [
- "bitflags 2.10.0",
+ "bitflags 2.11.0",
  "libc",
  "libgit2-sys",
  "log",
@@ -3145,7 +3145,7 @@ version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f37dccff2791ab604f9babef0ba14fbe0be30bd368dc541e2b08d07c8aa908f3"
 dependencies = [
- "bitflags 2.10.0",
+ "bitflags 2.11.0",
  "inotify-sys",
  "libc",
 ]
@@ -3295,9 +3295,9 @@ dependencies = [
 
 [[package]]
 name = "keccak"
-version = "0.1.5"
+version = "0.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ecc2af9a1119c51f12a14607e783cb977bde58bc069ff0c3da1095e635d70654"
+checksum = "cb26cec98cce3a3d96cbb7bced3c4b16e3d13f27ec56dbd62cbc8f39cfb9d653"
 dependencies = [
  "cpufeatures",
 ]
@@ -3354,9 +3354,9 @@ checksum = "2c4a545a15244c7d945065b5d392b2d2d7f21526fba56ce51467b06ed445e8f7"
 
 [[package]]
 name = "libc"
-version = "0.2.181"
+version = "0.2.182"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "459427e2af2b9c839b132acb702a1c654d95e10f8c326bfc2ad11310e458b1c5"
+checksum = "6800badb6cb2082ffd7b6a67e6125bb39f18782f793520caee8cb8846be06112"
 
 [[package]]
 name = "libgit2-sys"
@@ -3392,7 +3392,7 @@ version = "0.1.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3d0b95e02c851351f877147b7deea7b1afb1df71b63aa5f8270716e0c5720616"
 dependencies = [
- "bitflags 2.10.0",
+ "bitflags 2.11.0",
  "libc",
  "redox_syscall 0.7.1",
 ]
@@ -3652,7 +3652,7 @@ version = "0.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2c624fa1b7aab6bd2aff6e9b18565cc0363b6d45cbcd7465c9ed5e3740ebf097"
 dependencies = [
- "bitflags 2.10.0",
+ "bitflags 2.11.0",
  "libc",
  "nix 0.26.4",
  "smallstr",
@@ -3665,7 +3665,7 @@ dependencies = [
 [[package]]
 name = "mwc_api"
 version = "6.0.0"
-source = "git+https://github.com/mwcproject/mwc-node?branch=master#638dc96cee882c7f2f769e3e2b2072ac56b9422a"
+source = "git+https://github.com/mwcproject/mwc-node?branch=master#d8cff919b4d1655043e2c3d8540c24fd720cbe1a"
 dependencies = [
  "async-stream",
  "chrono",
@@ -3698,7 +3698,7 @@ dependencies = [
 [[package]]
 name = "mwc_chain"
 version = "6.0.0"
-source = "git+https://github.com/mwcproject/mwc-node?branch=master#638dc96cee882c7f2f769e3e2b2072ac56b9422a"
+source = "git+https://github.com/mwcproject/mwc-node?branch=master#d8cff919b4d1655043e2c3d8540c24fd720cbe1a"
 dependencies = [
  "bit-vec",
  "bitflags 1.3.2",
@@ -3723,7 +3723,7 @@ dependencies = [
 [[package]]
 name = "mwc_core"
 version = "6.0.0"
-source = "git+https://github.com/mwcproject/mwc-node?branch=master#638dc96cee882c7f2f769e3e2b2072ac56b9422a"
+source = "git+https://github.com/mwcproject/mwc-node?branch=master#d8cff919b4d1655043e2c3d8540c24fd720cbe1a"
 dependencies = [
  "blake2-rfc",
  "byteorder",
@@ -3751,7 +3751,7 @@ dependencies = [
 [[package]]
 name = "mwc_keychain"
 version = "6.0.0"
-source = "git+https://github.com/mwcproject/mwc-node?branch=master#638dc96cee882c7f2f769e3e2b2072ac56b9422a"
+source = "git+https://github.com/mwcproject/mwc-node?branch=master#d8cff919b4d1655043e2c3d8540c24fd720cbe1a"
 dependencies = [
  "blake2-rfc",
  "byteorder",
@@ -3774,7 +3774,7 @@ dependencies = [
 [[package]]
 name = "mwc_node_lib"
 version = "6.0.0"
-source = "git+https://github.com/mwcproject/mwc-node?branch=master#638dc96cee882c7f2f769e3e2b2072ac56b9422a"
+source = "git+https://github.com/mwcproject/mwc-node?branch=master#d8cff919b4d1655043e2c3d8540c24fd720cbe1a"
 dependencies = [
  "futures 0.3.31",
  "hyper 0.14.32",
@@ -3800,7 +3800,7 @@ dependencies = [
 [[package]]
 name = "mwc_node_workflow"
 version = "6.0.0"
-source = "git+https://github.com/mwcproject/mwc-node?branch=master#638dc96cee882c7f2f769e3e2b2072ac56b9422a"
+source = "git+https://github.com/mwcproject/mwc-node?branch=master#d8cff919b4d1655043e2c3d8540c24fd720cbe1a"
 dependencies = [
  "futures 0.3.31",
  "hyper 0.14.32",
@@ -3822,7 +3822,7 @@ dependencies = [
 [[package]]
 name = "mwc_p2p"
 version = "6.0.0"
-source = "git+https://github.com/mwcproject/mwc-node?branch=master#638dc96cee882c7f2f769e3e2b2072ac56b9422a"
+source = "git+https://github.com/mwcproject/mwc-node?branch=master#d8cff919b4d1655043e2c3d8540c24fd720cbe1a"
 dependencies = [
  "arti-client",
  "async-std",
@@ -3864,7 +3864,7 @@ dependencies = [
 [[package]]
 name = "mwc_pool"
 version = "6.0.0"
-source = "git+https://github.com/mwcproject/mwc-node?branch=master#638dc96cee882c7f2f769e3e2b2072ac56b9422a"
+source = "git+https://github.com/mwcproject/mwc-node?branch=master#d8cff919b4d1655043e2c3d8540c24fd720cbe1a"
 dependencies = [
  "blake2-rfc",
  "chrono",
@@ -3896,7 +3896,7 @@ dependencies = [
 [[package]]
 name = "mwc_servers"
 version = "6.0.0"
-source = "git+https://github.com/mwcproject/mwc-node?branch=master#638dc96cee882c7f2f769e3e2b2072ac56b9422a"
+source = "git+https://github.com/mwcproject/mwc-node?branch=master#d8cff919b4d1655043e2c3d8540c24fd720cbe1a"
 dependencies = [
  "async-stream",
  "atomic_float",
@@ -3925,7 +3925,7 @@ dependencies = [
 [[package]]
 name = "mwc_store"
 version = "6.0.0"
-source = "git+https://github.com/mwcproject/mwc-node?branch=master#638dc96cee882c7f2f769e3e2b2072ac56b9422a"
+source = "git+https://github.com/mwcproject/mwc-node?branch=master#d8cff919b4d1655043e2c3d8540c24fd720cbe1a"
 dependencies = [
  "byteorder",
  "croaring",
@@ -3944,7 +3944,7 @@ dependencies = [
 [[package]]
 name = "mwc_util"
 version = "6.0.0"
-source = "git+https://github.com/mwcproject/mwc-node?branch=master#638dc96cee882c7f2f769e3e2b2072ac56b9422a"
+source = "git+https://github.com/mwcproject/mwc-node?branch=master#d8cff919b4d1655043e2c3d8540c24fd720cbe1a"
 dependencies = [
  "anyhow",
  "backtrace",
@@ -4278,7 +4278,7 @@ version = "8.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4d3d07927151ff8575b7087f245456e549fea62edf0ec4e565a5ee50c8402bc3"
 dependencies = [
- "bitflags 2.10.0",
+ "bitflags 2.11.0",
  "inotify",
  "kqueue",
  "libc",
@@ -4295,7 +4295,7 @@ version = "2.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "42b8cfee0e339a0337359f3c88165702ac6e600dc01c0cc9579a92d62b08477a"
 dependencies = [
- "bitflags 2.10.0",
+ "bitflags 2.11.0",
 ]
 
 [[package]]
@@ -4472,7 +4472,7 @@ version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1c10c2894a6fed806ade6027bcd50662746363a9589d3ec9d9bef30a4e4bc166"
 dependencies = [
- "bitflags 2.10.0",
+ "bitflags 2.11.0",
 ]
 
 [[package]]
@@ -5488,7 +5488,7 @@ version = "0.5.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ed2bf2547551a7053d6fdfafda3f938979645c44812fbfcda098faae3f1a362d"
 dependencies = [
- "bitflags 2.10.0",
+ "bitflags 2.11.0",
 ]
 
 [[package]]
@@ -5497,7 +5497,7 @@ version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "35985aa610addc02e24fc232012c86fd11f14111180f902b67e2d5331f8ebf2b"
 dependencies = [
- "bitflags 2.10.0",
+ "bitflags 2.11.0",
 ]
 
 [[package]]
@@ -5742,7 +5742,7 @@ version = "0.38.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f1c93dd1c9683b438c392c492109cb702b8090b2bfc8fed6f6e4eb4523f17af3"
 dependencies = [
- "bitflags 2.10.0",
+ "bitflags 2.11.0",
  "fallible-iterator",
  "fallible-streaming-iterator",
  "hashlink",
@@ -5800,7 +5800,7 @@ version = "1.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "146c9e247ccc180c1f61615433868c99f3de3ae256a30a43b49f67c2d9171f34"
 dependencies = [
- "bitflags 2.10.0",
+ "bitflags 2.11.0",
  "errno",
  "libc",
  "linux-raw-sys",
@@ -5856,7 +5856,7 @@ dependencies = [
  "openssl-probe 0.2.1",
  "rustls-pki-types",
  "schannel",
- "security-framework 3.5.1",
+ "security-framework 3.6.0",
 ]
 
 [[package]]
@@ -5893,7 +5893,7 @@ dependencies = [
  "rustls-native-certs 0.8.3",
  "rustls-platform-verifier-android",
  "rustls-webpki",
- "security-framework 3.5.1",
+ "security-framework 3.6.0",
  "security-framework-sys",
  "webpki-root-certs",
  "windows-sys 0.61.2",
@@ -6115,7 +6115,7 @@ version = "2.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "897b2245f0b511c87893af39b033e5ca9cce68824c4d7e7630b5a1d339658d02"
 dependencies = [
- "bitflags 2.10.0",
+ "bitflags 2.11.0",
  "core-foundation 0.9.4",
  "core-foundation-sys",
  "libc",
@@ -6124,11 +6124,11 @@ dependencies = [
 
 [[package]]
 name = "security-framework"
-version = "3.5.1"
+version = "3.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b3297343eaf830f66ede390ea39da1d462b6b0c1b000f420d0a83f898bbbe6ef"
+checksum = "d17b898a6d6948c3a8ee4372c17cb384f90d2e6e912ef00895b14fd7ab54ec38"
 dependencies = [
- "bitflags 2.10.0",
+ "bitflags 2.11.0",
  "core-foundation 0.10.1",
  "core-foundation-sys",
  "libc",
@@ -6137,9 +6137,9 @@ dependencies = [
 
 [[package]]
 name = "security-framework-sys"
-version = "2.15.0"
+version = "2.16.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cc1f0cbffaac4852523ce30d8bd3c5cdc873501d96ff467ca09b6767bb8cd5c0"
+checksum = "321c8673b092a9a42605034a9879d73cb79101ed5fd117bc9a597b89b4e9e61a"
 dependencies = [
  "core-foundation-sys",
  "libc",
@@ -6850,7 +6850,7 @@ version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a13f3d0daba03132c0aa9767f98351b3488edc2c100cda2d2ec2b04f3d8d3c8b"
 dependencies = [
- "bitflags 2.10.0",
+ "bitflags 2.11.0",
  "core-foundation 0.9.4",
  "system-configuration-sys",
 ]
@@ -7310,7 +7310,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "80f782f6467bf1791892cbd3cf7a1c367c60635c4bff911e539ae74c52bc8b18"
 dependencies = [
  "amplify",
- "bitflags 2.10.0",
+ "bitflags 2.11.0",
  "bytes 1.11.1",
  "caret",
  "derive-deftly",
@@ -8013,7 +8013,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "66c1068f204fbb53f67ccbf010549cd118e333eb50dd4843ad8f23c32a1c60c7"
 dependencies = [
  "async-trait",
- "bitflags 2.10.0",
+ "bitflags 2.11.0",
  "derive_more",
  "digest 0.10.7",
  "futures 0.3.31",
@@ -8370,7 +8370,7 @@ version = "0.6.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d4e6559d53cc268e5031cd8429d05415bc4cb4aefc4aa5d6cc35fbf5b924a1f8"
 dependencies = [
- "bitflags 2.10.0",
+ "bitflags 2.11.0",
  "bytes 1.11.1",
  "futures-util",
  "http 1.4.0",
@@ -8874,7 +8874,7 @@ version = "0.244.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "47b807c72e1bac69382b3a6fb3dbe8ea4c0ed87ff5629b8685ae6b9a611028fe"
 dependencies = [
- "bitflags 2.10.0",
+ "bitflags 2.11.0",
  "hashbrown 0.15.5",
  "indexmap 2.13.0",
  "semver 1.0.27",
@@ -9526,7 +9526,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9d66ea20e9553b30172b5e831994e35fbde2d165325bec84fc43dbf6f4eb9cb2"
 dependencies = [
  "anyhow",
- "bitflags 2.10.0",
+ "bitflags 2.11.0",
  "indexmap 2.13.0",
  "log",
  "serde",
