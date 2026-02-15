@@ -932,8 +932,9 @@ impl MWCMQSBroker {
 
 				match resp_result {
 					Err(e) => {
-						let err_message = format!("{}", e);
-						if !err_message.contains("source: TimedOut") {
+						let connect_err = e.is_connect();
+						let timeout_err = e.is_timeout();
+						if connect_err || !timeout_err {
 							// This was not a timeout. Sleep first.
 							if self.healthy.load(Ordering::Relaxed) {
 								is_in_warning = true;
