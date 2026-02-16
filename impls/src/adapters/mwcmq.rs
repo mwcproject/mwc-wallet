@@ -510,7 +510,7 @@ impl MWCMQSBroker {
 		Self {
 			context_id,
 			running: Arc::new(AtomicBool::new(false)),
-			healthy: Arc::new(AtomicBool::new(true)),
+			healthy: Arc::new(AtomicBool::new(false)),
 			mwcmqs_domain,
 			mwcmqs_port,
 			print_to_log,
@@ -811,23 +811,32 @@ impl MWCMQSBroker {
 		let nanoid = nanoid::simple();
 		self.running.store(true, Ordering::SeqCst);
 
-		let mut resp_str = "".to_string();
-		let secret_key = secret_key.clone();
-		let cloned_address = address.clone();
-		let cloned_running = self.running.clone();
-		let mut count = 0;
-		let mut isnginxerror = false;
-		let mut delcount = 0;
-		let mut is_in_warning = false;
+		loop {
+			self.healthy.store(false, Ordering::Relaxed);
+			if !self.running.load(Ordering::SeqCst) {
+				break;
+			}
 
-		// get time from server
-		let mut time_now = "";
-		let mut is_error = false;
-		let secs = 30;
-		let cl = reqwest::blocking::Client::builder()
-			.timeout(Duration::from_secs(secs))
-			.build();
-		if let Ok(client) = cl {
+			let secret_key = secret_key.clone();
+			let cloned_address = address.clone();
+			let mut count = 0;
+			let mut isnginxerror = false;
+			let mut delcount = 0;
+			let mut is_in_warning = false;
+
+			let secs = 20;
+			let cl = reqwest::blocking::Client::builder()
+				.timeout(Duration::from_secs(secs))
+				.build();
+			let client = match cl {
+				Ok(c) => c,
+				Err(_) => {
+					self.print_error([].to_vec(), "couldn't instantiate client", -101);
+					thread::sleep(Duration::from_millis(1000));
+					continue;
+				}
+			};
+
 			let resp_result = client
 				.get(&format!(
 					"https://{}:{}/timenow?address={}",
@@ -837,91 +846,70 @@ impl MWCMQSBroker {
 				))
 				.send();
 
-			match resp_result {
+			// get time from server
+			let time_now = match resp_result {
 				Ok(mut resp) => {
+					let mut resp_str = "".to_string();
 					let read_resp = resp.read_to_string(&mut resp_str);
 					if !read_resp.is_ok() {
-						is_error = true;
+						self.print_error([].to_vec(), "couldn't contact mwcmqs server", -10);
+						thread::sleep(Duration::from_millis(1000));
+						continue;
 					} else {
-						time_now = &resp_str;
+						resp_str
 					}
 				}
-				Err(_) => is_error = true,
+				Err(_) => {
+					self.print_error([].to_vec(), "couldn't contact mwcmqs server", -10);
+					thread::sleep(Duration::from_millis(1000));
+					continue;
+				}
+			};
+
+			let mut time_now_signature = String::new();
+			if let Ok(time_now_sign) =
+				crypto::sign_challenge(&format!("{}", time_now), &secret_key, secp)
+			{
+				let time_now_sign = str::replace(&format!("{:?}", time_now_sign), "Signature(", "");
+				let time_now_sign = str::replace(&time_now_sign, ")", "");
+				time_now_signature = time_now_sign;
 			}
-		} else {
-			is_error = true;
-		}
 
-		let mut time_now_signature = String::new();
-		if let Ok(time_now_sign) =
-			crypto::sign_challenge(&format!("{}", time_now), &secret_key, secp)
-		{
-			let time_now_sign = str::replace(&format!("{:?}", time_now_sign), "Signature(", "");
-			let time_now_sign = str::replace(&time_now_sign, ")", "");
-			time_now_signature = time_now_sign;
-		}
+			if time_now_signature.is_empty() {
+				self.print_error([].to_vec(), "Unable to sign starting message", -11);
+				thread::sleep(Duration::from_millis(1000));
+				continue;
+			}
 
-		if time_now_signature.is_empty() {
-			is_error = true;
-		}
+			let mut url = String::from(&format!(
+				"https://{}:{}/listener?address={}&delTo={}&time_now={}&signature={}",
+				self.mwcmqs_domain,
+				self.mwcmqs_port,
+				str::replace(&cloned_address.get_stripped(), "@", "%40"),
+				"nil".to_string(),
+				time_now,
+				time_now_signature
+			));
 
-		let mut url = String::from(&format!(
-			"https://{}:{}/listener?address={}&delTo={}&time_now={}&signature={}",
-			self.mwcmqs_domain,
-			self.mwcmqs_port,
-			str::replace(&cloned_address.get_stripped(), "@", "%40"),
-			"nil".to_string(),
-			time_now,
-			time_now_signature
-		));
+			let first_url = String::from(&format!(
+				"https://{}:{}/listener?address={}&delTo={}&time_now={}&signature={}&first=true",
+				self.mwcmqs_domain,
+				self.mwcmqs_port,
+				str::replace(&cloned_address.get_stripped(), "@", "%40"),
+				"nil".to_string(),
+				time_now,
+				time_now_signature
+			));
 
-		let first_url = String::from(&format!(
-			"https://{}:{}/listener?address={}&delTo={}&time_now={}&signature={}&first=true",
-			self.mwcmqs_domain,
-			self.mwcmqs_port,
-			str::replace(&cloned_address.get_stripped(), "@", "%40"),
-			"nil".to_string(),
-			time_now,
-			time_now_signature
-		));
-
-		if is_error {
-			println!(
-				"ERROR: Failed to start mwcmqs subscriber. Error connecting to {}:{}",
-				self.mwcmqs_domain, self.mwcmqs_port
-			);
-		} else {
-			let mut is_error = false;
 			let mut loop_count = 0;
 			loop {
 				loop_count = loop_count + 1;
-				if is_error {
-					break;
-				}
-				let mut resp_str = "".to_string();
 				count = count + 1;
 				let cloned_cloned_address = cloned_address.clone();
 
-				if !cloned_running.load(Ordering::SeqCst) {
+				if !self.running.load(Ordering::SeqCst) {
 					break;
 				}
-
-				let secs = if !self.healthy.load(Ordering::Relaxed) {
-					15
-				} else {
-					120
-				};
-				let cl = reqwest::blocking::Client::builder()
-					.timeout(Duration::from_secs(secs))
-					.build();
-				let client = match cl {
-					Ok(c) => c,
-					Err(_) => {
-						self.print_error([].to_vec(), "couldn't instantiate client", -101);
-						is_error = true;
-						continue;
-					}
-				};
 
 				let mut first_response = true;
 				let resp_result = if loop_count == 1 {
@@ -990,6 +978,7 @@ impl MWCMQSBroker {
 							self.healthy.store(true, Ordering::Relaxed);
 						}
 
+						let mut resp_str = "".to_string();
 						let read_resp = resp.read_to_string(&mut resp_str);
 						if !read_resp.is_ok() {
 							// read error occured. Sleep and try again in 5 seconds
@@ -1029,7 +1018,7 @@ impl MWCMQSBroker {
 										));
 										ret.push(&params[1][index + 1..]);
 									} else if params[1] == "closenewlogin" {
-										if cloned_running.load(Ordering::SeqCst) {
+										if self.running.load(Ordering::SeqCst) {
 											self.do_log_error(format!(
 												"\nERROR: new login detected. mwcmqs listener will stop!"
 											));
@@ -1037,7 +1026,6 @@ impl MWCMQSBroker {
 										break; // stop listener
 									} else {
 										self.print_error([].to_vec(), "message id expected", -103);
-										is_error = true;
 										continue;
 									}
 								}
@@ -1081,7 +1069,7 @@ impl MWCMQSBroker {
 									continue;
 								} else {
 									if resp_str == "message: closenewlogin\n" {
-										if cloned_running.load(Ordering::SeqCst) {
+										if self.running.load(Ordering::SeqCst) {
 											self.do_log_error(format!(
 												"\nERROR: new login detected. mwcmqs listener will stop!",
 											));
@@ -1107,7 +1095,7 @@ impl MWCMQSBroker {
 							if msgvec[itt] == "message: closenewlogin\n"
 								|| msgvec[itt] == "closenewlogin"
 							{
-								if cloned_running.load(Ordering::SeqCst) {
+								if self.running.load(Ordering::SeqCst) {
 									println!(
 										"\nERROR: new login detected. mwcmqs listener will stop!",
 									);
@@ -1135,7 +1123,6 @@ impl MWCMQSBroker {
 								vec[1].split("&")
 							} else {
 								self.print_error(msgvec.clone(), "too many spaced messages", -1);
-								is_error = true;
 								continue;
 							};
 
@@ -1157,7 +1144,6 @@ impl MWCMQSBroker {
 									thread::sleep(second);
 								} else {
 									self.print_error(msgvec.clone(), "splitxveclen != 3", -2);
-									is_error = true;
 								}
 								continue;
 							} else if isnginxerror {
@@ -1171,7 +1157,6 @@ impl MWCMQSBroker {
 									let vec: Vec<&str> = splitxvec[i].split("=").collect();
 									if vec.len() <= 1 {
 										self.print_error(msgvec.clone(), "vec.len <= 1", -3);
-										is_error = true;
 										continue;
 									}
 									from = str::replace(
@@ -1187,7 +1172,6 @@ impl MWCMQSBroker {
 									let vec: Vec<&str> = splitxvec[i].split("=").collect();
 									if vec.len() <= 1 {
 										self.print_error(msgvec.clone(), "vec.len <= 1", -4);
-										is_error = true;
 										continue;
 									}
 									signature = vec[1].to_string().trim().to_string();
@@ -1208,7 +1192,6 @@ impl MWCMQSBroker {
 									let vec2: Vec<&str> = split2.collect();
 									if vec2.len() <= 1 {
 										self.print_error(msgvec.clone(), "vec2.len <= 1", -5);
-										is_error = true;
 										continue;
 									}
 									let r1 = str::replace(vec2[1], "%22", "\"");
@@ -1234,7 +1217,6 @@ impl MWCMQSBroker {
 												"error parsing from",
 												-12,
 											);
-											is_error = true;
 											continue;
 										}
 									};
@@ -1312,17 +1294,17 @@ impl MWCMQSBroker {
 					}
 				}
 			}
+			self.healthy.store(false, Ordering::Relaxed);
 		}
 
-		if !is_error {
-			self.do_log_info(format!(
-				"\nmwcmqs listener [{}] stopped. tid=[{}]",
-				address.get_stripped(),
-				nanoid
-			));
-		}
+		self.do_log_info(format!(
+			"\nmwcmqs listener [{}] stopped. tid=[{}]",
+			address.get_stripped(),
+			nanoid
+		));
 
-		cloned_running.store(false, Ordering::SeqCst);
+		self.healthy.store(false, Ordering::Relaxed);
+		self.running.store(false, Ordering::SeqCst);
 	}
 
 	fn stop(&self) {
