@@ -430,8 +430,11 @@ impl Subscriber for MWCMQSubscriber {
 		self.broker.stop();
 
 		if let Some(listener_thread) = listener_thread {
+			// For good bay  cancelling call low timeout make sense. If connectio os good
+			// That will pass. If connection is bad, we dont't want wait for a while, the brocker cycle will
+			// exit itsenf on average of 10 secoinds.
 			if let Ok(client) = reqwest::blocking::Client::builder()
-				.timeout(Duration::from_secs(60))
+				.timeout(Duration::from_secs(10))
 				.build()
 			{
 				let mut params = HashMap::new();
