@@ -421,50 +421,40 @@ impl Subscriber for MWCMQSubscriber {
 	}
 
 	fn stop(&mut self, call_reset_mwcmqs_brocker: bool) -> bool {
-		if self
+		let listener_thread = self
 			.subscribe_thread
 			.lock()
 			.unwrap_or_else(|e| e.into_inner())
-			.is_none()
-		{
-			return true; // allready stopped
-		}
+			.take();
 
-		if let Ok(client) = reqwest::blocking::Client::builder()
-			.timeout(Duration::from_secs(60))
-			.build()
-		{
-			let mut params = HashMap::new();
-			params.insert("mapmessage", "nil");
-			self.broker.stop();
-			let response = client
-				.post(&format!(
-					"https://{}:{}/sender?address={}",
-					self.broker.mwcmqs_domain,
-					self.broker.mwcmqs_port,
-					str::replace(&self.address.get_stripped(), "@", "%40")
-				))
-				.form(&params)
-				.send();
+		self.broker.stop();
 
-			let response_status = response.is_ok();
-			self.broker.stop();
-			let listener_thread = self
-				.subscribe_thread
-				.lock()
-				.unwrap_or_else(|e| e.into_inner())
-				.take();
-			if let Some(listener_thread) = listener_thread {
-				let _ = listener_thread.join();
+		if let Some(listener_thread) = listener_thread {
+			if let Ok(client) = reqwest::blocking::Client::builder()
+				.timeout(Duration::from_secs(60))
+				.build()
+			{
+				let mut params = HashMap::new();
+				params.insert("mapmessage", "nil");
+				let _response = client
+					.post(&format!(
+						"https://{}:{}/sender?address={}",
+						self.broker.mwcmqs_domain,
+						self.broker.mwcmqs_port,
+						str::replace(&self.address.get_stripped(), "@", "%40")
+					))
+					.form(&params)
+					.send();
+			} else {
+				error!("Unable to notify MQS server about stopping");
 			}
+
+			let _ = listener_thread.join();
 			if call_reset_mwcmqs_brocker {
 				reset_mwcmqs_brocker(self.context_id);
 			}
-			response_status
-		} else {
-			error!("Unable to stop mwcmqs threads");
-			false
 		}
+		true
 	}
 
 	fn is_running(&self) -> bool {
