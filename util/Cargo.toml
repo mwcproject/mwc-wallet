@@ -21,26 +21,26 @@ tokio = { version = "1", features = ["full"] }
 thiserror = "1"
 
 # For Release
-#mwc_core = { git = "https://github.com/mwcproject/mwc-node", version="5.3.10", tag = "5.3.10" }
-#mwc_keychain = { git = "https://github.com/mwcproject/mwc-node", version="5.3.10", tag = "5.3.10" }
-#mwc_chain = { git = "https://github.com/mwcproject/mwc-node", version="5.3.10", tag = "5.3.10" }
-#mwc_util = { git = "https://github.com/mwcproject/mwc-node", version="5.3.10", tag = "5.3.10" }
-#mwc_api = { git = "https://github.com/mwcproject/mwc-node", version="5.3.10", tag = "5.3.10" }
-#mwc_store = { git = "https://github.com/mwcproject/mwc-node", version="5.3.10", tag = "5.3.10" }
-#mwc_p2p = { git = "https://github.com/mwcproject/mwc-node", version="5.3.10", tag = "5.3.10" }
-#mwc_node_workflow = { git = "https://github.com/mwcproject/mwc-node", version="5.3.10", tag = "5.3.10" }
-# mwc_node_lib = { git = "https://github.com/mwcproject/mwc-node", version="5.3.10", tag = "5.3.10" }
+mwc_core = { git = "https://github.com/mwcproject/mwc-node", version="6.0.0", tag = "6.0.0" }
+mwc_keychain = { git = "https://github.com/mwcproject/mwc-node", version="6.0.0", tag = "6.0.0" }
+mwc_chain = { git = "https://github.com/mwcproject/mwc-node", version="6.0.0", tag = "6.0.0" }
+mwc_util = { git = "https://github.com/mwcproject/mwc-node", version="6.0.0", tag = "6.0.0" }
+mwc_api = { git = "https://github.com/mwcproject/mwc-node", version="6.0.0", tag = "6.0.0" }
+mwc_store = { git = "https://github.com/mwcproject/mwc-node", version="6.0.0", tag = "6.0.0" }
+mwc_p2p = { git = "https://github.com/mwcproject/mwc-node", version="6.0.0", tag = "6.0.0" }
+mwc_node_workflow = { git = "https://github.com/mwcproject/mwc-node", version="6.0.0", tag = "6.0.0" }
+mwc_node_lib = { git = "https://github.com/mwcproject/mwc-node", version="6.0.0", tag = "6.0.0" }
 
 # For bleeding edge
-mwc_core = { git = "https://github.com/mwcproject/mwc-node", branch = "master" }
-mwc_keychain = { git = "https://github.com/mwcproject/mwc-node", branch = "master" }
-mwc_chain = { git = "https://github.com/mwcproject/mwc-node", branch = "master" }
-mwc_util = { git = "https://github.com/mwcproject/mwc-node", branch = "master" }
-mwc_api = { git = "https://github.com/mwcproject/mwc-node", branch = "master" }
-mwc_store = { git = "https://github.com/mwcproject/mwc-node", branch = "master" }
-mwc_p2p = { git = "https://github.com/mwcproject/mwc-node", branch = "master" }
-mwc_node_workflow = { git = "https://github.com/mwcproject/mwc-node", branch = "master" }
-mwc_node_lib = { git = "https://github.com/mwcproject/mwc-node", branch = "master" }
+#mwc_core = { git = "https://github.com/mwcproject/mwc-node", branch = "master" }
+#mwc_keychain = { git = "https://github.com/mwcproject/mwc-node", branch = "master" }
+#mwc_chain = { git = "https://github.com/mwcproject/mwc-node", branch = "master" }
+#mwc_util = { git = "https://github.com/mwcproject/mwc-node", branch = "master" }
+#mwc_api = { git = "https://github.com/mwcproject/mwc-node", branch = "master" }
+#mwc_store = { git = "https://github.com/mwcproject/mwc-node", branch = "master" }
+#mwc_p2p = { git = "https://github.com/mwcproject/mwc-node", branch = "master" }
+#mwc_node_workflow = { git = "https://github.com/mwcproject/mwc-node", branch = "master" }
+#mwc_node_lib = { git = "https://github.com/mwcproject/mwc-node", branch = "master" }
 
 # For local testing
 #mwc_core = { path = "../../mwc-node/core"}
