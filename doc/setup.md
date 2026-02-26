@@ -4,18 +4,6 @@
 
 ## Building your own binary
 
-### Requirements
-1. All the [current requirements](https://github.com/mimblewimble/mwc/blob/master/doc/build.md#requirements) of Mwc.
-1. [OpenSSL](https://www.openssl.org).
-   * macOS with Homebrew:
-      ```
-      $ brew install openssl # you need to install version 1.1 of openssl for version 1.0.1 or newer of wallet713
-      ``` 
-   * Linux:
-      ```
-      $ sudo apt-get install openssl
-      ```
-
 ### Installation
 
 ```
@@ -55,3 +43,38 @@ Floonet: mwc713.floonet.mwc.mw mwc7132.floonet.mwc.mw mwc7133.floonet.mwc.mw mwc
 
 api_seed in the .api_seed file(same directory as mwc-wallet.toml file) will also be updated.
 
+## Build webtunnel client
+
+In order to launch Tor in restricted areas, mwc-wallet need webtunnelclient executable. Here is how you can build it.
+
+### Intall go.
+
+MacOS:
+```
+$ brew install go
+```
+
+Ubuntu:
+```
+$ sudo apt-get install -y golang
+```
+
+### Build webtunnelclient
+
+```
+$ clone https://gitlab.torproject.org/tpo/anti-censorship/pluggable-transports/webtunnel
+$ cd webtunnel/main/client
+$ go build
+$ mv client ../../webtunnelclient
+```
+
+webtunnelclient copy into the same directory where mwc-wallet executable is located. 
+
+## Build wallet library
+
+If you need integrate mwc-wallet and mwc-node into the  
+```
+$ cargo build --package mwc_wallet_lib --lib --release
+```
+
+Integration more integraiton details with some examples you can find in the `mwc_lib_specification.md`
