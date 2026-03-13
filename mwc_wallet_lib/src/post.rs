@@ -37,6 +37,7 @@ pub fn post(context_id: u32, input_path: String, fluff: Option<bool>) -> Result<
 			p.pop();
 			p.to_str().map(|s| s.to_string())
 		})
+		.ok()
 		.flatten()
 		.unwrap_or("~".to_string());
 
