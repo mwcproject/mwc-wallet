@@ -453,6 +453,7 @@ fn process_request(input: String) -> Result<Value, String> {
 				Arc::new(Mutex::new(None)),
 				None,
 				&tor_config,
+				false, // listen_on_socket_with_tor make sense for a mining pool wallet only.
 				&None,
 			)
 			.map_err(|e| format!("Unable to start Tor listener, {}", e))?;

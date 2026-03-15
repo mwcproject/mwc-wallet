@@ -183,13 +183,24 @@ pub fn set_foreign_api_server(context_id: u32, api_server: Option<Arc<ForeignApi
 	}
 }
 
-pub fn take_foreign_api_listener_thread(context_id: u32) -> Option<JoinHandle<()>> {
+pub fn take_foreign_api_listener_thread_primary(context_id: u32) -> Option<JoinHandle<()>> {
 	match FOREIGN_API
 		.write()
 		.unwrap_or_else(|e| e.into_inner())
 		.get_mut(&context_id)
 	{
-		Some(server) => server.take_listener_thread(),
+		Some(server) => server.take_listener_thread_primary(),
+		None => None,
+	}
+}
+
+pub fn take_foreign_api_listener_thread_secondary(context_id: u32) -> Option<JoinHandle<()>> {
+	match FOREIGN_API
+		.write()
+		.unwrap_or_else(|e| e.into_inner())
+		.get_mut(&context_id)
+	{
+		Some(server) => server.take_listener_thread_secondary(),
 		None => None,
 	}
 }
@@ -1098,6 +1109,7 @@ pub fn foreign_listener<L, C, K>(
 	keychain_mask: Arc<Mutex<Option<SecretKey>>>,
 	addr: Option<String>,
 	tor_config: &TorConfig,
+	listen_on_socket_with_tor: bool,
 	_libp2p_listen_port: &Option<u16>,
 ) -> Result<(), Error>
 where
@@ -1181,7 +1193,7 @@ where
 
 	let server = Arc::new(ForeignApiServer::new(router));
 
-	let connection_counter = AtomicI64::new(0);
+	let connection_counter = Arc::new(AtomicI64::new(0));
 	let stop_state = server.stop_state.clone();
 	let server2 = server.clone();
 	let handle_new_connection_callback =
@@ -1201,34 +1213,36 @@ where
 		set_foreign_api_health(context_id2, healthy);
 	};
 
-	let tor_config = tor_config.clone();
-	let api_thread = thread::Builder::new()
+	let tor_config2 = tor_config.clone();
+	let socket_addr: Option<SocketAddr> = match addr {
+		Some(addr) => match addr.parse() {
+			Ok(a) => Some(a),
+			Err(e) => {
+				error!(
+					"foreign_listener got invalid foreign listen address {}, {}",
+					addr, e
+				);
+				None
+			}
+		},
+		None => None,
+	};
+	let socket_addr2 = socket_addr.clone();
+	let handle_new_connection_callback2 = handle_new_connection_callback.clone();
+
+	let api_thread_primary = thread::Builder::new()
 		.name(format!("wallet-foreign-listener-{}", context_id))
 		.spawn(move || {
-			let socket_addr: Option<SocketAddr> = match addr {
-				Some(addr) => match addr.parse() {
-					Ok(a) => Some(a),
-					Err(e) => {
-						error!(
-							"foreign_listener got invalid foreign listen address {}, {}",
-							addr, e
-						);
-						None
-					}
-				},
-				None => None,
-			};
-
 			let res = mwc_p2p::listen(
 				context_id,
 				stop_state,
-				Some(tor_config),
-				socket_addr,
+				Some(tor_config2),
+				socket_addr2,
 				Some(onion_expanded_key),
 				Some(service_started_callback),
 				Some(service_failed_callback),
 				Some(service_status_callback),
-				handle_new_connection_callback,
+				handle_new_connection_callback2,
 			);
 
 			if let Err(e) = res {
@@ -1243,8 +1257,47 @@ where
 			Error::ListenerError(format!("Failed to start foreign listener thread, {}", e))
 		})?;
 
-	server.set_listener_thread(api_thread);
+	server.set_listener_thread_primary(api_thread_primary);
 	set_foreign_api_server(context_id, Some(server.clone()));
+
+	if listen_on_socket_with_tor && tor_config.is_tor_enabled() {
+		match socket_addr {
+			Some(socket_addr) => {
+				// stating secondary listener on IP socket
+				let stop_state = server.stop_state.clone();
+				let api_thread_secondary = thread::Builder::new()
+					.name(format!("wallet-foreign-ip-listener-{}", context_id))
+					.spawn(move || {
+						let res = mwc_p2p::listen(
+							context_id,
+							stop_state,
+							None,
+							Some(socket_addr),
+							None,
+							Some(service_started_callback),
+							Some(service_failed_callback),
+							Some(service_status_callback),
+							handle_new_connection_callback,
+						);
+
+						if let Err(e) = res {
+							error!("Error starting secondary foreign listener: {}", e);
+						}
+					})
+					.map_err(|e| {
+						Error::ListenerError(format!(
+							"Failed to start foreign listener thread, {}",
+							e
+						))
+					})?;
+
+				server.set_listener_thread_secondary(api_thread_secondary);
+			}
+			None => {
+				error!("Please specify valid foreign listener address to start secondary IP foreign listener: 'api_listen_interface' and 'api_listen_port' at mwc-wallet.toml");
+			}
+		}
+	}
 
 	#[cfg(feature = "libp2p")]
 	let libp2p_stop = Arc::new(std::sync::Mutex::new(1));

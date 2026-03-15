@@ -429,6 +429,7 @@ pub fn parse_listen_args(
 	}
 	Ok(command::ListenArgs {
 		method: method.to_owned(),
+		listen_on_socket_with_tor: args.is_present("listen_on_socket_with_tor"),
 	})
 }
 

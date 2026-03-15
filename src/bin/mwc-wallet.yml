@@ -94,6 +94,11 @@ subcommands:
             short: n
             long: no_tor
             takes_value: false
+        - listen_on_socket_with_tor:
+            help: If tor is enabled, start secondary listener on socket at <api_listen_interface>:<api_listen_port>
+            short: s
+            long: listen_on_socket_with_tor
+            takes_value: false
   - stop_listen:
       about: Stop listening. Foreign API server will be stopped.
   - get_address_index:

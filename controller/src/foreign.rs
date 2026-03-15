@@ -30,7 +30,8 @@ pub struct ForeignApiServer {
 	pub stop_state: Arc<StopState>,
 	connections: Arc<RwLock<HashMap<String, JoinHandle<()>>>>,
 	handlers: Arc<Mutex<Router>>,
-	listener_thread: Mutex<Option<JoinHandle<()>>>,
+	listener_thread_primary: Mutex<Option<JoinHandle<()>>>,
+	listener_thread_secondary: Mutex<Option<JoinHandle<()>>>,
 }
 
 impl ForeignApiServer {
@@ -39,7 +40,8 @@ impl ForeignApiServer {
 			stop_state: Arc::new(StopState::new()),
 			connections: Arc::new(RwLock::new(HashMap::new())),
 			handlers: Arc::new(Mutex::new(router)),
-			listener_thread: Mutex::new(None),
+			listener_thread_primary: Mutex::new(None),
+			listener_thread_secondary: Mutex::new(None),
 		}
 	}
 
@@ -145,21 +147,41 @@ impl ForeignApiServer {
 		}
 	}
 
-	pub fn set_listener_thread(&self, listener_handle: JoinHandle<()>) {
+	pub fn set_listener_thread_primary(&self, listener_handle: JoinHandle<()>) {
 		debug_assert!(!self.stop_state.is_stopped());
 		debug_assert!(self
-			.listener_thread
+			.listener_thread_primary
 			.lock()
 			.unwrap_or_else(|e| e.into_inner())
 			.is_none());
 		*self
-			.listener_thread
+			.listener_thread_primary
 			.lock()
 			.unwrap_or_else(|e| e.into_inner()) = Some(listener_handle);
 	}
 
-	pub fn take_listener_thread(&self) -> Option<JoinHandle<()>> {
-		self.listener_thread
+	pub fn set_listener_thread_secondary(&self, listener_handle: JoinHandle<()>) {
+		debug_assert!(!self.stop_state.is_stopped());
+		debug_assert!(self
+			.listener_thread_secondary
+			.lock()
+			.unwrap_or_else(|e| e.into_inner())
+			.is_none());
+		*self
+			.listener_thread_secondary
+			.lock()
+			.unwrap_or_else(|e| e.into_inner()) = Some(listener_handle);
+	}
+
+	pub fn take_listener_thread_primary(&self) -> Option<JoinHandle<()>> {
+		self.listener_thread_primary
+			.lock()
+			.unwrap_or_else(|e| e.into_inner())
+			.take()
+	}
+
+	pub fn take_listener_thread_secondary(&self) -> Option<JoinHandle<()>> {
+		self.listener_thread_secondary
 			.lock()
 			.unwrap_or_else(|e| e.into_inner())
 			.take()
@@ -178,7 +200,16 @@ impl ForeignApiServer {
 		}
 
 		if let Some(thr) = self
-			.listener_thread
+			.listener_thread_primary
+			.lock()
+			.unwrap_or_else(|e| e.into_inner())
+			.take()
+		{
+			let _ = thr.join();
+		}
+
+		if let Some(thr) = self
+			.listener_thread_secondary
 			.lock()
 			.unwrap_or_else(|e| e.into_inner())
 			.take()
