@@ -1,6 +1,6 @@
 [package]
 name = "mwc_wallet_impls"
-version = "6.0.0"
+version = "6.0.1"
 authors = ["Mwc Developers <info@mwc.mw>"]
 description = "Concrete types derived from libwallet traits"
 license = "Apache-2.0"
@@ -42,9 +42,9 @@ url = "2.1"
 #mwc-libp2p = { git = "https://github.com/mwcproject/rust-libp2p", version="0.35.3", branch = "master", default-features = false, features = [ "noise", "yamux", "mplex", "dns", "tcp-tokio", "ping", "gossipsub"] }
 #mwc-libp2p = { path = "../../rust-libp2p", default-features = false, features = [ "noise", "yamux", "mplex", "dns", "tcp-tokio", "ping", "gossipsub"] }
 
-mwc_wallet_util = { path = "../util", version = "6.0.0" }
-mwc_wallet_config = { path = "../config", version = "6.0.0" }
-mwc_wallet_libwallet = { path = "../libwallet", version = "6.0.0" }
+mwc_wallet_util = { path = "../util", version = "6.0.1" }
+mwc_wallet_config = { path = "../config", version = "6.0.1" }
+mwc_wallet_libwallet = { path = "../libwallet", version = "6.0.1" }
 
 [dev-dependencies]
 "remove_dir_all" = "0.7"

@@ -453,6 +453,7 @@ where
 /// Arguments for listen command
 pub struct ListenArgs {
 	pub method: String,
+	pub listen_on_socket_with_tor: bool,
 }
 
 pub fn listen<L, C, K>(
@@ -495,6 +496,7 @@ where
 				keychain_mask,
 				config.api_listen_addr(),
 				tor_config,
+				args.listen_on_socket_with_tor,
 				&config.libp2p_listen_port,
 			)?;
 
@@ -504,7 +506,17 @@ where
 					w.get_context_id()
 				};
 
-				if let Some(thr) = controller::take_foreign_api_listener_thread(context_id) {
+				if let Some(thr) = controller::take_foreign_api_listener_thread_primary(context_id)
+				{
+					let r = thr.join();
+					if let Err(e) = r {
+						error!("Error starting http listener");
+						return Err(Error::ListenerError(format!("{:?}", e)));
+					}
+				}
+				if let Some(thr) =
+					controller::take_foreign_api_listener_thread_secondary(context_id)
+				{
 					let r = thr.join();
 					if let Err(e) = r {
 						error!("Error starting http listener");
