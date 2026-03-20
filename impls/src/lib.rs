@@ -17,27 +17,6 @@
 //! way mostly to avoid any circular dependencies of any kind
 //! Functions in this crate should not use the wallet api crate directly
 
-use blake2_rfc as blake2;
-
-#[macro_use]
-extern crate serde_derive;
-#[macro_use]
-extern crate log;
-#[macro_use]
-extern crate serde_json;
-#[macro_use]
-extern crate lazy_static;
-use mwc_wallet_libwallet as libwallet;
-use mwc_wallet_util::mwc_api as api;
-use mwc_wallet_util::mwc_chain as chain;
-use mwc_wallet_util::mwc_core as core;
-pub use mwc_wallet_util::mwc_keychain as keychain;
-use mwc_wallet_util::mwc_p2p;
-use mwc_wallet_util::mwc_store as store;
-use mwc_wallet_util::mwc_util as util;
-
-use mwc_wallet_config as config;
-
 pub mod adapters;
 mod backends;
 mod client_utils;
@@ -56,7 +35,7 @@ pub use crate::adapters::{
 	create_sender, get_mwcmqs_brocker, init_mwcmqs_access_data, Address, AddressType, CloseReason,
 	HttpDataSender, HttpsAddress, MWCMQPublisher, MWCMQSAddress, MWCMQSubscriber, MwcMqsChannel,
 	PathToSlateGetter, PathToSlatePutter, Publisher, SlateGetter, SlatePutter, SlateReceiver,
-	SlateSender, Subscriber, SubscriptionHandler
+	SlateSender, Subscriber, SubscriptionHandler,
 };
 pub use crate::backends::{wallet_db_exists, LMDBBackend};
 pub use crate::client_utils::json_rpc;
@@ -64,9 +43,9 @@ pub use crate::error::Error;
 pub use crate::lifecycle::DefaultLCProvider;
 pub use crate::node_clients::HTTPNodeClient;
 
-use crate::keychain::{ExtKeychain, Keychain};
+use mwc_wallet_util::mwc_keychain::{ExtKeychain, Keychain};
 
-use libwallet::{NodeClient, WalletInst, WalletLCProvider};
+use mwc_wallet_libwallet::{NodeClient, WalletInst, WalletLCProvider};
 
 /// Main wallet instance
 pub struct DefaultWalletImpl<'a, C>
@@ -97,7 +76,7 @@ where
 {
 	fn lc_provider(
 		&mut self,
-	) -> Result<&mut (dyn WalletLCProvider<'a, C, K> + 'a), libwallet::Error> {
+	) -> Result<&mut (dyn WalletLCProvider<'a, C, K> + 'a), mwc_wallet_libwallet::Error> {
 		Ok(&mut self.lc_provider)
 	}
 }

@@ -15,53 +15,55 @@
 
 //! Owner API External Definition
 
-use chrono::prelude::*;
-use ed25519_dalek::PublicKey as DalekPublicKey;
+use mwc_wallet_util::mwc_crates::chrono::prelude::*;
+use mwc_wallet_util::mwc_crates::ed25519_dalek;
+use mwc_wallet_util::mwc_crates::lazy_static::lazy_static;
+use mwc_wallet_util::mwc_crates::uuid::Uuid;
 use std::path::Path;
-use uuid::Uuid;
 
-use crate::config::{MQSConfig, WalletConfig};
-use crate::core::core::OutputFeatures;
-use crate::core::core::Transaction;
-use crate::core::global;
-use crate::impls::create_sender;
-use crate::keychain::{Identifier, Keychain};
-use crate::libwallet::api_impl::foreign;
-use crate::libwallet::api_impl::owner_updater::{start_updater_log_thread, StatusMessage};
-use crate::libwallet::api_impl::{owner, owner_updater};
+use mwc_wallet_config::{MQSConfig, WalletConfig};
+use mwc_wallet_impls::create_sender;
+use mwc_wallet_libwallet::api_impl::foreign;
+use mwc_wallet_libwallet::api_impl::owner_updater::{start_updater_log_thread, StatusMessage};
+use mwc_wallet_libwallet::api_impl::{owner, owner_updater};
 #[cfg(feature = "swaps")]
-use crate::libwallet::api_impl::{owner_eth, owner_swap};
-use crate::libwallet::proof::proofaddress;
-use crate::libwallet::proof::tx_proof::TxProof;
+use mwc_wallet_libwallet::api_impl::{owner_eth, owner_swap};
+use mwc_wallet_libwallet::proof::proofaddress;
+use mwc_wallet_libwallet::proof::tx_proof::TxProof;
 #[cfg(feature = "swaps")]
-use crate::libwallet::swap::fsm::state::{StateEtaInfo, StateId, StateProcessRespond};
+use mwc_wallet_libwallet::swap::fsm::state::{StateEtaInfo, StateId, StateProcessRespond};
 #[cfg(feature = "swaps")]
-use crate::libwallet::swap::types::{Action, Currency, SwapTransactionsConfirmations};
+use mwc_wallet_libwallet::swap::types::{Action, Currency, SwapTransactionsConfirmations};
 #[cfg(feature = "swaps")]
-use crate::libwallet::swap::{message::Message, swap::Swap, swap::SwapJournalRecord};
+use mwc_wallet_libwallet::swap::{message::Message, swap::Swap, swap::SwapJournalRecord};
 #[cfg(feature = "grin_proof")]
-use crate::libwallet::PaymentProof;
+use mwc_wallet_libwallet::PaymentProof;
 #[cfg(feature = "grin_proof")]
-use crate::libwallet::SwapStartArgs;
-use crate::libwallet::{
+use mwc_wallet_libwallet::SwapStartArgs;
+use mwc_wallet_libwallet::{
 	AcctPathMapping, BuiltOutput, Error, InitTxArgs, IssueInvoiceTxArgs, NodeClient,
 	NodeHeightResult, OutputCommitMapping, Slate, SlatePurpose, SlateVersion, TxLogEntry,
 	VersionedSlate, ViewWallet, WalletInfo, WalletInst, WalletLCProvider,
 };
+use mwc_wallet_util::mwc_core::core::OutputFeatures;
+use mwc_wallet_util::mwc_core::core::Transaction;
+use mwc_wallet_util::mwc_core::global;
+use mwc_wallet_util::mwc_keychain::{Identifier, Keychain};
 
-use crate::util::logger::LoggingConfig;
-use crate::util::secp::key::SecretKey;
-use crate::util::{from_hex, ZeroingString};
-use libwallet::proof::tx_proof;
-use libwallet::proof::tx_proof::VerifyProofResult;
-use libwallet::types::{TxSession, U64_DATA_IDX_ADDRESS_INDEX};
-use libwallet::{
+use mwc_wallet_libwallet::proof::tx_proof;
+use mwc_wallet_libwallet::proof::tx_proof::VerifyProofResult;
+use mwc_wallet_libwallet::types::{TxSession, U64_DATA_IDX_ADDRESS_INDEX};
+use mwc_wallet_libwallet::{
 	wallet_lock, Context, OwnershipProof, OwnershipProofValidation, RetrieveTxQueryArgs,
 };
+use mwc_wallet_util::mwc_crates::log::{error, info};
+use mwc_wallet_util::mwc_crates::secp::key::PublicKey;
+use mwc_wallet_util::mwc_crates::secp::key::SecretKey;
+use mwc_wallet_util::mwc_crates::secp::{ContextFlag, Secp256k1};
 use mwc_wallet_util::mwc_p2p::TorConfig;
-use mwc_wallet_util::mwc_util::secp::key::PublicKey;
-use mwc_wallet_util::mwc_util::secp::{ContextFlag, Secp256k1};
+use mwc_wallet_util::mwc_util::logger::LoggingConfig;
 use mwc_wallet_util::mwc_util::static_secp_instance;
+use mwc_wallet_util::mwc_util::{from_hex, ZeroingString};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, Sender};
 use std::sync::{Arc, Mutex};
@@ -187,24 +189,21 @@ where
 	/// # Example
 	/// ```
 	/// use mwc_wallet_util::mwc_keychain as keychain;
-	/// use mwc_wallet_util::mwc_util as util;
-	/// use mwc_wallet_util::mwc_core;
 	/// use mwc_wallet_api as api;
 	/// use mwc_wallet_config as config;
 	/// use mwc_wallet_impls as impls;
-	/// use mwc_wallet_libwallet as libwallet;
 	///
-	/// use mwc_core::global;
+	/// use mwc_wallet_util::mwc_core::global;
 	/// use keychain::ExtKeychain;
-	/// use tempfile::tempdir;
+	/// use mwc_wallet_util::mwc_crates::tempfile::tempdir;
 	///
 	/// use std::sync::{Mutex,Arc};
-	/// use util::ZeroingString;
+	/// use mwc_wallet_util::mwc_util::ZeroingString;
 	///
 	/// use api::Owner;
 	/// use config::WalletConfig;
 	/// use impls::{DefaultWalletImpl, DefaultLCProvider, HTTPNodeClient};
-	/// use libwallet::WalletInst;
+	/// use mwc_wallet_libwallet::WalletInst;
 	/// use config::parse_node_address_string;
 	///
 	/// global::set_local_chain_type(global::ChainTypes::AutomatedTesting);
@@ -314,7 +313,7 @@ where
 	/// # Returns
 	/// * Result Containing:
 	/// * A Vector of [`AcctPathMapping`](../mwc_wallet_libwallet/types/struct.AcctPathMapping.html) data
-	/// * or [`libwallet::Error`](../mwc_wallet_libwallet/struct.Error.html) if an error is encountered.
+	/// * or [`mwc_wallet_libwallet::Error`](../mwc_wallet_libwallet/struct.Error.html) if an error is encountered.
 	///
 	/// # Remarks
 	///
@@ -358,7 +357,7 @@ where
 	/// # Returns
 	/// * Result Containing:
 	/// * A [Keychain Identifier](../mwc_keychain/struct.Identifier.html) for the new path
-	/// * or [`libwallet::Error`](../mwc_wallet_libwallet/struct.Error.html) if an error is encountered.
+	/// * or [`mwc_wallet_libwallet::Error`](../mwc_wallet_libwallet/struct.Error.html) if an error is encountered.
 	///
 	/// # Remarks
 	///
@@ -407,7 +406,7 @@ where
 	/// # Returns
 	/// * Result Containing:
 	/// * `Ok(())` if the path was correctly set
-	/// * or [`libwallet::Error`](../mwc_wallet_libwallet/struct.Error.html) if an error is encountered.
+	/// * or [`mwc_wallet_libwallet::Error`](../mwc_wallet_libwallet/struct.Error.html) if an error is encountered.
 	///
 	/// # Remarks
 	///
@@ -702,7 +701,7 @@ where
 	/// transaction outputs should be locked via a call to
 	/// [`tx_lock_outputs`](struct.Owner.html#method.tx_lock_outputs). This must be called before calling
 	/// [`finalize_tx`](struct.Owner.html#method.finalize_tx).
-	/// * or [`libwallet::Error`](../mwc_wallet_libwallet/struct.Error.html) if an error is encountered.
+	/// * or [`mwc_wallet_libwallet::Error`](../mwc_wallet_libwallet/struct.Error.html) if an error is encountered.
 	///
 	/// # Remarks
 	///
@@ -772,7 +771,7 @@ where
 			None => {}
 		}
 
-		let mut recipient: Option<DalekPublicKey> = None;
+		let mut recipient: Option<ed25519_dalek::PublicKey> = None;
 		if let Some(r) = &args.slatepack_recipient {
 			recipient = Some(r.tor_public_key()?);
 		}
@@ -981,7 +980,7 @@ where
 	/// # Returns
 	/// * ``Ok([`slate`](../mwc_wallet_libwallet/slate/struct.Slate.html))` if successful,
 	/// containing the updated slate.
-	/// * or [`libwallet::Error`](../mwc_wallet_libwallet/struct.Error.html) if an error is encountered.
+	/// * or [`mwc_wallet_libwallet::Error`](../mwc_wallet_libwallet/struct.Error.html) if an error is encountered.
 	///
 	/// # Example
 	/// Set up as in [`new`](struct.Owner.html#method.new) method above.
@@ -1065,7 +1064,7 @@ where
 	/// # Returns
 	/// * ``Ok([`slate`](../mwc_wallet_libwallet/slate/struct.Slate.html))` if successful,
 	/// containing the updated slate.
-	/// * or [`libwallet::Error`](../mwc_wallet_libwallet/struct.Error.html) if an error is encountered.
+	/// * or [`mwc_wallet_libwallet::Error`](../mwc_wallet_libwallet/struct.Error.html) if an error is encountered.
 	///
 	/// # Example
 	/// Set up as in [`new`](struct.Owner.html#method.new) method above.
@@ -1154,7 +1153,7 @@ where
 	///
 	/// # Returns
 	/// * Ok(()) if successful
-	/// * or [`libwallet::Error`](../mwc_wallet_libwallet/struct.Error.html) if an error is encountered.
+	/// * or [`mwc_wallet_libwallet::Error`](../mwc_wallet_libwallet/struct.Error.html) if an error is encountered.
 	///
 	/// # Example
 	/// Set up as in [`new`](struct.Owner.html#method.new) method above.
@@ -1231,7 +1230,7 @@ where
 	/// # Returns
 	/// * ``Ok([`slate`](../mwc_wallet_libwallet/slate/struct.Slate.html))` if successful,
 	/// containing the new finalized slate.
-	/// * or [`libwallet::Error`](../mwc_wallet_libwallet/struct.Error.html) if an error is encountered.
+	/// * or [`mwc_wallet_libwallet::Error`](../mwc_wallet_libwallet/struct.Error.html) if an error is encountered.
 	///
 	/// # Example
 	/// Set up as in [`new`](struct.Owner.html#method.new) method above.
@@ -1310,7 +1309,7 @@ where
 	///
 	/// # Returns
 	/// * `Ok(())` if successful
-	/// * or [`libwallet::Error`](../mwc_wallet_libwallet/struct.Error.html) if an error is encountered.
+	/// * or [`mwc_wallet_libwallet::Error`](../mwc_wallet_libwallet/struct.Error.html) if an error is encountered.
 	///
 	/// # Example
 	/// Set up as in [`new`](struct.Owner.html#method.new) method above.
@@ -1383,7 +1382,7 @@ where
 	///
 	/// # Returns
 	/// * `Ok(())` if successful
-	/// * or [`libwallet::Error`](../mwc_wallet_libwallet/struct.Error.html) if an error is encountered.
+	/// * or [`mwc_wallet_libwallet::Error`](../mwc_wallet_libwallet/struct.Error.html) if an error is encountered.
 	///
 	/// # Example
 	/// Set up as in [`new`](struct.Owner.html#method.new) method above.
@@ -1451,7 +1450,7 @@ where
 	/// # Returns
 	/// * Ok with the stored  [`Transaction`](../mwc_core/core/transaction/struct.Transaction.html)
 	/// if successful
-	/// * or [`libwallet::Error`](../mwc_wallet_libwallet/struct.Error.html) if an error is encountered.
+	/// * or [`mwc_wallet_libwallet::Error`](../mwc_wallet_libwallet/struct.Error.html) if an error is encountered.
 	///
 	/// # Example
 	/// Set up as in [`new`](struct.Owner.html#method.new) method above.
@@ -1506,7 +1505,7 @@ where
 	///
 	/// # Returns
 	/// * `Ok(())` if successful and the signatures validate
-	/// * or [`libwallet::Error`](../mwc_wallet_libwallet/struct.Error.html) if an error is encountered.
+	/// * or [`mwc_wallet_libwallet::Error`](../mwc_wallet_libwallet/struct.Error.html) if an error is encountered.
 	///
 	/// # Example
 	/// Set up as in [`new`](struct.Owner.html#method.new) method above.
@@ -1565,7 +1564,7 @@ where
 	///
 	/// # Returns
 	/// * `Ok(String)` if successful
-	/// * or [`libwallet::Error`](../mwc_wallet_libwallet/struct.Error.html) if an error is encountered.
+	/// * or [`mwc_wallet_libwallet::Error`](../mwc_wallet_libwallet/struct.Error.html) if an error is encountered.
 
 	/// # Example
 	/// Set up as in [`new`](struct.Owner.html#method.new) method above.
@@ -1605,7 +1604,7 @@ where
 	///
 	/// # Returns
 	/// * `Ok(ViewWallet)` if successful
-	/// * or [`libwallet::Error`](../mwc_wallet_libwallet/struct.Error.html) if an error is encountered.
+	/// * or [`mwc_wallet_libwallet::Error`](../mwc_wallet_libwallet/struct.Error.html) if an error is encountered.
 
 	/// # Example
 	/// Set up as in [`new`](struct.Owner.html#method.new) method above.
@@ -1669,7 +1668,7 @@ where
 	///
 	/// # Returns
 	/// * `Ok(())` if successful
-	/// * or [`libwallet::Error`](../mwc_wallet_libwallet/struct.Error.html) if an error is encountered.
+	/// * or [`mwc_wallet_libwallet::Error`](../mwc_wallet_libwallet/struct.Error.html) if an error is encountered.
 
 	/// # Example
 	/// Set up as in [`new`](struct.Owner.html#method.new) method above.
@@ -1742,7 +1741,7 @@ where
 	/// * Ok with a  [`NodeHeightResult`](../mwc_wallet_libwallet/types/struct.NodeHeightResult.html)
 	/// if successful. If the height result was obtained from the configured node,
 	/// `updated_from_node` will be set to `true`
-	/// * or [`libwallet::Error`](../mwc_wallet_libwallet/struct.Error.html) if an error is encountered.
+	/// * or [`mwc_wallet_libwallet::Error`](../mwc_wallet_libwallet/struct.Error.html) if an error is encountered.
 	///
 	/// # Example
 	/// Set up as in [`new`](struct.Owner.html#method.new) method above.
@@ -1798,7 +1797,7 @@ where
 	///
 	/// # Returns
 	/// * Ok with a String value representing the full path to the top level wallet dierctory
-	/// * or [`libwallet::Error`](../mwc_wallet_libwallet/struct.Error.html) if an error is encountered.
+	/// * or [`mwc_wallet_libwallet::Error`](../mwc_wallet_libwallet/struct.Error.html) if an error is encountered.
 	///
 	/// # Example
 	/// Set up as in [`new`](struct.Owner.html#method.new) method above.
@@ -1837,7 +1836,7 @@ where
 	///
 	/// # Returns
 	/// * Ok if successful
-	/// * or [`libwallet::Error`](../mwc_wallet_libwallet/struct.Error.html) if an error is encountered.
+	/// * or [`mwc_wallet_libwallet::Error`](../mwc_wallet_libwallet/struct.Error.html) if an error is encountered.
 	///
 	/// # Example
 	/// Set up as in [`new`](struct.Owner.html#method.new) method above.
@@ -1885,14 +1884,14 @@ where
 	///
 	/// # Returns
 	/// * Ok if successful
-	/// * or [`libwallet::Error`](../mwc_wallet_libwallet/struct.Error.html) if an error is encountered.
+	/// * or [`mwc_wallet_libwallet::Error`](../mwc_wallet_libwallet/struct.Error.html) if an error is encountered.
 	///
 	/// # Example
 	/// Set up as in [`new`](struct.Owner.html#method.new) method above.
 	/// ```
 	/// # mwc_wallet_api::doctest_helper_setup_doc_env!(wallet, wallet_config);
 	///
-	/// use mwc_core::global::ChainTypes;
+	/// use mwc_wallet_util::mwc_core::global::ChainTypes;
 	///
 	/// let dir = "path/to/wallet/dir";
 	///
@@ -1954,14 +1953,14 @@ where
 	///
 	/// # Returns
 	/// * Ok with mnemonic phrase if successful
-	/// * or [`libwallet::Error`](../mwc_wallet_libwallet/struct.Error.html) if an error is encountered.
+	/// * or [`mwc_wallet_libwallet::Error`](../mwc_wallet_libwallet/struct.Error.html) if an error is encountered.
 	///
 	/// # Example
 	/// Set up as in [`new`](struct.Owner.html#method.new) method above.
 	/// ```
 	/// # mwc_wallet_api::doctest_helper_setup_doc_env!(wallet, wallet_config);
 	///
-	/// use mwc_core::global::ChainTypes;
+	/// use mwc_wallet_util::mwc_core::global::ChainTypes;
 	///
 	/// // note that the WalletInst struct does not necessarily need to contain an
 	/// // instantiated wallet
@@ -2026,14 +2025,14 @@ where
 	///
 	/// # Returns
 	/// * Ok if successful
-	/// * or [`libwallet::Error`](../mwc_wallet_libwallet/struct.Error.html) if an error is encountered.
+	/// * or [`mwc_wallet_libwallet::Error`](../mwc_wallet_libwallet/struct.Error.html) if an error is encountered.
 	///
 	/// # Example
 	/// Set up as in [`new`](struct.Owner.html#method.new) method above.
 	/// ```
 	/// # mwc_wallet_api::doctest_helper_setup_doc_env!(wallet, wallet_config);
 	///
-	/// use mwc_core::global::ChainTypes;
+	/// use mwc_wallet_util::mwc_core::global::ChainTypes;
 	///
 	/// // note that the WalletInst struct does not necessarily need to contain an
 	/// // instantiated wallet
@@ -2093,14 +2092,14 @@ where
 	///
 	/// # Returns
 	/// * Ok if successful
-	/// * or [`libwallet::Error`](../mwc_wallet_libwallet/struct.Error.html) if an error is encountered.
+	/// * or [`mwc_wallet_libwallet::Error`](../mwc_wallet_libwallet/struct.Error.html) if an error is encountered.
 	///
 	/// # Example
 	/// Set up as in [`new`](struct.Owner.html#method.new) method above.
 	/// ```
 	/// # mwc_wallet_api::doctest_helper_setup_doc_env!(wallet, wallet_config);
 	///
-	/// use mwc_core::global::ChainTypes;
+	/// use mwc_wallet_util::mwc_core::global::ChainTypes;
 	///
 	/// // Set up as above
 	/// # let api_owner = Owner::new(0, wallet.clone(), None, None);
@@ -2129,14 +2128,14 @@ where
 	///
 	/// # Returns
 	/// * Ok(BIP-39 mneminc) if successful
-	/// * or [`libwallet::Error`](../mwc_wallet_libwallet/struct.Error.html) if an error is encountered.
+	/// * or [`mwc_wallet_libwallet::Error`](../mwc_wallet_libwallet/struct.Error.html) if an error is encountered.
 	///
 	/// # Example
 	/// Set up as in [`new`](struct.Owner.html#method.new) method above.
 	/// ```
 	/// # mwc_wallet_api::doctest_helper_setup_doc_env!(wallet, wallet_config);
 	///
-	/// use mwc_core::global::ChainTypes;
+	/// use mwc_wallet_util::mwc_core::global::ChainTypes;
 	///
 	/// // Set up as above
 	/// # let api_owner = Owner::new(0, wallet.clone(), None, None);
@@ -2175,14 +2174,14 @@ where
 	///
 	/// # Returns
 	/// * Ok(()) if successful
-	/// * or [`libwallet::Error`](../mwc_wallet_libwallet/struct.Error.html) if an error is encountered.
+	/// * or [`mwc_wallet_libwallet::Error`](../mwc_wallet_libwallet/struct.Error.html) if an error is encountered.
 	///
 	/// # Example
 	/// Set up as in [`new`](struct.Owner.html#method.new) method above.
 	/// ```
 	/// # mwc_wallet_api::doctest_helper_setup_doc_env!(wallet, wallet_config);
 	///
-	/// use mwc_core::global::ChainTypes;
+	/// use mwc_wallet_util::mwc_core::global::ChainTypes;
 	///
 	/// // Set up as above
 	/// # let api_owner = Owner::new(0, wallet.clone(), None, None);
@@ -2219,14 +2218,14 @@ where
 	///
 	/// # Returns
 	/// * Ok if successful
-	/// * or [`libwallet::Error`](../mwc_wallet_libwallet/struct.Error.html) if an error is encountered.
+	/// * or [`mwc_wallet_libwallet::Error`](../mwc_wallet_libwallet/struct.Error.html) if an error is encountered.
 	///
 	/// # Example
 	/// Set up as in [`new`](struct.Owner.html#method.new) method above.
 	/// ```
 	/// # mwc_wallet_api::doctest_helper_setup_doc_env!(wallet, wallet_config);
 	///
-	/// use mwc_core::global::ChainTypes;
+	/// use mwc_wallet_util::mwc_core::global::ChainTypes;
 	///
 	/// // Set up as above
 	/// # let api_owner = Owner::new(0, wallet.clone(), None, None);
@@ -2273,14 +2272,14 @@ where
 	///
 	/// # Returns
 	/// * Ok if successful
-	/// * or [`libwallet::Error`](../mwc_wallet_libwallet/struct.Error.html) if an error is encountered.
+	/// * or [`mwc_wallet_libwallet::Error`](../mwc_wallet_libwallet/struct.Error.html) if an error is encountered.
 	///
 	/// # Example
 	/// Set up as in [`new`](struct.Owner.html#method.new) method above.
 	/// ```
 	/// # mwc_wallet_api::doctest_helper_setup_doc_env!(wallet, wallet_config);
 	///
-	/// use mwc_core::global::ChainTypes;
+	/// use mwc_wallet_util::mwc_core::global::ChainTypes;
 	///
 	/// use std::time::Duration;
 	///
@@ -2340,14 +2339,14 @@ where
 	///
 	/// # Returns
 	/// * Ok if successful
-	/// * or [`libwallet::Error`](../mwc_wallet_libwallet/struct.Error.html) if an error is encountered.
+	/// * or [`mwc_wallet_libwallet::Error`](../mwc_wallet_libwallet/struct.Error.html) if an error is encountered.
 	///
 	/// # Example
 	/// Set up as in [`new`](struct.Owner.html#method.new) method above.
 	/// ```
 	/// # mwc_wallet_api::doctest_helper_setup_doc_env!(wallet, wallet_config);
 	///
-	/// use mwc_core::global::ChainTypes;
+	/// use mwc_wallet_util::mwc_core::global::ChainTypes;
 	///
 	/// use std::time::Duration;
 	///
@@ -2390,14 +2389,14 @@ where
 	///
 	/// # Returns
 	/// * Ok with a Vec of [`StatusMessage`](../mwc_wallet_libwallet/api_impl/owner_updater/enum.StatusMessage.html)
-	/// * or [`libwallet::Error`](../mwc_wallet_libwallet/struct.Error.html) if an error is encountered.
+	/// * or [`mwc_wallet_libwallet::Error`](../mwc_wallet_libwallet/struct.Error.html) if an error is encountered.
 	///
 	/// # Example
 	/// Set up as in [`new`](struct.Owner.html#method.new) method above.
 	/// ```
 	/// # mwc_wallet_api::doctest_helper_setup_doc_env!(wallet, wallet_config);
 	///
-	/// use mwc_core::global::ChainTypes;
+	/// use mwc_wallet_util::mwc_core::global::ChainTypes;
 	///
 	/// use std::time::Duration;
 	///
@@ -2435,14 +2434,14 @@ where
 	///
 	/// # Returns
 	/// * Ok with a PublicKey that representing the address for MQS
-	/// * or [`libwallet::Error`](../mwc_wallet_libwallet/struct.Error.html) if an error is encountered.
+	/// * or [`mwc_wallet_libwallet::Error`](../mwc_wallet_libwallet/struct.Error.html) if an error is encountered.
 	///
 	/// # Example
 	/// Set up as in [`new`](struct.Owner.html#method.new) method above.
 	/// ```
 	/// # mwc_wallet_api::doctest_helper_setup_doc_env!(wallet, wallet_config);
 	///
-	/// use mwc_core::global::ChainTypes;
+	/// use mwc_wallet_util::mwc_core::global::ChainTypes;
 	///
 	/// use std::time::Duration;
 	///
@@ -2469,8 +2468,8 @@ where
 	/// * `keychain_mask` - Wallet secret mask to XOR against the stored wallet seed before using, if
 	///
 	/// # Returns
-	/// * Ok(DalekPublicKey) representing the public key associated with the address, if successful
-	/// * or [`libwallet::Error`](../mwc_wallet_libwallet/struct.Error.html) if an error is encountered
+	/// * Ok(ed25519_dalek::PublicKey) representing the public key associated with the address, if successful
+	/// * or [`mwc_wallet_libwallet::Error`](../mwc_wallet_libwallet/struct.Error.html) if an error is encountered
 	/// or the address provided is invalid
 	///
 	/// # Example
@@ -2478,7 +2477,7 @@ where
 	/// ```
 	/// # mwc_wallet_api::doctest_helper_setup_doc_env!(wallet, wallet_config);
 	///
-	/// use mwc_core::global::ChainTypes;
+	/// use mwc_wallet_util::mwc_core::global::ChainTypes;
 	///
 	/// use std::time::Duration;
 	///
@@ -2496,7 +2495,7 @@ where
 	pub fn get_wallet_public_address(
 		&self,
 		keychain_mask: Option<&SecretKey>,
-	) -> Result<DalekPublicKey, Error> {
+	) -> Result<ed25519_dalek::PublicKey, Error> {
 		owner::get_wallet_public_address(self.wallet_inst.clone(), keychain_mask)
 	}
 
@@ -2523,7 +2522,7 @@ where
 	///
 	/// # Returns
 	/// * Ok([PaymentProof](../mwc_wallet_libwallet/api_impl/types/struct.PaymentProof.html)) if successful
-	/// * or [`libwallet::Error`](../mwc_wallet_libwallet/struct.Error.html) if an error is encountered
+	/// * or [`mwc_wallet_libwallet::Error`](../mwc_wallet_libwallet/struct.Error.html) if an error is encountered
 	/// or the proof is not present or complete
 	///
 	/// # Example
@@ -2617,7 +2616,7 @@ where
 	/// * Ok((bool, bool)) if the proof is valid. The first boolean indicates whether the sender
 	/// address belongs to this wallet, the second whether the recipient address belongs to this
 	/// wallet
-	/// * or [`libwallet::Error`](../mwc_wallet_libwallet/struct.Error.html) if an error is encountered
+	/// * or [`mwc_wallet_libwallet::Error`](../mwc_wallet_libwallet/struct.Error.html) if an error is encountered
 	/// or the proof is not present or complete
 	///
 	/// # Example
@@ -2811,7 +2810,7 @@ where
 		dest: String,
 		currency: Currency,
 		amount: &String,
-	) -> Result<(), libwallet::swap::Error> {
+	) -> Result<(), mwc_wallet_libwallet::swap::Error> {
 		owner_eth::transfer(self.wallet_inst.clone(), currency, dest, amount)
 	}
 
@@ -2894,7 +2893,11 @@ where
 		eth_infura_project_id: Option<String>,
 	) -> Result<(StateProcessRespond, Vec<Swap>), Error>
 	where
-		F: FnOnce(Message, String, String) -> Result<(bool, String), libwallet::swap::Error>
+		F: FnOnce(
+				Message,
+				String,
+				String,
+			) -> Result<(bool, String), mwc_wallet_libwallet::swap::Error>
 			+ 'static,
 	{
 		owner_swap::swap_process(
@@ -2931,7 +2934,14 @@ where
 		&self,
 		keychain_mask: Option<&SecretKey>,
 		in_slate: VersionedSlate,
-	) -> Result<(Slate, Option<SlatePurpose>, Option<DalekPublicKey>), Error> {
+	) -> Result<
+		(
+			Slate,
+			Option<SlatePurpose>,
+			Option<ed25519_dalek::PublicKey>,
+		),
+		Error,
+	> {
 		let (slate_from, content, sender) = if in_slate.is_slatepack() {
 			let (slate_from, content, sender, _receiver) = self
 				.decrypt_slatepack(keychain_mask, in_slate, None)
@@ -2960,8 +2970,8 @@ where
 		(
 			Slate,
 			SlatePurpose,
-			Option<DalekPublicKey>,
-			Option<DalekPublicKey>,
+			Option<ed25519_dalek::PublicKey>,
+			Option<ed25519_dalek::PublicKey>,
 		),
 		Error,
 	> {
@@ -2976,7 +2986,7 @@ where
 		slate: &Slate,
 		version: Option<SlateVersion>,
 		content: SlatePurpose,
-		slatepack_recipient: Option<DalekPublicKey>,
+		slatepack_recipient: Option<ed25519_dalek::PublicKey>,
 		address_index: Option<u32>,
 		use_test_rng: bool,
 	) -> Result<VersionedSlate, Error> {
@@ -3009,29 +3019,22 @@ where
 #[macro_export]
 macro_rules! doctest_helper_setup_doc_env {
 	($wallet:ident, $wallet_config:ident) => {
-		use mwc_wallet_api as api;
-		use mwc_wallet_config as config;
-		use mwc_wallet_impls as impls;
-		use mwc_wallet_libwallet as libwallet;
 		use mwc_wallet_util::mwc_core;
-		use mwc_wallet_util::mwc_keychain as keychain;
-		use mwc_wallet_util::mwc_util as util;
+		use mwc_wallet_util::mwc_core::global;
 
-		use mwc_core::global;
+		use mwc_wallet_util::mwc_crates::tempfile::tempdir;
+		use mwc_wallet_util::mwc_keychain::ExtKeychain;
 
-		use keychain::ExtKeychain;
-		use tempfile::tempdir;
-
+		use mwc_wallet_util::mwc_util::ZeroingString;
 		use std::sync::Arc;
 		use std::sync::Mutex;
-		use util::ZeroingString;
 
-		use api::{Foreign, Owner};
-		use config::{parse_node_address_string, WalletConfig};
-		use impls::{DefaultLCProvider, DefaultWalletImpl, HTTPNodeClient};
-		use libwallet::{BlockFees, InitTxArgs, IssueInvoiceTxArgs, Slate, WalletInst};
+		use mwc_wallet_api::{Foreign, Owner};
+		use mwc_wallet_config::{parse_node_address_string, WalletConfig};
+		use mwc_wallet_impls::{DefaultLCProvider, DefaultWalletImpl, HTTPNodeClient};
+		use mwc_wallet_libwallet::{BlockFees, InitTxArgs, IssueInvoiceTxArgs, Slate, WalletInst};
 
-		use uuid::Uuid;
+		use mwc_wallet_util::mwc_crates::uuid::Uuid;
 
 		// Set our local chain_type for testing.
 		global::set_local_chain_type(global::ChainTypes::AutomatedTesting);

@@ -54,16 +54,21 @@ pub mod owner_swap;
 pub use self::error::Error;
 pub use self::swap::Swap;
 pub use self::types::Context;
+use mwc_wallet_util::mwc_crates::blake2_rfc;
+use mwc_wallet_util::mwc_crates::chrono;
+use mwc_wallet_util::mwc_crates::serde_json;
 //pub use self::types::BtcSellerContext;
 
 pub(crate) use self::api::SwapApi;
 pub(crate) use self::buyer::BuyApi;
 pub(crate) use self::seller::SellApi;
 
-pub use crate::mwc_keychain::Keychain;
+pub use mwc_wallet_util::mwc_keychain::Keychain;
 
 #[cfg(test)]
-use serial_test::serial;
+use mwc_wallet_util::mwc_crates::lazy_static::lazy_static;
+#[cfg(test)]
+use mwc_wallet_util::mwc_crates::serial_test::serial;
 #[cfg(test)]
 use std::sync::atomic::{AtomicBool, Ordering};
 #[cfg(test)]
@@ -113,27 +118,25 @@ mod tests {
 	use super::message::Message;
 	use super::types::*;
 	use super::*;
-	use crate::mwc_api::{Libp2pMessages, Libp2pPeers};
-	use crate::mwc_core::core::transaction::Weighting;
-	use crate::mwc_core::core::Committed;
-	use crate::mwc_core::core::{Inputs, KernelFeatures, Transaction, TxKernel};
-	use crate::mwc_core::global;
-	use crate::mwc_core::global::ChainTypes;
-	use crate::mwc_keychain::{ExtKeychain, Identifier, Keychain, SwitchCommitmentType};
-	use crate::mwc_util::secp::key::{PublicKey, SecretKey};
-	use crate::mwc_util::secp::pedersen::{Commitment, RangeProof};
-	use crate::mwc_util::to_hex;
 	use crate::swap::fsm::machine::StateMachine;
 	use crate::swap::fsm::state;
 	use crate::swap::fsm::state::{Input, StateId, StateProcessRespond};
 	use crate::swap::message::{SecondaryUpdate, Update};
 	use crate::{NodeClient, Slate, SlateVersion, VersionedSlate};
-	use bitcoin_lib::network::constants::Network as BtcNetwork;
 	use bitcoin_lib::secp256k1::ContextFlag;
-	use bitcoin_lib::util::key::PublicKey as BtcPublicKey;
-	use bitcoin_lib::{Address, AddressType, Transaction as BtcTransaction, TxOut};
+	use bitcoin_lib::{Address, AddressType, Transaction, TxOut};
+	use mwc_wallet_util::mwc_api::{Libp2pMessages, Libp2pPeers};
 	use mwc_wallet_util::mwc_core::consensus;
-	use mwc_wallet_util::mwc_util::secp::Secp256k1;
+	use mwc_wallet_util::mwc_core::core::transaction::Weighting;
+	use mwc_wallet_util::mwc_core::core::Committed;
+	use mwc_wallet_util::mwc_core::core::{Inputs, KernelFeatures, Transaction, TxKernel};
+	use mwc_wallet_util::mwc_core::global;
+	use mwc_wallet_util::mwc_core::global::ChainTypes;
+	use mwc_wallet_util::mwc_crates::secp::key::{PublicKey, SecretKey};
+	use mwc_wallet_util::mwc_crates::secp::pedersen::{Commitment, RangeProof};
+	use mwc_wallet_util::mwc_crates::secp::Secp256k1;
+	use mwc_wallet_util::mwc_keychain::{ExtKeychain, Identifier, Keychain, SwitchCommitmentType};
+	use mwc_wallet_util::mwc_util::to_hex;
 	use std::collections::HashMap;
 	use std::convert::TryInto;
 	#[cfg(not(target_os = "windows"))]
@@ -148,7 +151,7 @@ mod tests {
 
 	fn keychain(idx: u8) -> ExtKeychain {
 		let seed_sell: String = format!("fixed0rng0for0testing0purposes0{}", idx % 10);
-		let seed_sell = crate::blake2::blake2b::blake2b(32, &[], seed_sell.as_bytes());
+		let seed_sell = blake2_rfc::blake2b::blake2b(32, &[], seed_sell.as_bytes());
 		ExtKeychain::from_seed(seed_sell.as_bytes(), false).unwrap()
 	}
 
@@ -207,11 +210,11 @@ mod tests {
 		let key = PublicKey::from_secret_key(kc.secp(), &key(kc, 2, 0)).unwrap();
 		let address = Address::new_btc().p2pkh(
 			kc.secp(),
-			&BtcPublicKey {
+			&bitcoin_lib::util::key::PublicKey {
 				compressed: true,
 				key,
 			},
-			BtcNetwork::Testnet,
+			bitcoin_lib::network::constants::Network::Testnet,
 		);
 		format!("{}", address)
 	}
@@ -373,7 +376,7 @@ mod tests {
 		}
 		fn get_connected_peer_info(
 			&self,
-		) -> Result<Vec<crate::mwc_p2p::types::PeerInfoDisplayLegacy>, crate::Error> {
+		) -> Result<Vec<mwc_p2p::types::PeerInfoDisplayLegacy>, crate::Error> {
 			unimplemented!()
 		}
 		fn height_range_to_pmmr_indices(
@@ -388,7 +391,7 @@ mod tests {
 			_start_height: u64,
 			_end_height: u64,
 			_threads_number: usize,
-		) -> Result<Vec<crate::mwc_api::BlockPrintable>, crate::Error> {
+		) -> Result<Vec<mwc_api::BlockPrintable>, crate::Error> {
 			unimplemented!()
 		}
 		fn reset_cache(&self) {
@@ -816,7 +819,7 @@ mod tests {
 		let address = Address::new_btc().from_str(&address[0]).unwrap();
 
 		// Buyer: first deposit
-		let tx_1 = BtcTransaction {
+		let tx_1 = Transaction {
 			version: 2,
 			lock_time: 0,
 			input: vec![],
@@ -854,7 +857,7 @@ mod tests {
 
 		// Buyer: second deposit
 		btc_nc.mine_blocks(2);
-		let tx_2 = BtcTransaction {
+		let tx_2 = Transaction {
 			version: 2,
 			lock_time: 0,
 			input: vec![],
@@ -2625,7 +2628,7 @@ mod tests {
 			.unwrap()
 			.address(Currency::Btc, &input_script, buyer.swap.network)
 			.unwrap();
-		let tx_1 = BtcTransaction {
+		let tx_1 = Transaction {
 			version: 2,
 			lock_time: 0,
 			input: vec![],
@@ -2637,7 +2640,7 @@ mod tests {
 			}],
 		};
 		let _txid_1 = tx_1.txid();
-		let tx_2 = BtcTransaction {
+		let tx_2 = Transaction {
 			version: 2,
 			lock_time: 0,
 			input: vec![],
@@ -2649,7 +2652,7 @@ mod tests {
 			}],
 		};
 		let _txid_2 = tx_2.txid();
-		let tx_plus = BtcTransaction {
+		let tx_plus = Transaction {
 			version: 2,
 			lock_time: 0,
 			input: vec![],
@@ -5751,7 +5754,10 @@ mod tests {
 		let address = Address::new_btc()
 			.from_str("bc1q9p6etejnpzvwkkyt9qcl94hvd8tzwwq6afjyk3")
 			.unwrap();
-		assert_eq!(address.network, BtcNetwork::Bitcoin);
+		assert_eq!(
+			address.network,
+			bitcoin_lib::network::constants::Network::Bitcoin
+		);
 		assert_eq!(address.address_type().unwrap(), AddressType::P2wpkh);
 		assert_eq!(
 			address.to_string(),
@@ -5762,7 +5768,10 @@ mod tests {
 		let address = Address::new_btc()
 			.from_str("1KN4Q4czMUro6vTJU7b4PBJECreWCEB6Uq")
 			.unwrap();
-		assert_eq!(address.network, BtcNetwork::Bitcoin);
+		assert_eq!(
+			address.network,
+			bitcoin_lib::network::constants::Network::Bitcoin
+		);
 		assert_eq!(address.address_type().unwrap(), AddressType::P2pkh);
 		assert_eq!(address.to_string(), "1KN4Q4czMUro6vTJU7b4PBJECreWCEB6Uq");
 
@@ -5770,7 +5779,10 @@ mod tests {
 		let address = Address::new_btc()
 			.from_str("3N732nEbUkmYWGmHXcYE4GZnV9kDHydAWn")
 			.unwrap();
-		assert_eq!(address.network, BtcNetwork::Bitcoin);
+		assert_eq!(
+			address.network,
+			bitcoin_lib::network::constants::Network::Bitcoin
+		);
 		assert_eq!(address.address_type().unwrap(), AddressType::P2sh);
 		assert_eq!(address.to_string(), "3N732nEbUkmYWGmHXcYE4GZnV9kDHydAWn");
 
@@ -5778,7 +5790,10 @@ mod tests {
 		let address = Address::new_btc()
 			.from_str("bc1qpc59yxhkf46scr0jy690sv0xj3edvufgf356zxqrn6ltawf3x0kq0llant")
 			.unwrap();
-		assert_eq!(address.network, BtcNetwork::Bitcoin);
+		assert_eq!(
+			address.network,
+			bitcoin_lib::network::constants::Network::Bitcoin
+		);
 		assert_eq!(address.address_type().unwrap(), AddressType::P2wsh);
 		assert_eq!(
 			address.to_string(),
@@ -5789,7 +5804,10 @@ mod tests {
 		let address = Address::new_btc()
 			.from_str("tb1q90vsej82xcy7cn9wexggvy6gtqees0w8ngj7z0")
 			.unwrap();
-		assert_eq!(address.network, BtcNetwork::Testnet);
+		assert_eq!(
+			address.network,
+			bitcoin_lib::network::constants::Network::Testnet
+		);
 		assert_eq!(address.address_type().unwrap(), AddressType::P2wpkh);
 		assert_eq!(
 			address.to_string(),
@@ -5800,7 +5818,10 @@ mod tests {
 		let address = Address::new_btc()
 			.from_str("mowAPBbAdbkiNDzNDsYUPtYzTN2Zvz6JqT")
 			.unwrap();
-		assert_eq!(address.network, BtcNetwork::Testnet);
+		assert_eq!(
+			address.network,
+			bitcoin_lib::network::constants::Network::Testnet
+		);
 		assert_eq!(address.address_type().unwrap(), AddressType::P2pkh);
 		assert_eq!(address.to_string(), "mowAPBbAdbkiNDzNDsYUPtYzTN2Zvz6JqT");
 
@@ -5808,7 +5829,10 @@ mod tests {
 		let address = Address::new_btc()
 			.from_str("2N58JuGyrj1A9hKUKK6srqMUR3GFwtLoRem")
 			.unwrap();
-		assert_eq!(address.network, BtcNetwork::Testnet);
+		assert_eq!(
+			address.network,
+			bitcoin_lib::network::constants::Network::Testnet
+		);
 		assert_eq!(address.address_type().unwrap(), AddressType::P2sh);
 		assert_eq!(address.to_string(), "2N58JuGyrj1A9hKUKK6srqMUR3GFwtLoRem");
 
@@ -5816,7 +5840,10 @@ mod tests {
 		let address = Address::new_btc()
 			.from_str("tb1qc3gjhdpnnc5lg5aqy2xqkpwnlqtsv98503957te787pwt36v6l4s6d3xua")
 			.unwrap();
-		assert_eq!(address.network, BtcNetwork::Testnet);
+		assert_eq!(
+			address.network,
+			bitcoin_lib::network::constants::Network::Testnet
+		);
 		assert_eq!(address.address_type().unwrap(), AddressType::P2wsh);
 		assert_eq!(
 			address.to_string(),
@@ -5831,7 +5858,10 @@ mod tests {
 		let address = Address::new_ltc()
 			.from_str("tltc1qvh2vseq03wyyk8e7fj245p49uw7lxph0yjq07x")
 			.unwrap();
-		assert_eq!(address.network, BtcNetwork::Testnet);
+		assert_eq!(
+			address.network,
+			bitcoin_lib::network::constants::Network::Testnet
+		);
 		assert_eq!(address.address_type().unwrap(), AddressType::P2wpkh);
 		assert_eq!(
 			address.to_string(),
@@ -5842,7 +5872,10 @@ mod tests {
 		let address = Address::new_ltc()
 			.from_str("mpQgPACKj4AVDa89xvwDrjRietyQG4Lzgg")
 			.unwrap();
-		assert_eq!(address.network, BtcNetwork::Testnet);
+		assert_eq!(
+			address.network,
+			bitcoin_lib::network::constants::Network::Testnet
+		);
 		assert_eq!(address.address_type().unwrap(), AddressType::P2pkh);
 		assert_eq!(address.to_string(), "mpQgPACKj4AVDa89xvwDrjRietyQG4Lzgg");
 
@@ -5850,7 +5883,10 @@ mod tests {
 		let address = Address::new_ltc()
 			.from_str("QUFqWUwTb7XsugzZkie6BQzaSRFVJWWXG7")
 			.unwrap();
-		assert_eq!(address.network, BtcNetwork::Testnet);
+		assert_eq!(
+			address.network,
+			bitcoin_lib::network::constants::Network::Testnet
+		);
 		assert_eq!(address.address_type().unwrap(), AddressType::P2sh);
 		assert_eq!(address.to_string(), "QUFqWUwTb7XsugzZkie6BQzaSRFVJWWXG7");
 
@@ -5858,7 +5894,10 @@ mod tests {
 		let address = Address::new_ltc()
 			.from_str("tltc1q3ye4xgaqn0h6zttxne88fuv8zkzepst54udqr73jhmra8fsuxgfqgxfzsk")
 			.unwrap();
-		assert_eq!(address.network, BtcNetwork::Testnet);
+		assert_eq!(
+			address.network,
+			bitcoin_lib::network::constants::Network::Testnet
+		);
 		assert_eq!(address.address_type().unwrap(), AddressType::P2wsh);
 		assert_eq!(
 			address.to_string(),
@@ -5869,7 +5908,10 @@ mod tests {
 		let address = Address::new_ltc()
 			.from_str("ltc1q9p6etejnpzvwkkyt9qcl94hvd8tzwwq6e4gqwp")
 			.unwrap();
-		assert_eq!(address.network, BtcNetwork::Bitcoin);
+		assert_eq!(
+			address.network,
+			bitcoin_lib::network::constants::Network::Bitcoin
+		);
 		assert_eq!(address.address_type().unwrap(), AddressType::P2wpkh);
 		assert_eq!(
 			address.to_string(),
@@ -5880,7 +5922,10 @@ mod tests {
 		let address = Address::new_ltc()
 			.from_str("LPNrdDV83eDbEQGn34p16A6MiZk3uFj5Nw")
 			.unwrap();
-		assert_eq!(address.network, BtcNetwork::Bitcoin);
+		assert_eq!(
+			address.network,
+			bitcoin_lib::network::constants::Network::Bitcoin
+		);
 		assert_eq!(address.address_type().unwrap(), AddressType::P2pkh);
 		assert_eq!(address.to_string(), "LPNrdDV83eDbEQGn34p16A6MiZk3uFj5Nw");
 
@@ -5888,7 +5933,10 @@ mod tests {
 		let address = Address::new_ltc()
 			.from_str("MNyckn2AK1uw2HLccnSbHPmZe92hAyTifB")
 			.unwrap();
-		assert_eq!(address.network, BtcNetwork::Bitcoin);
+		assert_eq!(
+			address.network,
+			bitcoin_lib::network::constants::Network::Bitcoin
+		);
 		assert_eq!(address.address_type().unwrap(), AddressType::P2sh);
 		assert_eq!(address.to_string(), "MNyckn2AK1uw2HLccnSbHPmZe92hAyTifB");
 
@@ -5896,7 +5944,10 @@ mod tests {
 		let address = Address::new_ltc()
 			.from_str("ltc1qh60u6pfxvxhllspvxcnx2894m69vgr262840m4zljdg9ww28aazs9rll7j")
 			.unwrap();
-		assert_eq!(address.network, BtcNetwork::Bitcoin);
+		assert_eq!(
+			address.network,
+			bitcoin_lib::network::constants::Network::Bitcoin
+		);
 		assert_eq!(address.address_type().unwrap(), AddressType::P2wsh);
 		assert_eq!(
 			address.to_string(),
@@ -5909,7 +5960,10 @@ mod tests {
 		let address = Address::new_dash()
 			.from_str("XbgxFwr9UvsUSWhr9zMMvBChKw4aaFryeW")
 			.unwrap();
-		assert_eq!(address.network, BtcNetwork::Bitcoin);
+		assert_eq!(
+			address.network,
+			bitcoin_lib::network::constants::Network::Bitcoin
+		);
 		assert_eq!(address.address_type().unwrap(), AddressType::P2pkh);
 		assert_eq!(address.to_string(), "XbgxFwr9UvsUSWhr9zMMvBChKw4aaFryeW");
 
@@ -5917,7 +5971,10 @@ mod tests {
 		let address = Address::new_dash()
 			.from_str("7iFKZHTR2R19ie6yn6CZvEqrhJA2HFutmK")
 			.unwrap();
-		assert_eq!(address.network, BtcNetwork::Bitcoin);
+		assert_eq!(
+			address.network,
+			bitcoin_lib::network::constants::Network::Bitcoin
+		);
 		assert_eq!(address.address_type().unwrap(), AddressType::P2sh);
 		assert_eq!(address.to_string(), "7iFKZHTR2R19ie6yn6CZvEqrhJA2HFutmK");
 
@@ -5925,7 +5982,10 @@ mod tests {
 		let address = Address::new_dash()
 			.from_str("yY9X94xxyGbCocayg4QCxYrXgkLrQfpNkK")
 			.unwrap();
-		assert_eq!(address.network, BtcNetwork::Testnet);
+		assert_eq!(
+			address.network,
+			bitcoin_lib::network::constants::Network::Testnet
+		);
 		assert_eq!(address.address_type().unwrap(), AddressType::P2pkh);
 		assert_eq!(address.to_string(), "yY9X94xxyGbCocayg4QCxYrXgkLrQfpNkK");
 
@@ -5933,7 +5993,10 @@ mod tests {
 		let address = Address::new_dash()
 			.from_str("8kGdHo4UhmQ9dmayTBtZNJUf972z58SmEc")
 			.unwrap();
-		assert_eq!(address.network, BtcNetwork::Testnet);
+		assert_eq!(
+			address.network,
+			bitcoin_lib::network::constants::Network::Testnet
+		);
 		assert_eq!(address.address_type().unwrap(), AddressType::P2sh);
 		assert_eq!(address.to_string(), "8kGdHo4UhmQ9dmayTBtZNJUf972z58SmEc");
 
@@ -5944,7 +6007,10 @@ mod tests {
 		let address = Address::new_zec()
 			.from_str("t1bU6mLTSoBTJ6LmM3SNwjnU211xqHNpfgk")
 			.unwrap();
-		assert_eq!(address.network, BtcNetwork::Bitcoin);
+		assert_eq!(
+			address.network,
+			bitcoin_lib::network::constants::Network::Bitcoin
+		);
 		assert_eq!(address.address_type().unwrap(), AddressType::P2pkh);
 		assert_eq!(address.to_string(), "t1bU6mLTSoBTJ6LmM3SNwjnU211xqHNpfgk");
 
@@ -5952,7 +6018,10 @@ mod tests {
 		let address = Address::new_zec()
 			.from_str("t3XyYW8yBFRuMnfvm5KLGFbEVz25kckZXym")
 			.unwrap();
-		assert_eq!(address.network, BtcNetwork::Bitcoin);
+		assert_eq!(
+			address.network,
+			bitcoin_lib::network::constants::Network::Bitcoin
+		);
 		assert_eq!(address.address_type().unwrap(), AddressType::P2sh);
 		assert_eq!(address.to_string(), "t3XyYW8yBFRuMnfvm5KLGFbEVz25kckZXym");
 
@@ -5960,7 +6029,10 @@ mod tests {
 		let address = Address::new_zec()
 			.from_str("tmLaEMAHxJjNhFcZWNmdB8HWnyfkdVe2Pfd")
 			.unwrap();
-		assert_eq!(address.network, BtcNetwork::Testnet);
+		assert_eq!(
+			address.network,
+			bitcoin_lib::network::constants::Network::Testnet
+		);
 		assert_eq!(address.address_type().unwrap(), AddressType::P2pkh);
 		assert_eq!(address.to_string(), "tmLaEMAHxJjNhFcZWNmdB8HWnyfkdVe2Pfd");
 
@@ -5968,7 +6040,10 @@ mod tests {
 		let address = Address::new_zec()
 			.from_str("t27eWDgjFYJGVXmzrXeVjnb5J3uXDM9xH9v")
 			.unwrap();
-		assert_eq!(address.network, BtcNetwork::Testnet);
+		assert_eq!(
+			address.network,
+			bitcoin_lib::network::constants::Network::Testnet
+		);
 		assert_eq!(address.address_type().unwrap(), AddressType::P2sh);
 		assert_eq!(address.to_string(), "t27eWDgjFYJGVXmzrXeVjnb5J3uXDM9xH9v");
 
@@ -5978,7 +6053,10 @@ mod tests {
 		let address = Address::new_doge()
 			.from_str("D5cvREcimMb1uRKVEUYoCzjdE5b2D8HsRP")
 			.unwrap();
-		assert_eq!(address.network, BtcNetwork::Bitcoin);
+		assert_eq!(
+			address.network,
+			bitcoin_lib::network::constants::Network::Bitcoin
+		);
 		assert_eq!(address.address_type().unwrap(), AddressType::P2pkh);
 		assert_eq!(address.to_string(), "D5cvREcimMb1uRKVEUYoCzjdE5b2D8HsRP");
 
@@ -5986,7 +6064,10 @@ mod tests {
 		let address = Address::new_doge()
 			.from_str("9v7AhpobcssNGwBaJEgCm26KJgwi8yTsbo")
 			.unwrap();
-		assert_eq!(address.network, BtcNetwork::Bitcoin);
+		assert_eq!(
+			address.network,
+			bitcoin_lib::network::constants::Network::Bitcoin
+		);
 		assert_eq!(address.address_type().unwrap(), AddressType::P2sh);
 		assert_eq!(address.to_string(), "9v7AhpobcssNGwBaJEgCm26KJgwi8yTsbo");
 
@@ -5994,13 +6075,19 @@ mod tests {
 		let address = Address::new_doge()
 			.from_str("nnkguAAdJP1Aco6818knbvpCLtGgywXZdT")
 			.unwrap();
-		assert_eq!(address.network, BtcNetwork::Testnet);
+		assert_eq!(
+			address.network,
+			bitcoin_lib::network::constants::Network::Testnet
+		);
 		assert_eq!(address.address_type().unwrap(), AddressType::P2pkh);
 		assert_eq!(address.to_string(), "nnkguAAdJP1Aco6818knbvpCLtGgywXZdT");
 		let address = Address::new_doge()
 			.from_str("nYAVBkVii35TVtz7SxqSn6XpTGBbdDkhja")
 			.unwrap();
-		assert_eq!(address.network, BtcNetwork::Testnet);
+		assert_eq!(
+			address.network,
+			bitcoin_lib::network::constants::Network::Testnet
+		);
 		assert_eq!(address.address_type().unwrap(), AddressType::P2pkh);
 		assert_eq!(address.to_string(), "nYAVBkVii35TVtz7SxqSn6XpTGBbdDkhja");
 
@@ -6008,7 +6095,10 @@ mod tests {
 		let address = Address::new_doge()
 			.from_str("2MsQug2PDbor2ndqYu9MxMij3MZFZ3EkGk9")
 			.unwrap();
-		assert_eq!(address.network, BtcNetwork::Testnet);
+		assert_eq!(
+			address.network,
+			bitcoin_lib::network::constants::Network::Testnet
+		);
 		assert_eq!(address.address_type().unwrap(), AddressType::P2sh);
 		assert_eq!(address.to_string(), "2MsQug2PDbor2ndqYu9MxMij3MZFZ3EkGk9");
 	}

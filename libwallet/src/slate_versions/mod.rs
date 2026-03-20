@@ -22,13 +22,14 @@ use crate::slate::{Slate, SlateCtx};
 use crate::slate_versions::v2::{CoinbaseV2, SlateV2};
 use crate::slate_versions::v3::{CoinbaseV3, SlateV3};
 use crate::slatepack::SlatePurpose;
+use crate::slatepack::Slatepacker;
 use crate::types::CbData;
 use crate::Error;
-use crate::Slatepacker;
-use ed25519_dalek::PublicKey as DalekPublicKey;
-use ed25519_dalek::SecretKey as DalekSecretKey;
 use mwc_wallet_util::mwc_core::global;
-use mwc_wallet_util::mwc_util::secp::Secp256k1;
+use mwc_wallet_util::mwc_crates::ed25519_dalek;
+use mwc_wallet_util::mwc_crates::secp::Secp256k1;
+use mwc_wallet_util::mwc_crates::serde::{self, Deserialize, Serialize};
+use mwc_wallet_util::mwc_crates::serde_json;
 use std::convert::TryFrom;
 
 pub mod ser;
@@ -45,7 +46,8 @@ pub const CURRENT_SLATE_VERSION: u16 = 3;
 pub const MWC_BLOCK_HEADER_VERSION: u16 = 3;
 
 /// Existing versions of the slate
-#[derive(EnumIter, Serialize, Deserialize, Clone, Debug, PartialEq, PartialOrd, Eq, Ord)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, PartialOrd, Eq, Ord)]
+#[serde(crate = "serde")]
 pub enum SlateVersion {
 	/// SP - has a slatepack support
 	SP,
@@ -60,6 +62,18 @@ pub enum SlateVersion {
 }
 
 impl SlateVersion {
+	/// Iterate over all supported slate versions.
+	pub fn iter() -> impl Iterator<Item = SlateVersion> {
+		[
+			SlateVersion::SP,
+			SlateVersion::V3B,
+			SlateVersion::V3,
+			SlateVersion::V2,
+		]
+		.iter()
+		.cloned()
+	}
+
 	/// Convert this version into numeric value
 	pub fn to_numeric_version(&self) -> i32 {
 		match self {
@@ -71,6 +85,7 @@ impl SlateVersion {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(crate = "serde")]
 #[serde(untagged)]
 /// Versions are ordered newest to oldest so serde attempts to
 /// deserialize newer versions first, then falls back to older versions.
@@ -108,9 +123,9 @@ impl VersionedSlate {
 		slate: Slate,
 		version: SlateVersion,
 		content: SlatePurpose,
-		sender: DalekPublicKey,
-		recipient: Option<DalekPublicKey>,
-		secret: &DalekSecretKey,
+		sender: ed25519_dalek::PublicKey,
+		recipient: Option<ed25519_dalek::PublicKey>,
+		secret: &ed25519_dalek::SecretKey,
 		use_test_rng: bool,
 		secp: &Secp256k1,
 	) -> Result<VersionedSlate, Error> {
@@ -160,7 +175,7 @@ impl VersionedSlate {
 	pub fn into_slatepack(
 		&self,
 		context_id: u32,
-		dec_key: &DalekSecretKey,
+		dec_key: &ed25519_dalek::SecretKey,
 		secp: &Secp256k1,
 	) -> Result<Slatepacker, Error> {
 		match self {
@@ -219,6 +234,7 @@ impl VersionedSlate {
 }
 
 #[derive(Deserialize, Serialize)]
+#[serde(crate = "serde")]
 #[serde(untagged)]
 /// Versions are ordered newest to oldest so serde attempts to
 /// deserialize newer versions first, then falls back to older versions.

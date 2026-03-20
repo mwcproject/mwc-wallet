@@ -15,21 +15,23 @@
 // It is a callback node client. All requests with json string body are translated to the
 // callback function. Response is expected in a string json format as well
 
-use log::{debug, error, info};
 use mwc_wallet_impls::json_rpc::Response;
 use mwc_wallet_impls::node_clients::resp_types::{GetTipResp, GetVersionResp};
-use mwc_wallet_libwallet as libwallet;
 use mwc_wallet_libwallet::{Error, HeaderInfo, NodeClient, NodeVersionInfo};
 use mwc_wallet_util::mwc_api::{
 	json_rpc, BlockHeaderPrintable, BlockPrintable, Libp2pMessages, Libp2pPeers, LocatedTxKernel,
 	OutputListing, OutputPrintable, OutputType,
 };
 use mwc_wallet_util::mwc_core::core::{Transaction, TxKernel};
+use mwc_wallet_util::mwc_crates::libc;
+use mwc_wallet_util::mwc_crates::log::{debug, error, info};
+use mwc_wallet_util::mwc_crates::secp::pedersen;
+use mwc_wallet_util::mwc_crates::serde;
+use mwc_wallet_util::mwc_crates::serde_json;
+use mwc_wallet_util::mwc_crates::serde_json::json;
 use mwc_wallet_util::mwc_node_lib::ffi::CallbackFn;
 use mwc_wallet_util::mwc_p2p::types::PeerInfoDisplayLegacy;
-use mwc_wallet_util::mwc_util::secp::pedersen;
 use mwc_wallet_util::mwc_util::ToHex;
-use serde_json::json;
 use std::collections::HashMap;
 use std::ffi::{CStr, CString};
 
@@ -151,7 +153,7 @@ impl NodeClient for CallbackNodeClient {
 	}
 
 	/// Return the chain tip from a given node
-	fn get_chain_tip(&self) -> Result<(u64, String, u64), libwallet::Error> {
+	fn get_chain_tip(&self) -> Result<(u64, String, u64), Error> {
 		let result = self.process_request::<GetTipResp>("get_tip", &serde_json::Value::Null)?;
 		let res = (
 			result.height,
@@ -162,7 +164,7 @@ impl NodeClient for CallbackNodeClient {
 	}
 
 	/// Return header info from given height
-	fn get_header_info(&self, height: u64) -> Result<HeaderInfo, libwallet::Error> {
+	fn get_header_info(&self, height: u64) -> Result<HeaderInfo, Error> {
 		let params = json!([Some(height), None::<Option<String>>, None::<Option<String>>]);
 		let r = self.process_request::<BlockHeaderPrintable>("get_header", &params)?;
 
@@ -193,7 +195,7 @@ impl NodeClient for CallbackNodeClient {
 		excess: &pedersen::Commitment,
 		min_height: Option<u64>,
 		max_height: Option<u64>,
-	) -> Result<Option<(TxKernel, u64, u64)>, libwallet::Error> {
+	) -> Result<Option<(TxKernel, u64, u64)>, Error> {
 		let params = json!([excess.0.as_ref().to_hex(), min_height, max_height]);
 
 		match self.process_request::<LocatedTxKernel>("get_kernel", &params) {
@@ -246,7 +248,7 @@ impl NodeClient for CallbackNodeClient {
 					Some(h) => h,
 					None => {
 						let msg = format!("Missing block height for output {:?}", out.commit);
-						return Err(libwallet::Error::ClientCallback(msg));
+						return Err(Error::ClientCallback(msg));
 					}
 				};
 				api_outputs.insert(
@@ -270,7 +272,7 @@ impl NodeClient for CallbackNodeClient {
 			u64,
 			Vec<(pedersen::Commitment, pedersen::RangeProof, bool, u64, u64)>,
 		),
-		libwallet::Error,
+		Error,
 	> {
 		let mut api_outputs: Vec<(pedersen::Commitment, pedersen::RangeProof, bool, u64, u64)> =
 			Vec::new();
@@ -292,7 +294,7 @@ impl NodeClient for CallbackNodeClient {
 						out.commit, out, e
 					);
 					error!("{}", msg);
-					return Err(libwallet::Error::ClientCallback(msg));
+					return Err(Error::ClientCallback(msg));
 				}
 			};
 			let block_height = match out.block_height {
@@ -303,7 +305,7 @@ impl NodeClient for CallbackNodeClient {
 						out.commit, out
 					);
 					error!("{}", msg);
-					return Err(libwallet::Error::ClientCallback(msg));
+					return Err(Error::ClientCallback(msg));
 				}
 			};
 			api_outputs.push((
@@ -321,7 +323,7 @@ impl NodeClient for CallbackNodeClient {
 		&self,
 		start_height: u64,
 		end_height: Option<u64>,
-	) -> Result<(u64, u64), libwallet::Error> {
+	) -> Result<(u64, u64), Error> {
 		let params = json!([start_height, end_height]);
 		let res = self.process_request::<OutputListing>("get_pmmr_indices", &params)?;
 		Ok((res.last_retrieved_index, res.highest_index))
@@ -336,7 +338,7 @@ impl NodeClient for CallbackNodeClient {
 		start_height: u64,
 		end_height: u64,
 		_threads_number: usize,
-	) -> Result<Vec<BlockPrintable>, libwallet::Error> {
+	) -> Result<Vec<BlockPrintable>, Error> {
 		debug!(
 			"Requesting blocks from heights {}-{}",
 			start_height, end_height
@@ -355,14 +357,14 @@ impl NodeClient for CallbackNodeClient {
 	}
 
 	/// Get Node Tor address
-	fn get_libp2p_peers(&self) -> Result<Libp2pPeers, libwallet::Error> {
+	fn get_libp2p_peers(&self) -> Result<Libp2pPeers, Error> {
 		debug!("Requesting libp2p peer connections from mwc-node");
 		let params = json!([]);
 		let res = self.process_request::<Libp2pPeers>("get_libp2p_peers", &params)?;
 		Ok(res)
 	}
 
-	fn get_libp2p_messages(&self) -> Result<Libp2pMessages, libwallet::Error> {
+	fn get_libp2p_messages(&self) -> Result<Libp2pMessages, Error> {
 		debug!("Requesting libp2p received messages from mwc-node");
 		let params = json!([]);
 		let res = self.process_request::<Libp2pMessages>("get_libp2p_messages", &params)?;

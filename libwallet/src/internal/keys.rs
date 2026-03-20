@@ -15,9 +15,9 @@
 
 //! Wallet key management functions
 use crate::error::Error;
-use crate::mwc_keychain::{ChildNumber, ExtKeychain, Identifier, Keychain};
-use crate::mwc_util::secp::key::SecretKey;
 use crate::types::{AcctPathMapping, NodeClient, WalletBackend};
+use mwc_wallet_util::mwc_crates::secp::key::SecretKey;
+use mwc_wallet_util::mwc_keychain::{ChildNumber, ExtKeychain, Identifier, Keychain};
 use std::collections::HashSet;
 
 /// Get next available key in the wallet for a given parent

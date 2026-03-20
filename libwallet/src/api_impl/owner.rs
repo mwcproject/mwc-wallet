@@ -14,22 +14,23 @@
 
 //! Generic implementation of owner API functions
 
-use uuid::Uuid;
+use mwc_wallet_util::mwc_crates::ed25519_dalek;
+use mwc_wallet_util::mwc_crates::uuid::Uuid;
 
-use crate::mwc_core::core::hash::Hashed;
-use crate::mwc_core::core::{Output, OutputFeatures, Transaction};
-use crate::mwc_core::libtx::proof;
-use crate::mwc_keychain::ViewKey;
-use crate::mwc_util::secp::key::SecretKey;
 use crate::proof::crypto::Hex;
+use mwc_wallet_util::mwc_core::core::hash::Hashed;
+use mwc_wallet_util::mwc_core::core::{Output, OutputFeatures, Transaction};
+use mwc_wallet_util::mwc_core::libtx::proof;
+use mwc_wallet_util::mwc_crates::secp::key::SecretKey;
+use mwc_wallet_util::mwc_keychain::ViewKey;
 use std::sync::Mutex;
 
 use crate::api_impl::owner_updater::StatusMessage;
-use crate::mwc_keychain::{BlindingFactor, Identifier, Keychain, SwitchCommitmentType};
-use crate::mwc_util::secp::key::PublicKey;
-use crate::mwc_util::secp::Message;
-use crate::mwc_util::secp::Secp256k1;
-use crate::mwc_util::secp::Signature;
+use mwc_wallet_util::mwc_crates::secp::key::PublicKey;
+use mwc_wallet_util::mwc_crates::secp::Message;
+use mwc_wallet_util::mwc_crates::secp::Secp256k1;
+use mwc_wallet_util::mwc_crates::secp::Signature;
+use mwc_wallet_util::mwc_keychain::{BlindingFactor, Identifier, Keychain, SwitchCommitmentType};
 
 use crate::internal::{keys, scan, selection, tx, updater};
 use crate::slate::{PaymentInfo, Slate};
@@ -48,14 +49,10 @@ use crate::{
 };
 
 use crate::proof::tx_proof::{pop_proof_for_slate, TxProof};
-use digest::Digest;
-use ed25519_dalek::Keypair as DalekKeypair;
-use ed25519_dalek::PublicKey as DalekPublicKey;
-use ed25519_dalek::SecretKey as DalekSecretKey;
-use ed25519_dalek::Signature as DalekSignature;
-use ed25519_dalek::Signer;
-use sha2::Sha256;
-use signature::Verifier;
+use mwc_wallet_util::mwc_crates::digest::Digest;
+use mwc_wallet_util::mwc_crates::ed25519_dalek::Signer;
+use mwc_wallet_util::mwc_crates::sha2::Sha256;
+use mwc_wallet_util::mwc_crates::signature::Verifier;
 use std::cmp;
 use std::fs::File;
 use std::io::Write;
@@ -67,6 +64,7 @@ use crate::proof::proofaddress;
 use crate::proof::proofaddress::ProvableAddress;
 use mwc_wallet_util::mwc_core::core::Committed;
 use mwc_wallet_util::mwc_core::global;
+use mwc_wallet_util::mwc_crates::log::{debug, error, info};
 use mwc_wallet_util::mwc_util::from_hex;
 
 /// List of accounts
@@ -150,7 +148,7 @@ where
 pub fn get_wallet_public_address<'a, L, C, K>(
 	wallet_inst: Arc<Mutex<Box<dyn WalletInst<'a, L, C, K>>>>,
 	keychain_mask: Option<&SecretKey>,
-) -> Result<DalekPublicKey, Error>
+) -> Result<ed25519_dalek::PublicKey, Error>
 where
 	L: WalletLCProvider<'a, C, K>,
 	C: NodeClient + 'a,
@@ -1922,10 +1920,10 @@ where
 			&keychain,
 			address_index,
 		)?;
-		let secret = DalekSecretKey::from_bytes(&secret.0)
+		let secret = ed25519_dalek::SecretKey::from_bytes(&secret.0)
 			.map_err(|e| Error::GenericError(format!("Unable build dalek public key, {}", e)))?;
-		let public = DalekPublicKey::from(&secret);
-		let keypair = DalekKeypair { secret, public };
+		let public = ed25519_dalek::PublicKey::from(&secret);
+		let keypair = ed25519_dalek::Keypair { secret, public };
 		#[allow(deprecated)]
 		let signature = keypair
 			.try_sign(message_hash.as_slice())
@@ -2077,14 +2075,14 @@ where
 			Error::InvalidOwnershipProof(format!("Unable to decode tor address public key, {}", e))
 		})?;
 
-		let public_key = DalekPublicKey::from_bytes(&public_key).map_err(|e| {
+		let public_key = ed25519_dalek::PublicKey::from_bytes(&public_key).map_err(|e| {
 			Error::InvalidOwnershipProof(format!("Unable to decode tor address public key, {}", e))
 		})?;
 
 		let signature = from_hex(&tor_address.signature).map_err(|e| {
 			Error::InvalidOwnershipProof(format!("Unable to decode tor address signature, {}", e))
 		})?;
-		let signature = DalekSignature::from_bytes(&signature).map_err(|e| {
+		let signature = ed25519_dalek::Signature::from_bytes(&signature).map_err(|e| {
 			Error::InvalidOwnershipProof(format!("Unable to decode tor address signature, {}", e))
 		})?;
 

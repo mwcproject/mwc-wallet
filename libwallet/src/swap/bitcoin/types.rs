@@ -14,8 +14,6 @@
 
 use super::client::Output;
 use crate::mwc_keychain::{Identifier, SwitchCommitmentType};
-use crate::mwc_util::secp::key::PublicKey;
-use crate::mwc_util::secp::{Message, Signature};
 use crate::swap::message::SecondaryUpdate;
 use crate::swap::ser::*;
 use crate::swap::swap;
@@ -24,24 +22,27 @@ use crate::swap::{Error, Keychain};
 use bitcoin::blockdata::opcodes::{all::*, OP_FALSE, OP_TRUE};
 use bitcoin::blockdata::script::Builder;
 use bitcoin::consensus::Encodable;
-use bitcoin::network::constants::Network as BtcNetwork;
+use bitcoin::network::constants;
 #[cfg(test)]
 use bitcoin::OutPoint;
 use bitcoin::{Address, Script, Transaction, TxIn, TxOut, VarInt};
-use bitcoin_hashes::sha256d;
-use byteorder::{ByteOrder, LittleEndian};
+use mwc_wallet_util::mwc_crates::bitcoin_hashes::sha256d;
+use mwc_wallet_util::mwc_crates::byteorder::{ByteOrder, LittleEndian};
+use mwc_wallet_util::mwc_crates::rand;
+use mwc_wallet_util::mwc_crates::secp::key::PublicKey;
+use mwc_wallet_util::mwc_crates::secp::{Message, Signature};
+use mwc_wallet_util::mwc_crates::serde::{self, Deserialize, Serialize};
 use std::io::Cursor;
 use std::ops::Deref;
 
-use bitcoin_hashes::hex::ToHex;
-use bitcoin_hashes::{hash160, Hash};
-use mwc_bch::messages::{Tx as BchTx, TxIn as BchTxIn, TxOut as BchTxOut};
+use mwc_wallet_util::mwc_crates::bitcoin_hashes::hex::ToHex;
+use mwc_wallet_util::mwc_crates::bitcoin_hashes::{hash160, Hash};
 
-use mwc_wallet_util::mwc_util::secp::Secp256k1;
-use mwc_zcash_primitives::transaction as zcash_tx;
+use mwc_wallet_util::mwc_crates::secp::Secp256k1;
 
 /// BTC transaction ready to post (any type). Here it is a redeem tx
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(crate = "serde")]
 pub struct BtcTtansaction {
 	pub txid: sha256d::Hash, // keep it is a hash for data compatibility.
 	#[serde(serialize_with = "bytes_to_hex", deserialize_with = "bytes_from_hex")]
@@ -50,6 +51,7 @@ pub struct BtcTtansaction {
 
 /// BTC operations context
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(crate = "serde")]
 pub struct BtcData {
 	/// Key owned by seller. Private key: keychain + BtcSellerContext::cosign
 	#[serde(serialize_with = "pubkey_to_hex", deserialize_with = "pubkey_from_hex")]
@@ -294,9 +296,9 @@ impl BtcData {
 
 	// Because BCH library can calculate the hash, but for the core we are using BTC, that is
 	// why we have this ugly solution. In any case it is better then have 2 separate implemenattions.
-	fn convert_tx_to_bch(tx: &Transaction) -> Result<BchTx, Error> {
-		let mut inputs: Vec<BchTxIn> = vec![];
-		let mut outputs: Vec<BchTxOut> = vec![];
+	fn convert_tx_to_bch(tx: &Transaction) -> Result<messages::Tx, Error> {
+		let mut inputs: Vec<mwc_bch::messages::TxIn> = vec![];
+		let mut outputs: Vec<mwc_bch::messages::TxOut> = vec![];
 
 		for tx_in in &tx.input {
 			let mut sig_script = mwc_bch::script::Script::new();
@@ -310,7 +312,7 @@ impl BtcData {
 				index: tx_in.previous_output.vout,
 			};
 
-			inputs.push(BchTxIn {
+			inputs.push(mwc_bch::messages::TxIn {
 				prev_output,
 				// Signature script for confirming authorization
 				sig_script,
@@ -319,14 +321,14 @@ impl BtcData {
 		}
 
 		for tx_out in &tx.output {
-			outputs.push(BchTxOut {
+			outputs.push(mwc_bch::messages::TxOut {
 				amount: mwc_bch::util::Amount(tx_out.value as i64),
 				// Public key script to claim the output
 				pk_script: mwc_bch::script::Script(tx_out.script_pubkey.to_bytes()),
 			})
 		}
 
-		Ok(BchTx {
+		Ok(mwc_bch::messages::Tx {
 			lock_time: tx.lock_time,
 			version: tx.version as u32,
 			inputs,
@@ -492,44 +494,55 @@ impl BtcData {
 				// But furtunatelly it is expected to be BTC compatible. So we can just copy the data form the Bitcoin
 				// TransactionData is smrt enough to sign everything and provide the binary data that will act like BTC Tx.
 
-				let mut zcash_tx_data = zcash_tx::TransactionData::new();
+				let mut zcash_tx_data = mwc_zcash_primitives::transaction::TransactionData::new();
 				zcash_tx_data.lock_time = tx.lock_time;
 				//zcash_tx_data.expiry_height = mwc_zcash_primitives::consensus::BlockHeight::from_u32(1266946 + 20);
 				for inp in &tx.input {
-					zcash_tx_data.vin.push(zcash_tx::components::TxIn {
-						prevout: zcash_tx::components::OutPoint::new(
-							inp.previous_output.txid.as_hash().into_inner(),
-							inp.previous_output.vout,
-						),
-						script_sig: mwc_zcash_primitives::legacy::Script::default(),
-						sequence: inp.sequence,
-					});
+					zcash_tx_data
+						.vin
+						.push(mwc_zcash_primitives::transaction::components::TxIn {
+							prevout: mwc_zcash_primitives::transaction::components::OutPoint::new(
+								inp.previous_output.txid.as_hash().into_inner(),
+								inp.previous_output.vout,
+							),
+							script_sig: mwc_zcash_primitives::legacy::Script::default(),
+							sequence: inp.sequence,
+						});
 				}
 				for out in &tx.output {
-					zcash_tx_data.vout.push(zcash_tx::components::TxOut {
-						value: zcash_tx::components::Amount::from_u64(out.value).map_err(|_| {
-							Error::Generic("Unable convert amount for ZCash".to_string())
-						})?,
-						script_pubkey: mwc_zcash_primitives::legacy::Script(
-							out.script_pubkey.to_bytes(),
-						),
-					});
+					zcash_tx_data
+						.vout
+						.push(mwc_zcash_primitives::transaction::components::TxOut {
+							value: mwc_zcash_primitives::transaction::components::Amount::from_u64(
+								out.value,
+							)
+							.map_err(|_| {
+								Error::Generic("Unable convert amount for ZCash".to_string())
+							})?,
+							script_pubkey: mwc_zcash_primitives::legacy::Script(
+								out.script_pubkey.to_bytes(),
+							),
+						});
 				}
 
 				// Sign inputs ZCash way. Zcash massages are uniques, we have to mainatain it's own branch for that
 				let mut sighash = [0u8; 32];
 				for idx in 0..zcash_tx_data.vin.len() {
-					sighash.copy_from_slice(&zcash_tx::signature_hash_data(
-						&zcash_tx_data,
-						mwc_zcash_primitives::consensus::BranchId::Canopy,
-						zcash_tx::SIGHASH_ALL,
-						zcash_tx::SignableInput::transparent(
-							idx,
-							&mwc_zcash_primitives::legacy::Script(input_script.to_bytes()),
-							zcash_tx::components::Amount::from_u64(input[idx].1)
+					sighash.copy_from_slice(
+						&mwc_zcash_primitives::transaction::signature_hash_data(
+							&zcash_tx_data,
+							mwc_zcash_primitives::consensus::BranchId::Canopy,
+							mwc_zcash_primitives::transaction::SIGHASH_ALL,
+							mwc_zcash_primitives::transaction::SignableInput::transparent(
+								idx,
+								&mwc_zcash_primitives::legacy::Script(input_script.to_bytes()),
+								mwc_zcash_primitives::transaction::components::Amount::from_u64(
+									input[idx].1,
+								)
 								.map_err(|_| Error::Generic("Invalid input amount".to_string()))?,
+							),
 						),
-					));
+					);
 
 					let msg = Message::from_slice(&sighash).map_err(|e| {
 						Error::Generic(format!(
@@ -663,6 +676,7 @@ impl BtcData {
 
 /// Context for the Seller (party that receive BTC)
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(crate = "serde")]
 pub struct BtcSellerContext {
 	/// Seller, cosign index for derivative key.
 	pub cosign: Identifier,
@@ -670,6 +684,7 @@ pub struct BtcSellerContext {
 
 /// Context for the Buyer (party that sell BTC)
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(crate = "serde")]
 pub struct BtcBuyerContext {
 	/// Buyer refund index for derivative key
 	pub refund: Identifier,
@@ -677,6 +692,7 @@ pub struct BtcBuyerContext {
 
 /// Messages regarding BTC part of the deal
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[serde(crate = "serde")]
 pub enum BtcUpdate {
 	/// Seller send offer to Buyer. Here is details about BTC deal
 	Offer(BtcOfferUpdate),
@@ -713,6 +729,7 @@ impl BtcUpdate {
 
 /// Seller send offer to Buyer. Here is details about BTC deal
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[serde(crate = "serde")]
 pub struct BtcOfferUpdate {
 	/// Public key to do cosign with Schnorr signature.
 	#[serde(serialize_with = "pubkey_to_hex", deserialize_with = "pubkey_from_hex")]
@@ -721,6 +738,7 @@ pub struct BtcOfferUpdate {
 
 /// Buyer message back to Seller. Offer is accepted
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[serde(crate = "serde")]
 pub struct BtcAcceptOfferUpdate {
 	/// Buyer public key for refund
 	#[serde(serialize_with = "pubkey_to_hex", deserialize_with = "pubkey_from_hex")]
@@ -728,10 +746,10 @@ pub struct BtcAcceptOfferUpdate {
 }
 
 /// Map MWC network to matched BTC network
-fn btc_network(network: Network) -> BtcNetwork {
+fn btc_network(network: Network) -> constants::Network {
 	match network {
-		Network::Floonet => BtcNetwork::Testnet,
-		Network::Mainnet => BtcNetwork::Bitcoin,
+		Network::Floonet => constants::Network::Testnet,
+		Network::Mainnet => constants::Network::Bitcoin,
 	}
 }
 
@@ -748,10 +766,9 @@ mod tests {
 	use crate::mwc_core::global;
 	use crate::mwc_core::global::ChainTypes;
 	use crate::mwc_util::from_hex;
-	use crate::mwc_util::secp::key::{PublicKey, SecretKey};
-	use crate::mwc_util::secp::{ContextFlag, Secp256k1};
 	use bitcoin::util::address::Payload;
-	use bitcoin::util::key::PublicKey as BTCPublicKey;
+	use mwc_wallet_util::mwc_crates::secp::key::{PublicKey, SecretKey};
+	use mwc_wallet_util::mwc_crates::secp::{ContextFlag, Secp256k1};
 	use mwc_wallet_util::mwc_util::static_secp_instance;
 	use rand::{thread_rng, Rng, RngCore};
 	use std::collections::HashMap;
@@ -902,7 +919,7 @@ mod tests {
 
 		let redeem_address = Address::new_btc().p2pkh(
 			&secp,
-			&BTCPublicKey {
+			&bitcoin::util::key::PublicKey {
 				compressed: true,
 				key: PublicKey::from_secret_key(&secp, &SecretKey::new(&secp, rng)).unwrap(),
 			},

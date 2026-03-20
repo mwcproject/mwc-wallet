@@ -16,38 +16,42 @@
 //! Types and traits that should be provided by a wallet
 //! implementation
 
-use crate::config::{MQSConfig, WalletConfig};
 use crate::error::Error;
-use crate::mwc_api::{Libp2pMessages, Libp2pPeers};
-use crate::mwc_core::core::hash::Hash;
-use crate::mwc_core::core::Committed;
-use crate::mwc_core::core::{Output, Transaction, TxKernel};
-use crate::mwc_core::libtx::{aggsig, secp_ser};
-use crate::mwc_core::{global, ser};
-use crate::mwc_keychain::{Identifier, Keychain};
-use crate::mwc_util::logger::LoggingConfig;
-use crate::mwc_util::secp::key::{PublicKey, SecretKey, ZERO_KEY};
-use crate::mwc_util::secp::pedersen::Commitment;
-use crate::mwc_util::secp::{self, pedersen, Secp256k1};
-use crate::mwc_util::{ToHex, ZeroingString};
 use crate::slate::ParticipantMessages;
 use crate::InitTxArgs;
 #[cfg(feature = "libp2p")]
 use crate::IntegrityContext;
 use crate::Slate;
-use chrono::prelude::*;
+use mwc_wallet_config::{MQSConfig, WalletConfig};
+use mwc_wallet_util::mwc_api;
+use mwc_wallet_util::mwc_api::{Libp2pMessages, Libp2pPeers};
+use mwc_wallet_util::mwc_core::core::hash::Hash;
+use mwc_wallet_util::mwc_core::core::Committed;
 use mwc_wallet_util::mwc_core::core::{CommitWrapper, KernelFeatures};
+use mwc_wallet_util::mwc_core::core::{Output, Transaction, TxKernel};
+use mwc_wallet_util::mwc_core::libtx::{aggsig, secp_ser};
+use mwc_wallet_util::mwc_core::{global, ser};
+use mwc_wallet_util::mwc_crates::chrono::prelude::*;
+use mwc_wallet_util::mwc_crates::lazy_static::lazy_static;
+use mwc_wallet_util::mwc_crates::rand::rngs::mock::StepRng;
+use mwc_wallet_util::mwc_crates::rand::thread_rng;
+use mwc_wallet_util::mwc_crates::secp;
+use mwc_wallet_util::mwc_crates::secp::key::{PublicKey, SecretKey, ZERO_KEY};
+use mwc_wallet_util::mwc_crates::secp::pedersen::Commitment;
+use mwc_wallet_util::mwc_crates::secp::{pedersen, Secp256k1};
+use mwc_wallet_util::mwc_crates::serde::{self, Deserialize, Serialize};
+use mwc_wallet_util::mwc_crates::serde_json;
+use mwc_wallet_util::mwc_crates::uuid::Uuid;
+use mwc_wallet_util::mwc_keychain::{Identifier, Keychain};
+use mwc_wallet_util::mwc_p2p;
 use mwc_wallet_util::mwc_p2p::TorConfig;
-use rand::rngs::mock::StepRng;
-use rand::thread_rng;
-use serde;
-use serde_json;
+use mwc_wallet_util::mwc_util::logger::LoggingConfig;
+use mwc_wallet_util::mwc_util::{ToHex, ZeroingString};
 use std::collections::HashMap;
 use std::fmt;
 use std::sync::RwLock;
 use std::sync::{Arc, Weak};
 use std::time::Duration;
-use uuid::Uuid;
 
 /// Combined trait to allow dynamic wallet dispatch
 pub trait WalletInst<'a, L, C, K>: Send + Sync
@@ -455,9 +459,7 @@ pub trait NodeClient: Send + Sync + Clone {
 	fn get_header_info(&self, height: u64) -> Result<HeaderInfo, Error>;
 
 	/// Return Connected peers
-	fn get_connected_peer_info(
-		&self,
-	) -> Result<Vec<crate::mwc_p2p::types::PeerInfoDisplayLegacy>, Error>;
+	fn get_connected_peer_info(&self) -> Result<Vec<mwc_p2p::types::PeerInfoDisplayLegacy>, Error>;
 
 	/// Get a kernel and the height of the block it's included in. Returns
 	/// (tx_kernel, height, mmr_index)
@@ -512,7 +514,7 @@ pub trait NodeClient: Send + Sync + Clone {
 		start_height: u64,
 		end_height: u64,
 		threads_number: usize,
-	) -> Result<Vec<crate::mwc_api::BlockPrintable>, Error>;
+	) -> Result<Vec<mwc_api::BlockPrintable>, Error>;
 
 	/// Get Node Tor address
 	fn get_libp2p_peers(&self) -> Result<Libp2pPeers, Error>;
@@ -524,6 +526,7 @@ pub trait NodeClient: Send + Sync + Clone {
 
 /// Node version info
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(crate = "serde")]
 pub struct NodeVersionInfo {
 	/// Semver version string
 	pub node_version: String,
@@ -538,6 +541,7 @@ pub struct NodeVersionInfo {
 /// root private key is known.
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, PartialOrd, Eq, Ord)]
+#[serde(crate = "serde")]
 pub struct OutputData {
 	/// Root key_id that the key for this output is derived from
 	pub root_key_id: Identifier,
@@ -679,6 +683,7 @@ impl OutputData {
 /// a transaction but we don't have confirmation that the transaction was
 /// broadcasted or mined).
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Ord, PartialOrd, Hash)]
+#[serde(crate = "serde")]
 pub enum OutputStatus {
 	/// Unconfirmed
 	Unconfirmed,
@@ -705,6 +710,7 @@ impl fmt::Display for OutputStatus {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(crate = "serde")]
 /// Holds the context for a single aggsig transaction
 pub struct Context {
 	/// Parent key id
@@ -1106,6 +1112,7 @@ impl<'de> serde::de::Visitor<'de> for BlockIdentifierVisitor {
 /// a contained wallet info struct, so automated tests can parse wallet info
 /// can add more fields here over time as needed
 #[derive(Serialize, Eq, PartialEq, Deserialize, Debug, Clone)]
+#[serde(crate = "serde")]
 pub struct WalletInfo {
 	/// height from which info was taken
 	#[serde(with = "secp_ser::string_or_u64")]
@@ -1138,6 +1145,7 @@ pub struct WalletInfo {
 
 /// Types of transactions that can be contained within a TXLog entry
 #[derive(Serialize, Deserialize, Debug, Clone, Eq, PartialEq)]
+#[serde(crate = "serde")]
 pub enum TxLogEntryType {
 	/// A coinbase transaction becomes confirmed
 	ConfirmedCoinbase,
@@ -1170,6 +1178,7 @@ impl fmt::Display for TxLogEntryType {
 /// to add or remove funds from a wallet. One Transaction log entry
 /// maps to one or many outputs
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(crate = "serde")]
 pub struct TxLogEntry {
 	/// BIP32 account path used for creating this tx
 	pub parent_key_id: Identifier,
@@ -1443,6 +1452,7 @@ impl TxLogEntry {
 /// the slate
 #[cfg(feature = "grin_proof")]
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(crate = "serde")]
 pub struct StoredProofInfo {
 	/// receiver address
 	pub receiver_address: ProvableAddress,
@@ -1484,6 +1494,7 @@ impl ser::Readable for StoredProofInfo {
 
 /// Map of named accounts to BIP32 paths
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(crate = "serde")]
 pub struct AcctPathMapping {
 	/// label used by user
 	pub label: String,
@@ -1517,6 +1528,7 @@ impl ser::Readable for AcctPathMapping {
 
 /// Store details of the last scanned block
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(crate = "serde")]
 pub struct ScannedBlockInfo {
 	/// Node chain height (corresponding to the last PMMR index scanned)
 	pub height: u64,
@@ -1567,6 +1579,7 @@ impl ser::Readable for ScannedBlockInfo {
 /// before serializing to json to ensure compatibility with mining node.
 /// NOTE2!!! Serialize, Deserialize needed for mwc713, even no version is present. Json should ease the problem
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(crate = "serde")]
 pub struct CbData {
 	/// Output
 	pub output: Output,
@@ -1595,6 +1608,7 @@ pub struct HeaderInfo {
 
 /// Utility struct for return values from below
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(crate = "serde")]
 pub struct ViewWallet {
 	/// Rewind Hash used to retrieve the outputs
 	pub rewind_hash: String,
@@ -1607,6 +1621,7 @@ pub struct ViewWallet {
 }
 /// Utility struct for return values from below
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(crate = "serde")]
 pub struct ViewWalletOutputResult {
 	///
 	pub commit: String,
@@ -1652,7 +1667,7 @@ pub struct TxSession {
 	exist: Arc<u8>,
 }
 
-lazy_static::lazy_static! {
+lazy_static! {
 	// No need to have context_id because commits are unique. So any number of instances can share this collection
 	static ref TX_SESSIONS_USED_INPUTS: RwLock<HashMap<String, Weak<u8>>> = RwLock::new(HashMap::new());
 }
@@ -1825,8 +1840,8 @@ impl TxSession {
 
 /// Serializes an Option<Duration> to and from a string
 pub mod option_duration_as_secs {
-	use serde::de::Error;
-	use serde::{Deserialize, Deserializer, Serializer};
+	use mwc_wallet_util::mwc_crates::serde::de::Error;
+	use mwc_wallet_util::mwc_crates::serde::{Deserialize, Deserializer, Serializer};
 	use std::time::Duration;
 
 	///
@@ -1860,9 +1875,11 @@ pub mod option_duration_as_secs {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use serde_json::Value;
+	use mwc_wallet_util::mwc_crates::serde::{self, Deserialize, Serialize};
+	use mwc_wallet_util::mwc_crates::serde_json::Value;
 
 	#[derive(Serialize, Deserialize, PartialEq, Clone, Debug)]
+	#[serde(crate = "serde")]
 	struct TestSer {
 		#[serde(with = "option_duration_as_secs", default)]
 		dur: Option<Duration>,

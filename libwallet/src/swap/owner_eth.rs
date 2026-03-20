@@ -14,10 +14,10 @@
 
 //! Generic implementation of owner API eth functions
 
-use crate::mwc_keychain::Keychain;
 use crate::types::NodeClient;
 use crate::{wallet_lock, WalletInst, WalletLCProvider};
 use mwc_wallet_util::mwc_core::global;
+use mwc_wallet_util::mwc_keychain::Keychain;
 use std::sync::Arc;
 use std::sync::Mutex;
 
@@ -26,6 +26,7 @@ use crate::swap::ethereum::*;
 use crate::swap::trades;
 use crate::swap::types::Currency;
 use crate::swap::Error;
+use mwc_wallet_util::mwc_crates::log::info;
 
 /// Show Wallet Info
 pub fn info<'a, L, C, K>(

@@ -26,8 +26,8 @@ use crate::swap::swap;
 use crate::swap::types::{check_txs_confirmed, Action, SwapTransactionsConfirmations};
 use crate::swap::{BuyApi, Context, Error, Swap, SwapApi};
 use crate::NodeClient;
-use chrono::Local;
-use mwc_wallet_util::mwc_util::secp::Secp256k1;
+use mwc_wallet_util::mwc_crates::chrono::Local;
+use mwc_wallet_util::mwc_crates::secp::Secp256k1;
 use std::marker::PhantomData;
 use std::sync::Arc;
 

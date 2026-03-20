@@ -12,20 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#[macro_use]
-extern crate log;
-extern crate mwc_wallet_controller as wallet;
-extern crate mwc_wallet_impls as impls;
+use mwc_wallet_util::mwc_crates::log::error;
 extern crate mwc_wallet_util;
 
-use impls::test_framework::LocalWalletClient;
-use mwc_wallet_libwallet as libwallet;
+use mwc_wallet_impls::test_framework::LocalWalletClient;
 use mwc_wallet_util::mwc_core::core::{OutputFeatures, Transaction};
+use mwc_wallet_util::mwc_crates::rand::{thread_rng, Rng};
+use mwc_wallet_util::mwc_crates::secp;
 use mwc_wallet_util::mwc_keychain::{
 	mnemonic, BlindingFactor, ExtKeychain, ExtKeychainPath, Keychain, SwitchCommitmentType,
 };
-use mwc_wallet_util::mwc_util::{secp, ZeroingString};
-use rand::{thread_rng, Rng};
+use mwc_wallet_util::mwc_util::ZeroingString;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -36,7 +33,7 @@ use std::time::Duration;
 mod common;
 use common::{clean_output_dir, create_wallet_proxy, setup};
 
-fn build_output_test_impl(test_dir: &str) -> Result<(), libwallet::Error> {
+fn build_output_test_impl(test_dir: &str) -> Result<(), mwc_wallet_libwallet::Error> {
 	// Generate seed so we can verify the blinding factor is derived correctly
 	let seed: [u8; 32] = thread_rng().gen();
 	let keychain = ExtKeychain::from_seed(&seed, false).unwrap();
@@ -70,26 +67,31 @@ fn build_output_test_impl(test_dir: &str) -> Result<(), libwallet::Error> {
 	let secp = secp::Secp256k1::with_caps(secp::ContextFlag::Commit);
 	let features = OutputFeatures::Plain;
 	let amount = 60_000_000_000;
-	wallet::controller::owner_single_use(Some(wallet1.clone()), mask1, None, |sender_api, m| {
-		let built_output = sender_api.build_output(m, features, amount)?;
+	mwc_wallet_controller::controller::owner_single_use(
+		Some(wallet1.clone()),
+		mask1,
+		None,
+		|sender_api, m| {
+			let built_output = sender_api.build_output(m, features, amount)?;
 
-		let key_id = built_output.key_id;
-		assert_eq!(
-			key_id.to_path().unwrap(),
-			ExtKeychainPath::new(3, 0, 0, 0, 0)
-		);
+			let key_id = built_output.key_id;
+			assert_eq!(
+				key_id.to_path().unwrap(),
+				ExtKeychainPath::new(3, 0, 0, 0, 0)
+			);
 
-		let blind = built_output.blind;
-		let key = keychain.derive_key(amount, &key_id, SwitchCommitmentType::Regular)?;
-		assert_eq!(blind, BlindingFactor::from_secret_key(key.clone()));
+			let blind = built_output.blind;
+			let key = keychain.derive_key(amount, &key_id, SwitchCommitmentType::Regular)?;
+			assert_eq!(blind, BlindingFactor::from_secret_key(key.clone()));
 
-		let output = built_output.output;
-		assert_eq!(output.features(), features);
-		assert_eq!(output.commitment(), secp.commit(amount, key).unwrap());
-		output.verify_proof(&secp)?;
+			let output = built_output.output;
+			assert_eq!(output.features(), features);
+			assert_eq!(output.commitment(), secp.commit(amount, key).unwrap());
+			output.verify_proof(&secp)?;
 
-		Ok(())
-	})
+			Ok(())
+		},
+	)
 	.unwrap();
 
 	// let logging finish

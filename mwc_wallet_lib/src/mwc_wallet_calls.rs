@@ -20,7 +20,6 @@ use crate::receive::receive;
 use crate::repost::{get_finalized_transaction, repost};
 use crate::scan::{scan, scan_rewind_hash, update_wallet_state};
 use crate::wallet_lock;
-use lazy_static::lazy_static;
 use mwc_wallet_api::{Owner, TxLogEntryAPI};
 use mwc_wallet_config::{GlobalWalletConfigMembers, MQSConfig, WalletConfig};
 use mwc_wallet_controller::command::{send, SendArgs};
@@ -30,9 +29,7 @@ use mwc_wallet_controller::controller::{
 use mwc_wallet_controller::{command, controller};
 use mwc_wallet_impls::adapters::reset_mwcmqs_brocker;
 use mwc_wallet_impls::lifecycle::WalletSeed;
-use mwc_wallet_impls::{
-	get_mwcmqs_brocker, keychain, DefaultLCProvider, DefaultWalletImpl, HttpDataSender,
-};
+use mwc_wallet_impls::{get_mwcmqs_brocker, DefaultLCProvider, DefaultWalletImpl, HttpDataSender};
 use mwc_wallet_libwallet::foreign::{clean_receive_callback, set_receive_callback, ReceiveData};
 use mwc_wallet_libwallet::internal::{keys, tx, updater};
 use mwc_wallet_libwallet::proof::proofaddress::ProvableAddress;
@@ -42,7 +39,14 @@ use mwc_wallet_libwallet::{
 	VersionedSlate, ViewWallet, WalletInst,
 };
 use mwc_wallet_util::mwc_core::global::ChainTypes;
-use mwc_wallet_util::mwc_keychain::Identifier;
+use mwc_wallet_util::mwc_crates::lazy_static::lazy_static;
+use mwc_wallet_util::mwc_crates::libc;
+use mwc_wallet_util::mwc_crates::serde::de::DeserializeOwned;
+use mwc_wallet_util::mwc_crates::serde_json;
+use mwc_wallet_util::mwc_crates::serde_json::{json, Value};
+use mwc_wallet_util::mwc_crates::uuid::Uuid;
+use mwc_wallet_util::mwc_crates::zip;
+use mwc_wallet_util::mwc_keychain::{ExtKeychain, Identifier};
 use mwc_wallet_util::mwc_node_lib::ffi::LIB_CALLBACKS;
 use mwc_wallet_util::mwc_node_workflow::context::{allocate_new_context, release_context};
 use mwc_wallet_util::mwc_p2p::tor::arti;
@@ -50,8 +54,6 @@ use mwc_wallet_util::mwc_p2p::tor::arti::is_arti_healthy;
 use mwc_wallet_util::mwc_p2p::TorConfig;
 use mwc_wallet_util::mwc_util::static_secp_instance;
 use mwc_wallet_workflow::wallet::{init_wallet_context, release_wallet_context};
-use serde::de::DeserializeOwned;
-use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::ffi::CString;
 use std::fs;
@@ -59,13 +61,12 @@ use std::fs::File;
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::{Arc, Mutex, RwLock};
-use uuid::Uuid;
 
 pub type LibWallet = dyn WalletInst<
 	'static,
-	DefaultLCProvider<'static, CallbackNodeClient, keychain::ExtKeychain>,
+	DefaultLCProvider<'static, CallbackNodeClient, ExtKeychain>,
 	CallbackNodeClient,
-	keychain::ExtKeychain,
+	ExtKeychain,
 >;
 
 pub type WalletArc = Arc<Mutex<Box<LibWallet>>>;

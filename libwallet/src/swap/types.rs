@@ -16,12 +16,14 @@ use super::bitcoin::{BtcBuyerContext, BtcData, BtcSellerContext};
 use super::ethereum::{EthBuyerContext, EthData, EthSellerContext, EthereumAddress};
 use super::ser::*;
 use super::Error;
-use crate::mwc_core::global::ChainTypes;
-use crate::mwc_core::{global, ser};
-use crate::mwc_keychain::Identifier;
-use crate::mwc_util::secp::key::SecretKey;
 use crate::swap::message::Message;
 use bitcoin::Address;
+use mwc_wallet_util::mwc_core::global::ChainTypes;
+use mwc_wallet_util::mwc_core::{global, ser};
+use mwc_wallet_util::mwc_crates::secp::key::SecretKey;
+use mwc_wallet_util::mwc_crates::serde::{self, Deserialize, Serialize};
+use mwc_wallet_util::mwc_crates::serde_json;
+use mwc_wallet_util::mwc_keychain::Identifier;
 use mwc_web3::types::H160;
 use std::convert::TryInto;
 use std::fmt;
@@ -29,6 +31,7 @@ use std::{convert::TryFrom, str::FromStr};
 
 /// MWC Network where SWAP happens.
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[serde(crate = "serde")]
 pub enum Network {
 	/// Floonet (testnet)
 	Floonet,
@@ -73,6 +76,7 @@ impl PartialEq<Network> for ChainTypes {
 
 /// Roles of MWC swap participants
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(crate = "serde")]
 pub enum Role {
 	/// Seller - sell MWC for BTC. Params: (<Secondary redeem address>, <change amount>)
 	Seller(String, u64),
@@ -82,6 +86,7 @@ pub enum Role {
 
 /// Secondary currency that swap supports
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[serde(crate = "serde")]
 pub enum Currency {
 	/// Bitcoin Segwit
 	Btc,
@@ -793,6 +798,7 @@ fn parse_mantissa(mantissa: &str, exp: usize) -> Result<u64, Error> {
 
 /// Secondary currency related data
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(crate = "serde")]
 pub enum SecondaryData {
 	/// None
 	Empty,
@@ -835,6 +841,7 @@ impl SecondaryData {
 
 /// Buyer/Seller single deal context
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(crate = "serde")]
 pub struct Context {
 	/// Multisig key. Both Buyer and Seller using it
 	pub multisig_key: Identifier,
@@ -895,6 +902,7 @@ impl ser::Readable for Context {
 
 /// Context specfic to the swap party role
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(crate = "serde")]
 pub enum RoleContext {
 	/// Seller role
 	Seller(SellerContext),
@@ -904,6 +912,7 @@ pub enum RoleContext {
 
 /// Context for the seller party
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(crate = "serde")]
 pub struct SellerContext {
 	/// Seller account. Both lock and redeem will go to the same account (not receive)
 	pub parent_key_id: Identifier,
@@ -939,6 +948,7 @@ impl SellerContext {
 
 /// Context for the Buyer party
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(crate = "serde")]
 pub struct BuyerContext {
 	/// Buyer recieve account
 	pub parent_key_id: Identifier,
@@ -970,6 +980,7 @@ impl BuyerContext {
 
 /// Seller Secondary currency spepicif context
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(crate = "serde")]
 pub enum SecondarySellerContext {
 	/// BTC context
 	Btc(BtcSellerContext),
@@ -979,6 +990,7 @@ pub enum SecondarySellerContext {
 
 /// Buyer secondary currency context
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(crate = "serde")]
 pub enum SecondaryBuyerContext {
 	/// BTC context
 	Btc(BtcBuyerContext),
@@ -988,6 +1000,7 @@ pub enum SecondaryBuyerContext {
 
 /// Action or step of the swap process
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(crate = "serde")]
 pub enum Action {
 	/// No further action required
 	None,

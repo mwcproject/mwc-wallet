@@ -16,9 +16,6 @@ use super::client::BtcNodeClient;
 use super::types::{BtcBuyerContext, BtcData, BtcSellerContext};
 use crate::mwc_core::core::Committed;
 use crate::mwc_keychain::{Identifier, Keychain, SwitchCommitmentType};
-use crate::mwc_util::secp::aggsig::export_secnonce_single as generate_nonce;
-use crate::mwc_util::secp::pedersen;
-use crate::mwc_util::secp::Message;
 use crate::swap::bitcoin::types::BtcTtansaction;
 use crate::swap::bitcoin::Output;
 use crate::swap::ethereum::*;
@@ -32,7 +29,10 @@ use crate::swap::types::{
 use crate::swap::{Error, SellApi, Swap, SwapApi};
 use crate::{NodeClient, Slate};
 use bitcoin::{Script, Txid};
-use mwc_wallet_util::mwc_util::secp::Secp256k1;
+use mwc_wallet_util::mwc_crates::secp;
+use mwc_wallet_util::mwc_crates::secp::pedersen;
+use mwc_wallet_util::mwc_crates::secp::Message;
+use mwc_wallet_util::mwc_crates::secp::Secp256k1;
 use std::marker::PhantomData;
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -468,10 +468,10 @@ where
 			multisig_key: keys
 				.next()
 				.ok_or(Error::Generic("Not enough keys items".into()))?,
-			multisig_nonce: generate_nonce(secp)?,
-			lock_nonce: generate_nonce(secp)?,
-			refund_nonce: generate_nonce(secp)?,
-			redeem_nonce: generate_nonce(secp)?,
+			multisig_nonce: secp::aggsig::export_secnonce_single(secp)?, // generate_nonce operation
+			lock_nonce: secp::aggsig::export_secnonce_single(secp)?,
+			refund_nonce: secp::aggsig::export_secnonce_single(secp)?,
+			redeem_nonce: secp::aggsig::export_secnonce_single(secp)?,
 			role_context,
 		})
 	}

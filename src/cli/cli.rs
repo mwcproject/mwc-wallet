@@ -14,24 +14,28 @@
 // limitations under the License.
 
 use crate::cmd::wallet_args;
-use crate::util::secp::key::SecretKey;
-use clap::{App, AppSettings};
+use mwc_wallet_util::mwc_crates::clap::{App, AppSettings, YamlLoader};
+use mwc_wallet_util::mwc_crates::lazy_static::lazy_static;
+use mwc_wallet_util::mwc_crates::secp::key::SecretKey;
+use mwc_wallet_util::mwc_crates::shlex;
 use std::sync::Mutex;
-//use colored::Colorize;
+//use mwc_wallet_util::mwc_crates::colored::Colorize;
 use mwc_wallet_api::Owner;
 use mwc_wallet_config::{MQSConfig, WalletConfig};
 use mwc_wallet_controller::command::GlobalArgs;
 use mwc_wallet_controller::Error;
 use mwc_wallet_impls::DefaultWalletImpl;
 use mwc_wallet_libwallet::{NodeClient, WalletInst, WalletLCProvider};
-use mwc_wallet_util::mwc_keychain as keychain;
+use mwc_wallet_util::mwc_crates::rustyline::completion::{Completer, FilenameCompleter, Pair};
+use mwc_wallet_util::mwc_crates::rustyline::error::ReadlineError;
+use mwc_wallet_util::mwc_crates::rustyline::highlight::{Highlighter, MatchingBracketHighlighter};
+use mwc_wallet_util::mwc_crates::rustyline::hint::Hinter;
+use mwc_wallet_util::mwc_crates::rustyline::validate::Validator;
+use mwc_wallet_util::mwc_crates::rustyline::{
+	CompletionType, Config, Context, EditMode, Editor, Helper, OutputStreamType,
+};
+use mwc_wallet_util::mwc_keychain::Keychain;
 use mwc_wallet_util::mwc_p2p::TorConfig;
-use rustyline::completion::{Completer, FilenameCompleter, Pair};
-use rustyline::error::ReadlineError;
-use rustyline::highlight::{Highlighter, MatchingBracketHighlighter};
-use rustyline::hint::Hinter;
-use rustyline::validate::Validator;
-use rustyline::{CompletionType, Config, Context, EditMode, Editor, Helper, OutputStreamType};
 use std::borrow::Cow::{self, Borrowed, Owned};
 use std::sync::Arc;
 use std::time::Duration;
@@ -98,7 +102,7 @@ where
 	DefaultWalletImpl<'static, C>: WalletInst<'static, L, C, K>,
 	L: WalletLCProvider<'static, C, K> + 'static,
 	C: NodeClient + 'static,
-	K: keychain::Keychain + 'static,
+	K: Keychain + 'static,
 {
 	let editor = Config::builder()
 		.history_ignore_space(true)
@@ -125,9 +129,9 @@ where
 		let _ = reader.load_history(&history_file);
 	}*/
 
-	let yml = load_yaml!("../bin/mwc-wallet.yml");
-	let mut app = App::from_yaml(yml)
-		.version(crate_version!())
+	let yml = YamlLoader::load_from_str(include_str!("../bin/mwc-wallet.yml")).unwrap();
+	let mut app = App::from_yaml(&yml[0])
+		.version(env!("CARGO_PKG_VERSION"))
 		.setting(AppSettings::VersionlessSubcommands);
 	let mut keychain_mask = keychain_mask;
 

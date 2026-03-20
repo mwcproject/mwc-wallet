@@ -15,15 +15,19 @@
 use super::types::{Address, Publisher, Subscriber, SubscriptionHandler};
 use crate::adapters::types::MWCMQSAddress;
 use crate::error::Error;
-use crate::libwallet::proof::crypto;
-use crate::libwallet::proof::crypto::Hex;
+use mwc_wallet_libwallet::proof::crypto;
+use mwc_wallet_libwallet::proof::crypto::Hex;
+use mwc_wallet_util::mwc_crates::ed25519_dalek;
+use mwc_wallet_util::mwc_crates::lazy_static::lazy_static;
+use mwc_wallet_util::mwc_crates::nanoid;
+use mwc_wallet_util::mwc_crates::reqwest;
+use mwc_wallet_util::mwc_crates::serde_json;
+use mwc_wallet_util::mwc_crates::uuid;
 use std::sync::Mutex;
 
-use crate::core::core::amount_to_hr_string;
 use crate::SlateSender;
 #[cfg(feature = "swaps")]
 use crate::SwapMessageSender;
-use ed25519_dalek::{PublicKey as DalekPublicKey, SecretKey as DalekSecretKey};
 use mwc_wallet_libwallet::proof::message::EncryptedMessage;
 use mwc_wallet_libwallet::proof::proofaddress::ProvableAddress;
 use mwc_wallet_libwallet::proof::tx_proof::{push_proof_for_slate, TxProof};
@@ -33,9 +37,11 @@ use mwc_wallet_libwallet::swap::message::Message;
 #[cfg(feature = "swaps")]
 use mwc_wallet_libwallet::swap::message::SwapMessage;
 use mwc_wallet_libwallet::{Slate, SlateCtx, SlateVersion, VersionedSlate};
+use mwc_wallet_util::mwc_core::core::amount_to_hr_string;
 use mwc_wallet_util::mwc_core::global;
-use mwc_wallet_util::mwc_util::secp::key::SecretKey;
-use mwc_wallet_util::mwc_util::secp::Secp256k1;
+use mwc_wallet_util::mwc_crates::log::{error, info, warn};
+use mwc_wallet_util::mwc_crates::secp::key::SecretKey;
+use mwc_wallet_util::mwc_crates::secp::Secp256k1;
 use std::collections::HashMap;
 use std::io::Read;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -45,8 +51,6 @@ use std::sync::RwLock;
 use std::thread::JoinHandle;
 use std::time::Duration;
 use std::{thread, time};
-
-extern crate nanoid;
 
 // MQS enforced to have a single instance. And different compoments migth manage
 // instances separatlly.
@@ -189,8 +193,8 @@ impl SlateSender for MwcMqsChannel {
 		send_tx: bool, // false if invoice, true if send operation
 		slate: &Slate,
 		_slate_content: SlatePurpose,
-		_slatepack_secret: &DalekSecretKey,
-		_recipients: Option<DalekPublicKey>,
+		_slatepack_secret: &ed25519_dalek::SecretKey,
+		_recipients: Option<ed25519_dalek::PublicKey>,
 		_other_wallet_version: Option<(SlateVersion, Option<String>)>,
 		secp: &Secp256k1,
 	) -> Result<Slate, Error> {

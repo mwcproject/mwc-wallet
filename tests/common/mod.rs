@@ -15,38 +15,37 @@
 //! Common functions for wallet integration tests
 extern crate mwc_wallet;
 
-use mwc_wallet_config as config;
 use mwc_wallet_impls::test_framework::LocalWalletClient;
-use mwc_wallet_util::mwc_util as util;
-
-use clap::{App, ArgMatches};
+use mwc_wallet_util::mwc_crates::clap::{App, ArgMatches};
+use mwc_wallet_util::mwc_crates::serde::de::DeserializeOwned;
+use mwc_wallet_util::mwc_crates::serde::{self, Deserialize, Serialize};
+use mwc_wallet_util::mwc_crates::serde_json;
+use mwc_wallet_util::mwc_crates::serde_json::{json, Value};
+use mwc_wallet_util::mwc_crates::url::Url;
+use mwc_wallet_util::mwc_crates::{easy_jsonrpc_mwc, remove_dir_all, thiserror};
+use mwc_wallet_util::mwc_util::ZeroingString;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::{env, fs};
-use util::ZeroingString;
 
 use mwc_wallet_api::{EncryptedRequest, EncryptedResponse, JsonId};
 use mwc_wallet_config::{GlobalWalletConfig, WalletConfig, MWC_WALLET_DIR};
 use mwc_wallet_impls::{DefaultLCProvider, DefaultWalletImpl};
 use mwc_wallet_libwallet::{NodeClient, WalletInfo, WalletInst};
 use mwc_wallet_util::mwc_core::global::{self, ChainTypes};
+use mwc_wallet_util::mwc_crates::secp::key::{PublicKey, SecretKey};
 use mwc_wallet_util::mwc_keychain::ExtKeychain;
 use mwc_wallet_util::mwc_util::from_hex;
-use util::secp::key::{PublicKey, SecretKey};
 
 use mwc_wallet::cmd::wallet_args;
-use mwc_wallet_util::mwc_api as api;
 
+use mwc_wallet_util::mwc_api;
 use mwc_wallet_util::mwc_api::client::HttpClient;
 use mwc_wallet_util::mwc_core::consensus;
-use mwc_wallet_util::mwc_util::secp::Secp256k1;
-use serde::de::DeserializeOwned;
-use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use mwc_wallet_util::mwc_crates::secp::Secp256k1;
 use std::thread;
 use std::time::Duration;
-use url::Url;
 
 // Set up 2 wallets and launch the test proxy behind them
 #[macro_export]
@@ -61,8 +60,10 @@ macro_rules! setup_proxy {
 		let $chain = wallet_proxy.chain.clone();
 
 		// load app yaml. If it don't exist, just say so and exit
-		let yml = load_yaml!("../src/bin/mwc-wallet.yml");
-		let app = App::from_yaml(yml);
+		let yml =
+			mwc_crates::clap::YamlLoader::load_from_str(include_str!("../src/bin/mwc-wallet.yml"))
+				.unwrap();
+		let app = App::from_yaml(&yml[0]);
 
 		// wallet init
 		let arg_vec = vec!["mwc-wallet", "-p", "password", "init", "-h"];
@@ -120,9 +121,7 @@ macro_rules! setup_proxy {
 
 		// Set the wallet proxy listener running
 		thread::spawn(move || {
-			mwc_wallet_util::mwc_core::global::set_local_chain_type(
-				mwc_wallet_util::mwc_core::global::ChainTypes::AutomatedTesting,
-			);
+			mwc_core::global::set_local_chain_type(mwc_core::global::ChainTypes::AutomatedTesting);
 			if let Err(e) = wallet_proxy.run() {
 				error!("Wallet Proxy error: {}", e);
 			}
@@ -137,7 +136,7 @@ pub fn clean_output_dir(test_dir: &str) {
 
 #[allow(dead_code)]
 pub fn setup(test_dir: &str) {
-	util::init_test_logger();
+	mwc_wallet_util::mwc_util::init_test_logger();
 	clean_output_dir(test_dir);
 	global::set_local_chain_type(global::ChainTypes::AutomatedTesting);
 	global::set_local_accept_fee_base(consensus::MILLI_MWC / 100);
@@ -345,7 +344,8 @@ where
 	let args = app.clone().get_matches_from(arg_vec);
 	let _ = get_wallet_subcommand(test_dir, wallet_name, args.clone());
 	let config =
-		config::initial_setup_wallet(&ChainTypes::AutomatedTesting, None, None, true).unwrap();
+		mwc_wallet_config::initial_setup_wallet(&ChainTypes::AutomatedTesting, None, None, true)
+			.unwrap();
 	let mut wallet_config = config.clone().members.wallet;
 	wallet_config.chain_type = None;
 	wallet_config.api_secret_path = None;
@@ -364,7 +364,7 @@ where
 	)
 }
 
-pub fn post(url: &Url, api_secret: Option<String>, input: &Value) -> Result<Value, api::Error> {
+pub fn post(url: &Url, api_secret: Option<String>, input: &Value) -> Result<Value, mwc_api::Error> {
 	let client = HttpClient::new(0, Duration::from_secs(10), api_secret);
 	let res = client.post_request(url.as_str(), input)?;
 	Ok(res)
@@ -375,7 +375,7 @@ pub fn send_request<OUT>(
 	id: u64,
 	dest: &str,
 	req: &str,
-) -> Result<Result<OUT, WalletAPIReturnError>, api::Error>
+) -> Result<Result<OUT, WalletAPIReturnError>, mwc_api::Error>
 where
 	OUT: DeserializeOwned,
 {
@@ -418,7 +418,7 @@ pub fn send_request_enc<OUT>(
 	dest: &str,
 	req: &str,
 	shared_key: &SecretKey,
-) -> Result<Result<OUT, WalletAPIReturnError>, api::Error>
+) -> Result<Result<OUT, WalletAPIReturnError>, mwc_api::Error>
 where
 	OUT: DeserializeOwned,
 {
@@ -497,6 +497,7 @@ pub fn derive_ecdh_key(sec_key_str: &str, other_pubkey: &PublicKey, secp: &Secp2
 
 // Types to make working with json responses easier
 #[derive(Clone, Debug, Serialize, Deserialize, thiserror::Error)]
+#[serde(crate = "serde")]
 pub struct WalletAPIReturnError {
 	pub message: String,
 	pub code: i32,
@@ -519,4 +520,5 @@ impl From<mwc_wallet_controller::Error> for WalletAPIReturnError {
 
 #[allow(dead_code)]
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(crate = "serde")]
 pub struct RetrieveSummaryInfoResp(pub bool, pub WalletInfo);

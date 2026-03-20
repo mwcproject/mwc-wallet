@@ -13,11 +13,14 @@
 // limitations under the License.
 
 use crate::swap::Error;
-use rustls::pki_types::{CertificateDer, ServerName};
-use rustls::{ClientConfig, ClientConnection, RootCertStore, StreamOwned};
-use rustls_native_certs::load_native_certs;
-use serde::Serialize;
-use serde_json::Value;
+use mwc_wallet_util::mwc_crates::rustls::pki_types::{CertificateDer, ServerName};
+use mwc_wallet_util::mwc_crates::rustls::{
+	ClientConfig, ClientConnection, RootCertStore, StreamOwned,
+};
+use mwc_wallet_util::mwc_crates::rustls_native_certs::load_native_certs;
+use mwc_wallet_util::mwc_crates::serde::{self, Deserialize, Serialize};
+use mwc_wallet_util::mwc_crates::serde_json;
+use mwc_wallet_util::mwc_crates::serde_json::Value;
 use std::convert::TryFrom;
 use std::io::{BufRead, BufReader, Write};
 use std::net::{IpAddr, TcpStream, ToSocketAddrs};
@@ -206,6 +209,7 @@ impl RpcClient {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
+#[serde(crate = "serde")]
 pub struct RpcRequest {
 	pub id: String,
 	jsonrpc: String,
@@ -225,6 +229,7 @@ impl RpcRequest {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
+#[serde(crate = "serde")]
 #[serde(untagged)]
 pub enum RpcResponse {
 	ResponseErr(RpcResponseErr),
@@ -232,12 +237,14 @@ pub enum RpcResponse {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
+#[serde(crate = "serde")]
 pub struct RpcResponseOk {
 	pub id: Option<String>,
 	pub result: Value,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
+#[serde(crate = "serde")]
 pub struct RpcResponseErr {
 	pub id: Option<String>,
 	pub error: Value,

@@ -15,6 +15,7 @@
 //! Tor status for the wallet. That data can be sharable by many components. We just
 //! need to know how it is running.
 
+use mwc_wallet_util::mwc_crates::lazy_static::lazy_static;
 use std::collections::HashMap;
 use std::sync::RwLock;
 

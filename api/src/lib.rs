@@ -22,22 +22,6 @@
 #![deny(non_snake_case)]
 #![deny(unused_mut)]
 
-use mwc_wallet_config as config;
-use mwc_wallet_util::mwc_core as core;
-use mwc_wallet_util::mwc_keychain as keychain;
-use mwc_wallet_util::mwc_util as util;
-extern crate mwc_wallet_impls as impls;
-extern crate mwc_wallet_libwallet as libwallet;
-
-#[macro_use]
-extern crate serde_derive;
-extern crate serde_json;
-
-#[macro_use]
-extern crate log;
-#[macro_use]
-extern crate lazy_static;
-
 mod foreign;
 mod foreign_rpc;
 
@@ -53,7 +37,6 @@ pub use crate::owner::Owner;
 pub use crate::owner_rpc_v2::OwnerRpcV2;
 pub use crate::owner_rpc_v3::OwnerRpcV3;
 
-pub use crate::foreign_rpc::foreign_rpc as foreign_rpc_client;
 pub use crate::foreign_rpc::run_doctest_foreign;
 pub use crate::owner_rpc_v2::run_doctest_owner;
 

@@ -10,27 +10,10 @@ exclude = ["**/*.mwc", "**/*.mwc2"]
 edition = "2018"
 
 [dependencies]
-log = "0.4"
-uuid = { version = "0.8", features = ["serde", "v4"] }
-serde = "1"
-rand = "0.6"
-serde_derive = "1"
-serde_json = "1"
-chrono = { version = "0.4.11", features = ["serde"] }
-ring = "0.16"
-base64 = "0.12"
-ed25519-dalek = "1.0.0-pre.4"
-easy-jsonrpc-mwc = { git = "https://github.com/mwcproject/easy-jsonrpc-mwc", version = "0.5.5", branch = "master" }
-lazy_static = "1.4"
-
 mwc_wallet_libwallet = { path = "../libwallet", version = "6.0.1" }
 mwc_wallet_config = { path = "../config", version = "6.0.1" }
 mwc_wallet_impls = { path = "../impls", version = "6.0.1" }
 mwc_wallet_util = { path = "../util", version = "6.0.1" }
-
-[dev-dependencies]
-serde_json = "1"
-tempfile = "3.1"
 
 [features]
 grin_proof = ["mwc_wallet_libwallet/grin_proof"]

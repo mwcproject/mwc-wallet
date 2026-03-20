@@ -13,14 +13,17 @@
 // limitations under the License.
 
 use super::Error;
-use crate::mwc_core::global;
-use crate::mwc_util::secp::key::SecretKey;
-use crate::mwc_util::{from_hex, to_hex};
 use crate::swap::types::{Context, Currency};
 use crate::swap::Swap;
-use base64;
-use rand::{thread_rng, Rng};
-use ring::aead;
+use mwc_wallet_util::mwc_core::global;
+use mwc_wallet_util::mwc_crates::base64;
+use mwc_wallet_util::mwc_crates::lazy_static::lazy_static;
+use mwc_wallet_util::mwc_crates::rand::{thread_rng, Rng};
+use mwc_wallet_util::mwc_crates::ring::aead;
+use mwc_wallet_util::mwc_crates::secp::key::SecretKey;
+use mwc_wallet_util::mwc_crates::serde::{self, Deserialize, Serialize};
+use mwc_wallet_util::mwc_crates::serde_json;
+use mwc_wallet_util::mwc_util::{from_hex, to_hex};
 use std::collections::{BTreeMap, HashMap};
 use std::fs;
 use std::fs::File;
@@ -602,6 +605,7 @@ pub fn import_trade(
 
 /// Encrypt and decrypt swap files
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(crate = "serde")]
 pub struct EncryptedSwap {
 	/// nonce used for encryption
 	pub nonce: String,

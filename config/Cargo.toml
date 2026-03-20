@@ -10,14 +10,4 @@ workspace = ".."
 edition = "2018"
 
 [dependencies]
-rand = "0.6"
-serde = "1"
-dirs = "2.0"
-toml = "0.5"
-serde_derive = "1"
-thiserror = "1"
-
 mwc_wallet_util = { path = "../util", version = "6.0.1" }
-
-[dev-dependencies]
-pretty_assertions = "0.6"

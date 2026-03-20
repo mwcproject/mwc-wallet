@@ -13,25 +13,19 @@
 // limitations under the License.
 
 //! common functions for tests (instantiating wallet and proxy, mostly)
-extern crate mwc_wallet_controller as wallet;
-extern crate mwc_wallet_impls as impls;
-extern crate mwc_wallet_libwallet as libwallet;
 
-use mwc_wallet_util::mwc_core as core;
-use mwc_wallet_util::mwc_keychain as keychain;
-use mwc_wallet_util::mwc_util as util;
-
-use self::core::global;
-use self::keychain::ExtKeychain;
-use self::libwallet::WalletInst;
-use impls::test_framework::{LocalWalletClient, WalletProxy};
-use impls::{DefaultLCProvider, DefaultWalletImpl};
+use mwc_wallet_impls::test_framework::{LocalWalletClient, WalletProxy};
+use mwc_wallet_impls::{DefaultLCProvider, DefaultWalletImpl};
+use mwc_wallet_libwallet::WalletInst;
 use mwc_wallet_util::mwc_core::consensus;
 use mwc_wallet_util::mwc_core::core::Transaction;
+use mwc_wallet_util::mwc_core::global;
+use mwc_wallet_util::mwc_crates::remove_dir_all;
+use mwc_wallet_util::mwc_crates::secp::key::SecretKey;
+use mwc_wallet_util::mwc_keychain::ExtKeychain;
+use mwc_wallet_util::mwc_util::ZeroingString;
 use std::sync::Arc;
 use std::sync::Mutex;
-use util::secp::key::SecretKey;
-use util::ZeroingString;
 
 #[macro_export]
 macro_rules! wallet_inst {
@@ -102,7 +96,7 @@ pub fn clean_output_dir(test_dir: &str) {
 
 #[allow(dead_code)]
 pub fn setup(test_dir: &str) {
-	util::init_test_logger();
+	mwc_wallet_util::mwc_util::init_test_logger();
 	clean_output_dir(test_dir);
 	global::set_local_chain_type(global::ChainTypes::AutomatedTesting);
 	global::set_local_accept_fee_base(consensus::MILLI_MWC / 100);

@@ -13,8 +13,10 @@
 // limitations under the License.
 
 use super::multisig;
-use crate::mwc_core::core::committed;
-use crate::mwc_util::secp;
+use mwc_wallet_util::mwc_core::core::committed;
+use mwc_wallet_util::mwc_crates::secp;
+use mwc_wallet_util::mwc_crates::serde_json;
+use mwc_wallet_util::mwc_crates::thiserror;
 use std::io;
 
 /// Swap crate errors
@@ -73,7 +75,7 @@ pub enum Error {
 	Multisig(#[from] multisig::Error),
 	/// Keychain failed
 	#[error("Swap Keychain error: {0}")]
-	Keychain(#[from] crate::mwc_keychain::Error),
+	Keychain(#[from] mwc_wallet_util::mwc_keychain::Error),
 	/// LibWallet error
 	#[error("Swap LibWallet error: {0}")]
 	LibWallet(String),

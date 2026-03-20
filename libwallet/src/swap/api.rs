@@ -16,15 +16,15 @@ use super::error::Error;
 use super::swap::Swap;
 use super::types::{Context, Currency};
 use super::Keychain;
-use crate::mwc_core::global;
-use crate::mwc_keychain::Identifier;
 use crate::swap::bitcoin::{BtcSwapApi, ElectrumNodeClient};
 use crate::swap::ethereum::{EthSwapApi, EthereumWallet, InfuraNodeClient};
 use crate::swap::fsm::machine::StateMachine;
 use crate::swap::message::SecondaryUpdate;
 use crate::swap::types::SwapTransactionsConfirmations;
 use crate::NodeClient;
-use mwc_wallet_util::mwc_util::secp::Secp256k1;
+use mwc_wallet_util::mwc_core::global;
+use mwc_wallet_util::mwc_crates::secp::Secp256k1;
+use mwc_wallet_util::mwc_keychain::Identifier;
 use std::sync::Arc;
 use std::sync::Mutex;
 

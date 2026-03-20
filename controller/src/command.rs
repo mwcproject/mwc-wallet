@@ -15,24 +15,11 @@
 
 //! Mwc wallet command-line function implementations
 
-use crate::api::TLSConfig;
-use crate::apiwallet::Owner;
-use crate::config::{MQSConfig, WalletConfig, WALLET_CONFIG_FILE_NAME};
-use crate::core::{core, global};
 use crate::error::Error;
-use crate::impls::{create_sender, SlateGetter as _};
-use crate::impls::{PathToSlateGetter, PathToSlatePutter, SlatePutter};
-use crate::keychain;
-#[cfg(feature = "swaps")]
-use crate::libwallet::swap::types::Currency;
-use crate::libwallet::{InitTxArgs, IssueInvoiceTxArgs, NodeClient, WalletLCProvider};
-use crate::util::secp::key::SecretKey;
-use crate::util::ZeroingString;
 use crate::{controller, display};
 use ::core::time;
-#[cfg(feature = "swaps")]
-use chrono::Utc;
-use ed25519_dalek::{PublicKey as DalekPublicKey, SecretKey as DalekSecretKey};
+use mwc_wallet_api::Owner;
+use mwc_wallet_config::{MQSConfig, WalletConfig, WALLET_CONFIG_FILE_NAME};
 #[cfg(feature = "swaps")]
 use mwc_wallet_impls::adapters::create_swap_message_sender;
 #[cfg(feature = "swaps")]
@@ -45,13 +32,29 @@ use mwc_wallet_impls::libp2p_messaging;
 use mwc_wallet_impls::tor;
 #[cfg(feature = "swaps")]
 use mwc_wallet_impls::HttpDataSender;
+use mwc_wallet_impls::{create_sender, SlateGetter};
 #[cfg(feature = "swaps")]
 use mwc_wallet_impls::{Address, MWCMQSAddress, Publisher};
+use mwc_wallet_impls::{PathToSlateGetter, PathToSlatePutter, SlatePutter};
 use mwc_wallet_libwallet::api_impl::owner;
 #[cfg(feature = "libp2p")]
 use mwc_wallet_libwallet::api_impl::owner_libp2p;
 #[cfg(feature = "swaps")]
 use mwc_wallet_libwallet::api_impl::{owner_eth, owner_swap};
+#[cfg(feature = "swaps")]
+use mwc_wallet_libwallet::swap::types::Currency;
+use mwc_wallet_libwallet::{InitTxArgs, IssueInvoiceTxArgs, NodeClient, WalletLCProvider};
+use mwc_wallet_util::mwc_api::TLSConfig;
+use mwc_wallet_util::mwc_core::{core, global};
+#[cfg(feature = "swaps")]
+use mwc_wallet_util::mwc_crates::chrono::Utc;
+use mwc_wallet_util::mwc_crates::ed25519_dalek;
+use mwc_wallet_util::mwc_crates::lazy_static::lazy_static;
+use mwc_wallet_util::mwc_crates::secp::key::SecretKey;
+use mwc_wallet_util::mwc_crates::serde::{self, Deserialize, Serialize};
+use mwc_wallet_util::mwc_crates::serde_json;
+use mwc_wallet_util::mwc_keychain::Keychain;
+use mwc_wallet_util::mwc_util::{is_console_output_enabled, static_secp_instance, ZeroingString};
 
 use mwc_wallet_libwallet::proof::proofaddress::{self, ProvableAddress};
 use mwc_wallet_libwallet::proof::tx_proof::TxProof;
@@ -77,6 +80,14 @@ use mwc_wallet_util::mwc_core::core::amount_to_hr_string;
 use mwc_wallet_util::mwc_core::core::Transaction;
 #[cfg(feature = "libp2p")]
 use mwc_wallet_util::mwc_core::global::{FLOONET_DNS_SEEDS, MAINNET_DNS_SEEDS};
+use mwc_wallet_util::mwc_crates::log::{error, info, warn};
+use mwc_wallet_util::mwc_crates::qr_code::{EcLevel, QrCode};
+use mwc_wallet_util::mwc_crates::secp::{ContextFlag, Secp256k1};
+#[cfg(feature = "swaps")]
+use mwc_wallet_util::mwc_crates::serde_json::json;
+#[cfg(feature = "libp2p")]
+use mwc_wallet_util::mwc_crates::serde_json::{Map as JsonMap, Value as JsonValue};
+use mwc_wallet_util::mwc_crates::uuid::Uuid;
 #[cfg(feature = "libp2p")]
 use mwc_wallet_util::mwc_p2p::libp2p_connection;
 #[cfg(feature = "libp2p")]
@@ -85,15 +96,6 @@ use mwc_wallet_util::mwc_p2p::tor::arti::{is_arti_started, start_arti};
 #[cfg(feature = "libp2p")]
 use mwc_wallet_util::mwc_p2p::PeerAddr;
 use mwc_wallet_util::mwc_p2p::TorConfig;
-use mwc_wallet_util::mwc_util;
-use mwc_wallet_util::mwc_util::secp::{ContextFlag, Secp256k1};
-use mwc_wallet_util::mwc_util::static_secp_instance;
-use qr_code::{EcLevel, QrCode};
-use serde_json as json;
-#[cfg(feature = "swaps")]
-use serde_json::json;
-#[cfg(feature = "libp2p")]
-use serde_json::{Map as JsonMap, Value as JsonValue};
 use std::collections::{HashMap, HashSet};
 use std::convert::TryFrom;
 use std::fs::File;
@@ -108,7 +110,6 @@ use std::sync::{mpsc, Mutex, RwLock};
 use std::thread;
 use std::thread::JoinHandle;
 use std::time::Duration;
-use uuid::Uuid;
 
 lazy_static! {
 	/// Recieve account can be specified separately and must be allpy to ALL receive operations
@@ -194,7 +195,7 @@ pub fn init<L, C, K>(
 where
 	L: WalletLCProvider<'static, C, K> + 'static,
 	C: NodeClient + 'static,
-	K: keychain::Keychain + 'static,
+	K: Keychain + 'static,
 {
 	let mut w_lock = owner_api
 		.wallet_inst
@@ -231,7 +232,7 @@ pub fn recover<L, C, K>(
 where
 	L: WalletLCProvider<'static, C, K> + 'static,
 	C: NodeClient + 'static,
-	K: keychain::Keychain + 'static,
+	K: Keychain + 'static,
 {
 	let mut w_lock = owner_api
 		.wallet_inst
@@ -251,7 +252,7 @@ pub fn rewind_hash<'a, L, C, K>(
 where
 	L: WalletLCProvider<'static, C, K>,
 	C: NodeClient + 'static,
-	K: keychain::Keychain + 'static,
+	K: Keychain + 'static,
 {
 	controller::owner_single_use(None, keychain_mask, Some(owner_api), |api, m| {
 		let rewind_hash = api.get_rewind_hash(m)?;
@@ -289,7 +290,7 @@ pub fn generate_ownership_proof<'a, L, C, K>(
 where
 	L: WalletLCProvider<'static, C, K>,
 	C: NodeClient + 'static,
-	K: keychain::Keychain + 'static,
+	K: Keychain + 'static,
 {
 	controller::owner_single_use(None, keychain_mask, Some(owner_api), |api, m| {
 		let proof = api.retrieve_ownership_proof(
@@ -318,7 +319,7 @@ pub fn validate_ownership_proof<'a, L, C, K>(
 where
 	L: WalletLCProvider<'static, C, K>,
 	C: NodeClient + 'static,
-	K: keychain::Keychain + 'static,
+	K: Keychain + 'static,
 {
 	controller::owner_single_use(None, keychain_mask, Some(owner_api), |api, _m| {
 		let proof = serde_json::from_str::<OwnershipProof>(proof).map_err(|e| {
@@ -361,7 +362,7 @@ pub fn scan_rewind_hash<L, C, K>(
 where
 	L: WalletLCProvider<'static, C, K> + 'static,
 	C: NodeClient + 'static,
-	K: keychain::Keychain + 'static,
+	K: Keychain + 'static,
 {
 	controller::owner_single_use(None, None, Some(owner_api), |api, m| {
 		let rewind_hash = args.rewind_hash;
@@ -468,7 +469,7 @@ pub fn listen<L, C, K>(
 where
 	L: WalletLCProvider<'static, C, K> + 'static,
 	C: NodeClient + 'static,
-	K: keychain::Keychain + 'static,
+	K: Keychain + 'static,
 {
 	match args.method.as_str() {
 		"http" => {
@@ -565,7 +566,7 @@ pub fn owner_api<L, C, K>(
 where
 	L: WalletLCProvider<'static, C, K> + Send + Sync + 'static,
 	C: NodeClient + 'static,
-	K: keychain::Keychain + 'static,
+	K: Keychain + 'static,
 {
 	// keychain mask needs to be a sinlge instance, in case the foreign API is
 	// also being run at the same time
@@ -609,7 +610,7 @@ pub fn account<L, C, K>(
 where
 	L: WalletLCProvider<'static, C, K> + 'static,
 	C: NodeClient + 'static,
-	K: keychain::Keychain + 'static,
+	K: Keychain + 'static,
 {
 	match args.create {
 		None => {
@@ -648,6 +649,7 @@ where
 
 /// Arguments for the send command
 #[derive(Serialize, Deserialize)]
+#[serde(crate = "serde")]
 pub struct SendArgs {
 	pub amount: u64,
 	pub amount_includes_fee: bool,
@@ -686,7 +688,7 @@ pub fn send<L, C, K>(
 where
 	L: WalletLCProvider<'static, C, K> + 'static,
 	C: NodeClient + 'static,
-	K: keychain::Keychain + 'static,
+	K: Keychain + 'static,
 {
 	let mut amount = args.amount;
 	if args.use_max_amount {
@@ -845,7 +847,7 @@ where
 
 				res_tx_uuid = Some(slate.id.clone());
 
-				let mut recipient: Option<DalekPublicKey> = None;
+				let mut recipient: Option<ed25519_dalek::PublicKey> = None;
 				if let Some(sp_address) = &args.slatepack_recipient {
 					recipient = Some(sp_address.tor_public_key()?);
 				}
@@ -863,7 +865,7 @@ where
 						&keychain,
 						address_index,
 					)?;
-					let slate_pub_key = DalekPublicKey::from(&slatepack_secret);
+					let slate_pub_key = ed25519_dalek::PublicKey::from(&slatepack_secret);
 					(slatepack_secret, slate_pub_key, keychain.secp().clone())
 				};
 
@@ -905,7 +907,7 @@ where
 						}
 
 						if !args.dest.is_empty() {
-							if mwc_wallet_util::mwc_util::is_console_output_enabled() {
+							if is_console_output_enabled() {
 								println!(
 									"Resulting transaction is successfully stored at : {}",
 									args.dest
@@ -1021,7 +1023,7 @@ where
 
 						info!("slate [{}] finalized successfully", slate.id.to_string());
 
-						if mwc_wallet_util::mwc_util::is_console_output_enabled() {
+						if is_console_output_enabled() {
 							println!("slate [{}] finalized successfully", slate.id.to_string());
 						}
 						return Ok(Some(slate.id));
@@ -1046,7 +1048,7 @@ pub fn fauset_request<L, C, K>(
 where
 	L: WalletLCProvider<'static, C, K> + 'static,
 	C: NodeClient + 'static,
-	K: keychain::Keychain + 'static,
+	K: Keychain + 'static,
 {
 	let wallet_inst = owner_api.wallet_inst.clone();
 	let mut res_slate = Slate::blank(2, false);
@@ -1180,7 +1182,7 @@ pub fn show_slatepack<L, C, K>(
 where
 	L: WalletLCProvider<'static, C, K> + 'static,
 	C: NodeClient + 'static,
-	K: keychain::Keychain + 'static,
+	K: Keychain + 'static,
 {
 	// Output if it is a slatepack, into stdout and backup file
 	let tld = api.get_top_level_directory()?;
@@ -1214,7 +1216,7 @@ where
 		))
 	})?;
 
-	if mwc_util::is_console_output_enabled() {
+	if is_console_output_enabled() {
 		println!();
 		if !show_finalizing_message {
 			println!("Slatepack data follows. Please provide this output to the other party");
@@ -1268,7 +1270,7 @@ pub fn receive<L, C, K>(
 where
 	L: WalletLCProvider<'static, C, K>,
 	C: NodeClient + 'static,
-	K: keychain::Keychain + 'static,
+	K: Keychain + 'static,
 {
 	let km = match keychain_mask.as_ref() {
 		None => None,
@@ -1339,14 +1341,14 @@ where
 			context_id,
 			response_file.clone().map(|s| s.into()),
 			SlatePurpose::SendResponse,
-			DalekPublicKey::from(&slatepack_secret),
+			ed25519_dalek::PublicKey::from(&slatepack_secret),
 			sender,
 			slatepack_format,
 		)
 		.put_tx(&slate, Some(&slatepack_secret), false, &secp)?;
 
 		if let Some(response_file) = &response_file {
-			if mwc_wallet_util::mwc_util::is_console_output_enabled() {
+			if is_console_output_enabled() {
 				println!(
 					"Response file {} generated, and can be sent back to the transaction originator.",
 					response_file
@@ -1381,7 +1383,7 @@ pub fn unpack<L, C, K>(
 where
 	L: WalletLCProvider<'static, C, K>,
 	C: NodeClient + 'static,
-	K: keychain::Keychain + 'static,
+	K: Keychain + 'static,
 {
 	let km = match keychain_mask.as_ref() {
 		None => None,
@@ -1490,7 +1492,7 @@ pub fn finalize<L, C, K>(
 where
 	L: WalletLCProvider<'static, C, K> + 'static,
 	C: NodeClient + 'static,
-	K: keychain::Keychain + 'static,
+	K: Keychain + 'static,
 {
 	let mut slate = Slate::blank(2, false); // result placeholder, params not important
 	let mut content = SlatePurpose::FullSlate;
@@ -1510,7 +1512,7 @@ where
 			};
 			let slatepack_secret =
 				proofaddress::payment_proof_address_secret(context_id, &keychain, address_index)?;
-			let slatepack_secret = DalekSecretKey::from_bytes(&slatepack_secret.0)
+			let slatepack_secret = ed25519_dalek::SecretKey::from_bytes(&slatepack_secret.0)
 				.map_err(|e| Error::GenericError(format!("Unable to build secret, {}", e)))?;
 			(slatepack_secret, keychain.secp().clone(), context_id)
 		};
@@ -1621,7 +1623,7 @@ where
 					&keychain,
 					address_index,
 				)?;
-				let slatepack_secret = DalekSecretKey::from_bytes(&slatepack_secret.0)
+				let slatepack_secret = ed25519_dalek::SecretKey::from_bytes(&slatepack_secret.0)
 					.map_err(|e| Error::GenericError(format!("Unable to build secret, {}", e)))?;
 				(slatepack_secret, keychain.secp().clone(), context_id)
 			};
@@ -1636,7 +1638,7 @@ where
 				context_id,
 				path_buf,
 				SlatePurpose::FullSlate,
-				DalekPublicKey::from(&slatepack_secret),
+				ed25519_dalek::PublicKey::from(&slatepack_secret),
 				sender,
 				slatepack_format,
 			)
@@ -1679,10 +1681,10 @@ pub fn issue_invoice_tx<L, C, K>(
 where
 	L: WalletLCProvider<'static, C, K> + 'static,
 	C: NodeClient + 'static,
-	K: keychain::Keychain + 'static,
+	K: Keychain + 'static,
 {
 	controller::owner_single_use(None, keychain_mask, Some(owner_api), |api, m| {
-		let mut recipient: Option<DalekPublicKey> = None;
+		let mut recipient: Option<ed25519_dalek::PublicKey> = None;
 		if let Some(sp_address) = &args.issue_args.slatepack_recipient {
 			recipient = Some(sp_address.tor_public_key()?);
 		}
@@ -1703,7 +1705,7 @@ where
 				&keychain,
 				address_index,
 			)?;
-			let slatepack_pk = DalekPublicKey::from(&slatepack_secret);
+			let slatepack_pk = ed25519_dalek::PublicKey::from(&slatepack_secret);
 			(
 				slatepack_secret,
 				slatepack_pk,
@@ -1766,7 +1768,7 @@ pub fn process_invoice<L, C, K>(
 where
 	L: WalletLCProvider<'static, C, K> + 'static,
 	C: NodeClient + 'static,
-	K: keychain::Keychain + 'static,
+	K: Keychain + 'static,
 {
 	let (slatepack_secret, tor_address, secp, context_id, base_dir) = {
 		wallet_lock!(owner_api.wallet_inst, w);
@@ -1780,7 +1782,7 @@ where
 		let base_dir = w.get_data_file_dir().to_string();
 		let slatepack_secret =
 			proofaddress::payment_proof_address_dalek_secret(context_id, &keychain, address_index)?;
-		let slatepack_pk = DalekPublicKey::from(&slatepack_secret);
+		let slatepack_pk = ed25519_dalek::PublicKey::from(&slatepack_secret);
 		(
 			slatepack_secret,
 			slatepack_pk,
@@ -1980,7 +1982,7 @@ pub fn info<L, C, K>(
 where
 	L: WalletLCProvider<'static, C, K> + 'static,
 	C: NodeClient + 'static,
-	K: keychain::Keychain + 'static,
+	K: Keychain + 'static,
 {
 	let updater_running = owner_api.updater_running.load(Ordering::Relaxed);
 	controller::owner_single_use(None, keychain_mask, Some(owner_api), |api, m| {
@@ -2018,7 +2020,7 @@ pub fn outputs<L, C, K>(
 where
 	L: WalletLCProvider<'static, C, K> + 'static,
 	C: NodeClient + 'static,
-	K: keychain::Keychain + 'static,
+	K: Keychain + 'static,
 {
 	let updater_running = owner_api.updater_running.load(Ordering::Relaxed);
 	controller::owner_single_use(None, keychain_mask, Some(owner_api), |api, m| {
@@ -2054,7 +2056,7 @@ pub fn txs<L, C, K>(
 where
 	L: WalletLCProvider<'static, C, K> + 'static,
 	C: NodeClient + 'static,
-	K: keychain::Keychain + 'static,
+	K: Keychain + 'static,
 {
 	let updater_running = owner_api.updater_running.load(Ordering::Relaxed);
 	controller::owner_single_use(None, keychain_mask, Some(owner_api), |api, m| {
@@ -2149,7 +2151,7 @@ pub fn post<L, C, K>(
 where
 	L: WalletLCProvider<'static, C, K> + 'static,
 	C: NodeClient + 'static,
-	K: keychain::Keychain + 'static,
+	K: Keychain + 'static,
 {
 	let path_buf: PathBuf = (&args.input).into();
 	let mut pub_tx_f = File::open(&path_buf)
@@ -2236,7 +2238,7 @@ pub fn submit<L, C, K>(
 where
 	L: WalletLCProvider<'static, C, K> + 'static,
 	C: NodeClient + 'static,
-	K: keychain::Keychain + 'static,
+	K: Keychain + 'static,
 {
 	controller::owner_single_use(None, keychain_mask, Some(owner_api), |api, m| {
 		let stored_tx = api.load_stored_tx(&args.input)?;
@@ -2262,7 +2264,7 @@ pub fn repost<L, C, K>(
 where
 	L: WalletLCProvider<'static, C, K> + 'static,
 	C: NodeClient + 'static,
-	K: keychain::Keychain + 'static,
+	K: Keychain + 'static,
 {
 	controller::owner_single_use(None, keychain_mask, Some(owner_api), |api, m| {
 		let (_, txs) = api.retrieve_txs(m, true, Some(args.id), None, None, None)?;
@@ -2300,7 +2302,7 @@ where
 				let mut tx_file = File::create(f.clone()).map_err(|e| {
 					Error::IO(format!("Unable to create tx dump file {}, {}", f, e))
 				})?;
-				let tx_as_str = json::to_string(&stored_tx).map_err(|e| {
+				let tx_as_str = serde_json::to_string(&stored_tx).map_err(|e| {
 					Error::GenericError(format!("Unable convert Tx to Json, {}", e))
 				})?;
 				tx_file.write_all(tx_as_str.as_bytes()).map_err(|e| {
@@ -2332,7 +2334,7 @@ pub fn cancel<L, C, K>(
 where
 	L: WalletLCProvider<'static, C, K> + 'static,
 	C: NodeClient + 'static,
-	K: keychain::Keychain + 'static,
+	K: Keychain + 'static,
 {
 	controller::owner_single_use(None, keychain_mask, Some(owner_api), |api, m| {
 		let result = api.cancel_tx(m, args.tx_id, args.tx_slate_id);
@@ -2368,7 +2370,7 @@ pub fn scan<L, C, K>(
 where
 	L: WalletLCProvider<'static, C, K> + 'static,
 	C: NodeClient + 'static,
-	K: keychain::Keychain + 'static,
+	K: Keychain + 'static,
 {
 	controller::owner_single_use(None, keychain_mask, Some(owner_api), |api, m| {
 		let tip_height = api.node_height(m)?.height;
@@ -2404,7 +2406,7 @@ pub fn address<L, C, K>(
 where
 	L: WalletLCProvider<'static, C, K> + 'static,
 	C: NodeClient + 'static,
-	K: keychain::Keychain + 'static,
+	K: Keychain + 'static,
 {
 	controller::owner_single_use(None, keychain_mask, Some(owner_api), |api, m| {
 		// Just address at derivation index 0 for now
@@ -2443,7 +2445,7 @@ pub fn proof_export<L, C, K>(
 where
 	L: WalletLCProvider<'static, C, K> + 'static,
 	C: NodeClient + 'static,
-	K: keychain::Keychain + 'static,
+	K: Keychain + 'static,
 {
 	controller::owner_single_use(None, keychain_mask, Some(owner_api), |api, m| {
 		let result = api.get_stored_tx_proof(m, args.id, args.tx_slate_id);
@@ -2458,7 +2460,7 @@ where
 				})?;
 				proof_file
 					.write_all(
-						json::to_string_pretty(&p)
+						serde_json::to_string_pretty(&p)
 							.map_err(|e| {
 								Error::GenericError(format!("Data to Json conversion error, {}", e))
 							})?
@@ -2501,7 +2503,7 @@ pub fn proof_verify<L, C, K>(
 where
 	L: WalletLCProvider<'static, C, K> + 'static,
 	C: NodeClient + 'static,
-	K: keychain::Keychain + 'static,
+	K: Keychain + 'static,
 {
 	//read the file.
 	let input = &args.input_file;
@@ -2560,7 +2562,7 @@ pub fn dump_wallet_data<L, C, K>(
 where
 	L: WalletLCProvider<'static, C, K> + 'static,
 	C: NodeClient + 'static,
-	K: keychain::Keychain + 'static,
+	K: Keychain + 'static,
 {
 	controller::owner_single_use(None, keychain_mask, Some(owner_api), |api, _m| {
 		let result = api.dump_wallet_data(file_name);
@@ -2588,7 +2590,7 @@ pub fn swap_start<L, C, K>(
 where
 	L: WalletLCProvider<'static, C, K> + 'static,
 	C: NodeClient + 'static,
-	K: keychain::Keychain + 'static,
+	K: Keychain + 'static,
 {
 	let context_id = {
 		wallet_lock!(owner_api.wallet_inst, w);
@@ -2618,7 +2620,7 @@ where
 		let result = api.swap_start(keychain_mask, args);
 		match result {
 			Ok(swap_id) => {
-				if mwc_wallet_util::mwc_util::is_console_output_enabled() {
+				if is_console_output_enabled() {
 					println!("Seller Swap trade is created: {}", swap_id);
 				}
 				Ok(swap_id)
@@ -2644,7 +2646,7 @@ pub fn swap_create_from_offer<L, C, K>(
 where
 	L: WalletLCProvider<'static, C, K> + 'static,
 	C: NodeClient + 'static,
-	K: keychain::Keychain + 'static,
+	K: Keychain + 'static,
 {
 	controller::owner_single_use(None, keychain_mask, Some(owner_api), |api, _m| {
 		let result = api.swap_create_from_offer(keychain_mask, file.clone());
@@ -2815,6 +2817,7 @@ pub struct SendMarketplaceMessageArgs {
 
 // For Json we can't use int 64, we have to convert all of them to Strings
 #[derive(Serialize, Deserialize)]
+#[serde(crate = "serde")]
 #[cfg(feature = "swaps")]
 pub struct StateEtaInfoString {
 	/// True if this is current active state
@@ -2826,6 +2829,7 @@ pub struct StateEtaInfoString {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(crate = "serde")]
 #[cfg(feature = "swaps")]
 pub struct SwapJournalRecordString {
 	/// Unix timestamp, when event happens
@@ -2843,7 +2847,7 @@ fn notify_about_cancelled_swaps<L, C, K>(
 ) where
 	L: WalletLCProvider<'static, C, K> + 'static,
 	C: NodeClient + 'static,
-	K: keychain::Keychain + 'static,
+	K: Keychain + 'static,
 {
 	if !cancelled_swaps.is_empty() {
 		// Notify peers about that async is fine
@@ -2886,7 +2890,7 @@ pub fn swap<L, C, K>(
 where
 	L: WalletLCProvider<'static, C, K> + 'static,
 	C: NodeClient + 'static,
-	K: keychain::Keychain + 'static,
+	K: Keychain + 'static,
 {
 	let km = match keychain_mask.as_ref() {
 		None => None,
@@ -2920,7 +2924,7 @@ where
 						let mut res = Vec::new();
 
 						for swap_info in list {
-							let item = json::json!({
+							let item = serde_json::json!({
 								"is_seller" : swap_info.is_seller,
 								"secondary_address" : swap_info.secondary_address,
 								"mwc_amount" : swap_info.mwc_amount,
@@ -3086,7 +3090,7 @@ where
 									})
 									.collect();
 
-								let item = json::json!({
+								let item = serde_json::json!({
 									"swapId" : swap.id.to_string(),
 									"tag": swap.tag.clone().unwrap_or("".to_string()),
 									"isSeller" : swap.is_seller(),
@@ -3180,7 +3184,7 @@ where
 						.collect();
 
 					if args.json_format {
-						let item = json::json!({
+						let item = serde_json::json!({
 							"swapId" : swap.id.to_string(),
 							"isSeller" : swap.is_seller(),
 							"mwcAmount": core::amount_to_hr_string(swap.primary_amount, true),
@@ -3815,7 +3819,7 @@ where
 								})
 								.collect();
 
-							let item = json::json!({
+							let item = serde_json::json!({
 									"swap_id" : swap_id2.clone(),
 									"stateCmd" : curr_state.to_cmd_str(),
 									"last_process_error" : last_error,
@@ -3966,7 +3970,7 @@ pub fn eth<L, C, K>(
 where
 	L: WalletLCProvider<'static, C, K> + 'static,
 	C: NodeClient + 'static,
-	K: keychain::Keychain + 'static,
+	K: Keychain + 'static,
 {
 	match args.subcommand {
 		EthSubcommand::Info => {
@@ -4028,7 +4032,7 @@ pub fn integrity<L, C, K>(
 where
 	L: WalletLCProvider<'static, C, K> + 'static,
 	C: NodeClient + 'static,
-	K: keychain::Keychain + 'static,
+	K: Keychain + 'static,
 {
 	// Let's do refresh first
 	{
@@ -4223,7 +4227,7 @@ pub fn messaging<L, C, K>(
 where
 	L: WalletLCProvider<'static, C, K> + 'static,
 	C: NodeClient + 'static,
-	K: keychain::Keychain + 'static,
+	K: Keychain + 'static,
 {
 	let mut json_res = JsonMap::new();
 
@@ -4670,7 +4674,7 @@ pub fn send_marketplace_message<L, C, K>(
 where
 	L: WalletLCProvider<'static, C, K> + 'static,
 	C: NodeClient + 'static,
-	K: keychain::Keychain + 'static,
+	K: Keychain + 'static,
 {
 	let (context_id, base_dir) = {
 		wallet_lock!(wallet_inst, w);
@@ -4718,7 +4722,7 @@ pub fn check_tor_connection<L, C, K>(
 where
 	L: WalletLCProvider<'static, C, K> + 'static,
 	C: NodeClient + 'static,
-	K: keychain::Keychain + 'static,
+	K: Keychain + 'static,
 {
 	let (context_id, base_dir) = {
 		wallet_lock!(wallet_inst, w);

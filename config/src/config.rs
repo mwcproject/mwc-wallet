@@ -16,20 +16,20 @@
 //! Configuration file management
 
 use crate::comments::{insert_comments, migrate_comments};
-use crate::core::global;
 use crate::types::{ConfigError, GlobalWalletConfig, GlobalWalletConfigMembers};
 use crate::types::{MQSConfig, WalletConfig};
-use crate::util::logger::LoggingConfig;
-use dirs;
+use mwc_wallet_util::mwc_core::global;
+use mwc_wallet_util::mwc_crates::dirs;
+use mwc_wallet_util::mwc_crates::rand::distributions::{Alphanumeric, Distribution};
+use mwc_wallet_util::mwc_crates::rand::thread_rng;
+use mwc_wallet_util::mwc_crates::toml;
 use mwc_wallet_util::mwc_p2p::TorConfig;
-use rand::distributions::{Alphanumeric, Distribution};
-use rand::thread_rng;
+use mwc_wallet_util::mwc_util::logger::LoggingConfig;
 use std::env;
 use std::fs::{self, File};
 use std::io::prelude::*;
 use std::io::BufReader;
 use std::path::PathBuf;
-use toml;
 
 /// Wallet configuration file name
 pub const WALLET_CONFIG_FILE_NAME: &str = "mwc-wallet.toml";

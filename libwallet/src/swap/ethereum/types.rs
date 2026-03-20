@@ -16,8 +16,10 @@ use crate::mwc_util::to_hex;
 use crate::swap::message::SecondaryUpdate;
 use crate::swap::types::SecondaryData;
 use crate::swap::Error;
+use mwc_wallet_util::mwc_crates::hex;
+use mwc_wallet_util::mwc_crates::regex::Regex;
+use mwc_wallet_util::mwc_crates::serde::{self, Deserialize, Serialize};
 use mwc_web3::types::{Address, H256};
-use regex::Regex;
 
 /// ETH transaction ready to post (any type). Here it is a redeem tx
 /*#[derive(Serialize, Deserialize, Debug, Clone)]
@@ -29,6 +31,7 @@ pub struct EthTransaction {
 
 /// ETH operations context
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(crate = "serde")]
 pub struct EthData {
 	/// Redeem Address owned by mwc seller
 	pub redeem_address: Option<Address>,
@@ -109,6 +112,7 @@ impl EthData {
 
 /// Context for the Seller (party that receive ETH)
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(crate = "serde")]
 pub struct EthSellerContext {
 	/// Seller, redeem addres.
 	pub redeem_address: Option<Address>,
@@ -116,6 +120,7 @@ pub struct EthSellerContext {
 
 /// Context for the Buyer (party that sell ETH)
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(crate = "serde")]
 pub struct EthBuyerContext {
 	/// Buyer swap offer index in swap contract account
 	pub address_from_secret: Address,
@@ -123,6 +128,7 @@ pub struct EthBuyerContext {
 
 /// Messages regarding ETH part of the deal
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[serde(crate = "serde")]
 pub enum EthUpdate {
 	/// Seller send offer to Buyer. Here is details about ETH deal
 	Offer(EthOfferUpdate),
@@ -159,6 +165,7 @@ impl EthUpdate {
 
 /// Seller send offer to Buyer. Here is details about ETH deal
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[serde(crate = "serde")]
 pub struct EthOfferUpdate {
 	/// Address to redeem eth.
 	pub redeem_address: Option<Address>,
@@ -166,6 +173,7 @@ pub struct EthOfferUpdate {
 
 /// Buyer message back to Seller. Offer is accepted
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[serde(crate = "serde")]
 pub struct EthAcceptOfferUpdate {
 	/// Eth Lock Transaction Id
 	pub lock_tx: Option<H256>,

@@ -12,7 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::mwc_util::secp;
+use mwc_wallet_util::mwc_crates::secp;
+use mwc_wallet_util::mwc_crates::thiserror;
 
 /// Multisig error
 #[derive(Clone, Eq, PartialEq, Debug, thiserror::Error)]

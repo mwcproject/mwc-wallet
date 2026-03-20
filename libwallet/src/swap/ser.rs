@@ -12,14 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::mwc_util::secp::key::{PublicKey, SecretKey};
-use crate::mwc_util::secp::pedersen::Commitment;
-use crate::mwc_util::secp::Signature;
+use crate::hex::{self, FromHex};
 use crate::swap::Error;
-use hex::{self, FromHex};
-use mwc_wallet_util::mwc_util::secp::{ContextFlag, Secp256k1};
+use mwc_wallet_util::mwc_crates::secp::key::{PublicKey, SecretKey};
+use mwc_wallet_util::mwc_crates::secp::pedersen::Commitment;
+use mwc_wallet_util::mwc_crates::secp::Signature;
+use mwc_wallet_util::mwc_crates::secp::{ContextFlag, Secp256k1};
+use mwc_wallet_util::mwc_crates::serde::{Deserialize, Deserializer, Serializer};
 use mwc_wallet_util::mwc_util::ToHex;
-use serde::{Deserialize, Deserializer, Serializer};
 
 /// Serialize Vec<u8> as HEX
 pub fn bytes_to_hex<S>(key: &Vec<u8>, serializer: S) -> Result<S::Ok, S::Error>
@@ -34,7 +34,7 @@ pub fn bytes_from_hex<'a, D>(deserializer: D) -> Result<Vec<u8>, D::Error>
 where
 	D: Deserializer<'a>,
 {
-	use serde::de::Error;
+	use mwc_wallet_util::mwc_crates::serde::de::Error;
 	let s = String::deserialize(deserializer)?;
 	Vec::from_hex(&s).map_err(D::Error::custom)
 }
@@ -70,7 +70,7 @@ pub fn option_commit_from_hex<'a, D>(deserializer: D) -> Result<Option<Commitmen
 where
 	D: Deserializer<'a>,
 {
-	use serde::de::Error;
+	use mwc_wallet_util::mwc_crates::serde::de::Error;
 	let opt: Option<String> = Option::deserialize(deserializer)?;
 	match opt {
 		Some(s) => commit_from_hex_string(s)
@@ -102,7 +102,7 @@ pub fn pubkey_from_hex<'a, D>(deserializer: D) -> Result<PublicKey, D::Error>
 where
 	D: Deserializer<'a>,
 {
-	use serde::de::Error;
+	use mwc_wallet_util::mwc_crates::serde::de::Error;
 	let s = String::deserialize(deserializer)?;
 	pubkey_from_hex_string(s).map_err(D::Error::custom)
 }
@@ -123,7 +123,7 @@ pub fn option_pubkey_from_hex<'a, D>(deserializer: D) -> Result<Option<PublicKey
 where
 	D: Deserializer<'a>,
 {
-	use serde::de::Error;
+	use mwc_wallet_util::mwc_crates::serde::de::Error;
 	let opt: Option<String> = Option::deserialize(deserializer)?;
 	match opt {
 		Some(s) => pubkey_from_hex_string(s)
@@ -154,7 +154,7 @@ pub fn seckey_from_hex<'a, D>(deserializer: D) -> Result<SecretKey, D::Error>
 where
 	D: Deserializer<'a>,
 {
-	use serde::de::Error;
+	use mwc_wallet_util::mwc_crates::serde::de::Error;
 	let s = String::deserialize(deserializer)?;
 	seckey_from_hex_string(s).map_err(D::Error::custom)
 }
@@ -175,7 +175,7 @@ pub fn option_seckey_from_hex<'a, D>(deserializer: D) -> Result<Option<SecretKey
 where
 	D: Deserializer<'a>,
 {
-	use serde::de::Error;
+	use mwc_wallet_util::mwc_crates::serde::de::Error;
 	let opt: Option<String> = Option::deserialize(deserializer)?;
 	match opt {
 		Some(s) => seckey_from_hex_string(s)
@@ -206,7 +206,7 @@ pub fn sig_from_hex<'a, D>(deserializer: D) -> Result<Signature, D::Error>
 where
 	D: Deserializer<'a>,
 {
-	use serde::de::Error;
+	use mwc_wallet_util::mwc_crates::serde::de::Error;
 	let s = String::deserialize(deserializer)?;
 	let secp = Secp256k1::with_caps(ContextFlag::None);
 	sig_from_hex_string(&secp, s).map_err(D::Error::custom)
@@ -228,7 +228,7 @@ pub fn option_sig_from_hex<'a, D>(deserializer: D) -> Result<Option<Signature>, 
 where
 	D: Deserializer<'a>,
 {
-	use serde::de::Error;
+	use mwc_wallet_util::mwc_crates::serde::de::Error;
 	let opt: Option<String> = Option::deserialize(deserializer)?;
 	let secp = Secp256k1::with_caps(ContextFlag::None);
 	match opt {

@@ -15,7 +15,9 @@
 // Derived from https://github.com/apoelstra/rust-jsonrpc
 
 //! JSON RPC Client functionality
-use serde_json;
+use mwc_wallet_util::mwc_crates::serde::{self, Deserialize, Serialize};
+use mwc_wallet_util::mwc_crates::serde_json;
+use mwc_wallet_util::mwc_crates::thiserror;
 
 /// Builds a request
 pub fn build_request<'a, 'b>(name: &'a str, params: &'b serde_json::Value) -> Request<'a, 'b> {
@@ -28,6 +30,7 @@ pub fn build_request<'a, 'b>(name: &'a str, params: &'b serde_json::Value) -> Re
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(crate = "serde")]
 /// A JSONRPC request object
 pub struct Request<'a, 'b> {
 	/// The name of the RPC call
@@ -41,6 +44,7 @@ pub struct Request<'a, 'b> {
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+#[serde(crate = "serde")]
 /// A JSONRPC response object
 pub struct Response {
 	/// A result if there is one, or null
@@ -124,6 +128,7 @@ impl From<RpcError> for Error {
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[serde(crate = "serde")]
 /// A JSONRPC error object
 pub struct RpcError {
 	/// The integer identifier of the error

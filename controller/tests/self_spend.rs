@@ -14,19 +14,14 @@
 
 //! Test a wallet spending some particular output
 //! this is part of solution to mitigate replay attack.
-#[macro_use]
-extern crate log;
-extern crate mwc_wallet_controller as wallet;
-extern crate mwc_wallet_impls as impls;
+use mwc_wallet_util::mwc_crates::log::{debug, error};
 
-use mwc_wallet_util::mwc_core as core;
-use mwc_wallet_util::mwc_core::global;
+use mwc_wallet_util::mwc_core::{self, global};
 use std::ops::DerefMut;
 use std::sync::Arc;
 
-use self::libwallet::OutputStatus;
-use impls::test_framework::{self, LocalWalletClient};
-use mwc_wallet_libwallet as libwallet;
+use mwc_wallet_impls::test_framework::{self, LocalWalletClient};
+use mwc_wallet_libwallet::OutputStatus;
 use std::thread;
 use std::time::Duration;
 
@@ -37,7 +32,7 @@ use mwc_wallet_util::mwc_core::core::Transaction;
 use std::sync::Mutex;
 
 /// self send impl
-fn self_spend_impl(test_dir: &str) -> Result<(), wallet::Error> {
+fn self_spend_impl(test_dir: &str) -> Result<(), mwc_wallet_controller::Error> {
 	// Create a new proxy to simulate server and wallet responses
 	global::set_local_chain_type(global::ChainTypes::AutomatedTesting);
 	let tx_pool: Arc<Mutex<Vec<Transaction>>> = Arc::new(Mutex::new(Vec::new()));
@@ -67,13 +62,18 @@ fn self_spend_impl(test_dir: &str) -> Result<(), wallet::Error> {
 	});
 
 	// few values to keep things shorter
-	let reward = core::consensus::MWC_FIRST_GROUP_REWARD;
+	let reward = mwc_core::consensus::MWC_FIRST_GROUP_REWARD;
 
 	// add some accounts
-	wallet::controller::owner_single_use(Some(wallet1.clone()), mask1, None, |api, m| {
-		api.create_account_path(m, "mining1")?;
-		Ok(())
-	})?;
+	mwc_wallet_controller::controller::owner_single_use(
+		Some(wallet1.clone()),
+		mask1,
+		None,
+		|api, m| {
+			api.create_account_path(m, "mining1")?;
+			Ok(())
+		},
+	)?;
 
 	// Get some mining done
 	{
@@ -94,21 +94,32 @@ fn self_spend_impl(test_dir: &str) -> Result<(), wallet::Error> {
 	);
 
 	// Check wallet 1 contents are as expected
-	wallet::controller::owner_single_use(Some(wallet1.clone()), mask1, None, |api, m| {
-		let (_wallet1_refreshed, wallet1_info) = api.retrieve_summary_info(m, true, 1)?;
-		debug!(
-			"Wallet 1 Info Pre-Transaction, after {} blocks: {:?}",
-			wallet1_info.last_confirmed_height,
-			wallet1_info //  assert_eq!(wallet1_info.total, 1);
-		);
-		assert_eq!(wallet1_info.total, bh * reward);
+	mwc_wallet_controller::controller::owner_single_use(
+		Some(wallet1.clone()),
+		mask1,
+		None,
+		|api, m| {
+			let (_wallet1_refreshed, wallet1_info) = api.retrieve_summary_info(m, true, 1)?;
+			debug!(
+				"Wallet 1 Info Pre-Transaction, after {} blocks: {:?}",
+				wallet1_info.last_confirmed_height,
+				wallet1_info //  assert_eq!(wallet1_info.total, 1);
+			);
+			assert_eq!(wallet1_info.total, bh * reward);
 
-		Ok(())
-	})?;
+			Ok(())
+		},
+	)?;
 
 	//how to get the output in the wallet
-	let (_, output_mappings) =
-		libwallet::owner::retrieve_outputs(wallet1.clone(), mask1, &None, false, false, None)?;
+	let (_, output_mappings) = mwc_wallet_libwallet::owner::retrieve_outputs(
+		wallet1.clone(),
+		mask1,
+		&None,
+		false,
+		false,
+		None,
+	)?;
 
 	let mut output_list = Vec::new();
 	for m in output_mappings.clone() {
@@ -121,7 +132,7 @@ fn self_spend_impl(test_dir: &str) -> Result<(), wallet::Error> {
 	debug!("===========the outputs list are {:?}", output_list);
 	assert!(output_list.len() == 4);
 
-	libwallet::owner::self_spend_particular_output(
+	mwc_wallet_libwallet::owner::self_spend_particular_output(
 		wallet1.clone(),
 		mask1,
 		output_list[0].clone(),
@@ -130,7 +141,7 @@ fn self_spend_impl(test_dir: &str) -> Result<(), wallet::Error> {
 		1,
 		true,
 	)?;
-	libwallet::owner::self_spend_particular_output(
+	mwc_wallet_libwallet::owner::self_spend_particular_output(
 		wallet1.clone(),
 		mask1,
 		output_list[1].clone(),
@@ -153,23 +164,34 @@ fn self_spend_impl(test_dir: &str) -> Result<(), wallet::Error> {
 			.deref_mut(),
 	);
 
-	let _fee = core::libtx::tx_fee(0, 1, 1, 1); //there is only one input and one output and one kernel
+	let _fee = mwc_core::libtx::tx_fee(0, 1, 1, 1); //there is only one input and one output and one kernel
 
 	//after the self spend, make sure the scan is done to update the status.
-	wallet::controller::owner_single_use(Some(wallet1.clone()), mask1, None, |api, m| {
-		let (_wallet1_refreshed, wallet1_info) = api.retrieve_summary_info(m, true, 1)?;
-		debug!(
-			"Wallet 1 Info Pre-Transaction, after {} blocks: {:?}",
-			wallet1_info.last_confirmed_height, wallet1_info
-		);
-		bh += 2;
-		assert_eq!(wallet1_info.total, bh * reward); //the way we build the testcode, the tx amount reward+fee will be mined and give it to the sender wallet.
-		Ok(())
-	})?;
+	mwc_wallet_controller::controller::owner_single_use(
+		Some(wallet1.clone()),
+		mask1,
+		None,
+		|api, m| {
+			let (_wallet1_refreshed, wallet1_info) = api.retrieve_summary_info(m, true, 1)?;
+			debug!(
+				"Wallet 1 Info Pre-Transaction, after {} blocks: {:?}",
+				wallet1_info.last_confirmed_height, wallet1_info
+			);
+			bh += 2;
+			assert_eq!(wallet1_info.total, bh * reward); //the way we build the testcode, the tx amount reward+fee will be mined and give it to the sender wallet.
+			Ok(())
+		},
+	)?;
 
 	//how to get the output in the wallet
-	let (_, output_mappings_after_spend) =
-		libwallet::owner::retrieve_outputs(wallet1.clone(), mask1, &None, false, false, None)?;
+	let (_, output_mappings_after_spend) = mwc_wallet_libwallet::owner::retrieve_outputs(
+		wallet1.clone(),
+		mask1,
+		&None,
+		false,
+		false,
+		None,
+	)?;
 
 	let mut output_list_after_spend = Vec::new();
 	for m in output_mappings_after_spend.clone() {

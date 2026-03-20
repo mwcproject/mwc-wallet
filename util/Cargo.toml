@@ -10,28 +10,36 @@ workspace = ".."
 edition = "2018"
 
 [dependencies]
-rand = "0.6"
-serde = "1"
-serde_derive = "1"
-ed25519-dalek = "1.0.0-pre.4"
-data-encoding = "2"
-sha3 = "0.8"
-lazy_static = "1.4"
-tokio = { version = "1", features = ["full"] }
-thiserror = "1"
+# Swaps related, need to be reexported
+#mwc-libp2p = { path = "../../rust-libp2p", default-features = false, features = [ "noise", "yamux", "mplex", "dns", "tcp-tokio", "ping", "gossipsub"] }
+#mwc-libp2p = { git = "https://github.com/mwcproject/rust-libp2p", version="0.35.3", branch = "master", default-features = false, features = [ "noise", "yamux", "mplex", "dns", "tcp-tokio", "ping", "gossipsub"] }
+#bitcoin = { version = "0.27", path = "../../rust-bitcoin", features = ["bitcoinconsensus"] }
+#mwc-bitcoin = { git = "https://github.com/mwcproject/rust-bitcoin",  version = "0.27.1", branch = "zkp", features = ["bitcoinconsensus"] }
+#bch = { path = "../../rust-bch" }
+#mwc-bch = { git = "https://github.com/mwcproject/rust-bch", version = "0.2.0", branch = "master" }
+#web3 = { version = "0.15.0", default-features = false, features = ["ws-tls-async-std", "signing"] }
+#mwc-web3 = { git = "https://github.com/mwcproject/rust-web3", version = "0.20.0", branch = "master",  default-features = false, features = ["ws-rustls-tokio", "signing"] }
+#mwc-wagyu-ethereum = { git = "https://github.com/mwcproject/wagyu-ethereum", version = "0.6.3", branch = "master" }
+#mwc-wagyu-model = { git = "https://github.com/mwcproject/wagyu-model",version = "0.6.3",  branch = "master" }
+#mwc-zcash_primitives = { git = "https://github.com/mwcproject/librustzcash", version = "0.4.0", branch = "master", features = ["transparent-inputs"] }
+#zcash_primitives = { path = "../../librustzcash/zcash_primitives", features = ["transparent-inputs"] }
+
+
 
 # For Release
-mwc_core = { git = "https://github.com/mwcproject/mwc-node", version="6.0.1", tag = "6.0.1" }
-mwc_keychain = { git = "https://github.com/mwcproject/mwc-node", version="6.0.1", tag = "6.0.1" }
-mwc_chain = { git = "https://github.com/mwcproject/mwc-node", version="6.0.1", tag = "6.0.1" }
-mwc_util = { git = "https://github.com/mwcproject/mwc-node", version="6.0.1", tag = "6.0.1" }
-mwc_api = { git = "https://github.com/mwcproject/mwc-node", version="6.0.1", tag = "6.0.1" }
-mwc_store = { git = "https://github.com/mwcproject/mwc-node", version="6.0.1", tag = "6.0.1" }
-mwc_p2p = { git = "https://github.com/mwcproject/mwc-node", version="6.0.1", tag = "6.0.1" }
-mwc_node_workflow = { git = "https://github.com/mwcproject/mwc-node", version="6.0.1", tag = "6.0.1" }
-mwc_node_lib = { git = "https://github.com/mwcproject/mwc-node", version="6.0.1", tag = "6.0.1" }
+#mwc_crates = { git = "https://github.com/mwcproject/mwc-node", version="6.0.1", tag = "6.0.1" }
+#mwc_core = { git = "https://github.com/mwcproject/mwc-node", version="6.0.1", tag = "6.0.1" }
+#mwc_keychain = { git = "https://github.com/mwcproject/mwc-node", version="6.0.1", tag = "6.0.1" }
+#mwc_chain = { git = "https://github.com/mwcproject/mwc-node", version="6.0.1", tag = "6.0.1" }
+#mwc_util = { git = "https://github.com/mwcproject/mwc-node", version="6.0.1", tag = "6.0.1" }
+#mwc_api = { git = "https://github.com/mwcproject/mwc-node", version="6.0.1", tag = "6.0.1" }
+#mwc_store = { git = "https://github.com/mwcproject/mwc-node", version="6.0.1", tag = "6.0.1" }
+#mwc_p2p = { git = "https://github.com/mwcproject/mwc-node", version="6.0.1", tag = "6.0.1" }
+#mwc_node_workflow = { git = "https://github.com/mwcproject/mwc-node", version="6.0.1", tag = "6.0.1" }
+#mwc_node_lib = { git = "https://github.com/mwcproject/mwc-node", version="6.0.1", tag = "6.0.1" }
 
 # For bleeding edge
+#mwc_crates = { git = "https://github.com/mwcproject/mwc-node", branch = "master" }
 #mwc_core = { git = "https://github.com/mwcproject/mwc-node", branch = "master" }
 #mwc_keychain = { git = "https://github.com/mwcproject/mwc-node", branch = "master" }
 #mwc_chain = { git = "https://github.com/mwcproject/mwc-node", branch = "master" }
@@ -43,15 +51,13 @@ mwc_node_lib = { git = "https://github.com/mwcproject/mwc-node", version="6.0.1"
 #mwc_node_lib = { git = "https://github.com/mwcproject/mwc-node", branch = "master" }
 
 # For local testing
-#mwc_core = { path = "../../mwc-node/core"}
-#mwc_keychain = { path = "../../mwc-node/keychain"}
-#mwc_chain = { path = "../../mwc-node/chain"}
-#mwc_util = { path = "../../mwc-node/util"}
-#mwc_api = { path = "../../mwc-node/api"}
-#mwc_store = { path = "../../mwc-node/store"}
-#mwc_p2p = { path = "../../mwc-node/p2p"}
-#mwc_node_workflow = { path = "../../mwc-node/node_workflow"}
-#mwc_node_lib = { path = "../../mwc-node/mwc_node_lib"}
-
-[dev-dependencies]
-pretty_assertions = "0.6"
+mwc_crates = { path = "../../mwc-node/mwc_crates" }
+mwc_core = { path = "../../mwc-node/core"}
+mwc_keychain = { path = "../../mwc-node/keychain"}
+mwc_chain = { path = "../../mwc-node/chain"}
+mwc_util = { path = "../../mwc-node/util"}
+mwc_api = { path = "../../mwc-node/api"}
+mwc_store = { path = "../../mwc-node/store"}
+mwc_p2p = { path = "../../mwc-node/p2p"}
+mwc_node_workflow = { path = "../../mwc-node/node_workflow"}
+mwc_node_lib = { path = "../../mwc-node/mwc_node_lib"}

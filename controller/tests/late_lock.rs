@@ -13,14 +13,10 @@
 // limitations under the License.
 
 //! Tests and experimentations with late locking
-#[macro_use]
-extern crate log;
-extern crate mwc_wallet_controller as wallet;
-extern crate mwc_wallet_impls as impls;
-extern crate mwc_wallet_libwallet as libwallet;
+use mwc_wallet_util::mwc_crates::log::error;
 
-use self::libwallet::{InitTxArgs, Slate};
-use impls::test_framework::{self, LocalWalletClient};
+use mwc_wallet_impls::test_framework::{self, LocalWalletClient};
+use mwc_wallet_libwallet::{InitTxArgs, Slate};
 use std::ops::DerefMut;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
@@ -35,7 +31,7 @@ use mwc_wallet_util::mwc_core::core::Transaction;
 use std::sync::Mutex;
 
 /// self send impl
-fn late_lock_test_impl(test_dir: &str) -> Result<(), libwallet::Error> {
+fn late_lock_test_impl(test_dir: &str) -> Result<(), mwc_wallet_libwallet::Error> {
 	// Create a new proxy to simulate server and wallet responses
 	let tx_pool: Arc<Mutex<Vec<Transaction>>> = Arc::new(Mutex::new(Vec::new()));
 	let mut wallet_proxy = create_wallet_proxy(test_dir.into(), tx_pool.clone());
@@ -75,17 +71,27 @@ fn late_lock_test_impl(test_dir: &str) -> Result<(), libwallet::Error> {
 	});
 
 	// add some accounts
-	wallet::controller::owner_single_use(Some(wallet_mining.clone()), mask1, None, |api, m| {
-		api.create_account_path(m, "mining")?;
-		Ok(())
-	})
+	mwc_wallet_controller::controller::owner_single_use(
+		Some(wallet_mining.clone()),
+		mask1,
+		None,
+		|api, m| {
+			api.create_account_path(m, "mining")?;
+			Ok(())
+		},
+	)
 	.unwrap();
 
 	// add some accounts
-	wallet::controller::owner_single_use(Some(wallet_acc1.clone()), mask2, None, |api, m| {
-		api.create_account_path(m, "account1")?;
-		Ok(())
-	})
+	mwc_wallet_controller::controller::owner_single_use(
+		Some(wallet_acc1.clone()),
+		mask2,
+		None,
+		|api, m| {
+			api.create_account_path(m, "account1")?;
+			Ok(())
+		},
+	)
 	.unwrap();
 
 	// Get some mining done
@@ -111,22 +117,27 @@ fn late_lock_test_impl(test_dir: &str) -> Result<(), libwallet::Error> {
 	)?;
 
 	// update/test contents of both accounts
-	wallet::controller::owner_single_use(Some(wallet_mining.clone()), mask1, None, |api, m| {
-		let (wallet1_refreshed, wallet_info) = api.retrieve_summary_info(m, true, 1)?;
-		assert!(wallet1_refreshed);
-		// Reward from mining 11 blocks, minus the amount sent.
-		// Note: We mined the block containing the tx, so fees are effectively refunded.
-		let expected_amount = calc_mwc_block_reward(0, 1) * (10 - 3);
-		assert_eq!(expected_amount, wallet_info.amount_currently_spendable);
-		//reward is 2_380_952_380
-		Ok(())
-	})
+	mwc_wallet_controller::controller::owner_single_use(
+		Some(wallet_mining.clone()),
+		mask1,
+		None,
+		|api, m| {
+			let (wallet1_refreshed, wallet_info) = api.retrieve_summary_info(m, true, 1)?;
+			assert!(wallet1_refreshed);
+			// Reward from mining 11 blocks, minus the amount sent.
+			// Note: We mined the block containing the tx, so fees are effectively refunded.
+			let expected_amount = calc_mwc_block_reward(0, 1) * (10 - 3);
+			assert_eq!(expected_amount, wallet_info.amount_currently_spendable);
+			//reward is 2_380_952_380
+			Ok(())
+		},
+	)
 	.unwrap();
 
 	let mut slate = Slate::blank(2, false);
 	let amount = 1_000_000_000;
 
-	wallet::controller::owner_single_use(
+	mwc_wallet_controller::controller::owner_single_use(
 		Some(wallet_mining.clone()),
 		mask1,
 		None,
@@ -148,7 +159,7 @@ fn late_lock_test_impl(test_dir: &str) -> Result<(), libwallet::Error> {
 			println!("S2 SLATE: {:?}", slate);
 
 			// Still all amount is spendable the same way
-			wallet::controller::owner_single_use(
+			mwc_wallet_controller::controller::owner_single_use(
 				Some(wallet_mining.clone()),
 				mask1,
 				None,
@@ -172,7 +183,7 @@ fn late_lock_test_impl(test_dir: &str) -> Result<(), libwallet::Error> {
 			println!("S3 SLATE: {:?}", slate);
 
 			// Now one input should be locked
-			wallet::controller::owner_single_use(
+			mwc_wallet_controller::controller::owner_single_use(
 				Some(wallet_mining.clone()),
 				mask1,
 				None,
@@ -210,24 +221,34 @@ fn late_lock_test_impl(test_dir: &str) -> Result<(), libwallet::Error> {
 	)?;
 
 	// update/test contents of both accounts
-	wallet::controller::owner_single_use(Some(wallet_mining.clone()), mask1, None, |api, m| {
-		let (wallet1_refreshed, wallet_info) = api.retrieve_summary_info(m, true, 1)?;
-		assert!(wallet1_refreshed);
-		// Reward from mining 11 blocks, minus the amount sent.
-		// Note: We mined the block containing the tx, so fees are effectively refunded.
-		let expected_amount = calc_mwc_block_reward(0, 1) * (14 - 3) - amount; // fee should be mined back,
-		assert_eq!(expected_amount, wallet_info.amount_currently_spendable);
-		// expected is 25190476180
-		Ok(())
-	})
+	mwc_wallet_controller::controller::owner_single_use(
+		Some(wallet_mining.clone()),
+		mask1,
+		None,
+		|api, m| {
+			let (wallet1_refreshed, wallet_info) = api.retrieve_summary_info(m, true, 1)?;
+			assert!(wallet1_refreshed);
+			// Reward from mining 11 blocks, minus the amount sent.
+			// Note: We mined the block containing the tx, so fees are effectively refunded.
+			let expected_amount = calc_mwc_block_reward(0, 1) * (14 - 3) - amount; // fee should be mined back,
+			assert_eq!(expected_amount, wallet_info.amount_currently_spendable);
+			// expected is 25190476180
+			Ok(())
+		},
+	)
 	.unwrap();
 
-	wallet::controller::owner_single_use(Some(wallet_acc1.clone()), mask2, None, |api, m| {
-		let (wallet2_refreshed, wallet_info) = api.retrieve_summary_info(m, true, 1)?;
-		assert!(wallet2_refreshed);
-		assert_eq!(amount, wallet_info.amount_currently_spendable);
-		Ok(())
-	})
+	mwc_wallet_controller::controller::owner_single_use(
+		Some(wallet_acc1.clone()),
+		mask2,
+		None,
+		|api, m| {
+			let (wallet2_refreshed, wallet_info) = api.retrieve_summary_info(m, true, 1)?;
+			assert!(wallet2_refreshed);
+			assert_eq!(amount, wallet_info.amount_currently_spendable);
+			Ok(())
+		},
+	)
 	.unwrap();
 
 	// let logging finish

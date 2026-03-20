@@ -13,12 +13,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-extern crate colored;
-use crate::mwc_util as util;
-use crate::mwc_util::secp::key::{PublicKey, SecretKey};
-use crate::mwc_util::secp::pedersen::Commitment;
-use crate::mwc_util::secp::{pedersen, Secp256k1, Signature};
 use crate::proof::crypto::Hex;
+use mwc_wallet_util::mwc_crates::ed25519_dalek;
+use mwc_wallet_util::mwc_crates::lazy_static::lazy_static;
+use mwc_wallet_util::mwc_crates::secp::key::{PublicKey, SecretKey};
+use mwc_wallet_util::mwc_crates::secp::pedersen::Commitment;
+use mwc_wallet_util::mwc_crates::secp::{pedersen, Secp256k1, Signature};
+use mwc_wallet_util::mwc_crates::serde::{self, Deserialize, Serialize};
+use mwc_wallet_util::mwc_crates::serde_json;
+use mwc_wallet_util::mwc_crates::uuid;
 
 use super::crypto;
 use super::message::EncryptedMessage;
@@ -26,7 +29,7 @@ use super::proofaddress::{version_bytes, ProvableAddress};
 use crate::error::Error;
 use crate::slate_versions::VersionedSlate;
 use crate::Slate;
-use ed25519_dalek::Verifier;
+use mwc_wallet_util::mwc_crates::ed25519_dalek::Verifier;
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{Read, Write};
@@ -34,11 +37,12 @@ use std::path::Path;
 use std::sync::Mutex;
 use std::{fs, path};
 
-use crate::mwc_core::core::amount_to_hr_string;
-use crate::mwc_core::core::Committed;
-use crate::mwc_core::global;
 use crate::proof::base58::Base58;
-use colored::*;
+use mwc_wallet_util::mwc_core::core::amount_to_hr_string;
+use mwc_wallet_util::mwc_core::core::Committed;
+use mwc_wallet_util::mwc_core::global;
+use mwc_wallet_util::mwc_crates::colored::*;
+use mwc_wallet_util::mwc_util;
 use std::collections::HashSet;
 
 /// Dir name with proof files
@@ -71,6 +75,7 @@ pub fn pop_proof_for_slate(uuid: &uuid::Uuid) -> Option<TxProof> {
 /// in mwc713 proof signature is generated using json string of  slate; and after upgrade
 /// it is generated using three factors: amount,sender address and commitment sum.
 #[derive(Debug, Serialize, Deserialize)]
+#[serde(crate = "serde")]
 pub struct TxProof {
 	/// Reciever address.
 	#[serde(serialize_with = "ProvableAddress::serialize_as_string")]
@@ -103,6 +108,7 @@ pub struct TxProof {
 
 /// Vefiry proof resulting data
 #[derive(Debug, Serialize, Deserialize)]
+#[serde(crate = "serde")]
 pub struct VerifyProofResult {
 	/// Sender address
 	pub sender_address: String,
@@ -139,7 +145,7 @@ impl TxProof {
 		}
 		if tor_proof {
 			if let Some(signature) = &self.tor_proof_signature {
-				let dalek_sig_vec = util::from_hex(&signature).map_err(|e| {
+				let dalek_sig_vec = mwc_util::from_hex(&signature).map_err(|e| {
 					Error::TxProofVerify(format!(
 						"Unable to deserialize tor payment proof signature, {}",
 						e
@@ -268,7 +274,7 @@ impl TxProof {
 	) -> Result<(Slate, TxProof), Error> {
 		let address = from;
 
-		let signature = util::from_hex(&signature).map_err(|e| {
+		let signature = mwc_util::from_hex(&signature).map_err(|e| {
 			Error::TxProofVerify(format!(
 				"Unable to build signature from HEX {}, {}",
 				signature, e
@@ -410,7 +416,7 @@ impl TxProof {
 					Ok(proof)
 				} else {
 					let address = p.receiver_address;
-					let signature = util::from_hex(&signature).map_err(|e| {
+					let signature = mwc_util::from_hex(&signature).map_err(|e| {
 						Error::TxProofVerify(format!(
 							"Unable to build signature from HEX {}, {}",
 							signature, e
@@ -796,10 +802,7 @@ pub fn verify_tx_proof_wrapper(
 	let (sender, receiver, amount, outputs, excess_sum, slate_str) =
 		verify_tx_proof(context_id, tx_proof, secp)?;
 
-	let outputs = outputs
-		.iter()
-		.map(|o| crate::mwc_util::to_hex(&o.0))
-		.collect();
+	let outputs = outputs.iter().map(|o| mwc_util::to_hex(&o.0)).collect();
 
 	Ok(VerifyProofResult {
 		sender_address: sender.public_key,

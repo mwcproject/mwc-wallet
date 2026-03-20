@@ -15,21 +15,23 @@
 
 //! JSON-RPC Stub generation for the Foreign API
 
-use crate::keychain::Keychain;
-use crate::libwallet::{
+use crate::{Foreign, ForeignCheckMiddlewareFn};
+use mwc_wallet_libwallet::proof::proofaddress::{self, ProvableAddress};
+use mwc_wallet_libwallet::slatepack::SlatePurpose;
+use mwc_wallet_libwallet::types::TxSession;
+use mwc_wallet_libwallet::{
 	self, BlockFees, CbData, Error, InitTxArgs, IssueInvoiceTxArgs, NodeClient, NodeVersionInfo,
 	Slate, SlateVersion, VersionInfo, VersionedCoinbase, VersionedSlate, WalletLCProvider,
 };
-use crate::{Foreign, ForeignCheckMiddlewareFn};
-use easy_jsonrpc_mwc;
-use ed25519_dalek::PublicKey as DalekPublicKey;
-use libwallet::slatepack::SlatePurpose;
-use libwallet::types::TxSession;
-use libwallet::{wallet_lock, wallet_lock_test, SlateCtx};
-use mwc_wallet_libwallet::proof::proofaddress::{self, ProvableAddress};
+use mwc_wallet_libwallet::{wallet_lock, wallet_lock_test, SlateCtx};
 use mwc_wallet_util::mwc_core::consensus;
 use mwc_wallet_util::mwc_core::core::Transaction;
-use mwc_wallet_util::mwc_util::secp::Secp256k1;
+use mwc_wallet_util::mwc_crates::easy_jsonrpc_mwc;
+use mwc_wallet_util::mwc_crates::ed25519_dalek;
+use mwc_wallet_util::mwc_crates::log::error;
+use mwc_wallet_util::mwc_crates::secp::Secp256k1;
+use mwc_wallet_util::mwc_crates::serde_json;
+use mwc_wallet_util::mwc_keychain::Keychain;
 use std::ops::DerefMut;
 
 /// Public definition used to generate Foreign jsonrpc api.
@@ -1063,7 +1065,7 @@ fn test_check_middleware(
 	_name: ForeignCheckMiddlewareFn,
 	_node_version_info: Option<NodeVersionInfo>,
 	_slate: Option<&Slate>,
-) -> Result<(), libwallet::Error> {
+) -> Result<(), Error> {
 	// TODO: Implement checks
 	// return Err(Error::GenericError("Test Rejection".into()))?
 	Ok(())
@@ -1083,11 +1085,10 @@ pub fn run_doctest_foreign(
 	use mwc_wallet_impls::test_framework::{self, LocalWalletClient, WalletProxy};
 	use mwc_wallet_impls::{DefaultLCProvider, DefaultWalletImpl};
 	use mwc_wallet_libwallet::{api_impl, WalletInst};
+	use mwc_wallet_util::mwc_core::global;
+	use mwc_wallet_util::mwc_core::global::ChainTypes;
 	use mwc_wallet_util::mwc_keychain::ExtKeychain;
-
-	use crate::core::global;
-	use crate::core::global::ChainTypes;
-	use mwc_wallet_util::mwc_util as util;
+	use mwc_wallet_util::mwc_util;
 
 	use std::sync::Arc;
 	use std::sync::Mutex;
@@ -1095,7 +1096,7 @@ pub fn run_doctest_foreign(
 	use std::fs;
 	use std::thread;
 
-	util::init_test_logger();
+	mwc_util::init_test_logger();
 	let _ = fs::remove_dir_all(test_dir);
 	global::set_local_chain_type(ChainTypes::AutomatedTesting);
 	global::set_local_accept_fee_base(consensus::MILLI_MWC / 100);
@@ -1109,11 +1110,11 @@ pub fn run_doctest_foreign(
 	> = WalletProxy::new(test_dir.into(), tx_pool.clone());
 	let chain = wallet_proxy.chain.clone();
 
-	let rec_phrase_1 = util::ZeroingString::from(
+	let rec_phrase_1 = mwc_util::ZeroingString::from(
 		"fat twenty mean degree forget shell check candy immense awful \
      flame next during february bulb bike sun wink theory day kiwi embrace peace lunch",
 	);
-	let empty_string = util::ZeroingString::from("");
+	let empty_string = mwc_util::ZeroingString::from("");
 	let client1 = LocalWalletClient::new("wallet1", wallet_proxy.tx.clone());
 	let mut wallet1 = Box::new(DefaultWalletImpl::<LocalWalletClient>::new(
 		0,
@@ -1156,7 +1157,7 @@ pub fn run_doctest_foreign(
 		mask1.clone(),
 	);
 
-	let rec_phrase_2 = util::ZeroingString::from(
+	let rec_phrase_2 = mwc_util::ZeroingString::from(
 		"hour kingdom ripple lunch razor inquiry coyote clay stamp mean \
      sell finish magic kid tiny wage stand panther inside settle feed song hole exile",
 	);
@@ -1236,7 +1237,7 @@ pub fn run_doctest_foreign(
 		let w = w_lock.lc_provider().unwrap().wallet_inst().unwrap();
 		let k = w.keychain((&mask1).as_ref()).unwrap();
 		let secret = proofaddress::payment_proof_address_dalek_secret(0, &k, 0).unwrap();
-		let tor_pk = DalekPublicKey::from(&secret);
+		let tor_pk = ed25519_dalek::PublicKey::from(&secret);
 		(secret, tor_pk)
 	};
 	let w1_slatepack_address = ProvableAddress::from_tor_pub_key(&w1_tor_pubkey);
@@ -1246,7 +1247,7 @@ pub fn run_doctest_foreign(
 		let w = w_lock.lc_provider().unwrap().wallet_inst().unwrap();
 		let k = w.keychain((&mask2).as_ref()).unwrap();
 		let secret = proofaddress::payment_proof_address_dalek_secret(0, &k, 0).unwrap();
-		let tor_pk = DalekPublicKey::from(&secret);
+		let tor_pk = ed25519_dalek::PublicKey::from(&secret);
 		(secret, tor_pk)
 	};
 	let w2_slatepack_address = ProvableAddress::from_tor_pub_key(&w2_tor_pubkey);
@@ -1423,10 +1424,9 @@ macro_rules! doctest_helper_json_rpc_foreign_assert_response {
 		// create temporary wallet, run jsonrpc request on owner api of wallet, delete wallet, return
 		// json response.
 		// In order to prevent leaking tempdirs, This function should not panic.
-		use mwc_wallet_api::run_doctest_foreign;
-		use serde_json;
-		use serde_json::Value;
-		use tempfile::tempdir;
+		use mwc_wallet_util::mwc_crates::serde_json::Value;
+		use mwc_wallet_util::mwc_crates::tempfile::tempdir;
+		use $crate::run_doctest_foreign;
 
 		let dir = tempdir().map_err(|e| format!("{:#?}", e)).unwrap();
 		let dir = dir
@@ -1435,8 +1435,10 @@ macro_rules! doctest_helper_json_rpc_foreign_assert_response {
 			.ok_or("Failed to convert tmpdir path to string.".to_owned())
 			.unwrap();
 
-		let request_val: Value = serde_json::from_str($request).unwrap();
-		let expected_response: Value = serde_json::from_str($expected_response).unwrap();
+		let request_val: Value =
+			mwc_wallet_util::mwc_crates::serde_json::from_str($request).unwrap();
+		let expected_response: Value =
+			mwc_wallet_util::mwc_crates::serde_json::from_str($expected_response).unwrap();
 
 		let response = run_doctest_foreign(
 			request_val,
@@ -1453,8 +1455,9 @@ macro_rules! doctest_helper_json_rpc_foreign_assert_response {
 		if response != expected_response {
 			panic!(
 				"(left != right) \nleft: {}\nright: {}",
-				serde_json::to_string_pretty(&response).unwrap(),
-				serde_json::to_string_pretty(&expected_response).unwrap()
+				mwc_wallet_util::mwc_crates::serde_json::to_string_pretty(&response).unwrap(),
+				mwc_wallet_util::mwc_crates::serde_json::to_string_pretty(&expected_response)
+					.unwrap()
 			);
 		}
 	};

@@ -16,22 +16,28 @@
 //! Controller for wallet.. instantiates and handles listeners (or single-run
 //! invocations) as needed.
 
-use crate::api::{self, ApiServer, BasicAuthMiddleware, ResponseFuture, Router, TLSConfig};
-use crate::libwallet::{
+use crate::Error;
+use mwc_wallet_api::JsonId;
+use mwc_wallet_libwallet::{
 	NodeClient, NodeVersionInfo, Slate, WalletInst, WalletLCProvider, MWC_BLOCK_HEADER_VERSION,
 };
-use crate::util::secp::key::SecretKey;
-use crate::util::{from_hex, to_base64};
-use crate::Error;
-use hyper::body;
-use hyper::header::HeaderValue;
-use hyper::{Body, Request, Response, StatusCode};
-use mwc_wallet_api::JsonId;
+use mwc_wallet_util::mwc_api::{ApiServer, BasicAuthMiddleware, ResponseFuture, Router, TLSConfig};
+use mwc_wallet_util::mwc_crates::ed25519_dalek;
+use mwc_wallet_util::mwc_crates::hyper;
+use mwc_wallet_util::mwc_crates::hyper::body;
+use mwc_wallet_util::mwc_crates::hyper::header::HeaderValue;
+use mwc_wallet_util::mwc_crates::hyper::{Body, Request, Response, StatusCode};
+use mwc_wallet_util::mwc_crates::lazy_static::lazy_static;
+use mwc_wallet_util::mwc_crates::qr_code::QrCode;
+use mwc_wallet_util::mwc_crates::secp::key::SecretKey;
+use mwc_wallet_util::mwc_crates::serde::{Deserialize, Serialize};
+use mwc_wallet_util::mwc_crates::serde_json;
+#[cfg(feature = "libp2p")]
+use mwc_wallet_util::mwc_crates::tokio;
+use mwc_wallet_util::mwc_crates::uuid;
 use mwc_wallet_util::mwc_p2p;
+use mwc_wallet_util::mwc_util::{from_hex, to_base64};
 use mwc_wallet_util::OnionV3Address;
-use qr_code::QrCode;
-use serde::{Deserialize, Serialize};
-use serde_json;
 
 use mwc_wallet_impls::{
 	Address, CloseReason, MWCMQPublisher, MWCMQSAddress, MWCMQSubscriber, Publisher, Subscriber,
@@ -42,19 +48,14 @@ use mwc_wallet_libwallet::swap::message::Message;
 use mwc_wallet_libwallet::wallet_lock;
 use mwc_wallet_util::mwc_core::core;
 
-use crate::apiwallet::{
+use crate::foreign::ForeignApiServer;
+#[cfg(feature = "libp2p")]
+use mwc_p2p;
+use mwc_wallet_api::{
 	EncryptedRequest, EncryptedResponse, EncryptionErrorResponse, Foreign,
 	ForeignCheckMiddlewareFn, ForeignRpc, Owner, OwnerRpcV2, OwnerRpcV3,
 };
-use crate::config::MQSConfig;
-use crate::core::global;
-use crate::foreign::ForeignApiServer;
-use crate::keychain::Keychain;
-#[cfg(feature = "libp2p")]
-use chrono::Utc;
-use easy_jsonrpc_mwc::{Handler, MaybeReply};
-use ed25519_dalek::{ExpandedSecretKey, PublicKey as DalekPublicKey};
-use log::Level;
+use mwc_wallet_config::MQSConfig;
 use mwc_wallet_impls::tor;
 use mwc_wallet_libwallet::proof::crypto;
 use mwc_wallet_libwallet::proof::proofaddress;
@@ -62,15 +63,21 @@ use mwc_wallet_libwallet::proof::proofaddress::ProvableAddress;
 use mwc_wallet_libwallet::types::{TxSession, U64_DATA_IDX_ADDRESS_INDEX};
 #[cfg(feature = "libp2p")]
 use mwc_wallet_util::mwc_core::core::TxKernel;
+use mwc_wallet_util::mwc_core::global;
 #[cfg(feature = "libp2p")]
-use mwc_wallet_util::mwc_p2p;
+use mwc_wallet_util::mwc_crates::chrono::Utc;
+use mwc_wallet_util::mwc_crates::easy_jsonrpc_mwc::{Handler, MaybeReply};
+use mwc_wallet_util::mwc_crates::ed25519_dalek::ExpandedSecretKey;
+use mwc_wallet_util::mwc_crates::log::Level;
+use mwc_wallet_util::mwc_crates::log::{debug, error, info, log_enabled, warn};
+#[cfg(feature = "libp2p")]
+use mwc_wallet_util::mwc_crates::secp::pedersen::Commitment;
+use mwc_wallet_util::mwc_crates::secp::{ContextFlag, Secp256k1};
+use mwc_wallet_util::mwc_keychain::Keychain;
 #[cfg(feature = "libp2p")]
 use mwc_wallet_util::mwc_p2p::libp2p_connection;
 use mwc_wallet_util::mwc_p2p::tor::tcp_data_stream::TcpDataStream;
 use mwc_wallet_util::mwc_p2p::{PeerAddr, TorConfig};
-#[cfg(feature = "libp2p")]
-use mwc_wallet_util::mwc_util::secp::pedersen::Commitment;
-use mwc_wallet_util::mwc_util::secp::{ContextFlag, Secp256k1};
 use mwc_wallet_util::mwc_util::static_secp_instance;
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -230,7 +237,7 @@ fn check_middleware(
 	name: ForeignCheckMiddlewareFn,
 	node_version_info: Option<NodeVersionInfo>,
 	slate: Option<&Slate>,
-) -> Result<(), crate::libwallet::Error> {
+) -> Result<(), mwc_wallet_libwallet::Error> {
 	match name {
 		// allow coinbases to be built regardless
 		ForeignCheckMiddlewareFn::BuildCoinbase => Ok(()),
@@ -241,7 +248,7 @@ fn check_middleware(
 			}
 			if let Some(s) = slate {
 				if bhv > 3 && s.version_info.block_header_version < MWC_BLOCK_HEADER_VERSION {
-					Err(crate::libwallet::Error::Compatibility(
+					Err(mwc_wallet_libwallet::Error::Compatibility(
 						"Incoming Slate is not compatible with this wallet. \
 						 Please upgrade the node or use a different one."
 							.into(),
@@ -848,7 +855,7 @@ where
 	};
 
 	// Publishing this running MQS service
-	crate::impls::init_mwcmqs_access_data(context_id, mwcmqs_publisher, mwcmqs_subscriber);
+	mwc_wallet_impls::init_mwcmqs_access_data(context_id, mwcmqs_publisher, mwcmqs_subscriber);
 
 	if let Some(thr) = thr {
 		let _ = thr.join();
@@ -1010,65 +1017,67 @@ where
 				RwLock::new(HashMap::new());
 			let last_time_cache_cleanup: RwLock<i64> = RwLock::new(0);
 
-			let output_validation_fn =
-				move |excess: &Commitment| -> Result<Option<TxKernel>, mwc_p2p::Error> {
-					// Tip is needed in order to request from last 24 hours (1440 blocks)
-					let tip_height = node_client
-						.get_chain_tip()
-						.map_err(|e| {
-							mwc_p2p::Error::Libp2pError(format!(
-								"Unable contact the node to get chain tip, {}",
-								e
-							))
-						})?
-						.0;
+			let output_validation_fn = move |excess: &Commitment| -> Result<
+				Option<TxKernel>,
+				mwc_wallet_util::mwc_p2p::Error,
+			> {
+				// Tip is needed in order to request from last 24 hours (1440 blocks)
+				let tip_height = node_client
+					.get_chain_tip()
+					.map_err(|e| {
+						mwc_p2p::Error::Libp2pError(format!(
+							"Unable contact the node to get chain tip, {}",
+							e
+						))
+					})?
+					.0;
 
-					let cur_time = Utc::now().timestamp();
-					// let's clean cache every 10 minutes. Removing all expired items
-					{
-						let mut last_time_cache_cleanup = last_time_cache_cleanup.write().unwrap();
-						if cur_time - 600 > *last_time_cache_cleanup {
-							let min_height = tip_height
-								- libp2p_connection::INTEGRITY_FEE_VALID_BLOCKS
-								- libp2p_connection::INTEGRITY_FEE_VALID_BLOCKS / 12;
-							requested_kernel_cache
-								.write()
-								.unwrap()
-								.retain(|_k, v| v.1 > min_height);
-							*last_time_cache_cleanup = cur_time;
-						}
+				let cur_time = Utc::now().timestamp();
+				// let's clean cache every 10 minutes. Removing all expired items
+				{
+					let mut last_time_cache_cleanup = last_time_cache_cleanup.write().unwrap();
+					if cur_time - 600 > *last_time_cache_cleanup {
+						let min_height = tip_height
+							- libp2p_connection::INTEGRITY_FEE_VALID_BLOCKS
+							- libp2p_connection::INTEGRITY_FEE_VALID_BLOCKS / 12;
+						requested_kernel_cache
+							.write()
+							.unwrap()
+							.retain(|_k, v| v.1 > min_height);
+						*last_time_cache_cleanup = cur_time;
 					}
+				}
 
-					// Checking if we hit the cache
-					if let Some(tx) = requested_kernel_cache.read().unwrap().get(excess) {
-						return Ok(Some(tx.clone().0));
-					}
+				// Checking if we hit the cache
+				if let Some(tx) = requested_kernel_cache.read().unwrap().get(excess) {
+					return Ok(Some(tx.clone().0));
+				}
 
-					// !!! Note, get_kernel_height does iteration through the MMR. That will work until we
-					// Ban nodes that sent us incorrect excess. For now it should work fine. Normally
-					// peers reusing the integrity kernels so cache hit should happen most of the time.
-					match node_client
-						.get_kernel(
-							excess,
-							Some(tip_height - libp2p_connection::INTEGRITY_FEE_VALID_BLOCKS),
-							None,
-						)
-						.map_err(|e| {
-							mwc_p2p::Error::Libp2pError(format!(
-								"Unable contact the node to get kernel data, {}",
-								e
-							))
-						})? {
-						Some((tx_kernel, height, _)) => {
-							requested_kernel_cache
-								.write()
-								.unwrap()
-								.insert(excess.clone(), (tx_kernel.clone(), height));
-							Ok(Some(tx_kernel))
-						}
-						None => Ok(None),
+				// !!! Note, get_kernel_height does iteration through the MMR. That will work until we
+				// Ban nodes that sent us incorrect excess. For now it should work fine. Normally
+				// peers reusing the integrity kernels so cache hit should happen most of the time.
+				match node_client
+					.get_kernel(
+						excess,
+						Some(tip_height - libp2p_connection::INTEGRITY_FEE_VALID_BLOCKS),
+						None,
+					)
+					.map_err(|e| {
+						mwc_p2p::Error::Libp2pError(format!(
+							"Unable contact the node to get kernel data, {}",
+							e
+						))
+					})? {
+					Some((tx_kernel, height, _)) => {
+						requested_kernel_cache
+							.write()
+							.unwrap()
+							.insert(excess.clone(), (tx_kernel.clone(), height));
+						Ok(Some(tx_kernel))
 					}
-				};
+					None => Ok(None),
+				}
+			};
 
 			let validation_fn = Arc::new(output_validation_fn);
 
@@ -1133,7 +1142,7 @@ where
 		};
 		let slatepack_secret =
 			proofaddress::payment_proof_address_dalek_secret(context_id, &keychain, address_index)?;
-		let slatepack_pk = DalekPublicKey::from(&slatepack_secret);
+		let slatepack_pk = ed25519_dalek::PublicKey::from(&slatepack_secret);
 		(slatepack_secret, slatepack_pk, context_id)
 	};
 
@@ -1168,7 +1177,7 @@ where
 
 	let is_arti_running = tor_config.is_tor_internal_arti();
 
-	let service_failed_callback = move |e: &mwc_wallet_util::mwc_p2p::Error| {
+	let service_failed_callback = move |e: &mwc_p2p::Error| {
 		if is_arti_running {
 			// not exiting for embedded Tor
 			warn!(
@@ -1233,7 +1242,7 @@ where
 	let api_thread_primary = thread::Builder::new()
 		.name(format!("wallet-foreign-listener-{}", context_id))
 		.spawn(move || {
-			let res = mwc_p2p::listen(
+			let res = mwc_wallet_util::mwc_p2p::listen(
 				context_id,
 				stop_state,
 				Some(tor_config2),
@@ -1268,7 +1277,7 @@ where
 				let api_thread_secondary = thread::Builder::new()
 					.name(format!("wallet-foreign-ip-listener-{}", context_id))
 					.spawn(move || {
-						let res = mwc_p2p::listen(
+						let res = mwc_wallet_util::mwc_p2p::listen(
 							context_id,
 							stop_state,
 							None,
@@ -1409,7 +1418,7 @@ where
 	}
 }
 
-impl<L, C, K> api::Handler for OwnerAPIHandlerV2<L, C, K>
+impl<L, C, K> mwc_wallet_util::mwc_api::Handler for OwnerAPIHandlerV2<L, C, K>
 where
 	L: WalletLCProvider<'static, C, K> + 'static,
 	C: NodeClient + 'static,
@@ -1789,7 +1798,7 @@ where
 	}
 }
 
-impl<L, C, K> api::Handler for OwnerAPIHandlerV3<L, C, K>
+impl<L, C, K> mwc_wallet_util::mwc_api::Handler for OwnerAPIHandlerV3<L, C, K>
 where
 	L: WalletLCProvider<'static, C, K> + 'static,
 	C: NodeClient + 'static,
@@ -1895,7 +1904,7 @@ where
 	}
 }
 
-impl<L, C, K> api::Handler for ForeignAPIHandlerV2<L, C, K>
+impl<L, C, K> mwc_wallet_util::mwc_api::Handler for ForeignAPIHandlerV2<L, C, K>
 where
 	L: WalletLCProvider<'static, C, K> + 'static,
 	C: NodeClient + 'static,

@@ -14,6 +14,7 @@
 
 use crate::swap::types::Currency;
 use crate::swap::Error;
+use mwc_wallet_util::mwc_crates::serde_json;
 use mwc_web3::types::{Address, TransactionReceipt, H256};
 use std::sync::Arc;
 use std::sync::Mutex;

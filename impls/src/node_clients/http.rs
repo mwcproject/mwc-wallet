@@ -15,25 +15,30 @@
 
 //! Client functions, implementations of the NodeClient trait
 
-use crate::api::{self, LocatedTxKernel, OutputListing, OutputPrintable};
-use crate::core::core::{Transaction, TxKernel};
-use crate::libwallet::HeaderInfo;
-use crate::libwallet::{NodeClient, NodeVersionInfo};
-use futures::stream::FuturesUnordered;
-use futures::TryStreamExt;
+use mwc_wallet_libwallet::HeaderInfo;
+use mwc_wallet_libwallet::{NodeClient, NodeVersionInfo};
+use mwc_wallet_util::mwc_api::{self, LocatedTxKernel, OutputListing, OutputPrintable};
+use mwc_wallet_util::mwc_core::core::{Transaction, TxKernel};
+use mwc_wallet_util::mwc_crates::futures::stream::FuturesUnordered;
+use mwc_wallet_util::mwc_crates::futures::TryStreamExt;
+use mwc_wallet_util::mwc_crates::serde;
+use mwc_wallet_util::mwc_crates::serde_json;
+use mwc_wallet_util::mwc_crates::tokio::runtime::Builder;
+use mwc_wallet_util::mwc_p2p::types::PeerInfoDisplayLegacy;
 use std::collections::HashMap;
 use std::env;
-use tokio::runtime::Builder;
 
-use crate::libwallet;
-use crate::util::secp::pedersen;
-use crate::util::ToHex;
+use mwc_wallet_libwallet;
+use mwc_wallet_util::mwc_crates::secp::pedersen;
+use mwc_wallet_util::mwc_crates::serde_json::json;
+use mwc_wallet_util::mwc_util;
+use mwc_wallet_util::mwc_util::ToHex;
 
 use super::resp_types::*;
 use crate::client_utils::json_rpc::*;
 use crate::client_utils::Client;
 use mwc_wallet_util::mwc_api::{Libp2pMessages, Libp2pPeers};
-use mwc_wallet_util::mwc_util;
+use mwc_wallet_util::mwc_crates::log::{debug, error, trace};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
@@ -102,7 +107,7 @@ pub struct HTTPNodeClient {
 	// cache for the data
 	chain_tip: CachedValue<u8, (u64, String, u64)>,
 	header_info: CachedValue<u64, HeaderInfo>,
-	block_info: CachedValue<u64, api::BlockPrintable>,
+	block_info: CachedValue<u64, mwc_api::BlockPrintable>,
 }
 
 impl HTTPNodeClient {
@@ -135,7 +140,7 @@ impl HTTPNodeClient {
 	}
 
 	/// Allow returning the chain height without needing a wallet instantiated
-	pub fn chain_height(&self) -> Result<(u64, String, u64), libwallet::Error> {
+	pub fn chain_height(&self) -> Result<(u64, String, u64), mwc_wallet_libwallet::Error> {
 		self.get_chain_tip()
 	}
 
@@ -144,7 +149,7 @@ impl HTTPNodeClient {
 		method: &str,
 		params: &serde_json::Value,
 		counter: i32,
-	) -> Result<D, libwallet::Error> {
+	) -> Result<D, mwc_wallet_libwallet::Error> {
 		let url = format!("{}{}", self.node_url()?, ENDPOINT);
 		let req = build_request(method, params);
 		let res = self
@@ -161,7 +166,7 @@ impl HTTPNodeClient {
 				}
 				let report = format!("Error calling {}: {}", method, e);
 				error!("{}", report);
-				Err(libwallet::Error::ClientCallback(report))
+				Err(mwc_wallet_libwallet::Error::ClientCallback(report))
 			}
 			Ok(inner) => match inner.clone().into_result() {
 				Ok(r) => Ok(r),
@@ -176,7 +181,7 @@ impl HTTPNodeClient {
 					// error message is likely what user want to see...
 					let report = format!("{}", e);
 					error!("{}", report);
-					Err(libwallet::Error::ClientCallback(report))
+					Err(mwc_wallet_libwallet::Error::ClientCallback(report))
 				}
 			},
 		}
@@ -186,17 +191,14 @@ impl HTTPNodeClient {
 	fn get_connected_peer_info_impls(
 		&self,
 		counter: i32,
-	) -> Result<Vec<crate::mwc_p2p::types::PeerInfoDisplayLegacy>, libwallet::Error> {
+	) -> Result<Vec<PeerInfoDisplayLegacy>, mwc_wallet_libwallet::Error> {
 		// There is no v2 API with connected peers. Keep using v1 for that
 		let addr = self.node_url()?;
 		let url = format!("{}/v1/peers/connected", addr);
 
 		let res = self
 			.client
-			.get::<Vec<crate::mwc_p2p::types::PeerInfoDisplayLegacy>>(
-				url.as_str(),
-				self.node_api_secret(),
-			);
+			.get::<Vec<PeerInfoDisplayLegacy>>(url.as_str(), self.node_api_secret());
 		match res {
 			Err(e) => {
 				// Do retry
@@ -207,7 +209,7 @@ impl HTTPNodeClient {
 				}
 				let report = format!("Get connected peers error {}, {}", url, e);
 				error!("{}", report);
-				Err(libwallet::Error::ClientCallback(report))
+				Err(mwc_wallet_libwallet::Error::ClientCallback(report))
 			}
 			Ok(peer) => Ok(peer),
 		}
@@ -220,7 +222,7 @@ impl HTTPNodeClient {
 		min_height: Option<u64>,
 		max_height: Option<u64>,
 		counter: i32,
-	) -> Result<Option<(TxKernel, u64, u64)>, libwallet::Error> {
+	) -> Result<Option<(TxKernel, u64, u64)>, mwc_wallet_libwallet::Error> {
 		let method = "get_kernel";
 		let params = json!([excess.0.as_ref().to_hex(), min_height, max_height]);
 		// have to handle this manually since the error needs to be parsed
@@ -239,7 +241,7 @@ impl HTTPNodeClient {
 				}
 				let report = format!("Error calling {}: {}", method, e);
 				error!("{}", report);
-				Err(libwallet::Error::ClientCallback(report))
+				Err(mwc_wallet_libwallet::Error::ClientCallback(report))
 			}
 			Ok(inner) => match inner.clone().into_result::<LocatedTxKernel>() {
 				Ok(r) => Ok(Some((r.tx_kernel, r.height, r.mmr_index))),
@@ -250,7 +252,7 @@ impl HTTPNodeClient {
 					} else {
 						let report = format!("Unable to parse response for {}: {}", method, e);
 						error!("{}", report);
-						Err(libwallet::Error::ClientCallback(report))
+						Err(mwc_wallet_libwallet::Error::ClientCallback(report))
 					}
 				}
 			},
@@ -263,7 +265,7 @@ impl HTTPNodeClient {
 		&self,
 		wallet_outputs: &Vec<pedersen::Commitment>,
 		counter: i32,
-	) -> Result<HashMap<pedersen::Commitment, (String, u64, u64)>, libwallet::Error> {
+	) -> Result<HashMap<pedersen::Commitment, (String, u64, u64)>, mwc_wallet_libwallet::Error> {
 		// build a map of api outputs by commit so we can look them up efficiently
 		let mut api_outputs: HashMap<pedersen::Commitment, (String, u64, u64)> = HashMap::new();
 
@@ -339,7 +341,7 @@ impl HTTPNodeClient {
 
 							let report = format!("Unable to parse response for get_outputs: {}", e);
 							error!("{}", report);
-							return Err(libwallet::Error::ClientCallback(report));
+							return Err(mwc_wallet_libwallet::Error::ClientCallback(report));
 						}
 					};
 				}
@@ -353,7 +355,7 @@ impl HTTPNodeClient {
 				}
 				let report = format!("Outputs by id failed: {}", e);
 				error!("{}", report);
-				return Err(libwallet::Error::ClientCallback(report));
+				return Err(mwc_wallet_libwallet::Error::ClientCallback(report));
 			}
 		};
 
@@ -365,7 +367,7 @@ impl HTTPNodeClient {
 				Some(h) => h,
 				None => {
 					let msg = format!("Missing block height for output {:?}", out.commit);
-					return Err(libwallet::Error::ClientCallback(msg));
+					return Err(mwc_wallet_libwallet::Error::ClientCallback(msg));
 				}
 			};
 			api_outputs.insert(
@@ -384,9 +386,9 @@ impl HTTPNodeClient {
 		}
 	}
 
-	pub fn node_url(&self) -> Result<String, libwallet::Error> {
+	pub fn node_url(&self) -> Result<String, mwc_wallet_libwallet::Error> {
 		if self.node_url_list.is_empty() {
-			return Err(libwallet::Error::NodeUrlIsEmpty);
+			return Err(mwc_wallet_libwallet::Error::NodeUrlIsEmpty);
 		}
 		let index = self.current_node_index.load(Ordering::Relaxed) % self.node_url_list.len();
 		Ok(self.node_url_list[index].clone())
@@ -457,14 +459,14 @@ impl NodeClient for HTTPNodeClient {
 	}
 
 	/// Posts a transaction to a mwc node
-	fn post_tx(&self, tx: &Transaction, fluff: bool) -> Result<(), libwallet::Error> {
+	fn post_tx(&self, tx: &Transaction, fluff: bool) -> Result<(), mwc_wallet_libwallet::Error> {
 		let params = json!([tx, fluff]);
 		self.send_json_request::<serde_json::Value>("push_transaction", &params, NODE_CALL_RETRY)?;
 		Ok(())
 	}
 
 	/// Return the chain tip from a given node
-	fn get_chain_tip(&self) -> Result<(u64, String, u64), libwallet::Error> {
+	fn get_chain_tip(&self) -> Result<(u64, String, u64), mwc_wallet_libwallet::Error> {
 		if let Some(tip) = self.chain_tip.get_value(&0) {
 			return Ok(tip);
 		}
@@ -481,13 +483,13 @@ impl NodeClient for HTTPNodeClient {
 	}
 
 	/// Return header info from given height
-	fn get_header_info(&self, height: u64) -> Result<HeaderInfo, libwallet::Error> {
+	fn get_header_info(&self, height: u64) -> Result<HeaderInfo, mwc_wallet_libwallet::Error> {
 		if let Some(h) = self.header_info.get_value(&height) {
 			return Ok(h);
 		}
 
 		let params = json!([Some(height), None::<Option<String>>, None::<Option<String>>]);
-		let r = self.send_json_request::<api::BlockHeaderPrintable>(
+		let r = self.send_json_request::<mwc_api::BlockHeaderPrintable>(
 			"get_header",
 			&params,
 			NODE_CALL_RETRY,
@@ -509,7 +511,7 @@ impl NodeClient for HTTPNodeClient {
 	/// Return Connected peers
 	fn get_connected_peer_info(
 		&self,
-	) -> Result<Vec<crate::mwc_p2p::types::PeerInfoDisplayLegacy>, libwallet::Error> {
+	) -> Result<Vec<PeerInfoDisplayLegacy>, mwc_wallet_libwallet::Error> {
 		self.get_connected_peer_info_impls(1)
 	}
 
@@ -519,7 +521,7 @@ impl NodeClient for HTTPNodeClient {
 		excess: &pedersen::Commitment,
 		min_height: Option<u64>,
 		max_height: Option<u64>,
-	) -> Result<Option<(TxKernel, u64, u64)>, libwallet::Error> {
+	) -> Result<Option<(TxKernel, u64, u64)>, mwc_wallet_libwallet::Error> {
 		self.get_kernel_impl(excess, min_height, max_height, NODE_CALL_RETRY)
 	}
 
@@ -528,7 +530,7 @@ impl NodeClient for HTTPNodeClient {
 	fn get_outputs_from_node(
 		&self,
 		wallet_outputs: &Vec<pedersen::Commitment>,
-	) -> Result<HashMap<pedersen::Commitment, (String, u64, u64)>, libwallet::Error> {
+	) -> Result<HashMap<pedersen::Commitment, (String, u64, u64)>, mwc_wallet_libwallet::Error> {
 		self.get_outputs_from_node_impl(wallet_outputs, NODE_CALL_RETRY)
 	}
 
@@ -544,7 +546,7 @@ impl NodeClient for HTTPNodeClient {
 			u64,
 			Vec<(pedersen::Commitment, pedersen::RangeProof, bool, u64, u64)>,
 		),
-		libwallet::Error,
+		mwc_wallet_libwallet::Error,
 	> {
 		let mut api_outputs: Vec<(pedersen::Commitment, pedersen::RangeProof, bool, u64, u64)> =
 			Vec::new();
@@ -558,8 +560,8 @@ impl NodeClient for HTTPNodeClient {
 		// We asked for unspent outputs via the api but defensively filter out spent outputs just in case.
 		for out in res.outputs.into_iter().filter(|out| out.spent == false) {
 			let is_coinbase = match out.output_type {
-				api::OutputType::Coinbase => true,
-				api::OutputType::Transaction => false,
+				mwc_api::OutputType::Coinbase => true,
+				mwc_api::OutputType::Transaction => false,
 			};
 			let range_proof = match out.range_proof() {
 				Ok(r) => r,
@@ -569,7 +571,7 @@ impl NodeClient for HTTPNodeClient {
 						out.commit, out, e
 					);
 					error!("{}", msg);
-					return Err(libwallet::Error::ClientCallback(msg));
+					return Err(mwc_wallet_libwallet::Error::ClientCallback(msg));
 				}
 			};
 			let block_height = match out.block_height {
@@ -580,7 +582,7 @@ impl NodeClient for HTTPNodeClient {
 						out.commit, out
 					);
 					error!("{}", msg);
-					return Err(libwallet::Error::ClientCallback(msg));
+					return Err(mwc_wallet_libwallet::Error::ClientCallback(msg));
 				}
 			};
 			api_outputs.push((
@@ -598,7 +600,7 @@ impl NodeClient for HTTPNodeClient {
 		&self,
 		start_height: u64,
 		end_height: Option<u64>,
-	) -> Result<(u64, u64), libwallet::Error> {
+	) -> Result<(u64, u64), mwc_wallet_libwallet::Error> {
 		let params = json!([start_height, end_height]);
 		let res =
 			self.send_json_request::<OutputListing>("get_pmmr_indices", &params, NODE_CALL_RETRY)?;
@@ -615,7 +617,7 @@ impl NodeClient for HTTPNodeClient {
 		start_height: u64,
 		end_height: u64,
 		threads_number: usize,
-	) -> Result<Vec<api::BlockPrintable>, libwallet::Error> {
+	) -> Result<Vec<mwc_api::BlockPrintable>, mwc_wallet_libwallet::Error> {
 		debug!(
 			"Requesting blocks from heights {}-{}",
 			start_height, end_height
@@ -623,7 +625,7 @@ impl NodeClient for HTTPNodeClient {
 		assert!(threads_number>0 && threads_number<20, "Please use a sane positive number for the wallet that can be connected to the shareable node");
 		assert!(start_height <= end_height);
 
-		let mut result_blocks: Vec<api::BlockPrintable> = Vec::new();
+		let mut result_blocks: Vec<mwc_api::BlockPrintable> = Vec::new();
 		let rt = Builder::new_current_thread().enable_all().build()?;
 		let mut height = start_height;
 
@@ -636,7 +638,7 @@ impl NodeClient for HTTPNodeClient {
 					let params =
 						json!([Some(height), None::<Option<String>>, None::<Option<String>>]);
 					tasks.push(async move {
-						self.send_json_request::<api::BlockPrintable>(
+						self.send_json_request::<mwc_api::BlockPrintable>(
 							"get_block",
 							&params,
 							NODE_CALL_RETRY,
@@ -651,7 +653,7 @@ impl NodeClient for HTTPNodeClient {
 					let task: FuturesUnordered<_> = tasks.into_iter().collect();
 					task.try_collect().await
 				};
-				let res: Result<Vec<api::BlockPrintable>, _> = rt.block_on(task);
+				let res: Result<Vec<mwc_api::BlockPrintable>, _> = rt.block_on(task);
 				match res {
 					Ok(blocks) => {
 						for b in &blocks {
@@ -666,7 +668,7 @@ impl NodeClient for HTTPNodeClient {
 							e
 						);
 						error!("{}", report);
-						return Err(libwallet::Error::ClientCallback(report));
+						return Err(mwc_wallet_libwallet::Error::ClientCallback(report));
 					}
 				}
 			}
@@ -678,7 +680,7 @@ impl NodeClient for HTTPNodeClient {
 	}
 
 	/// Get Node Tor address
-	fn get_libp2p_peers(&self) -> Result<Libp2pPeers, libwallet::Error> {
+	fn get_libp2p_peers(&self) -> Result<Libp2pPeers, mwc_wallet_libwallet::Error> {
 		debug!("Requesting libp2p peer connections from mwc-node");
 		let params = json!([]);
 		let res =
@@ -686,7 +688,7 @@ impl NodeClient for HTTPNodeClient {
 		Ok(res)
 	}
 
-	fn get_libp2p_messages(&self) -> Result<Libp2pMessages, libwallet::Error> {
+	fn get_libp2p_messages(&self) -> Result<Libp2pMessages, mwc_wallet_libwallet::Error> {
 		debug!("Requesting libp2p received messages from mwc-node");
 		let params = json!([]);
 		let res = self.send_json_request::<Libp2pMessages>(
@@ -701,16 +703,16 @@ impl NodeClient for HTTPNodeClient {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::core::core::{KernelFeatures, OutputFeatures, OutputIdentifier};
-	use crate::core::global;
-	use crate::core::libtx::build;
-	use crate::core::libtx::ProofBuilder;
-	use crate::keychain::{ExtKeychain, Keychain};
-	use crate::libwallet;
-	use crate::util;
-	use crate::util::secp::pedersen::Commitment;
 	use crate::HTTPNodeClient;
+	use mwc_wallet_libwallet;
 	use mwc_wallet_libwallet::NodeClient;
+	use mwc_wallet_util::mwc_core::core::{KernelFeatures, OutputFeatures, OutputIdentifier};
+	use mwc_wallet_util::mwc_core::global;
+	use mwc_wallet_util::mwc_core::libtx::build;
+	use mwc_wallet_util::mwc_core::libtx::ProofBuilder;
+	use mwc_wallet_util::mwc_crates::secp::pedersen::Commitment;
+	use mwc_wallet_util::mwc_keychain::{ExtKeychain, Keychain};
+	use mwc_wallet_util::mwc_util;
 	use std::thread;
 	use std::thread::JoinHandle;
 	use std::time::Instant;
@@ -719,7 +721,7 @@ mod tests {
 	// Normally test is ignoring because the point of that test to run it manually and review the results.
 	#[test]
 	#[ignore]
-	fn run_node_stress_test() -> Result<(), libwallet::Error> {
+	fn run_node_stress_test() -> Result<(), mwc_wallet_libwallet::Error> {
 		global::set_local_chain_type(global::ChainTypes::Floonet);
 
 		let threads_number = 40;
@@ -736,19 +738,19 @@ mod tests {
 		//let node_url = "http://52.47.109.152:13413";
 		//let api_secret = "xgSQOfZLDkoYOVWTmjps";
 
-		let mut joins: Vec<JoinHandle<Result<(), libwallet::Error>>> = Vec::new();
+		let mut joins: Vec<JoinHandle<Result<(), mwc_wallet_libwallet::Error>>> = Vec::new();
 
 		for thr_idx in 0..threads_number {
 			let thr_idx = thr_idx;
 
 			let kernel_exist = Commitment::from_vec(
-				util::from_hex(
+				mwc_util::from_hex(
 					"0974e00703b771aaed85d3ff0c2050018a0b648078b3793fabb19dd9ce97b07efb",
 				)
 				.unwrap(),
 			);
 			let kernel_not_exist = Commitment::from_vec(
-				util::from_hex(
+				mwc_util::from_hex(
 					"0974e00703b771aaed85d3ff0c2050018a0b648078b3793fabb19dd9ce97b07efa",
 				)
 				.unwrap(),
@@ -756,13 +758,13 @@ mod tests {
 
 			let outputs_exist: Vec<Commitment> = vec![
 				Commitment::from_vec(
-					util::from_hex(
+					mwc_util::from_hex(
 						"08a30bc4893f169098cab8291d699741853553f897f202fcdea2ca3d9c187551ab",
 					)
 					.unwrap(),
 				),
 				Commitment::from_vec(
-					util::from_hex(
+					mwc_util::from_hex(
 						"09118e17c6a39d50336344cb490c94f96503d1fa45a7014ac037c89778839639c4",
 					)
 					.unwrap(),
@@ -771,13 +773,13 @@ mod tests {
 
 			let outputs_not_exist: Vec<Commitment> = vec![
 				Commitment::from_vec(
-					util::from_hex(
+					mwc_util::from_hex(
 						"08a30bc4893f169098cab8291d699741853553f897f202fcdea2ca3d9c187551ac",
 					)
 					.unwrap(),
 				),
 				Commitment::from_vec(
-					util::from_hex(
+					mwc_util::from_hex(
 						"09118e17c6a39d50336344cb490c94f96503d1fa45a7014ac037c89778839639c5",
 					)
 					.unwrap(),
@@ -787,7 +789,7 @@ mod tests {
 			let node_list_clone = node_list.clone();
 			joins.push(thread::spawn(move || {
 				let client = HTTPNodeClient::new(0, node_list_clone, Some(api_secret.to_string()))
-					.map_err(|e| libwallet::Error::ClientCallback(format!("{}", e)))?;
+					.map_err(|e| mwc_wallet_libwallet::Error::ClientCallback(format!("{}", e)))?;
 
 				let total_time = Instant::now();
 

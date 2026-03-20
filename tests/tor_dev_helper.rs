@@ -12,26 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#[macro_use]
-extern crate clap;
-
-#[macro_use]
-extern crate log;
-
-extern crate mwc_wallet;
-
 use mwc_wallet_impls::test_framework::{self, LocalWalletClient, WalletProxy};
+use mwc_wallet_util::mwc_core;
+use mwc_wallet_util::mwc_crates::clap::{App, YamlLoader};
+use mwc_wallet_util::mwc_util;
 use std::ops::DerefMut;
 use std::sync::Arc;
-
-use clap::App;
 use std::thread;
 use std::time::Duration;
 
 use mwc_wallet_impls::DefaultLCProvider;
+use mwc_wallet_util::mwc_crates;
+use mwc_wallet_util::mwc_crates::log::error;
 use mwc_wallet_util::mwc_keychain::ExtKeychain;
-
-use mwc_wallet_util::mwc_util as util;
 
 #[macro_use]
 mod common;
@@ -42,7 +35,7 @@ use std::sync::Mutex;
 // Not (yet) to be run as part of automated testing
 
 fn setup_no_clean() {
-	util::init_test_logger();
+	mwc_util::init_test_logger();
 	setup_global_chain_type();
 }
 
@@ -56,8 +49,8 @@ fn socks_tor() -> Result<(), mwc_wallet_controller::Error> {
 	}
 
 	let test_dir = "target/test_output/socks_tor";
-	let yml = load_yaml!("../src/bin/mwc-wallet.yml");
-	let app = App::from_yaml(yml);
+	let yml = YamlLoader::load_from_str(include_str!("../src/bin/mwc-wallet.yml")).unwrap();
+	let app = App::from_yaml(&yml[0]);
 	setup_no_clean();
 
 	let tx_pool: Arc<Mutex<Vec<Transaction>>> = Arc::new(Mutex::new(Vec::new()));
@@ -80,8 +73,8 @@ fn socks_tor() -> Result<(), mwc_wallet_controller::Error> {
 	let arg_vec = vec!["mwc-wallet", "-p", "password", "listen"];
 	// Set owner listener running
 	thread::spawn(move || {
-		let yml = load_yaml!("../src/bin/mwc-wallet.yml");
-		let app = App::from_yaml(yml);
+		let yml = YamlLoader::load_from_str(include_str!("../src/bin/mwc-wallet.yml")).unwrap();
+		let app = App::from_yaml(&yml[0]);
 		execute_command(&app, test_dir, "wallet2", &client2, arg_vec.clone()).unwrap();
 	});
 

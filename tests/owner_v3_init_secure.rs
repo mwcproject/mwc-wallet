@@ -12,29 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#[macro_use]
-extern crate clap;
-
-#[macro_use]
-extern crate log;
-
-extern crate mwc_wallet;
-
 use mwc_wallet_api::{ECDHPubkey, JsonId};
 use mwc_wallet_impls::test_framework::{self, LocalWalletClient, WalletProxy};
+use mwc_wallet_util::mwc_crates::clap::{App, YamlLoader};
+use mwc_wallet_util::mwc_crates::serde_json;
 use std::ops::DerefMut;
 use std::sync::Arc;
-
-use clap::App;
 use std::thread;
 use std::time::Duration;
 
 use mwc_wallet_impls::DefaultLCProvider;
 use mwc_wallet_util::mwc_core::global;
+use mwc_wallet_util::mwc_crates::secp::key::SecretKey;
 use mwc_wallet_util::mwc_keychain::ExtKeychain;
 use mwc_wallet_util::mwc_util::from_hex;
-use mwc_wallet_util::mwc_util::secp::key::SecretKey;
-use serde_json;
 use std::sync::Mutex;
 
 #[macro_use]
@@ -43,8 +34,11 @@ use common::{
 	clean_output_dir, derive_ecdh_key, execute_command, initial_setup_wallet, instantiate_wallet,
 	send_request, send_request_enc, setup, setup_global_chain_type, RetrieveSummaryInfoResp,
 };
+use mwc_wallet_util::mwc_core;
 use mwc_wallet_util::mwc_core::core::Transaction;
-use mwc_wallet_util::mwc_util::secp::Secp256k1;
+use mwc_wallet_util::mwc_crates;
+use mwc_wallet_util::mwc_crates::log::error;
+use mwc_wallet_util::mwc_crates::secp::Secp256k1;
 
 #[test]
 fn owner_v3_init_secure() -> Result<(), mwc_wallet_controller::Error> {
@@ -81,8 +75,8 @@ fn owner_v3_init_secure() -> Result<(), mwc_wallet_controller::Error> {
 	let arg_vec = vec!["mwc-wallet", "-p", "password", "owner_api", "-l", "33420"];
 	thread::spawn(move || {
 		global::set_local_chain_type(global::ChainTypes::AutomatedTesting);
-		let yml = load_yaml!("../src/bin/mwc-wallet.yml");
-		let app = App::from_yaml(yml);
+		let yml = YamlLoader::load_from_str(include_str!("../src/bin/mwc-wallet.yml")).unwrap();
+		let app = App::from_yaml(&yml[0]);
 		execute_command(&app, test_dir, "wallet1", &client1, arg_vec.clone()).unwrap();
 	});
 	thread::sleep(Duration::from_millis(1000));

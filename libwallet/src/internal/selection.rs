@@ -17,22 +17,22 @@
 
 use crate::error::Error;
 use crate::internal::keys;
-use crate::mwc_core::core::amount_to_hr_string;
-use crate::mwc_core::libtx::{
-	build,
-	proof::{ProofBuild, ProofBuilder},
-	tx_fee,
-};
-use crate::mwc_keychain::{Identifier, Keychain};
-use crate::mwc_util::secp::key::SecretKey;
-use crate::mwc_util::secp::pedersen::Commitment;
 #[cfg(feature = "grin_proof")]
 use crate::proof::proofaddress;
 use crate::slate::Slate;
 use crate::types::*;
+use mwc_wallet_util::mwc_core::core::amount_to_hr_string;
+use mwc_wallet_util::mwc_core::libtx::{
+	build,
+	proof::{ProofBuild, ProofBuilder},
+	tx_fee,
+};
 use mwc_wallet_util::mwc_core::libtx::{inputs_for_fee_points, inputs_for_minimal_fee};
-use mwc_wallet_util::mwc_util as util;
-use mwc_wallet_util::mwc_util::ToHex;
+use mwc_wallet_util::mwc_crates::log::{debug, warn};
+use mwc_wallet_util::mwc_crates::secp::key::SecretKey;
+use mwc_wallet_util::mwc_crates::secp::pedersen::Commitment;
+use mwc_wallet_util::mwc_keychain::{Identifier, Keychain};
+use mwc_wallet_util::mwc_util::{self, ToHex};
 use std::collections::HashSet;
 
 /// Initialize a transaction on the sender side, returns a corresponding
@@ -939,7 +939,7 @@ where
 
 		for tx in &txs {
 			for o in &tx.output_commits {
-				let commit = format!("{}", util::to_hex(&o.0));
+				let commit = format!("{}", mwc_util::to_hex(&o.0));
 				change_outputs.insert(commit);
 			}
 		}

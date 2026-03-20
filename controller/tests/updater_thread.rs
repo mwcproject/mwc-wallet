@@ -13,18 +13,9 @@
 // limitations under the License.
 
 //! Test a wallet repost command
-#[macro_use]
-extern crate log;
-extern crate mwc_wallet_api as api;
-extern crate mwc_wallet_controller as wallet;
-extern crate mwc_wallet_impls as impls;
-extern crate mwc_wallet_libwallet as libwallet;
-
-// use crate::libwallet::api_impl::owner_updater::{start_updater_log_thread, StatusMessage};
-// use mwc_wallet_util::mwc_core as core;
-
-use impls::test_framework::{self, LocalWalletClient};
+use mwc_wallet_impls::test_framework::{self, LocalWalletClient};
 use mwc_wallet_util::mwc_core::global;
+use mwc_wallet_util::mwc_crates::log::error;
 use std::ops::DerefMut;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
@@ -38,7 +29,7 @@ use mwc_wallet_util::mwc_core::core::Transaction;
 use std::sync::Mutex;
 
 /// updater thread test impl
-fn updater_thread_test_impl(test_dir: &str) -> Result<(), wallet::Error> {
+fn updater_thread_test_impl(test_dir: &str) -> Result<(), mwc_wallet_controller::Error> {
 	global::set_local_chain_type(global::ChainTypes::AutomatedTesting);
 	// Create a new proxy to simulate server and wallet responses
 	let tx_pool: Arc<Mutex<Vec<Transaction>>> = Arc::new(Mutex::new(Vec::new()));
@@ -80,18 +71,28 @@ fn updater_thread_test_impl(test_dir: &str) -> Result<(), wallet::Error> {
 	});
 
 	// add some accounts
-	wallet::controller::owner_single_use(Some(wallet1.clone()), mask1, None, |api, m| {
-		api.create_account_path(m, "mining")?;
-		api.create_account_path(m, "listener")?;
-		Ok(())
-	})?;
+	mwc_wallet_controller::controller::owner_single_use(
+		Some(wallet1.clone()),
+		mask1,
+		None,
+		|api, m| {
+			api.create_account_path(m, "mining")?;
+			api.create_account_path(m, "listener")?;
+			Ok(())
+		},
+	)?;
 
 	// add some accounts
-	wallet::controller::owner_single_use(Some(wallet2.clone()), mask2, None, |api, m| {
-		api.create_account_path(m, "account1")?;
-		api.create_account_path(m, "account2")?;
-		Ok(())
-	})?;
+	mwc_wallet_controller::controller::owner_single_use(
+		Some(wallet2.clone()),
+		mask2,
+		None,
+		|api, m| {
+			api.create_account_path(m, "account1")?;
+			api.create_account_path(m, "account2")?;
+			Ok(())
+		},
+	)?;
 
 	// Get some mining done
 	{
@@ -111,7 +112,7 @@ fn updater_thread_test_impl(test_dir: &str) -> Result<(), wallet::Error> {
 			.deref_mut(),
 	);
 
-	let owner_api = api::Owner::new(0, wallet1, None, None);
+	let owner_api = mwc_wallet_api::Owner::new(0, wallet1, None, None);
 	owner_api.start_updater(mask1, Duration::from_secs(5))?;
 
 	// let updater thread run a bit

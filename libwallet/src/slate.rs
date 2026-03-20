@@ -16,53 +16,54 @@
 //! Functions for building partial transactions to be passed
 //! around during an interactive wallet exchange
 
-use crate::blake2::blake2b::blake2b;
 use crate::error::Error;
-use crate::mwc_core::core::amount_to_hr_string;
-use crate::mwc_core::core::committed::Committed;
-use crate::mwc_core::core::transaction::{
+use crate::{Context, VersionedSlate};
+use mwc_wallet_util::mwc_core::core::amount_to_hr_string;
+use mwc_wallet_util::mwc_core::core::committed::Committed;
+use mwc_wallet_util::mwc_core::core::transaction::{
 	Input, KernelFeatures, Output, OutputFeatures, Transaction, TransactionBody, TxKernel,
 	Weighting,
 };
-use crate::mwc_core::libtx::{aggsig, build, proof::ProofBuild, secp_ser, tx_fee};
-use crate::mwc_core::map_vec;
-use crate::mwc_keychain::{BlindSum, BlindingFactor, Keychain, SwitchCommitmentType};
-use crate::mwc_util::secp;
-use crate::mwc_util::secp::key::{PublicKey, SecretKey};
-use crate::mwc_util::secp::pedersen::Commitment;
-use crate::mwc_util::secp::Signature;
-use crate::mwc_util::ToHex;
-use crate::{Context, VersionedSlate};
-use serde::ser::{Serialize, Serializer};
-use serde_json;
+use mwc_wallet_util::mwc_core::libtx::{aggsig, build, proof::ProofBuild, secp_ser, tx_fee};
+use mwc_wallet_util::mwc_core::map_vec;
+use mwc_wallet_util::mwc_crates::blake2_rfc::blake2b::blake2b;
+use mwc_wallet_util::mwc_crates::ed25519_dalek;
+use mwc_wallet_util::mwc_crates::secp;
+use mwc_wallet_util::mwc_crates::secp::key::{PublicKey, SecretKey};
+use mwc_wallet_util::mwc_crates::secp::pedersen::Commitment;
+use mwc_wallet_util::mwc_crates::secp::Signature;
+use mwc_wallet_util::mwc_crates::serde::{self, Deserialize, Deserializer, Serialize, Serializer};
+use mwc_wallet_util::mwc_crates::serde_json;
+use mwc_wallet_util::mwc_crates::uuid::Uuid;
+use mwc_wallet_util::mwc_keychain::{BlindSum, BlindingFactor, Keychain, SwitchCommitmentType};
+use mwc_wallet_util::mwc_util::ToHex;
 use std::convert::{TryFrom, TryInto};
 use std::fmt;
-use uuid::Uuid;
 
 use crate::slate_versions::v2::SlateV2;
 use crate::slate_versions::v2::SlateV2ParseTTL;
 
-use crate::mwc_core::consensus::WEEK_HEIGHT;
 use crate::slate_versions::v3::{
 	CoinbaseV3, InputV3, OutputV3, ParticipantDataV3, PaymentInfoV3, SlateV3, TransactionBodyV3,
 	TransactionV3, TxKernelV3, VersionCompatInfoV3,
 };
+use mwc_wallet_util::mwc_core::consensus::WEEK_HEIGHT;
 
 // use crate::slate_versions::{CURRENT_SLATE_VERSION, MWC_BLOCK_HEADER_VERSION};
-use crate::mwc_core::core::{Inputs, NRDRelativeHeight, OutputIdentifier};
 use crate::proof::proofaddress::ProvableAddress;
 use crate::types::CbData;
 use crate::{SlateVersion, Slatepacker, CURRENT_SLATE_VERSION};
-use ed25519_dalek::SecretKey as DalekSecretKey;
 use mwc_wallet_util::mwc_core::core::FeeFields;
+use mwc_wallet_util::mwc_core::core::{Inputs, NRDRelativeHeight, OutputIdentifier};
 use mwc_wallet_util::mwc_core::global;
-use mwc_wallet_util::mwc_util::secp::ContextFlag;
-use mwc_wallet_util::mwc_util::secp::Secp256k1;
-use rand::rngs::mock::StepRng;
-use rand::thread_rng;
-use serde::{Deserialize, Deserializer};
+use mwc_wallet_util::mwc_crates::log::{debug, error, info, trace};
+use mwc_wallet_util::mwc_crates::rand::rngs::mock::StepRng;
+use mwc_wallet_util::mwc_crates::rand::thread_rng;
+use mwc_wallet_util::mwc_crates::secp::ContextFlag;
+use mwc_wallet_util::mwc_crates::secp::Secp256k1;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(crate = "serde")]
 pub struct PaymentInfo {
 	#[serde(serialize_with = "ProvableAddress::serialize_as_string")]
 	pub sender_address: ProvableAddress,
@@ -73,6 +74,7 @@ pub struct PaymentInfo {
 
 /// Public data for each participant in the slate
 #[derive(Serialize, Deserialize, Debug, Clone, Eq, PartialEq)]
+#[serde(crate = "serde")]
 pub struct ParticipantData {
 	/// Id of participant in the transaction. (For now, 0=sender, 1=rec)
 	#[serde(with = "secp_ser::string_or_u64")]
@@ -112,6 +114,7 @@ impl ParticipantData {
 
 /// Public message data (for serialising and storage)
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(crate = "serde")]
 pub struct ParticipantMessageData {
 	/// id of the particpant in the tx
 	#[serde(with = "secp_ser::string_or_u64")]
@@ -226,6 +229,7 @@ pub struct SlateCtx {
 
 /// Versioning and compatibility info about this slate
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(crate = "serde")]
 pub struct VersionCompatInfo {
 	/// The current version of the slate format
 	pub version: u16,
@@ -235,6 +239,7 @@ pub struct VersionCompatInfo {
 
 /// Helper just to facilitate serialization
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(crate = "serde")]
 pub struct ParticipantMessages {
 	/// included messages
 	pub messages: Vec<ParticipantMessageData>,
@@ -391,7 +396,7 @@ impl Slate {
 	pub fn deserialize_upgrade_slatepack(
 		context_id: u32,
 		slate_str: &str,
-		dec_key: &DalekSecretKey,
+		dec_key: &ed25519_dalek::SecretKey,
 		secp: &Secp256k1,
 	) -> Result<Slatepacker, Error> {
 		let sp = Slatepacker::decrypt_slatepack(context_id, slate_str.as_bytes(), dec_key, secp)?;
@@ -1159,6 +1164,7 @@ impl<'de> Deserialize<'de> for SlateCtx {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(crate = "serde")]
 pub struct SlateVersionProbe {
 	#[serde(default)]
 	version: Option<u64>,
@@ -1555,6 +1561,7 @@ impl TryFrom<&TxKernelV3> for TxKernel {
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[serde(crate = "serde")]
 pub enum CompatKernelFeatures {
 	Plain,
 	Coinbase,

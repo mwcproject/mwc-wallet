@@ -18,9 +18,6 @@
 use crate::api_impl::owner::check_ttl;
 use crate::internal::selection;
 use crate::internal::{tx, updater};
-use crate::mwc_core::core::amount_to_hr_string;
-use crate::mwc_keychain::Keychain;
-use crate::mwc_util::secp::key::SecretKey;
 use crate::proof::crypto::Hex;
 use crate::proof::proofaddress;
 use crate::proof::proofaddress::ProofAddressType;
@@ -34,8 +31,14 @@ use crate::{
 };
 #[cfg(feature = "swaps")]
 use crate::{WalletInst, WalletLCProvider};
-use ed25519_dalek::PublicKey as DalekPublicKey;
+use mwc_wallet_util::mwc_core::core::amount_to_hr_string;
+use mwc_wallet_util::mwc_crates::ed25519_dalek;
+use mwc_wallet_util::mwc_crates::lazy_static::lazy_static;
+use mwc_wallet_util::mwc_crates::log::{debug, info};
+use mwc_wallet_util::mwc_crates::secp::key::SecretKey;
+use mwc_wallet_util::mwc_crates::serde::{self, Deserialize, Serialize};
 use mwc_wallet_util::mwc_keychain::Identifier;
+use mwc_wallet_util::mwc_keychain::Keychain;
 use mwc_wallet_util::OnionV3Address;
 use std::collections::HashMap;
 #[cfg(feature = "swaps")]
@@ -43,13 +46,12 @@ use std::sync::Arc;
 #[cfg(feature = "swaps")]
 use std::sync::Mutex;
 use std::sync::RwLock;
-use strum::IntoEnumIterator;
-
 const FOREIGN_API_VERSION: u16 = 2;
 const USER_MESSAGE_MAX_LEN: usize = 256;
 
 /// Data about received transaciton
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(crate = "serde")]
 pub struct ReceiveData {
 	context_id: u32,
 	tx_uuid: String,
@@ -547,8 +549,8 @@ pub fn decrypt_slate<'a, T: ?Sized, C, K>(
 	(
 		Slate,
 		SlatePurpose,
-		Option<DalekPublicKey>,
-		Option<DalekPublicKey>,
+		Option<ed25519_dalek::PublicKey>,
+		Option<ed25519_dalek::PublicKey>,
 	),
 	Error,
 >
@@ -589,7 +591,7 @@ pub fn encrypt_slate<'a, T: ?Sized, C, K>(
 	slate: &Slate,
 	version: Option<SlateVersion>,
 	content: SlatePurpose,
-	slatepack_recipient: Option<DalekPublicKey>,
+	slatepack_recipient: Option<ed25519_dalek::PublicKey>,
 	address_index: Option<u32>,
 	use_test_rng: bool,
 ) -> Result<VersionedSlate, Error>
@@ -618,7 +620,7 @@ where
 				&keychain,
 				address_index,
 			)?;
-			let slatepack_pk = DalekPublicKey::from(&slatepack_secret);
+			let slatepack_pk = ed25519_dalek::PublicKey::from(&slatepack_secret);
 			(slatepack_secret, slatepack_pk)
 		};
 

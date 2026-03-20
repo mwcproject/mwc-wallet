@@ -21,17 +21,15 @@
 #![deny(unused_mut)]
 #![warn(missing_docs)]
 
-#[macro_use]
-extern crate serde_derive;
-
 mod ov3;
 
 pub use ov3::OnionV3Address;
-pub use ov3::OnionV3Error as OnionV3AddressError;
+pub use ov3::OnionV3Error;
 
 pub use mwc_api;
 pub use mwc_chain;
 pub use mwc_core;
+pub use mwc_crates;
 pub use mwc_keychain;
 pub use mwc_node_lib;
 pub use mwc_node_workflow;

@@ -14,18 +14,15 @@
 
 //! Generic implementation of owner API atomic swap functions
 
-use crate::{ethereum::EthereumWallet, mwc_util::secp::key::SecretKey};
+use crate::{ethereum::EthereumWallet, mwc_wallet_util::mwc_crates::secp::key::SecretKey};
+use mwc_wallet_util::mwc_crates::lazy_static::lazy_static;
+use mwc_wallet_util::mwc_crates::serde_json;
 use std::sync::Mutex;
 
 use crate::error::Error;
 use crate::fsm::state::{Input, StateEtaInfo, StateId, StateProcessRespond};
 use crate::internal::selection;
 use crate::message::{Message, SecondaryUpdate, Update};
-use crate::mwc_core::core::Committed;
-use crate::mwc_core::{core, global};
-use crate::mwc_keychain::ExtKeychainPath;
-use crate::mwc_keychain::{Identifier, Keychain, SwitchCommitmentType};
-use crate::mwc_util::to_hex;
 use crate::types::NodeClient;
 use crate::types::{Action, Currency, Network, Role, SwapTransactionsConfirmations};
 use crate::{get_receive_account, owner_eth};
@@ -34,14 +31,20 @@ use crate::{
 	wallet_lock, OutputData, OutputStatus, Slate, SwapStartArgs, TxLogEntry, TxLogEntryType,
 	WalletBackend, WalletInst, WalletLCProvider,
 };
-use serde_json::json;
+use mwc_wallet_util::mwc_core::core::Committed;
+use mwc_wallet_util::mwc_core::{self, core, global};
+use mwc_wallet_util::mwc_crates::log::{debug, info, warn};
+use mwc_wallet_util::mwc_crates::serde_json::json;
+use mwc_wallet_util::mwc_crates::uuid::Uuid;
+use mwc_wallet_util::mwc_keychain::ExtKeychainPath;
+use mwc_wallet_util::mwc_keychain::{Identifier, Keychain, SwitchCommitmentType};
+use mwc_wallet_util::mwc_util::to_hex;
 use std::collections::{HashMap, HashSet};
 use std::convert::TryFrom;
 use std::fs::File;
 use std::io::Read;
 use std::sync::Arc;
 use std::sync::RwLock;
-use uuid::Uuid;
 
 lazy_static! {
 	/// Offers that are online now. It is needed to answer correctly about offers status
@@ -174,7 +177,7 @@ where
 
 	if swap_reserved_amount > 0 {
 		let swap_reserved_amount_str =
-			crate::mwc_core::core::amount_to_hr_string(swap_reserved_amount, true);
+			mwc_core::core::amount_to_hr_string(swap_reserved_amount, true);
 		info!("Running swaps reserved {} coins", swap_reserved_amount);
 		if mwc_wallet_util::mwc_util::is_console_output_enabled() {
 			println!("WARNING. This swap will need to reserve {} MWC. If you don't have enough funds, please cancel it.", swap_reserved_amount_str);

@@ -12,23 +12,24 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::mwc_p2p::libp2p_connection;
 use crate::Error;
-use chrono::Utc;
-use mwc_libp2p::gossipsub::IdentTopic as Topic;
 use mwc_wallet_libwallet::IntegrityContext;
-use mwc_wallet_util::mwc_util::secp::Secp256k1;
+use mwc_wallet_util::mwc_crates::chrono::Utc;
+use mwc_wallet_util::mwc_crates::lazy_static::lazy_static;
+use mwc_wallet_util::mwc_crates::log::error;
+use mwc_wallet_util::mwc_crates::secp::Secp256k1;
+use mwc_wallet_util::mwc_crates::uuid::Uuid;
+use mwc_wallet_util::mwc_p2p::libp2p_connection;
 use std::sync::RwLock;
 use std::thread;
-use uuid::Uuid;
 
 /// Publishing message
 #[derive(Clone, Debug)]
 pub struct PublishingMessage {
 	/// This message uuid
 	pub uuid: Uuid,
-	/// Topic to broadcast
-	pub topic: Topic,
+	/// mwc_libp2p::gossipsub::IdentTopic to broadcast
+	pub topic: mwc_libp2p::gossipsub::IdentTopic,
 	/// message to broadcast. Must be json string
 	pub message: String,
 	/// Broadcasting time period (sec)
@@ -92,7 +93,7 @@ pub fn add_broadcasting_messages(
 	let uuid = Uuid::new_v4();
 	broadcasting.push(PublishingMessage {
 		uuid: uuid.clone(),
-		topic: Topic::new(topic),
+		topic: mwc_libp2p::gossipsub::IdentTopic::new(topic),
 		message: message.clone(),
 		broadcasting_interval: interval,
 		last_time_published: 0,

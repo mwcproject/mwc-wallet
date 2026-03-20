@@ -13,22 +13,23 @@
 // limitations under the License.
 
 use super::error::Error;
-use crate::blake2::blake2b::blake2b;
 use crate::mwc_core::core::{
 	Input as TxInput, Output as TxOutput, OutputFeatures, OutputIdentifier,
 };
 use crate::mwc_core::libtx::secp_ser;
-use crate::mwc_util::secp::constants::SECRET_KEY_SIZE;
-use crate::mwc_util::secp::key::{PublicKey, SecretKey};
-use crate::mwc_util::secp::pedersen::{Commitment, RangeProof};
-use crate::mwc_util::secp::Secp256k1;
 use crate::swap::ser::*;
-use hex::FromHex;
-use rand::thread_rng;
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use mwc_wallet_util::mwc_crates::blake2_rfc::blake2b::blake2b;
+use mwc_wallet_util::mwc_crates::hex::FromHex;
+use mwc_wallet_util::mwc_crates::rand::thread_rng;
+use mwc_wallet_util::mwc_crates::secp::constants::SECRET_KEY_SIZE;
+use mwc_wallet_util::mwc_crates::secp::key::{PublicKey, SecretKey};
+use mwc_wallet_util::mwc_crates::secp::pedersen::{Commitment, RangeProof};
+use mwc_wallet_util::mwc_crates::secp::Secp256k1;
+use mwc_wallet_util::mwc_crates::serde::{self, Deserialize, Deserializer, Serialize, Serializer};
 
 /// Multisig builder
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(crate = "serde")]
 pub struct Builder {
 	/// Number of participant. For swap it is 2
 	num_participants: usize,
@@ -371,6 +372,7 @@ impl Builder {
 
 /// Multisig participant data
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(crate = "serde")]
 pub struct ParticipantData {
 	/// Hash for commit (not revealed data)
 	#[serde(skip_serializing_if = "Option::is_none", default)]
@@ -510,7 +512,7 @@ impl<'de> Deserialize<'de> for Hash {
 	where
 		D: Deserializer<'de>,
 	{
-		use serde::de::Error;
+		use mwc_wallet_util::mwc_crates::serde::de::Error;
 		let s = String::deserialize(deserializer)?;
 
 		let v = Vec::from_hex(&s).map_err(D::Error::custom)?;
@@ -541,8 +543,7 @@ impl Hashed for Vec<u8> {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::mwc_util::secp::ContextFlag;
-	use rand::thread_rng;
+	use mwc_wallet_util::mwc_crates::secp::ContextFlag;
 
 	/*
 	/// Test proof for 2-of-2 multisig with a commit & reveal phase

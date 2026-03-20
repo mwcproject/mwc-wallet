@@ -14,11 +14,9 @@
 // limitations under the License.
 
 //! Implementation specific error types
-use crate::api;
-use crate::core::core::transaction;
-use crate::core::libtx;
-use crate::impls;
-use crate::keychain;
+use mwc_wallet_util::mwc_core::core::transaction;
+use mwc_wallet_util::mwc_core::libtx;
+use mwc_wallet_util::mwc_crates::thiserror;
 
 /// Wallet errors, mostly wrappers around underlying crypto or I/O errors.
 #[derive(Clone, Eq, PartialEq, Debug, thiserror::Error)]
@@ -29,7 +27,7 @@ pub enum Error {
 
 	/// Impls error
 	#[error("Impls Error, {0}")]
-	Impls(#[from] impls::Error),
+	Impls(#[from] mwc_wallet_impls::Error),
 
 	/// LibWallet Error
 	#[error("LibWallet Error, {0}")]
@@ -41,7 +39,7 @@ pub enum Error {
 
 	/// Keychain error
 	#[error("Keychain error, {0}")]
-	Keychain(#[from] keychain::Error),
+	Keychain(#[from] mwc_wallet_util::mwc_keychain::Error),
 
 	/// Transaction Error
 	#[error("Transaction error, {0}")]
@@ -65,7 +63,7 @@ pub enum Error {
 
 	/// Error when contacting a node through its API
 	#[error("Node API error, {0}")]
-	Node(#[from] api::Error),
+	Node(#[from] mwc_wallet_util::mwc_api::Error),
 
 	/// Error originating from hyper.
 	#[error("Hyper error, {0}")]

@@ -12,10 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use hyper::service::Service;
 use mwc_wallet_impls::http_parser::http_request::{read_http_request, send_http_response};
 use mwc_wallet_impls::Error;
 use mwc_wallet_util::mwc_api::Router;
+use mwc_wallet_util::mwc_crates::futures;
+use mwc_wallet_util::mwc_crates::hyper::service::Service;
+use mwc_wallet_util::mwc_crates::log::{debug, error, info, warn};
 use mwc_wallet_util::mwc_p2p::tor::tcp_data_stream::TcpDataStream;
 use mwc_wallet_util::mwc_util::StopState;
 use std::collections::HashMap;

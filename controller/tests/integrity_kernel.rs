@@ -15,20 +15,14 @@
 //! At mwc-walllet there is a test for validation. It will use printed results form this test
 //!
 #[cfg(feature = "libp2p")]
-#[macro_use]
-extern crate log;
-extern crate mwc_wallet_controller as wallet;
-extern crate mwc_wallet_impls as impls;
+use mwc_wallet_util::mwc_crates::log::{debug, error};
 
-#[cfg(feature = "libp2p")]
-use mwc_wallet_util::mwc_core as core;
 #[cfg(feature = "libp2p")]
 use mwc_wallet_util::mwc_core::global;
 
 #[cfg(feature = "libp2p")]
-use impls::test_framework::{self, LocalWalletClient};
+use mwc_wallet_impls::test_framework::{self, LocalWalletClient};
 #[cfg(feature = "libp2p")]
-use mwc_wallet_libwallet as libwallet;
 #[cfg(feature = "libp2p")]
 use std::thread;
 #[cfg(feature = "libp2p")]
@@ -37,8 +31,6 @@ use std::time::Duration;
 #[cfg(feature = "libp2p")]
 use mwc_libp2p::PeerId;
 #[cfg(feature = "libp2p")]
-use mwc_wallet_util::mwc_util as util;
-
 #[macro_use]
 mod common;
 #[cfg(feature = "libp2p")]
@@ -50,19 +42,21 @@ use mwc_wallet_libwallet::internal::updater;
 #[cfg(feature = "libp2p")]
 use mwc_wallet_libwallet::{owner, wallet_lock_test, TxLogEntryType};
 #[cfg(feature = "libp2p")]
+use mwc_wallet_util::mwc_core;
+#[cfg(feature = "libp2p")]
 use mwc_wallet_util::mwc_core::core::hash::Hash;
 #[cfg(feature = "libp2p")]
 use mwc_wallet_util::mwc_core::core::{KernelFeatures, Transaction, TxKernel};
 #[cfg(feature = "libp2p")]
 use mwc_wallet_util::mwc_core::libtx::aggsig;
 #[cfg(feature = "libp2p")]
+use mwc_wallet_util::mwc_crates::secp;
+#[cfg(feature = "libp2p")]
+use mwc_wallet_util::mwc_crates::secp::pedersen::Commitment;
+#[cfg(feature = "libp2p")]
+use mwc_wallet_util::mwc_crates::secp::Message;
+#[cfg(feature = "libp2p")]
 use mwc_wallet_util::mwc_p2p::libp2p_connection;
-#[cfg(feature = "libp2p")]
-use mwc_wallet_util::mwc_util::secp::pedersen::Commitment;
-#[cfg(feature = "libp2p")]
-use mwc_wallet_util::mwc_util::secp::Message;
-#[cfg(feature = "libp2p")]
-use mwc_wallet_util::mwc_util::{secp, Mutex};
 #[cfg(feature = "libp2p")]
 use std::collections::HashMap;
 #[cfg(feature = "libp2p")]
@@ -71,10 +65,12 @@ use std::convert::TryInto;
 use std::ops::DerefMut;
 #[cfg(feature = "libp2p")]
 use std::sync::Arc;
+#[cfg(feature = "libp2p")]
+use std::sync::Mutex;
 
 /// self send impl
 #[cfg(feature = "libp2p")]
-fn integrity_kernel_impl(test_dir: &str) -> Result<(), wallet::Error> {
+fn integrity_kernel_impl(test_dir: &str) -> Result<(), mwc_wallet_controller::Error> {
 	// Create a new proxy to simulate server and wallet responses
 	global::set_local_chain_type(global::ChainTypes::AutomatedTesting);
 	let tx_pool: Arc<Mutex<Vec<Transaction>>> = Arc::new(Mutex::new(Vec::new()));
@@ -104,7 +100,7 @@ fn integrity_kernel_impl(test_dir: &str) -> Result<(), wallet::Error> {
 	});
 
 	// few values to keep things shorter
-	let reward = core::consensus::MWC_FIRST_GROUP_REWARD;
+	let reward = mwc_core::consensus::MWC_FIRST_GROUP_REWARD;
 
 	// 4 is a lock height for coinbase. We want 2 mining rewards to spend.
 	let _ = test_framework::award_blocks_to_wallet(
@@ -121,27 +117,32 @@ fn integrity_kernel_impl(test_dir: &str) -> Result<(), wallet::Error> {
 	}
 
 	// Check wallet 1 contents are as expected
-	wallet::controller::owner_single_use(Some(wallet1.clone()), mask1, None, |api, m| {
-		let (_wallet1_refreshed, wallet1_info) = api.retrieve_summary_info(m, true, 1)?;
-		debug!(
-			"Wallet 1 Info Pre-Transaction, after {} blocks: {:?}",
-			wallet1_info.last_confirmed_height,
-			wallet1_info //  assert_eq!(wallet1_info.total, 1);
-		);
-		assert_eq!(wallet1_info.total, 5 * reward);
+	mwc_wallet_controller::controller::owner_single_use(
+		Some(wallet1.clone()),
+		mask1,
+		None,
+		|api, m| {
+			let (_wallet1_refreshed, wallet1_info) = api.retrieve_summary_info(m, true, 1)?;
+			debug!(
+				"Wallet 1 Info Pre-Transaction, after {} blocks: {:?}",
+				wallet1_info.last_confirmed_height,
+				wallet1_info //  assert_eq!(wallet1_info.total, 1);
+			);
+			assert_eq!(wallet1_info.total, 5 * reward);
 
-		Ok(())
-	})?;
+			Ok(())
+		},
+	)?;
 
 	// Nothing expected at the beginning
 	let (account, outputs, _height, integral_balance) =
-		libwallet::owner_libp2p::get_integral_balance(wallet1.clone(), mask1)?;
+		mwc_wallet_libwallet::owner_libp2p::get_integral_balance(wallet1.clone(), mask1)?;
 	assert!(account.is_none());
 	assert!(outputs.is_empty());
 	assert!(integral_balance.is_empty());
 
 	// Creating the integral balance.
-	let integral_balance = libwallet::owner_libp2p::create_integral_balance(
+	let integral_balance = mwc_wallet_libwallet::owner_libp2p::create_integral_balance(
 		wallet1.clone(),
 		mask1,
 		1_000_000_000,
@@ -158,7 +159,7 @@ fn integrity_kernel_impl(test_dir: &str) -> Result<(), wallet::Error> {
 	);
 
 	let (account, outputs, _height, integral_balance) =
-		libwallet::owner_libp2p::get_integral_balance(wallet1.clone(), mask1)?;
+		mwc_wallet_libwallet::owner_libp2p::get_integral_balance(wallet1.clone(), mask1)?;
 	assert!(account.is_some());
 	assert_eq!(outputs.len(), 1);
 	assert_eq!(integral_balance.len(), 1);
@@ -167,7 +168,7 @@ fn integrity_kernel_impl(test_dir: &str) -> Result<(), wallet::Error> {
 	assert_eq!(integral_balance[0].0.expiration_height, 1445 + 3);
 
 	// Retry should do nothing because first transaction is not mined yet
-	let integral_balance = libwallet::owner_libp2p::create_integral_balance(
+	let integral_balance = mwc_wallet_libwallet::owner_libp2p::create_integral_balance(
 		wallet1.clone(),
 		mask1,
 		1_000_000_000,
@@ -200,7 +201,7 @@ fn integrity_kernel_impl(test_dir: &str) -> Result<(), wallet::Error> {
 	}
 
 	let (account, outputs, _height, integral_balance) =
-		libwallet::owner_libp2p::get_integral_balance(wallet1.clone(), mask1)?;
+		mwc_wallet_libwallet::owner_libp2p::get_integral_balance(wallet1.clone(), mask1)?;
 	assert!(account.is_some());
 	assert_eq!(outputs.len(), 1); // Should see available output
 	assert_eq!(integral_balance.len(), 1);
@@ -232,7 +233,7 @@ fn integrity_kernel_impl(test_dir: &str) -> Result<(), wallet::Error> {
 	);
 
 	let (account, outputs, _height, integral_balance) =
-		libwallet::owner_libp2p::get_integral_balance(wallet1.clone(), mask1)?;
+		mwc_wallet_libwallet::owner_libp2p::get_integral_balance(wallet1.clone(), mask1)?;
 	assert!(account.is_some());
 	assert_eq!(outputs.len(), 1); // Should see available output
 	assert_eq!(integral_balance.len(), 1);
@@ -240,7 +241,7 @@ fn integrity_kernel_impl(test_dir: &str) -> Result<(), wallet::Error> {
 	assert_eq!(integral_balance[0].1, true); // Now should be confirmed...
 
 	// Now create second one should succeed
-	let integral_balance = libwallet::owner_libp2p::create_integral_balance(
+	let integral_balance = mwc_wallet_libwallet::owner_libp2p::create_integral_balance(
 		wallet1.clone(),
 		mask1,
 		1_000_000_000,
@@ -286,7 +287,7 @@ fn integrity_kernel_impl(test_dir: &str) -> Result<(), wallet::Error> {
 	);
 
 	let (account, outputs, _height, integral_balance) =
-		libwallet::owner_libp2p::get_integral_balance(wallet1.clone(), mask1)?;
+		mwc_wallet_libwallet::owner_libp2p::get_integral_balance(wallet1.clone(), mask1)?;
 	assert!(account.is_some());
 	assert_eq!(outputs.len(), 1);
 	assert_eq!(integral_balance.len(), 2);
@@ -359,15 +360,15 @@ fn integrity_kernel_impl(test_dir: &str) -> Result<(), wallet::Error> {
 	}
 
 	// Testing for libp2p routine
-	println!("peer_id data: {}", util::to_hex(&peer_id.to_bytes()));
+	println!("peer_id data: {}", mwc_util::to_hex(&peer_id.to_bytes()));
 
 	let (kernel_excess, signature) = integrity_context1.calc_kernel_excess(&secp, &peer_pk)?;
 	let message: Vec<u8> = vec![1, 2, 3, 4, 5, 6, 7, 8, 9];
 
-	println!("kernel_excess: {}", util::to_hex(&kernel_excess.0));
+	println!("kernel_excess: {}", mwc_util::to_hex(&kernel_excess.0));
 	println!(
 		"signature: {}",
-		util::to_hex(&signature.serialize_compact(&secp))
+		mwc_util::to_hex(&signature.serialize_compact(&secp))
 	);
 
 	// Build message for p2p network
@@ -410,13 +411,18 @@ fn integrity_kernel_impl(test_dir: &str) -> Result<(), wallet::Error> {
 	assert_eq!(validate_ok2.unwrap().0, 100_000_000);
 
 	// add some accounts to check if lowest indexes will be used.
-	wallet::controller::owner_single_use(Some(wallet1.clone()), mask1, None, |api, m| {
-		let acc_id1 = api.create_account_path(m, "second")?;
-		let acc_id2 = api.create_account_path(m, "third")?;
-		assert_eq!(acc_id1.to_bip_32_string(), "m/1/0");
-		assert_eq!(acc_id2.to_bip_32_string(), "m/2/0");
-		Ok(())
-	})?;
+	mwc_wallet_controller::controller::owner_single_use(
+		Some(wallet1.clone()),
+		mask1,
+		None,
+		|api, m| {
+			let acc_id1 = api.create_account_path(m, "second")?;
+			let acc_id2 = api.create_account_path(m, "third")?;
+			assert_eq!(acc_id1.to_bip_32_string(), "m/1/0");
+			assert_eq!(acc_id2.to_bip_32_string(), "m/2/0");
+			Ok(())
+		},
+	)?;
 
 	// let logging finish
 	thread::sleep(Duration::from_millis(200));

@@ -14,26 +14,29 @@
 // limitations under the License.
 
 //! A threaded persistent Updater that can be controlled by a mwc wallet
+use mwc_wallet_util::mwc_crates::serde::{self, Deserialize, Serialize};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
-use crate::mwc_keychain::Keychain;
-use crate::mwc_util::secp::key::SecretKey;
+use mwc_wallet_util::mwc_crates::secp::key::SecretKey;
+use mwc_wallet_util::mwc_keychain::Keychain;
 use std::sync::Mutex;
 
 use crate::api_impl::owner;
 use crate::types::NodeClient;
 use crate::{wallet_lock, Error};
 use crate::{WalletInst, WalletLCProvider};
+use mwc_wallet_util::mwc_crates::log::{info, warn};
 use std::thread::JoinHandle;
 
 const MESSAGE_QUEUE_MAX_LEN: usize = 10_000;
 
 /// Update status messages which can be returned to listening clients
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(crate = "serde")]
 pub enum StatusMessage {
 	/// Wallet is performing a regular update, matching the UTXO set against
 	/// current wallet outputs

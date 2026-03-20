@@ -17,22 +17,20 @@
 mod common;
 
 use common::{clean_output_dir, create_wallet_proxy, setup};
-use log::error;
-use mwc_wallet_controller::controller::owner_single_use as owner;
 use mwc_wallet_controller::Error;
 use mwc_wallet_impls::test_framework::*;
 use mwc_wallet_impls::{DefaultLCProvider, PathToSlatePutter, SlatePutter};
-use mwc_wallet_libwallet as libwallet;
 use mwc_wallet_libwallet::api_impl::types::InitTxArgs;
 use mwc_wallet_libwallet::WalletInst;
-use mwc_wallet_util::mwc_chain as chain;
-use mwc_wallet_util::mwc_core as core;
+use mwc_wallet_util::mwc_chain;
+use mwc_wallet_util::mwc_core;
 use mwc_wallet_util::mwc_core::core::hash::Hashed;
 use mwc_wallet_util::mwc_core::core::Transaction;
 use mwc_wallet_util::mwc_core::global;
+use mwc_wallet_util::mwc_crates::log::error;
+use mwc_wallet_util::mwc_crates::secp::key::SecretKey;
+use mwc_wallet_util::mwc_crates::secp::Secp256k1;
 use mwc_wallet_util::mwc_keychain::ExtKeychain;
-use mwc_wallet_util::mwc_util::secp::key::SecretKey;
-use mwc_wallet_util::mwc_util::secp::Secp256k1;
 use std::ops::DerefMut;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -58,7 +56,7 @@ fn revert(
 	test_dir: &str,
 ) -> Result<
 	(
-		Arc<chain::Chain>,
+		Arc<mwc_chain::Chain>,
 		Arc<AtomicBool>,
 		u64,
 		u64,
@@ -111,19 +109,29 @@ fn revert(
 		}
 	});
 
-	owner(Some(wallet1.clone()), mask1, None, |api, m| {
-		api.create_account_path(m, "a")?;
-		api.set_active_account(m, "a")?;
-		Ok(())
-	})?;
+	mwc_wallet_controller::controller::owner_single_use(
+		Some(wallet1.clone()),
+		mask1,
+		None,
+		|api, m| {
+			api.create_account_path(m, "a")?;
+			api.set_active_account(m, "a")?;
+			Ok(())
+		},
+	)?;
 
-	owner(Some(wallet2.clone()), mask2, None, |api, m| {
-		api.create_account_path(m, "b")?;
-		api.set_active_account(m, "b")?;
-		Ok(())
-	})?;
+	mwc_wallet_controller::controller::owner_single_use(
+		Some(wallet2.clone()),
+		mask2,
+		None,
+		|api, m| {
+			api.create_account_path(m, "b")?;
+			api.set_active_account(m, "b")?;
+			Ok(())
+		},
+	)?;
 
-	let reward = core::consensus::reward(0, 0, 1);
+	let reward = mwc_core::consensus::reward(0, 0, 1);
 	let cm = global::coinbase_maturity(0) as u64;
 	let sent = reward * 2;
 
@@ -142,77 +150,97 @@ fn revert(
 	)?;
 
 	// Sanity check contents
-	owner(Some(wallet1.clone()), mask1, None, |api, m| {
-		let (refreshed, info) = api.retrieve_summary_info(m, true, 1)?;
-		assert!(refreshed);
-		assert_eq!(info.last_confirmed_height, bh);
-		assert_eq!(info.total, bh * reward);
-		assert_eq!(info.amount_currently_spendable, (bh - cm) * reward);
-		assert_eq!(info.amount_reverted, 0);
-		// check tx log as well
-		let (_, txs) = api.retrieve_txs(m, true, None, None, None, None)?;
-		let (c, _) = libwallet::TxLogEntry::sum_confirmed(&txs);
-		assert_eq!(info.total, c);
-		assert_eq!(txs.len(), bh as usize);
-		Ok(())
-	})?;
+	mwc_wallet_controller::controller::owner_single_use(
+		Some(wallet1.clone()),
+		mask1,
+		None,
+		|api, m| {
+			let (refreshed, info) = api.retrieve_summary_info(m, true, 1)?;
+			assert!(refreshed);
+			assert_eq!(info.last_confirmed_height, bh);
+			assert_eq!(info.total, bh * reward);
+			assert_eq!(info.amount_currently_spendable, (bh - cm) * reward);
+			assert_eq!(info.amount_reverted, 0);
+			// check tx log as well
+			let (_, txs) = api.retrieve_txs(m, true, None, None, None, None)?;
+			let (c, _) = mwc_wallet_libwallet::TxLogEntry::sum_confirmed(&txs);
+			assert_eq!(info.total, c);
+			assert_eq!(txs.len(), bh as usize);
+			Ok(())
+		},
+	)?;
 
-	owner(Some(wallet2.clone()), mask2, None, |api, m| {
-		let (refreshed, info) = api.retrieve_summary_info(m, true, 1)?;
-		assert!(refreshed);
-		assert_eq!(info.last_confirmed_height, bh);
-		assert_eq!(info.total, 0);
-		assert_eq!(info.amount_currently_spendable, 0);
-		assert_eq!(info.amount_reverted, 0);
-		// check tx log as well
-		let (_, txs) = api.retrieve_txs(m, true, None, None, None, None)?;
-		assert_eq!(txs.len(), 0);
-		Ok(())
-	})?;
+	mwc_wallet_controller::controller::owner_single_use(
+		Some(wallet2.clone()),
+		mask2,
+		None,
+		|api, m| {
+			let (refreshed, info) = api.retrieve_summary_info(m, true, 1)?;
+			assert!(refreshed);
+			assert_eq!(info.last_confirmed_height, bh);
+			assert_eq!(info.total, 0);
+			assert_eq!(info.amount_currently_spendable, 0);
+			assert_eq!(info.amount_reverted, 0);
+			// check tx log as well
+			let (_, txs) = api.retrieve_txs(m, true, None, None, None, None)?;
+			assert_eq!(txs.len(), 0);
+			Ok(())
+		},
+	)?;
 
 	// Send some funds
 	let mut tx = None;
-	owner(Some(wallet1.clone()), mask1, None, |api, m| {
-		// send to send
-		let args = InitTxArgs {
-			src_acct_name: None,
-			amount: sent,
-			minimum_confirmations: cm,
-			max_outputs: 500,
-			num_change_outputs: 1,
-			selection_strategy_is_use_all: false,
-			..Default::default()
-		};
-		let slate = api.init_send_tx(m, None, &args, 1)?;
-		// output tx file
-		let send_file = format!("{}/part_tx_1.tx", test_dir);
-		PathToSlatePutter::build_plain(0, Some(PathBuf::from(send_file)))
-			.put_tx(&slate, None, false, &secp)?;
-		api.tx_lock_outputs(m, None, &slate, None, 0)?;
-		let slate = client1.send_tx_slate_direct("wallet2", &slate)?;
-		let slate = api.finalize_tx(m, None, &slate, true)?;
-		tx = slate.tx;
+	mwc_wallet_controller::controller::owner_single_use(
+		Some(wallet1.clone()),
+		mask1,
+		None,
+		|api, m| {
+			// send to send
+			let args = InitTxArgs {
+				src_acct_name: None,
+				amount: sent,
+				minimum_confirmations: cm,
+				max_outputs: 500,
+				num_change_outputs: 1,
+				selection_strategy_is_use_all: false,
+				..Default::default()
+			};
+			let slate = api.init_send_tx(m, None, &args, 1)?;
+			// output tx file
+			let send_file = format!("{}/part_tx_1.tx", test_dir);
+			PathToSlatePutter::build_plain(0, Some(PathBuf::from(send_file)))
+				.put_tx(&slate, None, false, &secp)?;
+			api.tx_lock_outputs(m, None, &slate, None, 0)?;
+			let slate = client1.send_tx_slate_direct("wallet2", &slate)?;
+			let slate = api.finalize_tx(m, None, &slate, true)?;
+			tx = slate.tx;
 
-		Ok(())
-	})?;
+			Ok(())
+		},
+	)?;
 	let tx = tx.expect("tx from slate");
 
 	// Check funds have been received
-	owner(Some(wallet2.clone()), mask2, None, |api, m| {
-		let (refreshed, info) = api.retrieve_summary_info(m, true, 1)?;
-		assert!(refreshed);
-		assert_eq!(info.last_confirmed_height, bh);
-		assert_eq!(info.total, 0);
-		assert_eq!(info.amount_currently_spendable, 0);
-		assert_eq!(info.amount_reverted, 0);
-		// check tx log as well
-		let (_, txs) = api.retrieve_txs(m, true, None, None, None, None)?;
-		assert_eq!(txs.len(), 1);
-		let tx = &txs[0];
-		assert_eq!(tx.tx_type, libwallet::TxLogEntryType::TxReceived);
-		assert!(!tx.confirmed);
-		Ok(())
-	})?;
+	mwc_wallet_controller::controller::owner_single_use(
+		Some(wallet2.clone()),
+		mask2,
+		None,
+		|api, m| {
+			let (refreshed, info) = api.retrieve_summary_info(m, true, 1)?;
+			assert!(refreshed);
+			assert_eq!(info.last_confirmed_height, bh);
+			assert_eq!(info.total, 0);
+			assert_eq!(info.amount_currently_spendable, 0);
+			assert_eq!(info.amount_reverted, 0);
+			// check tx log as well
+			let (_, txs) = api.retrieve_txs(m, true, None, None, None, None)?;
+			assert_eq!(txs.len(), 1);
+			let tx = &txs[0];
+			assert_eq!(tx.tx_type, mwc_wallet_libwallet::TxLogEntryType::TxReceived);
+			assert!(!tx.confirmed);
+			Ok(())
+		},
+	)?;
 
 	// Update parallel chain
 	assert_eq!(chain2.head_header().unwrap().height, 0);
@@ -240,23 +268,28 @@ fn revert(
 	let bh = bh + 1;
 
 	// Check funds have been confirmed
-	owner(Some(wallet2.clone()), mask2, None, |api, m| {
-		let (refreshed, info) = api.retrieve_summary_info(m, true, 1)?;
-		assert!(refreshed);
-		assert_eq!(info.last_confirmed_height, bh);
-		assert_eq!(info.total, sent);
-		assert_eq!(info.amount_currently_spendable, sent);
-		assert_eq!(info.amount_reverted, 0);
-		// check tx log as well
-		let (_, txs) = api.retrieve_txs(m, true, None, None, None, None)?;
-		assert_eq!(txs.len(), 1);
-		let tx = &txs[0];
-		assert_eq!(tx.tx_type, libwallet::TxLogEntryType::TxReceived);
-		assert!(tx.confirmed);
-		assert!(tx.kernel_excess.is_some());
-		assert!(tx.reverted_after.is_none());
-		Ok(())
-	})?;
+	mwc_wallet_controller::controller::owner_single_use(
+		Some(wallet2.clone()),
+		mask2,
+		None,
+		|api, m| {
+			let (refreshed, info) = api.retrieve_summary_info(m, true, 1)?;
+			assert!(refreshed);
+			assert_eq!(info.last_confirmed_height, bh);
+			assert_eq!(info.total, sent);
+			assert_eq!(info.amount_currently_spendable, sent);
+			assert_eq!(info.amount_reverted, 0);
+			// check tx log as well
+			let (_, txs) = api.retrieve_txs(m, true, None, None, None, None)?;
+			assert_eq!(txs.len(), 1);
+			let tx = &txs[0];
+			assert_eq!(tx.tx_type, mwc_wallet_libwallet::TxLogEntryType::TxReceived);
+			assert!(tx.confirmed);
+			assert!(tx.kernel_excess.is_some());
+			assert!(tx.reverted_after.is_none());
+			Ok(())
+		},
+	)?;
 
 	// Attach more blocks to the parallel chain, making it the longest one
 	award_block_to_wallet(&chain2, &[], wallet1.clone(), mask1)?;
@@ -275,23 +308,28 @@ fn revert(
 	let bh = bh + 1;
 
 	// Check funds have been reverted
-	owner(Some(wallet2.clone()), mask2, None, |api, m| {
-		api.scan(m, None, false)?;
-		let (refreshed, info) = api.retrieve_summary_info(m, true, 1)?;
-		assert!(refreshed);
-		assert_eq!(info.last_confirmed_height, bh);
-		assert_eq!(info.total, 0);
-		assert_eq!(info.amount_currently_spendable, 0);
-		assert_eq!(info.amount_reverted, sent);
-		// check tx log as well
-		let (_, txs) = api.retrieve_txs(m, true, None, None, None, None)?;
-		assert_eq!(txs.len(), 1);
-		let tx = &txs[0];
-		assert_eq!(tx.tx_type, libwallet::TxLogEntryType::TxReverted);
-		assert!(!tx.confirmed);
-		assert!(tx.reverted_after.is_some());
-		Ok(())
-	})?;
+	mwc_wallet_controller::controller::owner_single_use(
+		Some(wallet2.clone()),
+		mask2,
+		None,
+		|api, m| {
+			api.scan(m, None, false)?;
+			let (refreshed, info) = api.retrieve_summary_info(m, true, 1)?;
+			assert!(refreshed);
+			assert_eq!(info.last_confirmed_height, bh);
+			assert_eq!(info.total, 0);
+			assert_eq!(info.amount_currently_spendable, 0);
+			assert_eq!(info.amount_reverted, sent);
+			// check tx log as well
+			let (_, txs) = api.retrieve_txs(m, true, None, None, None, None)?;
+			assert_eq!(txs.len(), 1);
+			let tx = &txs[0];
+			assert_eq!(tx.tx_type, mwc_wallet_libwallet::TxLogEntryType::TxReverted);
+			assert!(!tx.confirmed);
+			assert!(tx.reverted_after.is_some());
+			Ok(())
+		},
+	)?;
 
 	stopper2.store(false, Ordering::Relaxed);
 	Ok((
@@ -310,22 +348,27 @@ fn revert_reconfirm_impl(test_dir: &'static str) -> Result<(), Error> {
 	let bh = bh + 1;
 
 	// Check funds have been confirmed again
-	owner(Some(wallet2.clone()), mask2, None, |api, m| {
-		let (refreshed, info) = api.retrieve_summary_info(m, true, 1)?;
-		assert!(refreshed);
-		assert_eq!(info.last_confirmed_height, bh);
-		assert_eq!(info.total, sent);
-		assert_eq!(info.amount_currently_spendable, sent);
-		assert_eq!(info.amount_reverted, 0);
-		// check tx log as well
-		let (_, txs) = api.retrieve_txs(m, true, None, None, None, None)?;
-		assert_eq!(txs.len(), 1);
-		let tx = &txs[0];
-		assert_eq!(tx.tx_type, libwallet::TxLogEntryType::TxReceived);
-		assert!(tx.confirmed);
-		assert!(tx.reverted_after.is_none());
-		Ok(())
-	})?;
+	mwc_wallet_controller::controller::owner_single_use(
+		Some(wallet2.clone()),
+		mask2,
+		None,
+		|api, m| {
+			let (refreshed, info) = api.retrieve_summary_info(m, true, 1)?;
+			assert!(refreshed);
+			assert_eq!(info.last_confirmed_height, bh);
+			assert_eq!(info.total, sent);
+			assert_eq!(info.amount_currently_spendable, sent);
+			assert_eq!(info.amount_reverted, 0);
+			// check tx log as well
+			let (_, txs) = api.retrieve_txs(m, true, None, None, None, None)?;
+			assert_eq!(txs.len(), 1);
+			let tx = &txs[0];
+			assert_eq!(tx.tx_type, mwc_wallet_libwallet::TxLogEntryType::TxReceived);
+			assert!(tx.confirmed);
+			assert!(tx.reverted_after.is_none());
+			Ok(())
+		},
+	)?;
 
 	// let logging finish
 	stopper.store(false, Ordering::Relaxed);
@@ -338,37 +381,45 @@ fn revert_cancel_impl(test_dir: &'static str) -> Result<(), Error> {
 	let mask2 = mask2_i.as_ref();
 
 	// Cancelling tx
-	owner(Some(wallet2.clone()), mask2, None, |api, m| {
-		// Sanity check
-		let (refreshed, info) = api.retrieve_summary_info(m, true, 1)?;
-		assert!(refreshed);
-		assert_eq!(info.last_confirmed_height, bh);
-		assert_eq!(info.total, 0);
-		assert_eq!(info.amount_currently_spendable, 0);
-		assert_eq!(info.amount_reverted, sent);
+	mwc_wallet_controller::controller::owner_single_use(
+		Some(wallet2.clone()),
+		mask2,
+		None,
+		|api, m| {
+			// Sanity check
+			let (refreshed, info) = api.retrieve_summary_info(m, true, 1)?;
+			assert!(refreshed);
+			assert_eq!(info.last_confirmed_height, bh);
+			assert_eq!(info.total, 0);
+			assert_eq!(info.amount_currently_spendable, 0);
+			assert_eq!(info.amount_reverted, sent);
 
-		let (_, txs) = api.retrieve_txs(m, true, None, None, None, None)?;
-		assert_eq!(txs.len(), 1);
-		let tx = &txs[0];
+			let (_, txs) = api.retrieve_txs(m, true, None, None, None, None)?;
+			assert_eq!(txs.len(), 1);
+			let tx = &txs[0];
 
-		// Cancel
-		api.cancel_tx(m, Some(tx.id), None)?;
+			// Cancel
+			api.cancel_tx(m, Some(tx.id), None)?;
 
-		// Check updated summary info
-		let (refreshed, info) = api.retrieve_summary_info(m, true, 1)?;
-		assert!(refreshed);
-		assert_eq!(info.last_confirmed_height, bh);
-		assert_eq!(info.total, 0);
-		assert_eq!(info.amount_currently_spendable, 0);
-		assert_eq!(info.amount_reverted, 0);
+			// Check updated summary info
+			let (refreshed, info) = api.retrieve_summary_info(m, true, 1)?;
+			assert!(refreshed);
+			assert_eq!(info.last_confirmed_height, bh);
+			assert_eq!(info.total, 0);
+			assert_eq!(info.amount_currently_spendable, 0);
+			assert_eq!(info.amount_reverted, 0);
 
-		// Check updated tx log
-		let (_, txs) = api.retrieve_txs(m, true, None, None, None, None)?;
-		assert_eq!(txs.len(), 1);
-		let tx = &txs[0];
-		assert_eq!(tx.tx_type, libwallet::TxLogEntryType::TxReceivedCancelled);
-		Ok(())
-	})?;
+			// Check updated tx log
+			let (_, txs) = api.retrieve_txs(m, true, None, None, None, None)?;
+			assert_eq!(txs.len(), 1);
+			let tx = &txs[0];
+			assert_eq!(
+				tx.tx_type,
+				mwc_wallet_libwallet::TxLogEntryType::TxReceivedCancelled
+			);
+			Ok(())
+		},
+	)?;
 
 	// let logging finish
 	stopper.store(false, Ordering::Relaxed);

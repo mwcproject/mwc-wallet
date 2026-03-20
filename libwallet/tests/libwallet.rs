@@ -17,13 +17,13 @@ use mwc_wallet_libwallet::proof::crypto::Hex;
 use mwc_wallet_libwallet::Context;
 use mwc_wallet_util::mwc_core::core::{transaction, FeeFields};
 use mwc_wallet_util::mwc_core::libtx::{aggsig, proof};
+use mwc_wallet_util::mwc_crates::rand;
+use mwc_wallet_util::mwc_crates::secp;
+use mwc_wallet_util::mwc_crates::secp::key::{PublicKey, SecretKey};
 use mwc_wallet_util::mwc_keychain::{
 	BlindSum, BlindingFactor, ChildNumber, ExtKeychain, ExtKeychainPath, Keychain,
 	SwitchCommitmentType,
 };
-use mwc_wallet_util::mwc_util::secp;
-use mwc_wallet_util::mwc_util::secp::key::{PublicKey, SecretKey};
-use rand::thread_rng;
 
 fn kernel_sig_msg() -> secp::Message {
 	transaction::KernelFeatures::Plain {
@@ -277,7 +277,7 @@ fn aggsig_sender_receiver_interaction_offset() {
 	// This is the kernel offset that we use to split the key
 	// Summing these at the block level prevents the
 	// kernels from being used to reconstruct (or identify) individual transactions
-	let kernel_offset = SecretKey::new(sender_keychain.secp(), &mut thread_rng());
+	let kernel_offset = SecretKey::new(sender_keychain.secp(), &mut rand::thread_rng());
 
 	// Calculate the kernel excess here for convenience.
 	// Normally this would happen during transaction building.
@@ -613,7 +613,7 @@ fn blind_factor() {
 	// This is the kernel offset that we use to split the key
 	// Summing these at the block level prevents the
 	// kernels from being used to reconstruct (or identify) individual transactions
-	let _kernel_offset = SecretKey::new(receiver_keychain.secp(), &mut thread_rng());
+	let _kernel_offset = SecretKey::new(receiver_keychain.secp(), &mut rand::thread_rng());
 
 	let bytes_32: [u8; 32] = [
 		2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26,

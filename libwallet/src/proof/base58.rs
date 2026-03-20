@@ -13,9 +13,9 @@
 // limitations under the License.
 
 use crate::error::Error;
-use crate::mwc_keychain::base58;
-use crate::mwc_util::secp::key::PublicKey;
-use mwc_wallet_util::mwc_util::secp::{ContextFlag, Secp256k1};
+use mwc_wallet_util::mwc_crates::secp::key::PublicKey;
+use mwc_wallet_util::mwc_crates::secp::{ContextFlag, Secp256k1};
+use mwc_wallet_util::mwc_keychain::base58;
 
 ///
 pub trait Base58<T> {

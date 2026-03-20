@@ -13,14 +13,14 @@
 // limitations under the License.
 
 use crate::wallet_lock;
-use ed25519_dalek::PublicKey as DalekPublicKey;
 use mwc_wallet_impls::{PathToSlateGetter, PathToSlatePutter, SlateGetter, SlatePutter};
 use mwc_wallet_libwallet::proof::proofaddress;
 use mwc_wallet_libwallet::proof::proofaddress::ProvableAddress;
 use mwc_wallet_libwallet::types::U64_DATA_IDX_ADDRESS_INDEX;
 use mwc_wallet_libwallet::{foreign, SlatePurpose};
+use mwc_wallet_util::mwc_crates::ed25519_dalek;
+use mwc_wallet_util::mwc_crates::uuid::Uuid;
 use mwc_wallet_util::mwc_keychain::Keychain;
-use uuid::Uuid;
 
 /// Receive Slatepack data.
 /// Return: (response SP , txUUID)
@@ -92,7 +92,7 @@ pub fn receive(
 		context_id,
 		None,
 		SlatePurpose::SendResponse,
-		DalekPublicKey::from(&slatepack_secret),
+		ed25519_dalek::PublicKey::from(&slatepack_secret),
 		sender,
 		slatepack_format,
 	)

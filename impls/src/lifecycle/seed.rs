@@ -13,21 +13,23 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use mwc_wallet_util::mwc_crates::blake2_rfc;
+use mwc_wallet_util::mwc_crates::ring;
+use mwc_wallet_util::mwc_crates::serde::{self, Deserialize, Serialize};
+use mwc_wallet_util::mwc_crates::serde_json;
 use std::fs::{self, File};
 use std::io::{Read, Write};
 use std::path::Path;
 use std::path::MAIN_SEPARATOR;
 
-use crate::blake2;
-use rand::{thread_rng, Rng};
-use ring::aead;
-use ring::pbkdf2;
-use serde_json;
-use util::ZeroingString;
+use mwc_wallet_util::mwc_crates::rand::{thread_rng, Rng};
+use mwc_wallet_util::mwc_crates::ring::aead;
+use mwc_wallet_util::mwc_crates::ring::pbkdf2;
 
-use crate::keychain::{mnemonic, Keychain};
-use crate::util::{self, ToHex};
 use crate::Error;
+use mwc_wallet_util::mwc_crates::log::{debug, error, warn};
+use mwc_wallet_util::mwc_keychain::{mnemonic, Keychain};
+use mwc_wallet_util::mwc_util::{self, ToHex};
 use std::num::NonZeroU32;
 
 pub const SEED_FILE: &str = "wallet.seed";
@@ -35,7 +37,7 @@ pub const SEED_FILE: &str = "wallet.seed";
 #[derive(Clone, Debug, PartialEq)]
 pub struct WalletSeed(Vec<u8>);
 
-pub fn show_recovery_phrase(phrase: ZeroingString) {
+pub fn show_recovery_phrase(phrase: mwc_util::ZeroingString) {
 	println!("Your recovery phrase is:");
 	println!();
 	println!("{}", &*phrase);
@@ -48,7 +50,7 @@ impl WalletSeed {
 		WalletSeed(bytes.to_vec())
 	}
 
-	pub fn from_mnemonic(word_list: util::ZeroingString) -> Result<WalletSeed, Error> {
+	pub fn from_mnemonic(word_list: mwc_util::ZeroingString) -> Result<WalletSeed, Error> {
 		let res = mnemonic::to_entropy(&word_list);
 		match res {
 			Ok(s) => Ok(WalletSeed::from_bytes(&s)),
@@ -60,7 +62,7 @@ impl WalletSeed {
 	}
 
 	pub fn _from_hex(hex: &str) -> Result<WalletSeed, Error> {
-		let bytes = util::from_hex(hex)
+		let bytes = mwc_util::from_hex(hex)
 			.map_err(|e| Error::GenericError(format!("Invalid hex {}, {}", hex, e)))?;
 		Ok(WalletSeed::from_bytes(&bytes))
 	}
@@ -81,7 +83,7 @@ impl WalletSeed {
 	}
 
 	pub fn _derive_keychain_old(old_wallet_seed: [u8; 32], password: &str) -> Vec<u8> {
-		let seed = blake2::blake2b::blake2b(64, password.as_bytes(), &old_wallet_seed);
+		let seed = blake2_rfc::blake2b::blake2b(64, password.as_bytes(), &old_wallet_seed);
 		seed.as_bytes().to_vec()
 	}
 
@@ -132,8 +134,8 @@ impl WalletSeed {
 
 	pub fn recover_from_phrase(
 		data_file_dir: &str,
-		word_list: util::ZeroingString,
-		password: util::ZeroingString,
+		word_list: mwc_util::ZeroingString,
+		password: mwc_util::ZeroingString,
 	) -> Result<(), Error> {
 		let seed_file_path = &format!("{}{}{}", data_file_dir, MAIN_SEPARATOR, SEED_FILE,);
 		debug!("data file dir: {}", data_file_dir);
@@ -169,8 +171,8 @@ impl WalletSeed {
 	pub fn init_file(
 		data_file_dir: &str,
 		seed_length: usize,
-		recovery_phrase: Option<util::ZeroingString>,
-		password: util::ZeroingString,
+		recovery_phrase: Option<mwc_util::ZeroingString>,
+		password: mwc_util::ZeroingString,
 		show_seed: bool,
 		test_mode: bool,
 	) -> Result<WalletSeed, Error> {
@@ -191,8 +193,8 @@ impl WalletSeed {
 	pub fn init_file_impl(
 		data_file_dir: &str,
 		seed_length: usize,
-		recovery_phrase: Option<util::ZeroingString>,
-		password: util::ZeroingString,
+		recovery_phrase: Option<mwc_util::ZeroingString>,
+		password: mwc_util::ZeroingString,
 		write_seed: bool,
 		show_seed: bool,
 		passed_seed: Option<WalletSeed>,
@@ -239,7 +241,7 @@ impl WalletSeed {
 		}
 
 		if show_seed {
-			show_recovery_phrase(ZeroingString::from(seed.to_mnemonic()?));
+			show_recovery_phrase(mwc_util::ZeroingString::from(seed.to_mnemonic()?));
 		}
 
 		Ok(seed)
@@ -247,7 +249,7 @@ impl WalletSeed {
 
 	pub fn from_file(
 		data_file_dir: &str,
-		password: util::ZeroingString,
+		password: mwc_util::ZeroingString,
 	) -> Result<WalletSeed, Error> {
 		// create directory if it doesn't exist
 		fs::create_dir_all(data_file_dir)
@@ -301,6 +303,7 @@ impl WalletSeed {
 /// with provided password
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(crate = "serde")]
 pub struct EncryptedWalletSeed {
 	encrypted_seed: String,
 	/// Salt, not so useful in single case but include anyhow for situations
@@ -314,7 +317,7 @@ impl EncryptedWalletSeed {
 	/// Create a new encrypted seed from the given seed + password
 	pub fn from_seed(
 		seed: &WalletSeed,
-		password: util::ZeroingString,
+		password: mwc_util::ZeroingString,
 	) -> Result<EncryptedWalletSeed, Error> {
 		let salt: [u8; 8] = thread_rng().gen();
 		let nonce: [u8; 12] = thread_rng().gen();
@@ -354,11 +357,11 @@ impl EncryptedWalletSeed {
 
 	/// Decrypt seed
 	pub fn decrypt(&self, password: &str) -> Result<WalletSeed, Error> {
-		let mut encrypted_seed = util::from_hex(&self.encrypted_seed)
+		let mut encrypted_seed = mwc_util::from_hex(&self.encrypted_seed)
 			.map_err(|e| Error::Encryption(format!("Failed to convert seed HEX, {}", e)))?;
-		let salt = util::from_hex(&self.salt)
+		let salt = mwc_util::from_hex(&self.salt)
 			.map_err(|e| Error::Encryption(format!("Failed to convert salt HEX, {}", e)))?;
-		let nonce = util::from_hex(&self.nonce)
+		let nonce = mwc_util::from_hex(&self.nonce)
 			.map_err(|e| Error::Encryption(format!("Failed to convert nonce HEX, {}", e)))?;
 
 		let password = password.as_bytes();
@@ -396,7 +399,7 @@ impl EncryptedWalletSeed {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::util::ZeroingString;
+	use mwc_util::ZeroingString;
 	#[test]
 	fn wallet_seed_encrypt() {
 		let password = ZeroingString::from("passwoid");

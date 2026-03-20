@@ -15,32 +15,36 @@
 
 //! JSON-RPC Stub generation for the Owner API
 
-use uuid::Uuid;
+use mwc_wallet_util::mwc_crates::easy_jsonrpc_mwc;
+use mwc_wallet_util::mwc_crates::ed25519_dalek;
+use mwc_wallet_util::mwc_crates::serde_json;
+use mwc_wallet_util::mwc_crates::uuid::Uuid;
 
-use crate::core::core::Transaction;
-use crate::keychain::{Identifier, Keychain};
-use crate::libwallet::slate_versions::v3::TransactionV3;
-use crate::libwallet::{
+use mwc_wallet_libwallet::slate_versions::v3::TransactionV3;
+use mwc_wallet_libwallet::{
 	AcctPathMapping, Error, InitTxArgs, IssueInvoiceTxArgs, NodeClient, NodeHeightResult,
 	OutputCommitMapping, Slate, SlatePurpose, SlateVersion, StatusMessage, TxLogEntry,
 	VersionedSlate, WalletInfo, WalletLCProvider,
 };
+use mwc_wallet_util::mwc_core::core::Transaction;
+use mwc_wallet_util::mwc_keychain::{Identifier, Keychain};
 
 #[cfg(feature = "grin_proof")]
-use crate::libwallet::PaymentProof;
+use mwc_wallet_libwallet::PaymentProof;
 
 use crate::types::{SlatepackInfo, TxLogEntryAPI};
-use crate::util;
-use crate::util::secp::pedersen;
 use crate::{Owner, OwnerRpcV3};
-use easy_jsonrpc_mwc;
-use ed25519_dalek::PublicKey as DalekPublicKey;
-use libwallet::proof::tx_proof::VerifyProofResult;
-use libwallet::types::TxSession;
-use libwallet::{wallet_lock, wallet_lock_test, SlateCtx, TxProof};
 use mwc_wallet_libwallet::proof::proofaddress::{self, ProvableAddress};
+use mwc_wallet_libwallet::proof::tx_proof::VerifyProofResult;
+use mwc_wallet_libwallet::types::TxSession;
+use mwc_wallet_libwallet::{wallet_lock, wallet_lock_test, SlateCtx, TxProof};
 use mwc_wallet_util::mwc_core::consensus;
-use mwc_wallet_util::mwc_util::secp::Secp256k1;
+use mwc_wallet_util::mwc_crates::log::{error, info};
+use mwc_wallet_util::mwc_crates::secp::pedersen;
+use mwc_wallet_util::mwc_crates::secp::Secp256k1;
+use mwc_wallet_util::mwc_util::{
+	from_hex, init_test_logger, is_console_output_enabled, ZeroingString,
+};
 use std::convert::TryFrom;
 use std::ops::DerefMut;
 use std::sync::Arc;
@@ -3674,13 +3678,13 @@ where
 				tx.payment_proof.clone(),
 				tx.input_commits
 					.iter()
-					.map(|s| util::from_hex(s).ok())
+					.map(|s| from_hex(s).ok())
 					.flatten()
 					.map(|s| pedersen::Commitment::from_vec(s))
 					.collect(),
 				tx.output_commits
 					.iter()
-					.map(|s| util::from_hex(s).ok())
+					.map(|s| from_hex(s).ok())
 					.flatten()
 					.map(|s| pedersen::Commitment::from_vec(s))
 					.collect(),
@@ -3759,7 +3763,7 @@ where
 		};
 
 		let public_proof_address = ProvableAddress::from_pub_key(context_id, &address);
-		if mwc_wallet_util::mwc_util::is_console_output_enabled() {
+		if is_console_output_enabled() {
 			println!("mqs_address address {}", public_proof_address.public_key);
 		} else {
 			info!("mqs_address address {}", public_proof_address.public_key);
@@ -3770,7 +3774,7 @@ where
 	fn get_wallet_public_address(&self) -> Result<ProvableAddress, Error> {
 		let address = Owner::get_wallet_public_address(self, None)?;
 		let address = ProvableAddress::from_tor_pub_key(&address);
-		if mwc_wallet_util::mwc_util::is_console_output_enabled() {
+		if is_console_output_enabled() {
 			println!("wallet_public_address address {}", address.public_key);
 		} else {
 			info!("wallet_public_address address {}", address.public_key);
@@ -3808,7 +3812,7 @@ where
 			Error::SlatepackDecodeError(format!("Expected to get slate in Json format, {}", e))
 		})?;
 
-		let recipient: Option<DalekPublicKey> = match recipient {
+		let recipient: Option<ed25519_dalek::PublicKey> = match recipient {
 			Some(recipient) => Some(recipient.tor_public_key().map_err(|e| {
 				Error::SlatepackEncodeError(format!("Expecting recipient tor address, {}", e))
 			})?),
@@ -3879,13 +3883,13 @@ pub fn run_doctest_owner(
 	use mwc_wallet_libwallet::{api_impl, WalletInst};
 	use mwc_wallet_util::mwc_keychain::ExtKeychain;
 
-	use crate::core::global;
-	use crate::core::global::ChainTypes;
+	use mwc_wallet_util::mwc_core::global;
+	use mwc_wallet_util::mwc_core::global::ChainTypes;
 
 	use std::fs;
 	use std::thread;
 
-	util::init_test_logger();
+	init_test_logger();
 	let _ = fs::remove_dir_all(test_dir);
 	global::set_local_chain_type(ChainTypes::AutomatedTesting);
 	global::set_local_accept_fee_base(consensus::MILLI_MWC / 100);
@@ -3899,11 +3903,11 @@ pub fn run_doctest_owner(
 	> = WalletProxy::new(test_dir.into(), tx_pool.clone());
 	let chain = wallet_proxy.chain.clone();
 
-	let rec_phrase_1 = util::ZeroingString::from(
+	let rec_phrase_1 = ZeroingString::from(
 		"fat twenty mean degree forget shell check candy immense awful \
 		 flame next during february bulb bike sun wink theory day kiwi embrace peace lunch",
 	);
-	let empty_string = util::ZeroingString::from("");
+	let empty_string = ZeroingString::from("");
 
 	let client1 = LocalWalletClient::new("wallet1", wallet_proxy.tx.clone());
 	let mut wallet1 = Box::new(DefaultWalletImpl::<LocalWalletClient>::new(
@@ -3949,7 +3953,7 @@ pub fn run_doctest_owner(
 
 	let mut slate_outer = Slate::blank(2, false);
 
-	let rec_phrase_2 = util::ZeroingString::from(
+	let rec_phrase_2 = ZeroingString::from(
 		"hour kingdom ripple lunch razor inquiry coyote clay stamp mean \
 		 sell finish magic kid tiny wage stand panther inside settle feed song hole exile",
 	);
@@ -4039,7 +4043,7 @@ pub fn run_doctest_owner(
 		let w = w_lock.lc_provider().unwrap().wallet_inst().unwrap();
 		let k = w.keychain((&mask1).as_ref()).unwrap();
 		let secret = proofaddress::payment_proof_address_dalek_secret(0, &k, 0).unwrap();
-		let tor_pk = DalekPublicKey::from(&secret);
+		let tor_pk = ed25519_dalek::PublicKey::from(&secret);
 		(secret, tor_pk)
 	};
 	let _w1_slatepack_address = ProvableAddress::from_tor_pub_key(&w1_tor_pubkey);
@@ -4049,7 +4053,7 @@ pub fn run_doctest_owner(
 		let w = w_lock.lc_provider().unwrap().wallet_inst().unwrap();
 		let k = w.keychain((&mask2).as_ref()).unwrap();
 		let secret = proofaddress::payment_proof_address_dalek_secret(0, &k, 0).unwrap();
-		let tor_pk = DalekPublicKey::from(&secret);
+		let tor_pk = ed25519_dalek::PublicKey::from(&secret);
 		(secret, tor_pk)
 	};
 	let w2_slatepack_address = ProvableAddress::from_tor_pub_key(&w2_tor_pubkey);
@@ -4272,10 +4276,9 @@ macro_rules! doctest_helper_json_rpc_owner_assert_response {
 		// TODO: Fix properly
 		#[cfg(not(target_os = "windows"))]
 		{
-			use mwc_wallet_api::run_doctest_owner;
-			use serde_json;
-			use serde_json::Value;
-			use tempfile::tempdir;
+			use mwc_wallet_util::mwc_crates::serde_json::Value;
+			use mwc_wallet_util::mwc_crates::tempfile::tempdir;
+			use $crate::run_doctest_owner;
 
 			let dir = tempdir().map_err(|e| format!("{:#?}", e)).unwrap();
 			let dir = dir
@@ -4284,8 +4287,10 @@ macro_rules! doctest_helper_json_rpc_owner_assert_response {
 				.ok_or("Failed to convert tmpdir path to string.".to_owned())
 				.unwrap();
 
-			let request_val: Value = serde_json::from_str($request).unwrap();
-			let expected_response: Value = serde_json::from_str($expected_response).unwrap();
+			let request_val: Value =
+				mwc_wallet_util::mwc_crates::serde_json::from_str($request).unwrap();
+			let expected_response: Value =
+				mwc_wallet_util::mwc_crates::serde_json::from_str($expected_response).unwrap();
 
 			let response = run_doctest_owner(
 				request_val,
@@ -4304,8 +4309,9 @@ macro_rules! doctest_helper_json_rpc_owner_assert_response {
 			if response != expected_response {
 				panic!(
 					"(left != right) \nleft: {}\nright: {}",
-					serde_json::to_string_pretty(&response).unwrap(),
-					serde_json::to_string_pretty(&expected_response).unwrap()
+					mwc_wallet_util::mwc_crates::serde_json::to_string_pretty(&response).unwrap(),
+					mwc_wallet_util::mwc_crates::serde_json::to_string_pretty(&expected_response)
+						.unwrap()
 				);
 			}
 		}

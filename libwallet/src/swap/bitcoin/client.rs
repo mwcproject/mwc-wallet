@@ -16,6 +16,7 @@ use crate::swap::types::Currency;
 use crate::swap::Error;
 use bitcoin::consensus::Decodable;
 use bitcoin::{OutPoint, Transaction, Txid};
+use mwc_wallet_util::mwc_crates::serde::{self, Deserialize, Serialize};
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::io::Cursor;
@@ -25,6 +26,7 @@ use std::sync::Mutex;
 
 /// Single BTC output
 #[derive(Serialize, Deserialize, Debug, Clone, Eq)]
+#[serde(crate = "serde")]
 pub struct Output {
 	/// A reference to a bitcoin transaction output
 	#[serde(with = "OutPointRef")]
@@ -37,6 +39,7 @@ pub struct Output {
 
 /// Serialization for bitcoin::OutPoint. Helper
 #[derive(Serialize, Deserialize, Debug)]
+#[serde(crate = "serde")]
 #[serde(remote = "OutPoint")]
 struct OutPointRef {
 	pub txid: Txid,

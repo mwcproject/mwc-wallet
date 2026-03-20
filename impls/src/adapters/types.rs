@@ -1,14 +1,29 @@
-//The following is support mqs usage in mwc713
+// Copyright 2026 The Mwc Developers
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 use crate::error::Error;
 #[cfg(feature = "swaps")]
 use mwc_wallet_libwallet::swap::message::Message;
 use mwc_wallet_libwallet::Slate;
-use std::sync::mpsc::Sender;
-use url::Url; //only for the Address::parse
+use mwc_wallet_util::mwc_crates::serde::{self, Deserialize, Serialize};
+use mwc_wallet_util::mwc_crates::url::Url;
+use mwc_wallet_util::mwc_crates::uuid;
+use std::sync::mpsc::Sender; //only for the Address::parse
 
 use mwc_wallet_libwallet::proof::proofaddress::ProvableAddress;
-use mwc_wallet_util::mwc_util::secp::Secp256k1;
-use regex::Regex;
+use mwc_wallet_util::mwc_crates::regex::Regex;
+use mwc_wallet_util::mwc_crates::secp::Secp256k1;
 use std::fmt::{self, Debug, Display};
 
 const DEFAULT_MWCMQS_DOMAIN: &str = "mqs.mwc.mw";
@@ -165,6 +180,7 @@ impl Address for MWCMQSAddress {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(crate = "serde")]
 pub struct HttpsAddress {
 	pub uri: String,
 }

@@ -15,16 +15,13 @@
 
 //! Transaction building functions
 
+use mwc_wallet_util::mwc_crates::ed25519_dalek;
+use mwc_wallet_util::mwc_crates::lazy_static::lazy_static;
+use mwc_wallet_util::mwc_crates::uuid::Uuid;
+use mwc_wallet_util::mwc_util;
 use std::collections::HashSet;
-use uuid::Uuid;
 
 use crate::internal::{selection, updater};
-use crate::mwc_core::consensus::valid_header_version;
-use crate::mwc_core::core::HeaderVersion;
-use crate::mwc_keychain::{Identifier, Keychain};
-use crate::mwc_util as util;
-use crate::mwc_util::secp::key::SecretKey;
-use crate::mwc_util::secp::{pedersen, Signature};
 use crate::proof::crypto;
 use crate::proof::crypto::Hex;
 use crate::proof::proofaddress;
@@ -38,12 +35,14 @@ use crate::types::StoredProofInfo;
 use crate::types::{Context, NodeClient, TxLogEntryType, TxSession, WalletBackend};
 use crate::Error;
 use crate::InitTxArgs;
-use ed25519_dalek::Keypair as DalekKeypair;
-use ed25519_dalek::PublicKey as DalekPublicKey;
-use ed25519_dalek::SecretKey as DalekSecretKey;
-use ed25519_dalek::Signature as DalekSignature;
-use ed25519_dalek::{Signer, Verifier};
-use mwc_wallet_util::mwc_util::secp::Secp256k1;
+use mwc_wallet_util::mwc_core::consensus::valid_header_version;
+use mwc_wallet_util::mwc_core::core::HeaderVersion;
+use mwc_wallet_util::mwc_crates::ed25519_dalek::{Signer, Verifier};
+use mwc_wallet_util::mwc_crates::log::{debug, trace};
+use mwc_wallet_util::mwc_crates::secp::key::SecretKey;
+use mwc_wallet_util::mwc_crates::secp::Secp256k1;
+use mwc_wallet_util::mwc_crates::secp::{pedersen, Signature};
+use mwc_wallet_util::mwc_keychain::{Identifier, Keychain};
 use mwc_wallet_util::OnionV3Address;
 use std::convert::TryFrom;
 use std::sync::Mutex;
@@ -682,7 +681,7 @@ pub fn payment_proof_message(
 	let mut message = String::new();
 	debug!("the kernel excess is {:?}", kernel_commitment.0.to_vec());
 	debug!("the sender public key is {}", &sender_address_publickey);
-	message.push_str(&util::to_hex(&kernel_commitment.0));
+	message.push_str(&mwc_util::to_hex(&kernel_commitment.0));
 	message.push_str(&sender_address_publickey);
 	message.push_str(&amount.to_string());
 	Ok(message)
@@ -691,7 +690,7 @@ pub fn payment_proof_message(
 /// decode proof message
 //pub fn _decode_payment_proof_message(
 //	msg: &[u8],
-//) -> Result<(u64, pedersen::Commitment, DalekPublicKey), Error> {
+//) -> Result<(u64, pedersen::Commitment, ed25519_dalek::PublicKey), Error> {
 //	let mut rdr = Cursor::new(msg);
 //	let amount = rdr.read_u64::<BigEndian>()?;
 //	let mut commit_bytes = [0u8; 33];
@@ -706,7 +705,7 @@ pub fn payment_proof_message(
 //	Ok((
 //		amount,
 //		pedersen::Commitment::from_vec(commit_bytes.to_vec()),
-//		DalekPublicKey::from_bytes(&sender_address_bytes)
+//		ed25519_dalek::PublicKey::from_bytes(&sender_address_bytes)
 //			.map_err(|e| Error::Signature(format!("Failed to build public key, {}", e)))?,
 //	))
 //}
@@ -731,21 +730,21 @@ pub fn create_payment_proof_signature(
 		Ok(signature)
 	} else {
 		//this is tor oninion address and the length should be 56
-		let d_skey = match DalekSecretKey::from_bytes(&sec_key.0) {
+		let d_skey = match ed25519_dalek::SecretKey::from_bytes(&sec_key.0) {
 			Ok(k) => k,
 			Err(e) => {
 				return Err(Error::ED25519Key(format!("{}", e)));
 			}
 		};
-		let pub_key: DalekPublicKey = (&d_skey).into();
-		let keypair = DalekKeypair {
+		let pub_key: ed25519_dalek::PublicKey = (&d_skey).into();
+		let keypair = ed25519_dalek::Keypair {
 			public: pub_key,
 			secret: d_skey,
 		};
 		let signature = keypair.sign(&message_ser.as_bytes());
-		//let signature_string = util::to_hex(signature.to_bytes());
+		//let signature_string = mwc_util::to_hex(signature.to_bytes());
 		let signature_vec = signature.to_bytes().to_vec();
-		Ok(util::to_hex(&signature_vec))
+		Ok(mwc_util::to_hex(&signature_vec))
 	}
 }
 
@@ -853,7 +852,7 @@ where
 		};
 		//verify the proof signature
 		if p.receiver_address.public_key.len() == 52 {
-			let signature_ser = util::from_hex(&sig).map_err(|e| {
+			let signature_ser = mwc_util::from_hex(&sig).map_err(|e| {
 				Error::PaymentProof(format!(
 					"Unable to build signature from HEX {}, {}",
 					&sig, e
@@ -873,7 +872,7 @@ where
 		} else {
 			//the signature is generated using Dalek public key
 
-			let dalek_sig_vec = util::from_hex(&sig).map_err(|e| {
+			let dalek_sig_vec = mwc_util::from_hex(&sig).map_err(|e| {
 				Error::PaymentProof(format!(
 					"Unable to deserialize tor payment proof signature, {}",
 					e
@@ -881,7 +880,7 @@ where
 			})?;
 
 			let dalek_sig_vec: &[u8] = &dalek_sig_vec;
-			let dalek_sig = DalekSignature::try_from(dalek_sig_vec).map_err(|e| {
+			let dalek_sig = ed25519_dalek::Signature::try_from(dalek_sig_vec).map_err(|e| {
 				Error::PaymentProof(format!(
 					"Unable to deserialize tor payment proof receiver signature, {}",
 					e
@@ -940,10 +939,10 @@ where
 
 #[cfg(test)]
 mod test {
-	use crate::mwc_core::core::KernelFeatures;
-	use crate::mwc_core::libtx::{build, ProofBuilder};
-	use crate::mwc_keychain::{ExtKeychain, ExtKeychainPath, Keychain};
 	use mwc_wallet_util::mwc_core::core::FeeFields;
+	use mwc_wallet_util::mwc_core::core::KernelFeatures;
+	use mwc_wallet_util::mwc_core::libtx::{build, ProofBuilder};
+	use mwc_wallet_util::mwc_keychain::{ExtKeychain, ExtKeychainPath, Keychain};
 
 	#[test]
 	// demonstrate that input.commitment == referenced output.commitment
@@ -1010,7 +1009,7 @@ mod test {
 		let msg = payment_proof_message(amount, &kernel_excess, sender_address_string).unwrap();
 		println!("payment proof message is (len {}): {:?}", msg.len(), msg);
 
-		//todo don't know know to get PublicKey from bytes same as DalekPublicKey
+		//todo don't know know to get PublicKey from bytes same as ed25519_dalek::PublicKey
 		//		let decoded = _decode_payment_proof_message(&msg).unwrap();
 		//		assert_eq!(decoded.0, amount);
 		//		assert_eq!(decoded.1, kernel_excess);
@@ -1026,7 +1025,7 @@ mod test {
 		)
 		.unwrap();
 
-		let signature = util::from_hex(&sig).unwrap();
+		let signature = mwc_util::from_hex(&sig).unwrap();
 		let signature = Signature::from_der(&secp, &signature).unwrap();
 		assert!(crypto::verify_signature(&msg, &signature, &public_key).is_ok());
 	}

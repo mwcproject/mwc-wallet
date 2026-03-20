@@ -14,9 +14,8 @@
 // limitations under the License.
 
 //! Implementation specific error types
-use crate::core::libtx;
-use crate::keychain;
-use mwc_wallet_util::OnionV3AddressError;
+use mwc_wallet_util::mwc_core::libtx;
+use mwc_wallet_util::mwc_crates::thiserror;
 
 /// Wallet errors, mostly wrappers around underlying crypto or I/O errors.
 #[derive(Clone, thiserror::Error, Eq, PartialEq, Debug)]
@@ -31,11 +30,11 @@ pub enum Error {
 
 	/// Keychain error
 	#[error("Keychain error, {0}")]
-	Keychain(#[from] keychain::Error),
+	Keychain(#[from] mwc_wallet_util::mwc_keychain::Error),
 
 	/// Onion V3 Address Error
 	#[error("Onion V3 Address Error, {0}")]
-	OnionV3Address(#[from] OnionV3AddressError),
+	OnionV3Address(#[from] mwc_wallet_util::OnionV3Error),
 
 	/// Error when obfs4proxy is not in the user path if TOR brigde is enabled
 	#[error("Unable to find obfs4proxy binary in your path; {0}")]

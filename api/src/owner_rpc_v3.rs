@@ -15,38 +15,40 @@
 
 //! JSON-RPC Stub generation for the Owner API
 
-use uuid::Uuid;
+use mwc_wallet_util::mwc_crates::easy_jsonrpc_mwc;
+use mwc_wallet_util::mwc_crates::ed25519_dalek;
+use mwc_wallet_util::mwc_crates::rand::thread_rng;
+use mwc_wallet_util::mwc_crates::uuid::Uuid;
 
-use crate::config::{MQSConfig, WalletConfig};
-use crate::core::core::OutputFeatures;
-use crate::core::core::Transaction;
-use crate::core::global;
-use crate::keychain::{Identifier, Keychain};
-use crate::libwallet::slate_versions::v3::TransactionV3;
-use crate::libwallet::{
+use mwc_wallet_config::{MQSConfig, WalletConfig};
+use mwc_wallet_libwallet::slate_versions::v3::TransactionV3;
+use mwc_wallet_libwallet::{
 	AcctPathMapping, Amount, BuiltOutput, Error, InitTxArgs, IssueInvoiceTxArgs, NodeClient,
 	NodeHeightResult, OutputCommitMapping, Slate, SlatePurpose, SlateVersion, StatusMessage,
 	TxLogEntry, VersionedSlate, ViewWallet, WalletInfo, WalletLCProvider,
 };
+use mwc_wallet_util::mwc_core::core::OutputFeatures;
+use mwc_wallet_util::mwc_core::core::Transaction;
+use mwc_wallet_util::mwc_core::global;
+use mwc_wallet_util::mwc_keychain::{Identifier, Keychain};
 
 #[cfg(feature = "grin_proof")]
-use crate::libwallet::PaymentProof;
+use mwc_wallet_libwallet::PaymentProof;
 
 use crate::types::{SlatepackInfo, TxLogEntryAPI};
-use crate::util;
-use crate::util::logger::LoggingConfig;
-use crate::util::secp::key::{PublicKey, SecretKey};
-use crate::util::secp::pedersen;
-use crate::util::{static_secp_instance, ZeroingString};
 use crate::{ECDHPubkey, Owner, Token};
-use easy_jsonrpc_mwc;
-use ed25519_dalek::PublicKey as DalekPublicKey;
-use libwallet::proof::tx_proof::VerifyProofResult;
-use libwallet::types::TxSession;
-use libwallet::{wallet_lock, RetrieveTxQueryArgs, TxProof};
 use mwc_wallet_libwallet::proof::proofaddress::ProvableAddress;
+use mwc_wallet_libwallet::proof::tx_proof::VerifyProofResult;
+use mwc_wallet_libwallet::types::TxSession;
+use mwc_wallet_libwallet::{wallet_lock, RetrieveTxQueryArgs, TxProof};
+use mwc_wallet_util::mwc_crates::log::info;
+use mwc_wallet_util::mwc_crates::secp::key::{PublicKey, SecretKey};
+use mwc_wallet_util::mwc_crates::secp::pedersen;
 use mwc_wallet_util::mwc_p2p::TorConfig;
-use rand::thread_rng;
+use mwc_wallet_util::mwc_util::logger::LoggingConfig;
+use mwc_wallet_util::mwc_util::{
+	from_hex, is_console_output_enabled, static_secp_instance, ZeroingString,
+};
 use std::convert::TryFrom;
 use std::time::Duration;
 
@@ -4610,13 +4612,13 @@ where
 				tx.payment_proof.clone(),
 				tx.input_commits
 					.iter()
-					.map(|s| util::from_hex(s).ok())
+					.map(|s| from_hex(s).ok())
 					.flatten()
 					.map(|s| pedersen::Commitment::from_vec(s))
 					.collect(),
 				tx.output_commits
 					.iter()
-					.map(|s| util::from_hex(s).ok())
+					.map(|s| from_hex(s).ok())
 					.flatten()
 					.map(|s| pedersen::Commitment::from_vec(s))
 					.collect(),
@@ -4824,7 +4826,7 @@ where
 			w.get_context_id()
 		};
 		let public_proof_address = ProvableAddress::from_pub_key(context_id, &address);
-		if mwc_wallet_util::mwc_util::is_console_output_enabled() {
+		if is_console_output_enabled() {
 			println!("mqs_address address {}", public_proof_address.public_key);
 		} else {
 			info!("mqs_address address {}", public_proof_address.public_key);
@@ -4835,7 +4837,7 @@ where
 	fn get_wallet_public_address(&self, token: Token) -> Result<ProvableAddress, Error> {
 		let address = Owner::get_wallet_public_address(self, (&token.keychain_mask).as_ref())?;
 		let address = ProvableAddress::from_tor_pub_key(&address);
-		if mwc_wallet_util::mwc_util::is_console_output_enabled() {
+		if is_console_output_enabled() {
 			println!("wallet_public_address address {}", address.public_key);
 		} else {
 			info!("wallet_public_address address {}", address.public_key);
@@ -4891,7 +4893,7 @@ where
 			Error::SlatepackDecodeError(format!("Expected to get slate in Json format, {}", e))
 		})?;
 
-		let recipient: Option<DalekPublicKey> = match recipient {
+		let recipient: Option<ed25519_dalek::PublicKey> = match recipient {
 			Some(recipient) => Some(recipient.tor_public_key().map_err(|e| {
 				Error::SlatepackEncodeError(format!("Expecting recipient tor address, {}", e))
 			})?),

@@ -13,26 +13,26 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::api;
-use crate::api::BlockPrintable;
-use crate::chain;
-use crate::chain::Chain;
-use crate::core;
-use crate::core::core::hash::Hashed;
-use crate::core::core::{Output, Transaction, TxKernel};
-use crate::core::{consensus, global, pow};
-use crate::keychain;
-use crate::libwallet;
-use crate::libwallet::api_impl::{foreign, owner};
-use crate::libwallet::{
-	BlockFees, InitTxArgs, NodeClient, WalletInfo, WalletInst, WalletLCProvider,
-};
-use crate::util::secp::key::SecretKey;
-use crate::util::secp::pedersen;
-use chrono::Duration;
+use mwc_wallet_libwallet;
+use mwc_wallet_libwallet::api_impl::{foreign, owner};
 use mwc_wallet_libwallet::types::TxSession;
 use mwc_wallet_libwallet::wallet_lock;
+use mwc_wallet_libwallet::{
+	BlockFees, InitTxArgs, NodeClient, WalletInfo, WalletInst, WalletLCProvider,
+};
+use mwc_wallet_util::mwc_api;
+use mwc_wallet_util::mwc_api::BlockPrintable;
+use mwc_wallet_util::mwc_chain;
+use mwc_wallet_util::mwc_chain::Chain;
+use mwc_wallet_util::mwc_core;
 use mwc_wallet_util::mwc_core::consensus::HeaderDifficultyInfo;
+use mwc_wallet_util::mwc_core::core::hash::Hashed;
+use mwc_wallet_util::mwc_core::core::{Output, Transaction, TxKernel};
+use mwc_wallet_util::mwc_core::{consensus, global, pow};
+use mwc_wallet_util::mwc_crates::chrono::Duration;
+use mwc_wallet_util::mwc_crates::secp::key::SecretKey;
+use mwc_wallet_util::mwc_crates::secp::pedersen;
+use mwc_wallet_util::mwc_keychain::Keychain;
 use std::collections::{HashSet, VecDeque};
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -43,11 +43,11 @@ mod testclient;
 pub use self::{testclient::LocalWalletClient, testclient::WalletProxy};
 
 /// Get an output from the chain locally and present it back as an API output
-fn get_output_local(chain: &chain::Chain, commit: pedersen::Commitment) -> Option<api::Output> {
+fn get_output_local(chain: &Chain, commit: pedersen::Commitment) -> Option<mwc_api::Output> {
 	if chain.get_unspent(commit).unwrap().is_some() {
 		let block_height = chain.get_header_for_output(commit).unwrap().height;
 		let output_pos = chain.get_output_pos(&commit).unwrap_or(0);
-		Some(api::Output::new(&commit, block_height, output_pos))
+		Some(mwc_api::Output::new(&commit, block_height, output_pos))
 	} else {
 		None
 	}
@@ -55,15 +55,15 @@ fn get_output_local(chain: &chain::Chain, commit: pedersen::Commitment) -> Optio
 
 /// Get a kernel from the chain locally
 fn get_kernel_local(
-	chain: Arc<chain::Chain>,
+	chain: Arc<Chain>,
 	excess: &pedersen::Commitment,
 	min_height: Option<u64>,
 	max_height: Option<u64>,
-) -> Option<api::LocatedTxKernel> {
+) -> Option<mwc_api::LocatedTxKernel> {
 	chain
 		.get_kernel_height(&excess, min_height, max_height)
 		.unwrap()
-		.map(|(tx_kernel, height, mmr_index)| api::LocatedTxKernel {
+		.map(|(tx_kernel, height, mmr_index)| mwc_api::LocatedTxKernel {
 			tx_kernel,
 			height,
 			mmr_index,
@@ -72,35 +72,35 @@ fn get_kernel_local(
 
 /// get output listing traversing pmmr from local
 fn get_outputs_by_pmmr_index_local(
-	chain: Arc<chain::Chain>,
+	chain: Arc<Chain>,
 	start_index: u64,
 	end_index: Option<u64>,
 	max: u64,
-) -> api::OutputListing {
+) -> mwc_api::OutputListing {
 	let outputs = chain
 		.unspent_outputs_by_pmmr_index(start_index, max, end_index)
 		.unwrap();
-	api::OutputListing {
+	mwc_api::OutputListing {
 		last_retrieved_index: outputs.0,
 		highest_index: outputs.1,
 		outputs: outputs
 			.2
 			.iter()
-			.map(|x| api::OutputPrintable::from_output(x, &chain, None, true, false).unwrap())
+			.map(|x| mwc_api::OutputPrintable::from_output(x, &chain, None, true, false).unwrap())
 			.collect(),
 	}
 }
 
 /// get output listing in a given block range
 fn height_range_to_pmmr_indices_local(
-	chain: Arc<chain::Chain>,
+	chain: Arc<Chain>,
 	start_index: u64,
 	end_index: Option<u64>,
-) -> api::OutputListing {
+) -> mwc_api::OutputListing {
 	let indices = chain
 		.block_height_range_to_pmmr_indices(start_index, end_index)
 		.unwrap();
-	api::OutputListing {
+	mwc_api::OutputListing {
 		last_retrieved_index: indices.0,
 		highest_index: indices.1,
 		outputs: vec![],
@@ -109,7 +109,7 @@ fn height_range_to_pmmr_indices_local(
 
 /// Get blocks by heights
 fn get_blocks_by_height_local(
-	chain: Arc<chain::Chain>,
+	chain: Arc<Chain>,
 	start_index: u64,
 	end_index: u64,
 ) -> Vec<BlockPrintable> {
@@ -126,11 +126,11 @@ fn get_blocks_by_height_local(
 fn create_block_with_reward(
 	context_id: u32,
 	chain: &Chain,
-	prev: core::core::BlockHeader,
+	prev: mwc_core::core::BlockHeader,
 	txs: &[Transaction],
 	reward_output: Output,
 	reward_kernel: TxKernel,
-) -> core::core::Block {
+) -> mwc_core::core::Block {
 	let mut cache_values: VecDeque<HeaderDifficultyInfo> = VecDeque::new();
 	let next_header_info = consensus::next_difficulty(
 		context_id,
@@ -138,7 +138,7 @@ fn create_block_with_reward(
 		chain.difficulty_iter().unwrap(),
 		&mut cache_values,
 	);
-	let mut b = core::core::Block::new(
+	let mut b = mwc_core::core::Block::new(
 		context_id,
 		&prev,
 		txs,
@@ -179,15 +179,15 @@ pub fn add_block_with_reward(
 /// and return the block
 pub fn create_block_for_wallet<'a, L, C, K>(
 	chain: &Chain,
-	prev: core::core::BlockHeader,
+	prev: mwc_core::core::BlockHeader,
 	txs: &[Transaction],
 	wallet: Arc<Mutex<Box<dyn WalletInst<'a, L, C, K> + 'a>>>,
 	keychain_mask: Option<&SecretKey>,
-) -> Result<core::core::Block, libwallet::Error>
+) -> Result<mwc_core::core::Block, mwc_wallet_libwallet::Error>
 where
 	L: WalletLCProvider<'a, C, K>,
 	C: NodeClient + 'a,
-	K: keychain::Keychain + 'a,
+	K: Keychain + 'a,
 {
 	// build block fees
 	let fee_amt = txs.iter().map(|tx| tx.fee()).sum();
@@ -224,11 +224,11 @@ pub fn award_block_to_wallet<'a, L, C, K>(
 	txs: &[Transaction],
 	wallet: Arc<Mutex<Box<dyn WalletInst<'a, L, C, K> + 'a>>>,
 	keychain_mask: Option<&SecretKey>,
-) -> Result<(), libwallet::Error>
+) -> Result<(), mwc_wallet_libwallet::Error>
 where
 	L: WalletLCProvider<'a, C, K>,
 	C: NodeClient + 'a,
-	K: keychain::Keychain + 'a,
+	K: Keychain + 'a,
 {
 	let prev = chain.head_header().unwrap();
 	let block = create_block_for_wallet(chain, prev, txs, wallet, keychain_mask)?;
@@ -236,8 +236,10 @@ where
 	Ok(())
 }
 
-pub fn process_block(chain: &Chain, block: core::core::Block) {
-	chain.process_block(block, chain::Options::MINE).unwrap();
+pub fn process_block(chain: &Chain, block: mwc_core::core::Block) {
+	chain
+		.process_block(block, mwc_chain::Options::MINE)
+		.unwrap();
 	chain.validate(false).unwrap();
 }
 
@@ -249,11 +251,11 @@ pub fn award_blocks_to_wallet<'a, L, C, K>(
 	number: usize,
 	pause_between: bool,
 	tx_pool: &mut Vec<Transaction>,
-) -> Result<(), libwallet::Error>
+) -> Result<(), mwc_wallet_libwallet::Error>
 where
 	L: WalletLCProvider<'a, C, K>,
 	C: NodeClient + 'a,
-	K: keychain::Keychain + 'a,
+	K: Keychain + 'a,
 {
 	for _ in 0..number {
 		award_block_to_wallet(chain, &tx_pool, wallet.clone(), keychain_mask)?;
@@ -275,11 +277,11 @@ pub fn send_to_dest<'a, L, C, K>(
 	test_mode: bool,
 	outputs: Option<HashSet<String>>, // outputs to include into the transaction
 	routputs: usize,                  // Number of resulting outputs. Normally it is 1
-) -> Result<(), libwallet::Error>
+) -> Result<(), mwc_wallet_libwallet::Error>
 where
 	L: WalletLCProvider<'a, C, K>,
 	C: NodeClient + 'a,
-	K: keychain::Keychain + 'a,
+	K: Keychain + 'a,
 {
 	let mut tx_session = TxSession::new();
 	let (slate, client) = {
@@ -344,14 +346,14 @@ where
 pub fn wallet_info<'a, L, C, K>(
 	wallet: Arc<Mutex<Box<dyn WalletInst<'a, L, C, K>>>>,
 	keychain_mask: Option<&SecretKey>,
-) -> Result<WalletInfo, libwallet::Error>
+) -> Result<WalletInfo, mwc_wallet_libwallet::Error>
 where
 	L: WalletLCProvider<'a, C, K>,
 	C: NodeClient + 'a,
-	K: keychain::Keychain + 'a,
+	K: Keychain + 'a,
 {
 	let (wallet_refreshed, wallet_info) =
 		owner::retrieve_summary_info(wallet, keychain_mask, &None, true, 1)?;
-	assert!(wallet_refreshed);
+	debug_assert!(wallet_refreshed);
 	Ok(wallet_info)
 }

@@ -13,16 +13,17 @@
 // limitations under the License.
 
 #[allow(deprecated)]
-use digest::generic_array::GenericArray;
-use hmac::{Hmac, Mac, NewMac};
-use ripemd160::Ripemd160;
-use sha2::{Digest, Sha256, Sha512};
+use mwc_wallet_util::mwc_crates::digest::generic_array::GenericArray;
+use mwc_wallet_util::mwc_crates::hmac::{Hmac, Mac, NewMac};
+use mwc_wallet_util::mwc_crates::ripemd160::Ripemd160;
+use mwc_wallet_util::mwc_crates::sha2::{Digest, Sha256, Sha512};
 
-use crate::mwc_core::global::is_floonet;
-use crate::mwc_keychain::extkey_bip32::{BIP32Hasher, ChildNumber, ExtendedPrivKey};
-use crate::mwc_keychain::Keychain;
-use crate::mwc_keychain::SwitchCommitmentType;
-use crate::mwc_util::secp::key::SecretKey;
+use mwc_wallet_util::mwc_core::global::is_floonet;
+use mwc_wallet_util::mwc_crates::secp::key::SecretKey;
+use mwc_wallet_util::mwc_keychain;
+use mwc_wallet_util::mwc_keychain::extkey_bip32::{BIP32Hasher, ChildNumber, ExtendedPrivKey};
+use mwc_wallet_util::mwc_keychain::Keychain;
+use mwc_wallet_util::mwc_keychain::SwitchCommitmentType;
 
 use crate::Error;
 
@@ -67,7 +68,7 @@ impl BIP32Hasher for BIP32MwcboxHasher {
 		seed: &[u8],
 	) -> Result<(), mwc_wallet_util::mwc_keychain::extkey_bip32::Error> {
 		self.hmac_sha512 = HmacSha512::new_from_slice(seed).map_err(|e| {
-			mwc_wallet_util::mwc_keychain::extkey_bip32::Error::Generic(format!(
+			mwc_keychain::extkey_bip32::Error::Generic(format!(
 				"Unable to build sha512 for seed, {}",
 				e
 			))

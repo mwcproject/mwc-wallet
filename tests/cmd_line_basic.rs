@@ -13,19 +13,13 @@
 // limitations under the License.
 
 //! Test wallet command line works as expected
-#[macro_use]
-extern crate clap;
-
-#[macro_use]
-extern crate log;
-
 extern crate mwc_wallet;
 
 use mwc_wallet_impls::test_framework::{self, LocalWalletClient, WalletProxy};
+use mwc_wallet_util::mwc_crates::clap::{App, YamlLoader};
+use mwc_wallet_util::mwc_crates::log::error;
 use std::ops::DerefMut;
 use std::sync::Arc;
-
-use clap::App;
 use std::thread;
 use std::time::Duration;
 
@@ -53,8 +47,8 @@ fn command_line_test_impl(test_dir: &str) -> Result<(), mwc_wallet_controller::E
 	let chain = wallet_proxy.chain.clone();
 
 	// load app yaml. If it don't exist, just say so and exit
-	let yml = load_yaml!("../src/bin/mwc-wallet.yml");
-	let app = App::from_yaml(yml);
+	let yml = YamlLoader::load_from_str(include_str!("../src/bin/mwc-wallet.yml")).unwrap();
+	let app = App::from_yaml(&yml[0]);
 
 	// wallet init
 	let arg_vec = vec!["mwc-wallet", "-p", "password1", "init", "-h"];
@@ -489,8 +483,9 @@ fn command_line_test_impl(test_dir: &str) -> Result<(), mwc_wallet_controller::E
 		&file_name,
 	];
 	if let Err(err) = execute_command(&app, test_dir, "wallet2", &client2, arg_vec) {
+		let err_msg: String = err.to_string();
 		assert_eq!( String::from("Impls Error, LibWallet Error, Unable to deserialize slatepack, Slatepack decode error, Unable to decrypt, ring::error::Unspecified"),
-					err.to_string() );
+					err_msg );
 	} else {
 		panic!("Expected to fail because of another recipient")
 	}
@@ -723,7 +718,9 @@ fn command_line_test_impl(test_dir: &str) -> Result<(), mwc_wallet_controller::E
 		out_file_name.as_str(),
 	];
 	if let Err(err) = execute_command(&app, test_dir, "wallet1", &client1, arg_vec) {
-		assert_eq!( String::from("Invalid argument: Parsing IO error: Unable to read slate data from file target/test_output/command_line/wallet2/slatepack/0436430c-2b02-624c-2032-570501212b07.invoice_init.slatepack, LibWallet Error, Unable to deserialize slatepack, Slatepack decode error, Unable to decrypt, ring::error::Unspecified"), err.to_string() );
+		let err_msg: String = err.to_string();
+		assert_eq!( String::from("Invalid argument: Parsing IO error: Unable to read slate data from file target/test_output/command_line/wallet2/slatepack/0436430c-2b02-624c-2032-570501212b07.invoice_init.slatepack, LibWallet Error, Unable to deserialize slatepack, Slatepack decode error, Unable to decrypt, ring::error::Unspecified"),
+		  err_msg );
 	} else {
 		panic!("Expected to fail because of another recipient")
 	}

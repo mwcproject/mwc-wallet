@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use crate::Error;
-use hyper::http;
+use mwc_wallet_util::mwc_crates::http;
 use mwc_wallet_util::mwc_p2p::tor::tcp_data_stream::TcpDataStream;
 use std::io::Read;
 

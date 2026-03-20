@@ -13,19 +13,14 @@
 // limitations under the License.
 
 //! Test a wallet sending to self
-#[macro_use]
-extern crate log;
-extern crate mwc_wallet_controller as wallet;
-extern crate mwc_wallet_impls as impls;
+use mwc_wallet_util::mwc_crates::log::error;
 
-use mwc_wallet_util::mwc_core as core;
-use mwc_wallet_util::mwc_core::global;
+use mwc_wallet_util::mwc_core::{self, global};
 use std::ops::DerefMut;
 use std::sync::Arc;
 
-use impls::test_framework::{self, LocalWalletClient};
-use libwallet::InitTxArgs;
-use mwc_wallet_libwallet as libwallet;
+use mwc_wallet_impls::test_framework::{self, LocalWalletClient};
+use mwc_wallet_libwallet::InitTxArgs;
 use std::sync::atomic::Ordering;
 use std::thread;
 use std::time::Duration;
@@ -47,7 +42,10 @@ fn get_session(session: &mut TxSession, use_sessions: bool) -> Option<&mut TxSes
 }
 
 /// self send impl
-fn self_send_test_impl(test_dir: &str, use_sessions: bool) -> Result<(), wallet::Error> {
+fn self_send_test_impl(
+	test_dir: &str,
+	use_sessions: bool,
+) -> Result<(), mwc_wallet_controller::Error> {
 	// Create a new proxy to simulate server and wallet responses
 	global::set_local_chain_type(global::ChainTypes::AutomatedTesting);
 	let tx_pool: Arc<Mutex<Vec<Transaction>>> = Arc::new(Mutex::new(Vec::new()));
@@ -78,14 +76,19 @@ fn self_send_test_impl(test_dir: &str, use_sessions: bool) -> Result<(), wallet:
 	});
 
 	// few values to keep things shorter
-	let reward = core::consensus::MWC_FIRST_GROUP_REWARD;
+	let reward = mwc_core::consensus::MWC_FIRST_GROUP_REWARD;
 
 	// add some accounts
-	wallet::controller::owner_single_use(Some(wallet1.clone()), mask1, None, |api, m| {
-		api.create_account_path(m, "mining")?;
-		api.create_account_path(m, "listener")?;
-		Ok(())
-	})?;
+	mwc_wallet_controller::controller::owner_single_use(
+		Some(wallet1.clone()),
+		mask1,
+		None,
+		|api, m| {
+			api.create_account_path(m, "mining")?;
+			api.create_account_path(m, "listener")?;
+			Ok(())
+		},
+	)?;
 
 	// Get some mining done
 	{
@@ -106,63 +109,72 @@ fn self_send_test_impl(test_dir: &str, use_sessions: bool) -> Result<(), wallet:
 	);
 
 	// Should have 5 in account1 (5 spendable), 5 in account (2 spendable)
-	wallet::controller::owner_single_use(Some(wallet1.clone()), mask1, None, |api, m| {
-		let (wallet1_refreshed, wallet1_info) = api.retrieve_summary_info(m, true, 1)?;
-		assert!(wallet1_refreshed);
-		assert_eq!(wallet1_info.last_confirmed_height, bh);
-		assert_eq!(wallet1_info.total, bh * reward);
-		// send to send
-		let args = InitTxArgs {
-			src_acct_name: Some("mining".to_owned()),
-			amount: reward * 2,
-			minimum_confirmations: 2,
-			max_outputs: 500,
-			num_change_outputs: 1,
-			selection_strategy_is_use_all: true,
-			..Default::default()
-		};
+	mwc_wallet_controller::controller::owner_single_use(
+		Some(wallet1.clone()),
+		mask1,
+		None,
+		|api, m| {
+			let (wallet1_refreshed, wallet1_info) = api.retrieve_summary_info(m, true, 1)?;
+			assert!(wallet1_refreshed);
+			assert_eq!(wallet1_info.last_confirmed_height, bh);
+			assert_eq!(wallet1_info.total, bh * reward);
+			// send to send
+			let args = InitTxArgs {
+				src_acct_name: Some("mining".to_owned()),
+				amount: reward * 2,
+				minimum_confirmations: 2,
+				max_outputs: 500,
+				num_change_outputs: 1,
+				selection_strategy_is_use_all: true,
+				..Default::default()
+			};
 
-		let mut sender_session = TxSession::new();
-		let mut receiver_session = TxSession::new();
+			let mut sender_session = TxSession::new();
+			let mut receiver_session = TxSession::new();
 
-		let mut slate =
-			api.init_send_tx(m, get_session(&mut sender_session, use_sessions), &args, 1)?;
-		api.tx_lock_outputs(
-			m,
-			get_session(&mut sender_session, use_sessions),
-			&slate,
-			None,
-			0,
-		)?;
-		// Send directly to self
-		wallet::controller::foreign_single_use(wallet1.clone(), mask1_i.clone(), |api| {
-			slate = api.receive_tx(
-				get_session(&mut receiver_session, use_sessions),
+			let mut slate =
+				api.init_send_tx(m, get_session(&mut sender_session, use_sessions), &args, 1)?;
+			api.tx_lock_outputs(
+				m,
+				get_session(&mut sender_session, use_sessions),
 				&slate,
 				None,
-				&Some("listener".to_string()),
-				None,
+				0,
 			)?;
+			// Send directly to self
+			mwc_wallet_controller::controller::foreign_single_use(
+				wallet1.clone(),
+				mask1_i.clone(),
+				|api| {
+					slate = api.receive_tx(
+						get_session(&mut receiver_session, use_sessions),
+						&slate,
+						None,
+						&Some("listener".to_string()),
+						None,
+					)?;
+					Ok(())
+				},
+			)?;
+			slate = api.finalize_tx(
+				m,
+				get_session(&mut sender_session, use_sessions),
+				&slate,
+				true,
+			)?;
+			api.post_tx(m, slate.tx_or_err()?, false)?; // mines a block
+
+			if use_sessions {
+				debug_assert!(sender_session.get_context_participant().is_none());
+				debug_assert!(receiver_session.get_context_participant().is_none());
+
+				wallet_lock!(api.wallet_inst, w);
+				sender_session.save_tx_data(&mut **w, m, &slate.id)?;
+				receiver_session.save_tx_data(&mut **w, m, &slate.id)?;
+			}
 			Ok(())
-		})?;
-		slate = api.finalize_tx(
-			m,
-			get_session(&mut sender_session, use_sessions),
-			&slate,
-			true,
-		)?;
-		api.post_tx(m, slate.tx_or_err()?, false)?; // mines a block
-
-		if use_sessions {
-			debug_assert!(sender_session.get_context_participant().is_none());
-			debug_assert!(receiver_session.get_context_participant().is_none());
-
-			wallet_lock!(api.wallet_inst, w);
-			sender_session.save_tx_data(&mut **w, m, &slate.id)?;
-			receiver_session.save_tx_data(&mut **w, m, &slate.id)?;
-		}
-		Ok(())
-	})?;
+		},
+	)?;
 
 	let _ = test_framework::award_blocks_to_wallet(
 		&chain,
@@ -178,26 +190,36 @@ fn self_send_test_impl(test_dir: &str, use_sessions: bool) -> Result<(), wallet:
 	bh += 3;
 
 	// Check total in mining account
-	wallet::controller::owner_single_use(Some(wallet1.clone()), mask1, None, |api, m| {
-		let (wallet1_refreshed, wallet1_info) = api.retrieve_summary_info(m, true, 1)?;
-		assert!(wallet1_refreshed);
-		assert_eq!(wallet1_info.last_confirmed_height, bh);
-		assert_eq!(wallet1_info.total, bh * reward - reward * 2);
-		Ok(())
-	})?;
+	mwc_wallet_controller::controller::owner_single_use(
+		Some(wallet1.clone()),
+		mask1,
+		None,
+		|api, m| {
+			let (wallet1_refreshed, wallet1_info) = api.retrieve_summary_info(m, true, 1)?;
+			assert!(wallet1_refreshed);
+			assert_eq!(wallet1_info.last_confirmed_height, bh);
+			assert_eq!(wallet1_info.total, bh * reward - reward * 2);
+			Ok(())
+		},
+	)?;
 
 	// Check total in 'listener' account
 	{
 		wallet_inst!(wallet1, w);
 		w.set_parent_key_id_by_name("listener")?;
 	}
-	wallet::controller::owner_single_use(Some(wallet1.clone()), mask1, None, |api, m| {
-		let (wallet1_refreshed, wallet1_info) = api.retrieve_summary_info(m, true, 1)?;
-		assert!(wallet1_refreshed);
-		assert_eq!(wallet1_info.last_confirmed_height, bh);
-		assert_eq!(wallet1_info.total, 2 * reward);
-		Ok(())
-	})?;
+	mwc_wallet_controller::controller::owner_single_use(
+		Some(wallet1.clone()),
+		mask1,
+		None,
+		|api, m| {
+			let (wallet1_refreshed, wallet1_info) = api.retrieve_summary_info(m, true, 1)?;
+			assert!(wallet1_refreshed);
+			assert_eq!(wallet1_info.last_confirmed_height, bh);
+			assert_eq!(wallet1_info.total, 2 * reward);
+			Ok(())
+		},
+	)?;
 
 	// let logging finish
 	stopper.store(false, Ordering::Relaxed);

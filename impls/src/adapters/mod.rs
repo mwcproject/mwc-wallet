@@ -23,20 +23,20 @@ mod types;
 
 pub use self::file::{PathToSlateGetter, PathToSlatePutter};
 pub use self::http::HttpDataSender;
+use mwc_wallet_util::mwc_crates::ed25519_dalek;
 use std::path::Path;
 
-use crate::config::WalletConfig;
 use crate::error::Error;
-#[cfg(feature = "swaps")]
-use crate::libwallet::swap::message::Message;
-use crate::libwallet::Slate;
 use crate::tor::config::complete_tor_address;
-use crate::util::ZeroingString;
-use ed25519_dalek::{PublicKey as DalekPublicKey, SecretKey as DalekSecretKey};
+use mwc_wallet_config::WalletConfig;
 use mwc_wallet_libwallet::slatepack::SlatePurpose;
+#[cfg(feature = "swaps")]
+use mwc_wallet_libwallet::swap::message::Message;
+use mwc_wallet_libwallet::Slate;
 use mwc_wallet_libwallet::{SlateVersion, Slatepacker};
+use mwc_wallet_util::mwc_crates::secp::Secp256k1;
 use mwc_wallet_util::mwc_p2p::TorConfig;
-use mwc_wallet_util::mwc_util::secp::Secp256k1;
+use mwc_wallet_util::mwc_util::ZeroingString;
 pub use mwcmq::{
 	get_mwcmqs_brocker, init_mwcmqs_access_data, reset_mwcmqs_brocker, MWCMQPublisher,
 	MWCMQSubscriber, MwcMqsChannel,
@@ -63,8 +63,8 @@ pub trait SlateSender {
 		send_tx: bool, // false if invoice, true if send operation
 		slate: &Slate,
 		slate_content: SlatePurpose,
-		slatepack_secret: &DalekSecretKey,
-		recipient: Option<DalekPublicKey>,
+		slatepack_secret: &ed25519_dalek::SecretKey,
+		recipient: Option<ed25519_dalek::PublicKey>,
 		other_wallet_version: Option<(SlateVersion, Option<String>)>,
 		secp: &Secp256k1,
 	) -> Result<Slate, Error>;
@@ -89,7 +89,7 @@ pub trait SlatePutter {
 	fn put_tx(
 		&self,
 		slate: &Slate,
-		slatepack_secret: Option<&DalekSecretKey>,
+		slatepack_secret: Option<&ed25519_dalek::SecretKey>,
 		use_test_rng: bool,
 		secp: &Secp256k1,
 	) -> Result<String, Error>;
@@ -108,7 +108,7 @@ pub trait SlateGetter {
 	/// Receive a transaction sync. Just read it from wherever and return the slate.
 	fn get_tx(
 		&self,
-		slatepack_secret: Option<&DalekSecretKey>,
+		slatepack_secret: Option<&ed25519_dalek::SecretKey>,
 		secp: &Secp256k1,
 	) -> Result<SlateGetData, Error>;
 }
@@ -142,8 +142,8 @@ impl SlateGetData {
 	) -> Result<
 		(
 			Slate,
-			Option<DalekPublicKey>,
-			Option<DalekPublicKey>,
+			Option<ed25519_dalek::PublicKey>,
+			Option<ed25519_dalek::PublicKey>,
 			SlatePurpose,
 			bool,
 		),

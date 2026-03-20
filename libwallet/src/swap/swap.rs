@@ -13,24 +13,28 @@
 // limitations under the License.
 
 use super::message::*;
-use super::multisig::{Builder as MultisigBuilder, Hashed};
+use super::multisig::{self, Hashed};
 use super::ser::*;
 use super::types::*;
 use super::{Error, Keychain};
-use crate::mwc_core::core::{
-	transaction as tx, CommitWrapper, Inputs, KernelFeatures, OutputIdentifier, TxKernel, Weighting,
-};
-use crate::mwc_core::libtx::secp_ser;
-use crate::mwc_keychain::{Identifier, SwitchCommitmentType};
-use crate::mwc_util::secp::key::{PublicKey, SecretKey};
-use crate::mwc_util::secp::pedersen::{Commitment, RangeProof};
-use crate::mwc_util::secp::{Message as SecpMessage, Secp256k1, Signature};
 use crate::swap::fsm::state::StateId;
 use crate::{NodeClient, Slate};
 use bitcoin_lib::secp256k1::ContextFlag;
-use chrono::{DateTime, Utc};
+use mwc_wallet_util::mwc_core::core::{
+	transaction as tx, CommitWrapper, Inputs, KernelFeatures, OutputIdentifier, TxKernel, Weighting,
+};
+use mwc_wallet_util::mwc_core::libtx::secp_ser;
+use mwc_wallet_util::mwc_crates::chrono::{DateTime, Utc};
+use mwc_wallet_util::mwc_crates::lazy_static::lazy_static;
+use mwc_wallet_util::mwc_crates::secp;
+use mwc_wallet_util::mwc_crates::secp::key::{PublicKey, SecretKey};
+use mwc_wallet_util::mwc_crates::secp::pedersen::{Commitment, RangeProof};
+use mwc_wallet_util::mwc_crates::secp::{Secp256k1, Signature};
+use mwc_wallet_util::mwc_crates::serde::{self, Deserialize, Serialize};
+use mwc_wallet_util::mwc_crates::serde_json;
+use mwc_wallet_util::mwc_crates::uuid::Uuid;
+use mwc_wallet_util::mwc_keychain::{Identifier, SwitchCommitmentType};
 use std::convert::TryInto;
-use uuid::Uuid;
 
 use crate::slate::SlateCtx;
 use mwc_wallet_util::mwc_core::global;
@@ -39,6 +43,7 @@ use std::sync::RwLock;
 
 /// Dummy wrapper for the hex-encoded serialized transaction.
 #[derive(Serialize, Deserialize)]
+#[serde(crate = "serde")]
 pub struct TxWrapper {
 	/// hex representation of transaction
 	pub tx_hex: String,
@@ -46,6 +51,7 @@ pub struct TxWrapper {
 
 /// Swap event
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(crate = "serde")]
 pub struct SwapJournalRecord {
 	/// Unix timestamp, when event happens
 	pub time: i64,
@@ -55,6 +61,7 @@ pub struct SwapJournalRecord {
 
 /// Primary SWAP state. Both Seller and Buyer are using it.
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(crate = "serde")]
 pub struct Swap {
 	/// Swap session uuid
 	pub id: Uuid,
@@ -95,7 +102,7 @@ pub struct Swap {
 	/// Schnorr multisig this party participant id
 	pub(super) participant_id: usize,
 	/// Schnorr multisig builder and holder
-	pub(super) multisig: MultisigBuilder,
+	pub(super) multisig: multisig::Builder,
 	/// MWC Lock Slate
 	pub lock_slate: SlateCtx,
 	/// MWC Refund Slate
@@ -289,7 +296,7 @@ impl Swap {
 		&self,
 		redeem_slate: &Slate,
 		secp: &Secp256k1,
-	) -> Result<(PublicKey, PublicKey, SecpMessage), Error> {
+	) -> Result<(PublicKey, PublicKey, secp::Message), Error> {
 		let pub_nonces = redeem_slate
 			.participant_data
 			.iter()

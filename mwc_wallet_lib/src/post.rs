@@ -17,6 +17,7 @@ use mwc_wallet_libwallet::NodeClient;
 use mwc_wallet_util::mwc_core::core::Transaction;
 use mwc_wallet_util::mwc_core::ser;
 use mwc_wallet_util::mwc_core::ser::DeserializationMode;
+use mwc_wallet_util::mwc_crates::dirs;
 use mwc_wallet_util::mwc_util::from_hex;
 use std::fs::File;
 use std::io::Read;

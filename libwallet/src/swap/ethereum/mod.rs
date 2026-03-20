@@ -12,13 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub use mwc_wagyu_ethereum::{
-	wordlist::*, EthereumAddress, EthereumAmount, EthereumDerivationPath,
-	EthereumExtendedPrivateKey, EthereumExtendedPublicKey, EthereumFormat, EthereumMnemonic,
-	EthereumNetwork, EthereumPrivateKey, EthereumPublicKey, EthereumTransaction,
-	EthereumTransactionParameters, Goerli, Kovan, Mainnet, Rinkeby, Ropsten,
-};
-
 mod api;
 mod client;
 mod decimal_convert;

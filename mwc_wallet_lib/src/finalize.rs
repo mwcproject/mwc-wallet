@@ -13,11 +13,11 @@
 // limitations under the License.
 
 use crate::wallet_lock;
-use log::info;
 use mwc_wallet_impls::{PathToSlateGetter, SlateGetter};
 use mwc_wallet_libwallet::proof::proofaddress;
 use mwc_wallet_libwallet::types::U64_DATA_IDX_ADDRESS_INDEX;
 use mwc_wallet_libwallet::{foreign, owner, SlatePurpose};
+use mwc_wallet_util::mwc_crates::log::info;
 use mwc_wallet_util::mwc_keychain::Keychain;
 
 pub fn finalize(

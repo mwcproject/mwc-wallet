@@ -15,20 +15,16 @@
 //! tests whose only purpose is to build up a 'real' looking chain with
 //! actual transactions for testing purposes
 
-#[macro_use]
-extern crate log;
-extern crate mwc_wallet_controller as wallet;
-extern crate mwc_wallet_impls as impls;
-extern crate mwc_wallet_libwallet as libwallet;
+use mwc_wallet_util::mwc_crates::log::{debug, error};
+use mwc_wallet_util::mwc_crates::rand;
 
-use mwc_wallet_util::mwc_core as core;
+use mwc_wallet_impls::test_framework::{self, LocalWalletClient};
+use mwc_wallet_libwallet::{InitTxArgs, Slate};
+use mwc_wallet_util::mwc_core;
+use mwc_wallet_util::mwc_crates::rand::Rng;
 use std::ops::DerefMut;
-use std::sync::Arc;
-
-use self::libwallet::{InitTxArgs, Slate};
-use impls::test_framework::{self, LocalWalletClient};
-use rand::Rng;
 use std::sync::atomic::Ordering;
+use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
@@ -38,7 +34,7 @@ use mwc_wallet_util::mwc_core::core::Transaction;
 use std::sync::Mutex;
 
 /// Builds a chain with real transactions up to the given height
-fn build_chain(test_dir: &str, block_height: usize) -> Result<(), libwallet::Error> {
+fn build_chain(test_dir: &str, block_height: usize) -> Result<(), mwc_wallet_libwallet::Error> {
 	// Create a new proxy to simulate server and wallet responses
 	let tx_pool: Arc<Mutex<Vec<Transaction>>> = Arc::new(Mutex::new(Vec::new()));
 	let mut wallet_proxy = create_wallet_proxy(test_dir.into(), tx_pool.clone());
@@ -79,16 +75,26 @@ fn build_chain(test_dir: &str, block_height: usize) -> Result<(), libwallet::Err
 
 	// Stop the scanning updater threads because it extends the time needed to build the chain
 	// exponentially
-	wallet::controller::owner_single_use(Some(wallet1.clone()), mask1, None, |api, _m| {
-		api.stop_updater()?;
-		Ok(())
-	})
+	mwc_wallet_controller::controller::owner_single_use(
+		Some(wallet1.clone()),
+		mask1,
+		None,
+		|api, _m| {
+			api.stop_updater()?;
+			Ok(())
+		},
+	)
 	.unwrap();
 
-	wallet::controller::owner_single_use(Some(wallet2.clone()), mask2, None, |api, _m| {
-		api.stop_updater()?;
-		Ok(())
-	})
+	mwc_wallet_controller::controller::owner_single_use(
+		Some(wallet2.clone()),
+		mask2,
+		None,
+		|api, _m| {
+			api.stop_updater()?;
+			Ok(())
+		},
+	)
 	.unwrap();
 
 	// few values to keep things shorter
@@ -110,20 +116,25 @@ fn build_chain(test_dir: &str, block_height: usize) -> Result<(), libwallet::Err
 	for height in 0..block_height {
 		let mut wallet_1_has_funds = false;
 
-		let reward = core::consensus::calc_mwc_block_reward(0, (height + 1) as u64);
+		let reward = mwc_core::consensus::calc_mwc_block_reward(0, (height + 1) as u64);
 
 		// Check wallet 1 contents
-		wallet::controller::owner_single_use(Some(wallet1.clone()), mask1, None, |api, m| {
-			let (_, wallet1_info) = api.retrieve_summary_info(m, true, 1)?;
-			debug!(
-				"Wallet 1 spendable - {}",
-				wallet1_info.amount_currently_spendable
-			);
-			if wallet1_info.amount_currently_spendable > reward {
-				wallet_1_has_funds = true;
-			}
-			Ok(())
-		})
+		mwc_wallet_controller::controller::owner_single_use(
+			Some(wallet1.clone()),
+			mask1,
+			None,
+			|api, m| {
+				let (_, wallet1_info) = api.retrieve_summary_info(m, true, 1)?;
+				debug!(
+					"Wallet 1 spendable - {}",
+					wallet1_info.amount_currently_spendable
+				);
+				if wallet1_info.amount_currently_spendable > reward {
+					wallet_1_has_funds = true;
+				}
+				Ok(())
+			},
+		)
 		.unwrap();
 
 		// let's say 1 in every 3 blocks has a transaction (i.e. random 0 here and wallet1 has funds)
@@ -149,7 +160,7 @@ fn build_chain(test_dir: &str, block_height: usize) -> Result<(), libwallet::Err
 			let amount: u64 = rng.gen_range(1, 1_000_000_001);
 			let mut slate = Slate::blank(1, false);
 			debug!("Creating TX for {}", amount);
-			wallet::controller::owner_single_use(
+			mwc_wallet_controller::controller::owner_single_use(
 				Some(wallet1.clone()),
 				mask1,
 				None,

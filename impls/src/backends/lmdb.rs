@@ -13,6 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use mwc_wallet_util::mwc_crates::rand::rngs::mock::StepRng;
+use mwc_wallet_util::mwc_crates::rand::thread_rng;
 use std::cell::RefCell;
 use std::{fs, path};
 
@@ -22,29 +24,30 @@ use std::io::{Read, Write};
 use std::marker::PhantomData;
 use std::path::Path;
 
-use crate::blake2::blake2b::{Blake2b, Blake2bResult};
+use mwc_wallet_util::mwc_crates::blake2_rfc::blake2b::{Blake2b, Blake2bResult};
 
-use crate::keychain::{ChildNumber, ExtKeychain, Identifier, Keychain, SwitchCommitmentType};
-use crate::store::{self, option_to_not_found, to_key, to_key_u64, u64_to_key};
-
-use crate::core::core::Transaction;
-use crate::core::ser;
 #[cfg(feature = "swaps")]
-use crate::libwallet::swap::ethereum::EthereumWallet;
-use crate::libwallet::{
+use mwc_wallet_libwallet::swap::ethereum::EthereumWallet;
+use mwc_wallet_libwallet::{
 	AcctPathMapping, Context, Error, NodeClient, OutputData, ScannedBlockInfo, TxLogEntry, TxProof,
 	WalletBackend, WalletOutputBatch,
 };
-use crate::util::secp::constants::SECRET_KEY_SIZE;
-use crate::util::secp::key::SecretKey;
-use crate::util::{self, ToHex};
+use mwc_wallet_util::mwc_core::core::Transaction;
+use mwc_wallet_util::mwc_core::ser;
+use mwc_wallet_util::mwc_crates::secp::constants::SECRET_KEY_SIZE;
+use mwc_wallet_util::mwc_crates::secp::key::SecretKey;
+use mwc_wallet_util::mwc_keychain::{
+	ChildNumber, ExtKeychain, Identifier, Keychain, SwitchCommitmentType,
+};
+use mwc_wallet_util::mwc_store::{self, option_to_not_found, to_key, to_key_u64, u64_to_key};
+use mwc_wallet_util::mwc_util;
+use mwc_wallet_util::mwc_util::ToHex;
 
 #[cfg(feature = "libp2p")]
 use mwc_wallet_libwallet::IntegrityContext;
 use mwc_wallet_util::mwc_core::ser::{DeserializationMode, Readable};
-use mwc_wallet_util::mwc_util::secp::pedersen::Commitment;
-use rand::rngs::mock::StepRng;
-use rand::thread_rng;
+use mwc_wallet_util::mwc_crates::log::{debug, error};
+use mwc_wallet_util::mwc_crates::secp::pedersen::Commitment;
 
 pub const DB_DIR: &str = "db";
 pub const TX_SAVE_DIR: &str = "saved_txs";
@@ -112,7 +115,7 @@ where
 	K: Keychain + 'ck,
 {
 	context_id: u32,
-	db: store::Store,
+	db: mwc_store::Store,
 	data_file_dir: String,
 	/// Keychain
 	pub keychain: Option<K>,
@@ -160,7 +163,7 @@ where
 			))
 		})?;
 
-		let store = store::Store::new(
+		let store = mwc_store::Store::new(
 			context_id,
 			db_path
 				.to_str()
@@ -541,7 +544,7 @@ where
 		let mut tx_f = File::open(tx_file)?;
 		let mut content = String::new();
 		tx_f.read_to_string(&mut content)?;
-		let tx_bin = util::from_hex(&content).map_err(|e| {
+		let tx_bin = mwc_util::from_hex(&content).map_err(|e| {
 			Error::StoredTransactionError(format!("Unable to decode the data, {}", e))
 		})?;
 		Ok(ser::deserialize(
@@ -681,7 +684,7 @@ where
 	K: Keychain,
 {
 	store: &'a LMDBBackend<'a, C, K>,
-	db: RefCell<Option<store::Batch<'a>>>,
+	db: RefCell<Option<mwc_store::Batch<'a>>>,
 	/// Keychain
 	keychain: Option<K>,
 }
@@ -927,7 +930,7 @@ where
 		let mut start = heights.pop().unwrap_or(1);
 
 		while let Some(h) = heights.pop() {
-			assert!(h < start);
+			debug_assert!(h < start);
 			if start - h < step {
 				db.delete(&u64_to_key(LAST_SCANNED_BLOCK, h)?)?;
 			} else {

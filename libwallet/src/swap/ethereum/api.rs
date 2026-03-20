@@ -30,7 +30,8 @@ use crate::swap::types::{
 use crate::swap::{Error, SellApi, Swap, SwapApi};
 use crate::{NodeClient, Slate};
 use mwc_wallet_util::mwc_core::core::Committed;
-use mwc_wallet_util::mwc_util::secp::Secp256k1;
+use mwc_wallet_util::mwc_crates::secp;
+use mwc_wallet_util::mwc_crates::secp::Secp256k1;
 use mwc_web3::types::{Address, H256};
 use std::marker::PhantomData;
 use std::sync::Arc;

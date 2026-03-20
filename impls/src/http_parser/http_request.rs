@@ -14,8 +14,10 @@
 
 use crate::http_parser::parse_utils;
 use crate::Error;
-use hyper::body::to_bytes;
-use hyper::http;
+use mwc_wallet_util::mwc_crates::futures;
+use mwc_wallet_util::mwc_crates::http;
+use mwc_wallet_util::mwc_crates::hyper;
+use mwc_wallet_util::mwc_crates::hyper::body::to_bytes;
 use mwc_wallet_util::mwc_p2p::tor::tcp_data_stream::TcpDataStream;
 use std::io::Write;
 use std::time::Duration;

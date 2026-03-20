@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#[cfg(test)]
 use super::is_test_mode;
 use super::message::*;
 use super::swap;
@@ -20,23 +19,24 @@ use super::swap::{tx_add_input, tx_add_output, Swap};
 use super::types::*;
 use super::{Error, Keychain, CURRENT_VERSION};
 use crate::api_impl::owner_eth::get_eth_balance;
-use crate::mwc_core::core::Committed;
-use crate::mwc_core::core::KernelFeatures;
-use crate::mwc_core::libtx::{build, proof, tx_fee};
-use crate::mwc_keychain::{BlindSum, BlindingFactor, SwitchCommitmentType};
-use crate::mwc_util::secp::aggsig;
-use crate::mwc_util::secp::key::{PublicKey, SecretKey};
-use crate::mwc_util::secp::pedersen::RangeProof;
 use crate::slate::SlateCtx;
 use crate::swap::bitcoin::BtcData;
 use crate::swap::ethereum::{EthData, EthereumWallet};
 use crate::swap::fsm::state::StateId;
-use crate::swap::multisig::{Builder as MultisigBuilder, ParticipantData as MultisigParticipant};
-use crate::{NodeClient, ParticipantData as TxParticipant, Slate, SlateVersion, VersionedSlate};
+use crate::swap::multisig;
+use crate::{NodeClient, Slate, SlateVersion, VersionedSlate};
+use mwc_wallet_util::mwc_core::core::Committed;
+use mwc_wallet_util::mwc_core::core::KernelFeatures;
 use mwc_wallet_util::mwc_core::global;
-use rand::thread_rng;
+use mwc_wallet_util::mwc_core::libtx::{build, proof, tx_fee};
+use mwc_wallet_util::mwc_crates::rand::thread_rng;
+use mwc_wallet_util::mwc_crates::secp;
+use mwc_wallet_util::mwc_crates::secp::aggsig;
+use mwc_wallet_util::mwc_crates::secp::key::{PublicKey, SecretKey};
+use mwc_wallet_util::mwc_crates::secp::pedersen::RangeProof;
+use mwc_wallet_util::mwc_crates::uuid::Uuid;
+use mwc_wallet_util::mwc_keychain::{BlindSum, BlindingFactor, SwitchCommitmentType};
 use std::mem;
-use uuid::Uuid;
 
 /// Buyer API. Bunch of methods that cover buyer action for MWC swap
 /// This party is Buying MWC and selling BTC
@@ -227,7 +227,7 @@ impl BuyApi {
 
 		redeem_slate.participant_data.push(offer.redeem_participant);
 
-		let multisig = MultisigBuilder::new(
+		let multisig = multisig::Builder::new(
 			2,
 			offer.primary_amount, // !!! It is amount that will be put into transactions. It is primary what need to be validated
 			false,
@@ -472,7 +472,7 @@ impl BuyApi {
 		keychain: &K,
 		swap: &mut Swap,
 		context: &Context,
-		part: MultisigParticipant,
+		part: multisig::ParticipantData,
 	) -> Result<(), Error> {
 		let multisig_secret = swap.multisig_secret(keychain, context)?;
 		let multisig = &mut swap.multisig;
@@ -525,7 +525,7 @@ impl BuyApi {
 
 		// Add multisig output to slate (with invalid proof)
 		let mut proof = RangeProof::zero();
-		proof.plen = crate::mwc_util::secp::constants::MAX_PROOF_SIZE;
+		proof.plen = secp::constants::MAX_PROOF_SIZE;
 
 		tx_add_output(slate, swap.multisig.commit(keychain.secp())?, proof)?;
 
@@ -691,7 +691,7 @@ impl BuyApi {
 		keychain: &K,
 		swap: &mut Swap,
 		context: &Context,
-		part: TxParticipant,
+		part: crate::ParticipantData,
 	) -> Result<(), Error> {
 		let id = swap.participant_id;
 		let other_id = swap.other_participant_id();

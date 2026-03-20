@@ -16,20 +16,11 @@
 //! Utilities to check the status of all the outputs we have stored in
 //! the wallet storage and update them.
 
+use mwc_wallet_util::mwc_crates::uuid::Uuid;
 use std::collections::{HashMap, HashSet};
-use uuid::Uuid;
 
 use crate::error::Error;
 use crate::internal::keys;
-use crate::mwc_core::consensus::reward;
-use crate::mwc_core::core::{Output, TxKernel};
-use crate::mwc_core::global;
-use crate::mwc_core::libtx::proof::ProofBuilder;
-use crate::mwc_core::libtx::reward;
-use crate::mwc_keychain::{Identifier, Keychain, SwitchCommitmentType};
-use crate::mwc_util as util;
-use crate::mwc_util::secp::key::SecretKey;
-use crate::mwc_util::secp::pedersen;
 use crate::types::{
 	NodeClient, OutputData, OutputStatus, TxLogEntry, TxLogEntryType, WalletBackend, WalletInfo,
 };
@@ -37,11 +28,21 @@ use crate::{
 	BlockFees, CbData, OutputCommitMapping, RetrieveTxQueryArgs, RetrieveTxQuerySortField,
 	RetrieveTxQuerySortOrder,
 };
+use mwc_wallet_util::mwc_core::consensus::reward;
+use mwc_wallet_util::mwc_core::core::{Output, TxKernel};
+use mwc_wallet_util::mwc_core::global;
+use mwc_wallet_util::mwc_core::libtx::proof::ProofBuilder;
+use mwc_wallet_util::mwc_core::libtx::reward;
+use mwc_wallet_util::mwc_crates::secp::key::SecretKey;
+use mwc_wallet_util::mwc_crates::secp::pedersen;
+use mwc_wallet_util::mwc_keychain::{Identifier, Keychain, SwitchCommitmentType};
+use mwc_wallet_util::mwc_util;
 
 use mwc_wallet_util::mwc_chain::Chain;
 use mwc_wallet_util::mwc_core::consensus::DAY_HEIGHT;
+use mwc_wallet_util::mwc_crates::log::debug;
+use mwc_wallet_util::mwc_crates::num_bigint::BigInt;
 use mwc_wallet_util::mwc_util::ToHex;
-use num_bigint::BigInt;
 
 /// Retrieve all of the outputs (doesn't attempt to update from node)
 pub fn retrieve_outputs<'a, T: ?Sized, C, K>(
@@ -87,8 +88,8 @@ where
 	if let Some(tx) = tx {
 		let mut tx_commits: HashSet<String> = HashSet::new();
 
-		tx_commits.extend(tx.input_commits.iter().map(|c| util::to_hex(&c.0)));
-		tx_commits.extend(tx.output_commits.iter().map(|c| util::to_hex(&c.0)));
+		tx_commits.extend(tx.input_commits.iter().map(|c| mwc_util::to_hex(&c.0)));
+		tx_commits.extend(tx.output_commits.iter().map(|c| mwc_util::to_hex(&c.0)));
 
 		outputs = outputs
 			.into_iter()
@@ -131,7 +132,7 @@ where
 		}
 
 		let commit = match out.commit.clone() {
-			Some(c) => pedersen::Commitment::from_vec(util::from_hex(&c).map_err(|e| {
+			Some(c) => pedersen::Commitment::from_vec(mwc_util::from_hex(&c).map_err(|e| {
 				Error::GenericError(format!("Unable to parse HEX commit {}, {}", c, e))
 			})?),
 			None => keychain // TODO: proper support for different switch commitment schemes

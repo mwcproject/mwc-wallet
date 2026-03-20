@@ -15,25 +15,25 @@
 #[cfg(test)]
 use super::is_test_mode;
 use super::message::*;
-use super::multisig::{Builder as MultisigBuilder, ParticipantData as MultisigParticipant};
+use super::multisig;
 use super::swap;
 use super::swap::{signature_as_secret, tx_add_input, tx_add_output, Swap};
 use super::types::*;
 use super::{Error, Keychain, CURRENT_VERSION};
-use crate::mwc_core::libtx::{build, proof, tx_fee};
-use crate::mwc_keychain::{BlindSum, BlindingFactor};
-use crate::mwc_util::secp::aggsig;
-use crate::mwc_util::secp::key::{PublicKey, SecretKey};
-use crate::mwc_util::secp::pedersen::{Commitment, RangeProof};
 use crate::swap::fsm::state::StateId;
-use crate::{ParticipantData as TxParticipant, Slate, SlateVersion, VersionedSlate};
-use chrono::{TimeZone, Utc};
-use rand::thread_rng;
+use crate::{Slate, SlateVersion, VersionedSlate};
+use mwc_wallet_util::mwc_core::libtx::{build, proof, tx_fee};
+use mwc_wallet_util::mwc_crates::chrono::{TimeZone, Utc};
+use mwc_wallet_util::mwc_crates::rand::thread_rng;
+use mwc_wallet_util::mwc_crates::secp::aggsig;
+use mwc_wallet_util::mwc_crates::secp::key::{PublicKey, SecretKey};
+use mwc_wallet_util::mwc_crates::secp::pedersen::{Commitment, RangeProof};
+use mwc_wallet_util::mwc_keychain::{BlindSum, BlindingFactor};
 
 use crate::slate::SlateCtx;
 use mwc_wallet_util::mwc_core::global;
 #[cfg(test)]
-use uuid::Uuid;
+use mwc_wallet_util::mwc_crates::uuid::Uuid;
 
 /// Seller API. Bunch of methods that cover seller action for MWC swap
 /// This party is Selling MWC and buying BTC
@@ -73,7 +73,7 @@ impl SellApi {
 		#[cfg(test)]
 		let test_mode = is_test_mode();
 		let scontext = context.unwrap_seller()?;
-		let multisig = MultisigBuilder::new(
+		let multisig = multisig::Builder::new(
 			2,
 			primary_amount,
 			false,
@@ -467,7 +467,7 @@ impl SellApi {
 		keychain: &K,
 		swap: &mut Swap,
 		context: &Context,
-		part: MultisigParticipant,
+		part: multisig::ParticipantData,
 	) -> Result<RangeProof, Error> {
 		let sec_key = swap.multisig_secret(keychain, context)?;
 		let secp = keychain.secp();
@@ -573,7 +573,7 @@ impl SellApi {
 		context: &Context,
 		commit: Commitment,
 		proof: RangeProof,
-		part: TxParticipant,
+		part: crate::ParticipantData,
 	) -> Result<(), Error> {
 		let sec_key = Self::lock_tx_secret(keychain, swap, context)?;
 
@@ -677,7 +677,7 @@ impl SellApi {
 		swap: &mut Swap,
 		context: &Context,
 		commit: Commitment,
-		part: TxParticipant,
+		part: crate::ParticipantData,
 	) -> Result<(), Error> {
 		let sec_key = Self::refund_tx_secret(keychain, swap, context)?;
 
@@ -739,7 +739,7 @@ impl SellApi {
 		}
 
 		// Build participant
-		let participant = TxParticipant {
+		let participant = crate::ParticipantData {
 			id: swap.participant_id as u64,
 			public_blind_excess: PublicKey::from_secret_key(keychain.secp(), &sec_key)?,
 			public_nonce: PublicKey::from_secret_key(keychain.secp(), &context.redeem_nonce)?,

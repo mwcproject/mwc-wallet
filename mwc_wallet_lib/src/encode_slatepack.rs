@@ -13,9 +13,9 @@
 // limitations under the License.
 
 use crate::wallet_lock;
-use ed25519_dalek::PublicKey as DalekPublicKey;
 use mwc_wallet_libwallet::proof::proofaddress::ProvableAddress;
 use mwc_wallet_libwallet::{foreign, SlatePurpose, SlateVersion, VersionedSlate};
+use mwc_wallet_util::mwc_crates::ed25519_dalek;
 
 pub fn encode_slatepack(
 	context_id: u32,
@@ -31,7 +31,7 @@ pub fn encode_slatepack(
 		.into_slate_plain(context_id, false)
 		.map_err(|e| format!("Expected to get slate in Json format, {}", e))?;
 
-	let recipient: Option<DalekPublicKey> = match recipient {
+	let recipient: Option<ed25519_dalek::PublicKey> = match recipient {
 		Some(recipient) => {
 			let recipient = ProvableAddress::from_str(context_id, &recipient)
 				.map_err(|e| format!("Invalid recipient address, {}", e))?;

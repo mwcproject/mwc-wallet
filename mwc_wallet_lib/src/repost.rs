@@ -18,8 +18,8 @@ use mwc_wallet_libwallet::internal::updater;
 use mwc_wallet_libwallet::slate_versions::v3::sig_is_blank;
 use mwc_wallet_libwallet::{owner, TxLogEntry, TxLogEntryType};
 use mwc_wallet_util::mwc_core::core::Transaction;
+use mwc_wallet_util::mwc_crates::uuid::Uuid;
 use std::str::FromStr;
-use uuid::Uuid;
 
 pub fn get_finalized_transaction(
 	context_id: u32,

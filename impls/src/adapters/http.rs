@@ -16,32 +16,36 @@
 use crate::adapters::MarketplaceMessageSender;
 /// HTTP Wallet 'plugin' implementation
 use crate::error::Error;
-use crate::libwallet::slate_versions::{SlateVersion, VersionedSlate};
-#[cfg(feature = "swaps")]
-use crate::libwallet::swap::message::Message;
-use crate::libwallet::Slate;
 use crate::SlateSender;
 #[cfg(feature = "swaps")]
 use crate::SwapMessageSender;
-use ed25519_dalek::{PublicKey as DalekPublicKey, SecretKey as DalekSecretKey};
 use mwc_wallet_libwallet::address;
 use mwc_wallet_libwallet::proof::proofaddress::ProvableAddress;
+use mwc_wallet_libwallet::slate_versions::{SlateVersion, VersionedSlate};
 use mwc_wallet_libwallet::slatepack::SlatePurpose;
+#[cfg(feature = "swaps")]
+use mwc_wallet_libwallet::swap::message::Message;
+use mwc_wallet_libwallet::Slate;
+use mwc_wallet_util::mwc_crates::ed25519_dalek;
+use mwc_wallet_util::mwc_crates::log::{debug, error, info, trace, warn};
+use mwc_wallet_util::mwc_crates::secp::Secp256k1;
+use mwc_wallet_util::mwc_crates::serde::Serialize;
+use mwc_wallet_util::mwc_crates::serde_json;
+use mwc_wallet_util::mwc_crates::serde_json::{json, Value};
+use mwc_wallet_util::mwc_crates::tokio;
+use mwc_wallet_util::mwc_crates::tokio::net::TcpStream;
+use mwc_wallet_util::mwc_crates::tokio_socks::tcp::Socks5Stream;
+use mwc_wallet_util::mwc_crates::tor_proto::client::stream::DataStream;
+use mwc_wallet_util::mwc_crates::url::Url;
+use mwc_wallet_util::mwc_p2p;
 use mwc_wallet_util::mwc_p2p::tor::arti;
 use mwc_wallet_util::mwc_p2p::tor::arti::arti_async_block;
 use mwc_wallet_util::mwc_p2p::tor::tcp_data_stream::TcpDataStream;
-use mwc_wallet_util::mwc_p2p::{DataStream, TorConfig};
-use mwc_wallet_util::mwc_util;
+use mwc_wallet_util::mwc_p2p::TorConfig;
 use mwc_wallet_util::mwc_util::run_global_async_block;
-use mwc_wallet_util::mwc_util::secp::Secp256k1;
-use mwc_wallet_util::mwc_util::tokio_socks::tcp::Socks5Stream;
-use serde::Serialize;
-use serde_json::{json, Value};
 use std::path::Path;
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
-use tokio::net::TcpStream;
-use url::Url;
 
 type ReconnectHandler = Arc<dyn Fn() -> Result<TcpDataStream, Error> + Send + Sync>;
 
@@ -102,23 +106,21 @@ impl HttpDataSender {
 			let port = port;
 			let base_url2 = base_url2.to_string();
 			let stream = run_global_async_block(async {
-				let stream = mwc_util::tokio::time::timeout(
-					Duration::from_secs(10),
-					TcpStream::connect((host, port)),
-				)
-				.await
-				.map_err(|_| {
-					Error::ConnectionError(format!(
-						"Unable connect to {} by direct connection",
-						base_url2
-					))
-				})?
-				.map_err(|e| {
-					Error::ConnectionError(format!(
-						"Unable connect to {} by direct connection, {}",
-						base_url2, e
-					))
-				})?;
+				let stream =
+					tokio::time::timeout(Duration::from_secs(10), TcpStream::connect((host, port)))
+						.await
+						.map_err(|_| {
+							Error::ConnectionError(format!(
+								"Unable connect to {} by direct connection",
+								base_url2
+							))
+						})?
+						.map_err(|e| {
+							Error::ConnectionError(format!(
+								"Unable connect to {} by direct connection, {}",
+								base_url2, e
+							))
+						})?;
 				Ok::<TcpDataStream, Error>(TcpDataStream::from_tcp(stream))
 			})?;
 			Ok(stream)
@@ -189,7 +191,7 @@ impl HttpDataSender {
 					let stream = Socks5Stream::connect(proxy_address.as_str(), (onion_address, 80))
 						.await
 						.map_err(|e| {
-							mwc_wallet_util::mwc_p2p::Error::TorConnect(format!(
+							mwc_p2p::Error::TorConnect(format!(
 								"Unable connect to External Tor as 127.0.0.1:{}, {}",
 								socks_port, e
 							))
@@ -217,7 +219,7 @@ impl HttpDataSender {
 							arti.connect((onion_address.as_str(), port))
 								.await
 								.map_err(|e| {
-									mwc_wallet_util::mwc_p2p::Error::TorConnect(format!(
+									mwc_p2p::Error::TorConnect(format!(
 										"Unable connect to {}:{}, {}",
 										onion_address, 80, e
 									))
@@ -517,8 +519,8 @@ impl SlateSender for HttpDataSender {
 		send_tx: bool, // false if invoice, true if send operation
 		slate: &Slate,
 		slate_content: SlatePurpose,
-		slatepack_secret: &DalekSecretKey,
-		recipient: Option<DalekPublicKey>,
+		slatepack_secret: &ed25519_dalek::SecretKey,
+		recipient: Option<ed25519_dalek::PublicKey>,
 		other_wallet_version: Option<(SlateVersion, Option<String>)>,
 		secp: &Secp256k1,
 	) -> Result<Slate, Error> {
@@ -552,7 +554,7 @@ impl SlateSender for HttpDataSender {
 						"Not provided expected recipient address for Slate Pack".to_string(),
 					));
 				}
-				let tor_pk = DalekPublicKey::from(slatepack_secret);
+				let tor_pk = ed25519_dalek::PublicKey::from(slatepack_secret);
 
 				VersionedSlate::into_version(
 					self.context_id,

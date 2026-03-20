@@ -15,21 +15,23 @@
 
 //! Types specific to the wallet api, mostly argument serialization
 
-use crate::mwc_core::core::Output;
-use crate::mwc_core::libtx::secp_ser;
-use crate::mwc_keychain::{BlindingFactor, Identifier};
-use crate::mwc_util::secp::pedersen;
 use crate::proof::proofaddress::ProvableAddress;
 use crate::slate_versions::SlateVersion;
 use crate::types::OutputData;
+use mwc_wallet_util::mwc_core::core::Output;
+use mwc_wallet_util::mwc_core::libtx::secp_ser;
+use mwc_wallet_util::mwc_crates::secp::pedersen;
+use mwc_wallet_util::mwc_crates::serde::{self, Deserialize, Serialize};
+use mwc_wallet_util::mwc_keychain::{BlindingFactor, Identifier};
 use std::collections::HashSet;
 
-use chrono::prelude::*;
+use mwc_wallet_util::mwc_crates::chrono::prelude::*;
 
 /// Send TX API Args
 // TODO: This is here to ensure the legacy V1 API remains intact
 // remove this when v1 api is removed
 #[derive(Clone, Serialize, Deserialize)]
+#[serde(crate = "serde")]
 pub struct SendTXArgs {
 	/// amount to send
 	pub amount: u64,
@@ -54,10 +56,12 @@ pub struct SendTXArgs {
 /// Type for storing amounts (in nanomwcs).
 /// Serializes as a string but can deserialize from a string or u64.
 #[derive(Serialize, Deserialize)]
+#[serde(crate = "serde")]
 pub struct Amount(#[serde(with = "secp_ser::string_or_u64")] pub u64);
 
 /// V2 Init / Send TX API Args
 #[derive(Clone, Serialize, Deserialize, Debug)]
+#[serde(crate = "serde")]
 pub struct InitTxArgs {
 	/// The human readable account name from which to draw outputs
 	/// for the transaction, overriding whatever the active account is as set via the
@@ -142,7 +146,7 @@ pub struct InitTxArgs {
 	/// Selected outputs. If none, will use all outputs
 	pub outputs: Option<HashSet<String>>, // outputs to include into the transaction
 	/// Slatepack recipient. If defined will send as a slatepack. Otherwise as not encrypted. Will be ignored for MQS
-	/// ProvableAddress has to be tor (DalekPublicKey) address
+	/// ProvableAddress has to be tor (ed25519_dalek::PublicKey) address
 	#[serde(serialize_with = "ProvableAddress::serialize_option_as_string")]
 	pub slatepack_recipient: Option<ProvableAddress>,
 	/// if flagged, create the transaction as late-locked, i.e. don't select actual
@@ -157,6 +161,7 @@ pub struct InitTxArgs {
 /// Send TX API Args, for convenience functionality that inits the transaction and sends
 /// in one go
 #[derive(Clone, Serialize, Deserialize, Debug)]
+#[serde(crate = "serde")]
 pub struct InitTxSendArgs {
 	/// The transaction method. Can currently be 'http' .
 	pub method: String,
@@ -235,6 +240,7 @@ impl InitTxSendArgs {
 
 /// V2 Issue Invoice Tx Args
 #[derive(Clone, Serialize, Deserialize)]
+#[serde(crate = "serde")]
 pub struct IssueInvoiceTxArgs {
 	/// The human readable account name to which the received funds should be added
 	/// overriding whatever the active account is as set via the
@@ -256,7 +262,7 @@ pub struct IssueInvoiceTxArgs {
 	#[serde(default)]
 	pub address: Option<String>,
 	/// Slatepack recipient. If defined will send as a slatepack. Otherwise as not encrypted. Will be ignored for MQS
-	/// ProvableAddress has to be tor (DalekPublicKey) address
+	/// ProvableAddress has to be tor (ed25519_dalek::PublicKey) address
 	#[serde(default)]
 	pub slatepack_recipient: Option<ProvableAddress>,
 }
@@ -276,6 +282,7 @@ impl Default for IssueInvoiceTxArgs {
 
 /// Reply mitigation configuration, put it here because it is used in the impl layer.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(crate = "serde")]
 pub struct ReplayMitigationConfig {
 	/// turn it on or off
 	pub replay_mitigation_flag: bool,
@@ -294,6 +301,7 @@ impl Default for ReplayMitigationConfig {
 
 /// Sort tx retrieval order
 #[derive(Clone, Serialize, Deserialize)]
+#[serde(crate = "serde")]
 pub enum RetrieveTxQuerySortOrder {
 	/// Ascending
 	Asc,
@@ -303,6 +311,7 @@ pub enum RetrieveTxQuerySortOrder {
 
 /// Valid sort fields for a transaction list retrieval query
 #[derive(Clone, Serialize, Deserialize)]
+#[serde(crate = "serde")]
 pub enum RetrieveTxQuerySortField {
 	/// Transaction Id
 	Id,
@@ -320,6 +329,7 @@ pub enum RetrieveTxQuerySortField {
 
 /// Retrieve Transaction List Pagination Arguments
 #[derive(Clone, Serialize, Deserialize)]
+#[serde(crate = "serde")]
 pub struct RetrieveTxQueryArgs {
 	/// Retrieve transactions with an id higher than or equal to the given
 	/// If None, consider items from the first transaction and later
@@ -395,6 +405,7 @@ impl Default for RetrieveTxQueryArgs {
 
 /// Fees in block to use for coinbase amount calculation
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(crate = "serde")]
 pub struct BlockFees {
 	/// fees
 	#[serde(with = "secp_ser::string_or_u64")]
@@ -415,6 +426,7 @@ impl BlockFees {
 
 /// Map Outputdata to commits
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(crate = "serde")]
 pub struct OutputCommitMapping {
 	/// Output Data
 	pub output: OutputData,
@@ -428,6 +440,7 @@ pub struct OutputCommitMapping {
 
 /// Node height result
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(crate = "serde")]
 pub struct NodeHeightResult {
 	/// Last known height
 	#[serde(with = "secp_ser::string_or_u64")]
@@ -440,6 +453,7 @@ pub struct NodeHeightResult {
 
 /// Version request result
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(crate = "serde")]
 pub struct VersionInfo {
 	/// API version
 	pub foreign_api_version: u16,
@@ -450,6 +464,7 @@ pub struct VersionInfo {
 /// Packaged Payment Proof
 #[cfg(feature = "grin_proof")]
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(crate = "serde")]
 pub struct PaymentProof {
 	/// Amount
 	#[serde(with = "secp_ser::string_or_u64")]
@@ -472,6 +487,7 @@ pub struct PaymentProof {
 
 /// Ownership proof for addresses & root public keys
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(crate = "serde")]
 pub struct PubKeySignature {
 	/// Public key
 	pub public_key: String,
@@ -481,6 +497,7 @@ pub struct PubKeySignature {
 
 /// Ownership proof for addresses & root public keys
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(crate = "serde")]
 pub struct OwnershipProof {
 	/// Name of the network
 	pub network: String,
@@ -497,6 +514,7 @@ pub struct OwnershipProof {
 
 /// Ownership validation results
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(crate = "serde")]
 pub struct OwnershipProofValidation {
 	/// Network name
 	pub network: String,
@@ -526,6 +544,7 @@ impl OwnershipProofValidation {
 
 /// Init swap operation
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(crate = "serde")]
 pub struct SwapStartArgs {
 	/// MWC to send
 	pub mwc_amount: u64,
@@ -575,6 +594,7 @@ pub struct SwapStartArgs {
 
 /// Build output result
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(crate = "serde")]
 pub struct BuiltOutput {
 	/// Blinding Factor
 	#[serde(

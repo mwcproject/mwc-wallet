@@ -15,11 +15,12 @@
 use crate::http_parser::parse_utils;
 use crate::Error;
 use mwc_wallet_util::mwc_core::global;
+use mwc_wallet_util::mwc_crates::serde::Serialize;
+use mwc_wallet_util::mwc_crates::serde_json;
+use mwc_wallet_util::mwc_crates::url::Url;
 use mwc_wallet_util::mwc_p2p::tor::tcp_data_stream::TcpDataStream;
 use mwc_wallet_util::mwc_util::to_base64;
-use serde::Serialize;
 use std::io::{Read, Write};
-use url::Url;
 
 /// response with error AND close connection request flag
 pub fn post_auth<OUT>(

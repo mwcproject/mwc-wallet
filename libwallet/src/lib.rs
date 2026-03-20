@@ -23,33 +23,6 @@
 #![deny(unused_mut)]
 #![warn(missing_docs)]
 
-use mwc_wallet_config as config;
-use mwc_wallet_util::mwc_api;
-use mwc_wallet_util::mwc_core;
-use mwc_wallet_util::mwc_keychain;
-use mwc_wallet_util::mwc_p2p;
-use mwc_wallet_util::mwc_util;
-
-use mwc_wallet_util as util;
-
-use blake2_rfc as blake2;
-
-#[macro_use]
-extern crate serde_derive;
-#[macro_use]
-extern crate log;
-#[macro_use]
-extern crate lazy_static;
-
-extern crate strum;
-#[macro_use]
-extern crate strum_macros;
-
-extern crate hex;
-extern crate signature;
-
-extern crate crc;
-
 pub mod address;
 pub mod api_impl;
 /// Ring prev version internals that are needed for our internal encription functionality
@@ -64,17 +37,7 @@ pub mod slatepack;
 pub mod swap;
 pub mod types;
 
-#[cfg(feature = "swaps")]
-extern crate bitcoin as bitcoin_lib;
-#[cfg(feature = "swaps")]
-extern crate bitcoin_hashes;
-#[cfg(feature = "swaps")]
-extern crate mwc_zcash_primitives as zcash;
-
 pub use crate::slatepack::{SlatePurpose, Slatepack, SlatepackArmor, Slatepacker};
-
-#[cfg(feature = "swaps")]
-pub use bitcoin::Address as BitcoinAddress;
 
 pub use crate::error::Error;
 pub use crate::slate::{
@@ -98,7 +61,7 @@ pub use api_impl::types::{
 pub use internal::scan::{scan, set_replay_config};
 pub use proof::tx_proof::TxProof;
 pub use proof::tx_proof::{proof_ok, verify_tx_proof_wrapper};
-pub use slate_versions::ser as dalek_ser;
+pub use slate_versions::ser;
 pub use types::{
 	AcctPathMapping, BlockIdentifier, CbData, Context, HeaderInfo, NodeClient, NodeVersionInfo,
 	OutputData, OutputStatus, ScannedBlockInfo, TxLogEntry, TxLogEntryType, ViewWallet,

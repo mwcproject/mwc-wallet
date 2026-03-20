@@ -17,31 +17,34 @@
 //! so that wallet API can be fully exercised
 //! Operates directly on a chain instance
 
-use crate::api::{self, LocatedTxKernel};
-use crate::api::{Libp2pMessages, Libp2pPeers};
-use crate::chain::types::NoopAdapter;
-use crate::chain::Chain;
-use crate::core::core::hash::Hashed;
-use crate::core::core::BlockHeader;
-use crate::core::core::{Transaction, TxKernel};
-use crate::core::global::{set_local_chain_type, ChainTypes};
-use crate::core::pow;
-use crate::keychain::Keychain;
-use crate::libwallet;
-use crate::libwallet::api_impl::foreign;
-use crate::libwallet::slate_versions::v3::SlateV3;
-use crate::libwallet::{
-	HeaderInfo, NodeClient, NodeVersionInfo, Slate, WalletInst, WalletLCProvider,
-};
-use crate::util;
-use crate::util::secp::key::SecretKey;
-use crate::util::secp::pedersen;
-use crate::util::secp::pedersen::Commitment;
-use crate::util::ToHex;
+use mwc_wallet_libwallet;
+use mwc_wallet_libwallet::api_impl::foreign;
+use mwc_wallet_libwallet::slate_versions::v3::SlateV3;
 use mwc_wallet_libwallet::types::TxSession;
 use mwc_wallet_libwallet::SlateCtx;
+use mwc_wallet_libwallet::{
+	HeaderInfo, NodeClient, NodeVersionInfo, Slate, WalletInst, WalletLCProvider,
+};
+use mwc_wallet_util::mwc_api::{self, LocatedTxKernel};
+use mwc_wallet_util::mwc_api::{Libp2pMessages, Libp2pPeers};
+use mwc_wallet_util::mwc_chain::types::NoopAdapter;
+use mwc_wallet_util::mwc_chain::Chain;
+use mwc_wallet_util::mwc_core::core::hash::Hashed;
+use mwc_wallet_util::mwc_core::core::BlockHeader;
+use mwc_wallet_util::mwc_core::core::{Transaction, TxKernel};
 use mwc_wallet_util::mwc_core::global;
-use serde_json;
+use mwc_wallet_util::mwc_core::global::{set_local_chain_type, ChainTypes};
+use mwc_wallet_util::mwc_core::pow;
+use mwc_wallet_util::mwc_crates::chrono;
+use mwc_wallet_util::mwc_crates::log::{info, trace};
+use mwc_wallet_util::mwc_crates::secp::key::SecretKey;
+use mwc_wallet_util::mwc_crates::secp::pedersen;
+use mwc_wallet_util::mwc_crates::secp::pedersen::Commitment;
+use mwc_wallet_util::mwc_crates::serde_json;
+use mwc_wallet_util::mwc_keychain::Keychain;
+use mwc_wallet_util::mwc_p2p::types::PeerInfoDisplayLegacy;
+use mwc_wallet_util::mwc_util;
+use mwc_wallet_util::mwc_util::ToHex;
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender};
@@ -147,7 +150,7 @@ where
 
 	/// Run the incoming message queue and respond more or less
 	/// synchronously
-	pub fn run(&mut self) -> Result<(), libwallet::Error> {
+	pub fn run(&mut self) -> Result<(), mwc_wallet_libwallet::Error> {
 		// We run the wallet_proxy within a spawned thread in tests.
 		// We set the local chain_type here within the thread.
 		set_local_chain_type(ChainTypes::AutomatedTesting);
@@ -195,9 +198,12 @@ where
 	}
 
 	/// post transaction to the chain (and mine it, taking the reward)
-	fn post_tx(&mut self, m: WalletProxyMessage) -> Result<WalletProxyMessage, libwallet::Error> {
+	fn post_tx(
+		&mut self,
+		m: WalletProxyMessage,
+	) -> Result<WalletProxyMessage, mwc_wallet_libwallet::Error> {
 		let tx: Transaction = serde_json::from_str(&m.body).map_err(|e| {
-			libwallet::Error::ClientCallback(format!("Error parsing Transaction, {}", e))
+			mwc_wallet_libwallet::Error::ClientCallback(format!("Error parsing Transaction, {}", e))
 		})?;
 
 		self.tx_pool
@@ -217,7 +223,7 @@ where
 	fn send_tx_slate(
 		&mut self,
 		m: WalletProxyMessage,
-	) -> Result<WalletProxyMessage, libwallet::Error> {
+	) -> Result<WalletProxyMessage, mwc_wallet_libwallet::Error> {
 		let dest_wallet = self.wallets.get_mut(&m.dest);
 		let wallet = match dest_wallet {
 			None => panic!("Unknown wallet destination for send_tx_slate: {:?}", m),
@@ -225,7 +231,7 @@ where
 		};
 
 		let slate: SlateV3 = serde_json::from_str(&m.body).map_err(|e| {
-			libwallet::Error::ClientCallback(format!("Error parsing Transaction, {}", e))
+			mwc_wallet_libwallet::Error::ClientCallback(format!("Error parsing Transaction, {}", e))
 		})?;
 
 		let slate: Slate = {
@@ -278,7 +284,7 @@ where
 	fn get_chain_tip(
 		&mut self,
 		m: WalletProxyMessage,
-	) -> Result<WalletProxyMessage, libwallet::Error> {
+	) -> Result<WalletProxyMessage, mwc_wallet_libwallet::Error> {
 		let height = self.chain.head().unwrap().height;
 		let hash = self.chain.head().unwrap().last_block_h.to_hex();
 
@@ -294,7 +300,7 @@ where
 	fn get_header_info(
 		&mut self,
 		m: WalletProxyMessage,
-	) -> Result<WalletProxyMessage, libwallet::Error> {
+	) -> Result<WalletProxyMessage, mwc_wallet_libwallet::Error> {
 		let height = m.body.parse::<u64>().unwrap();
 
 		let hdr: BlockHeader = self.chain.get_header_by_height(height).unwrap();
@@ -319,15 +325,15 @@ where
 	fn get_outputs_from_node(
 		&mut self,
 		m: WalletProxyMessage,
-	) -> Result<WalletProxyMessage, libwallet::Error> {
+	) -> Result<WalletProxyMessage, mwc_wallet_libwallet::Error> {
 		let split = m.body.split(',');
 		//let mut api_outputs: HashMap<pedersen::Commitment, String> = HashMap::new();
-		let mut outputs: Vec<api::Output> = vec![];
+		let mut outputs: Vec<mwc_api::Output> = vec![];
 		for o in split {
 			if o.is_empty() {
 				continue;
 			}
-			let c = util::from_hex(o).unwrap();
+			let c = mwc_util::from_hex(o).unwrap();
 			let commit = Commitment::from_vec(c);
 			let out = super::get_output_local(&self.chain.clone(), commit);
 			if let Some(o) = out {
@@ -346,7 +352,7 @@ where
 	fn get_outputs_by_pmmr_index(
 		&mut self,
 		m: WalletProxyMessage,
-	) -> Result<WalletProxyMessage, libwallet::Error> {
+	) -> Result<WalletProxyMessage, mwc_wallet_libwallet::Error> {
 		let split = m.body.split(',').collect::<Vec<&str>>();
 		let start_index = std::cmp::max(split[0].parse::<u64>().unwrap(), 1);
 		let max = split[1].parse::<u64>().unwrap();
@@ -369,7 +375,7 @@ where
 	fn height_range_to_pmmr_indices(
 		&mut self,
 		m: WalletProxyMessage,
-	) -> Result<WalletProxyMessage, libwallet::Error> {
+	) -> Result<WalletProxyMessage, mwc_wallet_libwallet::Error> {
 		let split = m.body.split(',').collect::<Vec<&str>>();
 		let start_index = split[0].parse::<u64>().unwrap();
 		let end_index = split[1].parse::<u64>().unwrap();
@@ -391,11 +397,11 @@ where
 	fn get_blocks_by_height(
 		&mut self,
 		m: WalletProxyMessage,
-	) -> Result<WalletProxyMessage, libwallet::Error> {
+	) -> Result<WalletProxyMessage, mwc_wallet_libwallet::Error> {
 		let split = m.body.split(",").collect::<Vec<&str>>();
 		let start_height = split[0].parse::<u64>().unwrap();
 		let end_height = split[1].parse::<u64>().unwrap();
-		assert!(start_height <= end_height);
+		debug_assert!(start_height <= end_height);
 
 		let ol = super::get_blocks_by_height_local(self.chain.clone(), start_height, end_height);
 		Ok(WalletProxyMessage {
@@ -407,12 +413,15 @@ where
 	}
 
 	/// get kernel
-	fn get_kernel(&self, m: WalletProxyMessage) -> Result<WalletProxyMessage, libwallet::Error> {
+	fn get_kernel(
+		&self,
+		m: WalletProxyMessage,
+	) -> Result<WalletProxyMessage, mwc_wallet_libwallet::Error> {
 		let split = m.body.split(',').collect::<Vec<&str>>();
 		let excess = split[0].parse::<String>().unwrap();
 		let min = split[1].parse::<u64>().unwrap();
 		let max = split[2].parse::<u64>().unwrap();
-		let commit_bytes = util::from_hex(&excess).unwrap();
+		let commit_bytes = mwc_util::from_hex(&excess).unwrap();
 		let commit = pedersen::Commitment::from_vec(commit_bytes);
 		let min = match min {
 			0 => None,
@@ -466,7 +475,7 @@ impl LocalWalletClient {
 		&self,
 		dest: &str,
 		slate: &Slate,
-	) -> Result<Slate, libwallet::Error> {
+	) -> Result<Slate, mwc_wallet_libwallet::Error> {
 		let m = WalletProxyMessage {
 			sender_id: self.id.clone(),
 			dest: dest.to_owned(),
@@ -479,14 +488,18 @@ impl LocalWalletClient {
 		};
 		{
 			let p = self.proxy_tx.lock().unwrap_or_else(|e| e.into_inner());
-			p.send(m)
-				.map_err(|e| libwallet::Error::ClientCallback(format!("Send TX Slate, {}", e)))?;
+			p.send(m).map_err(|e| {
+				mwc_wallet_libwallet::Error::ClientCallback(format!("Send TX Slate, {}", e))
+			})?;
 		}
 		let r = self.rx.lock().unwrap_or_else(|e| e.into_inner());
 		let m = r.recv().unwrap();
 		trace!("Received send_tx_slate response: {:?}", m.clone());
 		let slate: SlateV3 = serde_json::from_str(&m.body).map_err(|e| {
-			libwallet::Error::ClientCallback(format!("Parsing send_tx_slate response, {}", e))
+			mwc_wallet_libwallet::Error::ClientCallback(format!(
+				"Parsing send_tx_slate response, {}",
+				e
+			))
 		})?;
 		Ok(slate.to_slate(Some(global::get_network_name(0)), false)?)
 	}
@@ -494,7 +507,7 @@ impl LocalWalletClient {
 
 impl NodeClient for LocalWalletClient {
 	/*	fn increase_index(&self) {}
-	fn node_url(&self) -> Result<String, libwallet::Error> {
+	fn node_url(&self) -> Result<String, mwc_wallet_libwallet::Error> {
 		Ok("node".to_string())
 	}
 	fn node_api_secret(&self) -> &Option<String> {
@@ -512,7 +525,7 @@ impl NodeClient for LocalWalletClient {
 	}
 	/// Posts a transaction to a mwc node
 	/// In this case it will create a new block with award rewarded to
-	fn post_tx(&self, tx: &Transaction, _fluff: bool) -> Result<(), libwallet::Error> {
+	fn post_tx(&self, tx: &Transaction, _fluff: bool) -> Result<(), mwc_wallet_libwallet::Error> {
 		let m = WalletProxyMessage {
 			sender_id: self.id.clone(),
 			dest: "node".to_string(),
@@ -521,8 +534,9 @@ impl NodeClient for LocalWalletClient {
 		};
 		{
 			let p = self.proxy_tx.lock().unwrap_or_else(|e| e.into_inner());
-			p.send(m)
-				.map_err(|e| libwallet::Error::ClientCallback(format!("post_tx send, {}", e)))?;
+			p.send(m).map_err(|e| {
+				mwc_wallet_libwallet::Error::ClientCallback(format!("post_tx send, {}", e))
+			})?;
 		}
 		let r = self.rx.lock().unwrap_or_else(|e| e.into_inner());
 		let m = r.recv().unwrap();
@@ -531,7 +545,7 @@ impl NodeClient for LocalWalletClient {
 	}
 
 	/// Return the chain tip from a given node
-	fn get_chain_tip(&self) -> Result<(u64, String, u64), libwallet::Error> {
+	fn get_chain_tip(&self) -> Result<(u64, String, u64), mwc_wallet_libwallet::Error> {
 		let m = WalletProxyMessage {
 			sender_id: self.id.clone(),
 			dest: "node".to_string(),
@@ -541,21 +555,24 @@ impl NodeClient for LocalWalletClient {
 		{
 			let p = self.proxy_tx.lock().unwrap_or_else(|e| e.into_inner());
 			p.send(m).map_err(|e| {
-				libwallet::Error::ClientCallback(format!("Get chain height send, {}", e))
+				mwc_wallet_libwallet::Error::ClientCallback(format!("Get chain height send, {}", e))
 			})?;
 		}
 		let r = self.rx.lock().unwrap_or_else(|e| e.into_inner());
 		let m = r.recv().unwrap();
 		trace!("Received get_chain_tip response: {:?}", m.clone());
 		let res = m.body.parse::<String>().map_err(|e| {
-			libwallet::Error::ClientCallback(format!("Parsing get_height response, {}", e))
+			mwc_wallet_libwallet::Error::ClientCallback(format!(
+				"Parsing get_height response, {}",
+				e
+			))
 		})?;
 		let split: Vec<&str> = res.split(",").collect();
 		Ok((split[0].parse::<u64>().unwrap(), split[1].to_owned(), 1))
 	}
 
 	/// Return header info by height
-	fn get_header_info(&self, height: u64) -> Result<HeaderInfo, libwallet::Error> {
+	fn get_header_info(&self, height: u64) -> Result<HeaderInfo, mwc_wallet_libwallet::Error> {
 		let m = WalletProxyMessage {
 			sender_id: self.id.clone(),
 			dest: "node".to_string(),
@@ -565,14 +582,20 @@ impl NodeClient for LocalWalletClient {
 		{
 			let p = self.proxy_tx.lock().unwrap_or_else(|e| e.into_inner());
 			p.send(m).map_err(|e| {
-				libwallet::Error::ClientCallback(format!("Get chain header info send, {}", e))
+				mwc_wallet_libwallet::Error::ClientCallback(format!(
+					"Get chain header info send, {}",
+					e
+				))
 			})?;
 		}
 		let r = self.rx.lock().unwrap_or_else(|e| e.into_inner());
 		let m = r.recv().unwrap();
 		trace!("Received get_header_info response: {:?}", m.clone());
 		let res = m.body.parse::<String>().map_err(|e| {
-			libwallet::Error::ClientCallback(format!("Parsing get_header_info response, {}", e))
+			mwc_wallet_libwallet::Error::ClientCallback(format!(
+				"Parsing get_header_info response, {}",
+				e
+			))
 		})?;
 		let split: Vec<&str> = res.split(",").collect();
 
@@ -597,7 +620,7 @@ impl NodeClient for LocalWalletClient {
 	/// Return Connected peers
 	fn get_connected_peer_info(
 		&self,
-	) -> Result<Vec<crate::mwc_p2p::types::PeerInfoDisplayLegacy>, libwallet::Error> {
+	) -> Result<Vec<PeerInfoDisplayLegacy>, mwc_wallet_libwallet::Error> {
 		trace!("get_connected_peer_info called at the test client. Skipped.");
 		return Ok(Vec::new());
 	}
@@ -607,7 +630,7 @@ impl NodeClient for LocalWalletClient {
 	fn get_outputs_from_node(
 		&self,
 		wallet_outputs: &Vec<pedersen::Commitment>,
-	) -> Result<HashMap<pedersen::Commitment, (String, u64, u64)>, libwallet::Error> {
+	) -> Result<HashMap<pedersen::Commitment, (String, u64, u64)>, mwc_wallet_libwallet::Error> {
 		let query_params: Vec<String> = wallet_outputs
 			.iter()
 			.map(|commit| commit.as_ref().to_hex())
@@ -622,12 +645,15 @@ impl NodeClient for LocalWalletClient {
 		{
 			let p = self.proxy_tx.lock().unwrap_or_else(|e| e.into_inner());
 			p.send(m).map_err(|e| {
-				libwallet::Error::ClientCallback(format!("Get outputs from node send, {}", e))
+				mwc_wallet_libwallet::Error::ClientCallback(format!(
+					"Get outputs from node send, {}",
+					e
+				))
 			})?;
 		}
 		let r = self.rx.lock().unwrap_or_else(|e| e.into_inner());
 		let m = r.recv().unwrap();
-		let outputs: Vec<api::Output> = serde_json::from_str(&m.body).unwrap();
+		let outputs: Vec<mwc_api::Output> = serde_json::from_str(&m.body).unwrap();
 		let mut api_outputs: HashMap<pedersen::Commitment, (String, u64, u64)> = HashMap::new();
 		for out in outputs {
 			api_outputs.insert(
@@ -643,7 +669,7 @@ impl NodeClient for LocalWalletClient {
 		excess: &pedersen::Commitment,
 		min_height: Option<u64>,
 		max_height: Option<u64>,
-	) -> Result<Option<(TxKernel, u64, u64)>, libwallet::Error> {
+	) -> Result<Option<(TxKernel, u64, u64)>, mwc_wallet_libwallet::Error> {
 		let mut query = format!("{},", excess.0.as_ref().to_hex());
 		if let Some(h) = min_height {
 			query += &format!("{},", h);
@@ -665,7 +691,7 @@ impl NodeClient for LocalWalletClient {
 		{
 			let p = self.proxy_tx.lock().unwrap_or_else(|e| e.into_inner());
 			p.send(m).map_err(|e| {
-				libwallet::Error::ClientCallback(format!(
+				mwc_wallet_libwallet::Error::ClientCallback(format!(
 					"Get outputs from node by PMMR index send, {}",
 					e
 				))
@@ -674,7 +700,10 @@ impl NodeClient for LocalWalletClient {
 		let r = self.rx.lock().unwrap_or_else(|e| e.into_inner());
 		let m = r.recv().unwrap();
 		let res: Option<LocatedTxKernel> = serde_json::from_str(&m.body).map_err(|e| {
-			libwallet::Error::ClientCallback(format!("Get transaction kernels send, {}", e))
+			mwc_wallet_libwallet::Error::ClientCallback(format!(
+				"Get transaction kernels send, {}",
+				e
+			))
 		})?;
 		match res {
 			Some(k) => Ok(Some((k.tx_kernel, k.height, k.mmr_index))),
@@ -693,7 +722,7 @@ impl NodeClient for LocalWalletClient {
 			u64,
 			Vec<(pedersen::Commitment, pedersen::RangeProof, bool, u64, u64)>,
 		),
-		libwallet::Error,
+		mwc_wallet_libwallet::Error,
 	> {
 		// start index, max
 		let mut query_str = format!("{},{}", start_index, max_outputs);
@@ -710,7 +739,7 @@ impl NodeClient for LocalWalletClient {
 		{
 			let p = self.proxy_tx.lock().unwrap_or_else(|e| e.into_inner());
 			p.send(m).map_err(|e| {
-				libwallet::Error::ClientCallback(format!(
+				mwc_wallet_libwallet::Error::ClientCallback(format!(
 					"Get outputs from node by PMMR index send, {}",
 					e
 				))
@@ -719,15 +748,15 @@ impl NodeClient for LocalWalletClient {
 
 		let r = self.rx.lock().unwrap_or_else(|e| e.into_inner());
 		let m = r.recv().unwrap();
-		let o: api::OutputListing = serde_json::from_str(&m.body).unwrap();
+		let o: mwc_api::OutputListing = serde_json::from_str(&m.body).unwrap();
 
 		let mut api_outputs: Vec<(pedersen::Commitment, pedersen::RangeProof, bool, u64, u64)> =
 			Vec::new();
 
 		for out in o.outputs {
 			let is_coinbase = match out.output_type {
-				api::OutputType::Coinbase => true,
-				api::OutputType::Transaction => false,
+				mwc_api::OutputType::Coinbase => true,
+				mwc_api::OutputType::Transaction => false,
 			};
 			api_outputs.push((
 				out.commit,
@@ -744,7 +773,7 @@ impl NodeClient for LocalWalletClient {
 		&self,
 		start_height: u64,
 		end_height: Option<u64>,
-	) -> Result<(u64, u64), libwallet::Error> {
+	) -> Result<(u64, u64), mwc_wallet_libwallet::Error> {
 		// start index, max
 		let mut query_str = format!("{}", start_height);
 		match end_height {
@@ -760,7 +789,7 @@ impl NodeClient for LocalWalletClient {
 		{
 			let p = self.proxy_tx.lock().unwrap_or_else(|e| e.into_inner());
 			p.send(m).map_err(|e| {
-				libwallet::Error::ClientCallback(format!(
+				mwc_wallet_libwallet::Error::ClientCallback(format!(
 					"Get outputs within height range send, {}",
 					e
 				))
@@ -769,7 +798,7 @@ impl NodeClient for LocalWalletClient {
 
 		let r = self.rx.lock().unwrap_or_else(|e| e.into_inner());
 		let m = r.recv().unwrap();
-		let o: api::OutputListing = serde_json::from_str(&m.body).unwrap();
+		let o: mwc_wallet_util::mwc_api::OutputListing = serde_json::from_str(&m.body).unwrap();
 		Ok((o.last_retrieved_index, o.highest_index))
 	}
 
@@ -778,7 +807,7 @@ impl NodeClient for LocalWalletClient {
 		start_height: u64,
 		end_height: u64,
 		_threads_number: usize,
-	) -> Result<Vec<api::BlockPrintable>, libwallet::Error> {
+	) -> Result<Vec<mwc_api::BlockPrintable>, mwc_wallet_libwallet::Error> {
 		let m = WalletProxyMessage {
 			sender_id: self.id.clone(),
 			dest: "node".to_string(),
@@ -788,24 +817,27 @@ impl NodeClient for LocalWalletClient {
 		{
 			let p = self.proxy_tx.lock().unwrap_or_else(|e| e.into_inner());
 			p.send(m).map_err(|e| {
-				libwallet::Error::ClientCallback(format!("Get blocks by height range send, {}", e))
+				mwc_wallet_libwallet::Error::ClientCallback(format!(
+					"Get blocks by height range send, {}",
+					e
+				))
 			})?;
 		}
 
 		let r = self.rx.lock().unwrap_or_else(|e| e.into_inner());
 		let m = r.recv().unwrap();
-		let o: Vec<api::BlockPrintable> = serde_json::from_str(&m.body).unwrap();
+		let o: Vec<mwc_api::BlockPrintable> = serde_json::from_str(&m.body).unwrap();
 		Ok(o)
 	}
 
-	fn get_libp2p_peers(&self) -> Result<Libp2pPeers, libwallet::Error> {
+	fn get_libp2p_peers(&self) -> Result<Libp2pPeers, mwc_wallet_libwallet::Error> {
 		Ok(Libp2pPeers {
 			libp2p_peers: vec![],
 			node_peers: vec![],
 		})
 	}
 
-	fn get_libp2p_messages(&self) -> Result<Libp2pMessages, libwallet::Error> {
+	fn get_libp2p_messages(&self) -> Result<Libp2pMessages, mwc_wallet_libwallet::Error> {
 		Ok(Libp2pMessages {
 			current_time: chrono::Utc::now().timestamp(),
 			#[cfg(feature = "libp2p")]

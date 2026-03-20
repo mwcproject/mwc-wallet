@@ -14,11 +14,11 @@
 // limitations under the License.
 
 use crate::cmd::wallet_args;
-use crate::config::GlobalWalletConfig;
-use clap::ArgMatches;
 use mwc_wallet_config::parse_node_address_string;
+use mwc_wallet_config::GlobalWalletConfig;
 use mwc_wallet_impls::{DefaultLCProvider, HTTPNodeClient};
 use mwc_wallet_libwallet::WalletInst;
+use mwc_wallet_util::mwc_crates::clap::ArgMatches;
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;

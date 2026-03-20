@@ -13,21 +13,15 @@
 // limitations under the License.
 
 //! tests differing accounts in the same wallet
-#[macro_use]
-extern crate log;
-extern crate mwc_wallet_controller as wallet;
-extern crate mwc_wallet_impls as impls;
+use mwc_wallet_util::mwc_crates::log::error;
 
-use mwc_wallet_util::mwc_core as core;
-use mwc_wallet_util::mwc_keychain as keychain;
 use std::ops::DerefMut;
 use std::sync::Arc;
 
-use self::core::global;
-use self::keychain::{ExtKeychain, Keychain};
-use impls::test_framework::{self, LocalWalletClient};
-use libwallet::InitTxArgs;
-use mwc_wallet_libwallet as libwallet;
+use mwc_wallet_impls::test_framework::{self, LocalWalletClient};
+use mwc_wallet_libwallet::InitTxArgs;
+use mwc_wallet_util::mwc_core::global;
+use mwc_wallet_util::mwc_keychain::{ExtKeychain, Keychain};
 use std::sync::atomic::Ordering;
 use std::thread;
 use std::time::Duration;
@@ -39,7 +33,7 @@ use mwc_wallet_util::mwc_core::core::Transaction;
 use std::sync::Mutex;
 
 /// Various tests on accounts within the same wallet
-fn accounts_test_impl(test_dir: &str) -> Result<(), wallet::Error> {
+fn accounts_test_impl(test_dir: &str) -> Result<(), mwc_wallet_controller::Error> {
 	global::set_local_chain_type(global::ChainTypes::AutomatedTesting);
 	// Create a new proxy to simulate server and wallet responses
 	let tx_pool: Arc<Mutex<Vec<Transaction>>> = Arc::new(Mutex::new(Vec::new()));
@@ -82,40 +76,55 @@ fn accounts_test_impl(test_dir: &str) -> Result<(), wallet::Error> {
 	});
 
 	// few values to keep things shorter
-	let reward = core::consensus::MWC_FIRST_GROUP_REWARD;
+	let reward = mwc_wallet_util::mwc_core::consensus::MWC_FIRST_GROUP_REWARD;
 	let cm = global::coinbase_maturity(0); // assume all testing precedes soft fork height
 
 	// test default accounts exist
-	wallet::controller::owner_single_use(Some(wallet1.clone()), mask1, None, |api, m| {
-		let accounts = api.accounts(m)?;
-		assert_eq!(accounts[0].label, "default");
-		assert_eq!(
-			accounts[0].path,
-			ExtKeychain::derive_key_id(2, 0, 0, 0, 0).unwrap()
-		);
-		Ok(())
-	})?;
+	mwc_wallet_controller::controller::owner_single_use(
+		Some(wallet1.clone()),
+		mask1,
+		None,
+		|api, m| {
+			let accounts = api.accounts(m)?;
+			assert_eq!(accounts[0].label, "default");
+			assert_eq!(
+				accounts[0].path,
+				ExtKeychain::derive_key_id(2, 0, 0, 0, 0).unwrap()
+			);
+			Ok(())
+		},
+	)?;
 
 	// add some accounts
-	wallet::controller::owner_single_use(Some(wallet1.clone()), mask1, None, |api, m| {
-		let new_path = api.create_account_path(m, "account1").unwrap();
-		assert_eq!(new_path, ExtKeychain::derive_key_id(2, 1, 0, 0, 0).unwrap());
-		let new_path = api.create_account_path(m, "account2").unwrap();
-		assert_eq!(new_path, ExtKeychain::derive_key_id(2, 2, 0, 0, 0).unwrap());
-		let new_path = api.create_account_path(m, "account3").unwrap();
-		assert_eq!(new_path, ExtKeychain::derive_key_id(2, 3, 0, 0, 0).unwrap());
-		// trying to add same label again should fail
-		let res = api.create_account_path(m, "account1");
-		assert!(res.is_err());
-		Ok(())
-	})?;
+	mwc_wallet_controller::controller::owner_single_use(
+		Some(wallet1.clone()),
+		mask1,
+		None,
+		|api, m| {
+			let new_path = api.create_account_path(m, "account1").unwrap();
+			assert_eq!(new_path, ExtKeychain::derive_key_id(2, 1, 0, 0, 0).unwrap());
+			let new_path = api.create_account_path(m, "account2").unwrap();
+			assert_eq!(new_path, ExtKeychain::derive_key_id(2, 2, 0, 0, 0).unwrap());
+			let new_path = api.create_account_path(m, "account3").unwrap();
+			assert_eq!(new_path, ExtKeychain::derive_key_id(2, 3, 0, 0, 0).unwrap());
+			// trying to add same label again should fail
+			let res = api.create_account_path(m, "account1");
+			assert!(res.is_err());
+			Ok(())
+		},
+	)?;
 
 	// add account to wallet 2
-	wallet::controller::owner_single_use(Some(wallet2.clone()), mask2, None, |api, m| {
-		let new_path = api.create_account_path(m, "listener_account").unwrap();
-		assert_eq!(new_path, ExtKeychain::derive_key_id(2, 1, 0, 0, 0).unwrap());
-		Ok(())
-	})?;
+	mwc_wallet_controller::controller::owner_single_use(
+		Some(wallet2.clone()),
+		mask2,
+		None,
+		|api, m| {
+			let new_path = api.create_account_path(m, "listener_account").unwrap();
+			assert_eq!(new_path, ExtKeychain::derive_key_id(2, 1, 0, 0, 0).unwrap());
+			Ok(())
+		},
+	)?;
 
 	// Default wallet 2 to listen on that account
 	{
@@ -165,19 +174,24 @@ fn accounts_test_impl(test_dir: &str) -> Result<(), wallet::Error> {
 	);
 
 	// Should have 5 in account1 (5 spendable), 5 in account (2 spendable)
-	wallet::controller::owner_single_use(Some(wallet1.clone()), mask1, None, |api, m| {
-		let (_, wallet1_info) = api.retrieve_summary_info(m, false, 1)?;
-		assert_eq!(wallet1_info.last_confirmed_height, 0); // mwc false case must be first. scan will update all accounts
-		let (wallet1_refreshed, wallet1_info) = api.retrieve_summary_info(m, true, 1)?;
-		assert!(wallet1_refreshed);
-		assert_eq!(wallet1_info.last_confirmed_height, 12);
-		assert_eq!(wallet1_info.total, 5 * reward);
-		assert_eq!(wallet1_info.amount_currently_spendable, (5 - cm) * reward);
-		// check tx log as well
-		let (_, txs) = api.retrieve_txs(m, true, None, None, None, None)?;
-		assert_eq!(txs.len(), 5);
-		Ok(())
-	})?;
+	mwc_wallet_controller::controller::owner_single_use(
+		Some(wallet1.clone()),
+		mask1,
+		None,
+		|api, m| {
+			let (_, wallet1_info) = api.retrieve_summary_info(m, false, 1)?;
+			assert_eq!(wallet1_info.last_confirmed_height, 0); // mwc false case must be first. scan will update all accounts
+			let (wallet1_refreshed, wallet1_info) = api.retrieve_summary_info(m, true, 1)?;
+			assert!(wallet1_refreshed);
+			assert_eq!(wallet1_info.last_confirmed_height, 12);
+			assert_eq!(wallet1_info.total, 5 * reward);
+			assert_eq!(wallet1_info.amount_currently_spendable, (5 - cm) * reward);
+			// check tx log as well
+			let (_, txs) = api.retrieve_txs(m, true, None, None, None, None)?;
+			assert_eq!(txs.len(), 5);
+			Ok(())
+		},
+	)?;
 
 	// now check second account
 	{
@@ -188,62 +202,77 @@ fn accounts_test_impl(test_dir: &str) -> Result<(), wallet::Error> {
 		w.set_parent_key_id_by_name("account1")?;
 	}
 
-	wallet::controller::owner_single_use(Some(wallet1.clone()), mask1, None, |api, m| {
-		// check last confirmed height on this account is different from above (should be 0)
-		let (_, wallet1_info) = api.retrieve_summary_info(m, false, 1)?;
-		assert_eq!(wallet1_info.last_confirmed_height, 12); // for mwc no failure case. we are already updated for all accounts. Refresh comes from prev update
-		let (wallet1_refreshed, wallet1_info) = api.retrieve_summary_info(m, true, 1)?;
-		assert!(wallet1_refreshed);
-		assert_eq!(wallet1_info.last_confirmed_height, 12);
-		assert_eq!(wallet1_info.total, 7 * reward);
-		assert_eq!(wallet1_info.amount_currently_spendable, 7 * reward);
-		// check tx log as well
-		let (_, txs) = api.retrieve_txs(m, true, None, None, None, None)?;
-		assert_eq!(txs.len(), 7);
-		Ok(())
-	})?;
+	mwc_wallet_controller::controller::owner_single_use(
+		Some(wallet1.clone()),
+		mask1,
+		None,
+		|api, m| {
+			// check last confirmed height on this account is different from above (should be 0)
+			let (_, wallet1_info) = api.retrieve_summary_info(m, false, 1)?;
+			assert_eq!(wallet1_info.last_confirmed_height, 12); // for mwc no failure case. we are already updated for all accounts. Refresh comes from prev update
+			let (wallet1_refreshed, wallet1_info) = api.retrieve_summary_info(m, true, 1)?;
+			assert!(wallet1_refreshed);
+			assert_eq!(wallet1_info.last_confirmed_height, 12);
+			assert_eq!(wallet1_info.total, 7 * reward);
+			assert_eq!(wallet1_info.amount_currently_spendable, 7 * reward);
+			// check tx log as well
+			let (_, txs) = api.retrieve_txs(m, true, None, None, None, None)?;
+			assert_eq!(txs.len(), 7);
+			Ok(())
+		},
+	)?;
 
 	// should be nothing in default account
 	{
 		wallet_inst!(wallet1, w);
 		w.set_parent_key_id_by_name("default")?;
 	}
-	wallet::controller::owner_single_use(Some(wallet1.clone()), mask1, None, |api, m| {
-		let (_, wallet1_info) = api.retrieve_summary_info(m, false, 1)?;
-		assert_eq!(wallet1_info.last_confirmed_height, 12); // for mwc no failure case. we are already updated for all accounts. Refresh comes from prev update
-		let (wallet1_refreshed, wallet1_info) = api.retrieve_summary_info(m, true, 1)?;
-		assert!(wallet1_refreshed);
-		assert_eq!(wallet1_info.last_confirmed_height, 12);
-		assert_eq!(wallet1_info.total, 0,);
-		assert_eq!(wallet1_info.amount_currently_spendable, 0,);
-		// check tx log as well
-		let (_, txs) = api.retrieve_txs(m, true, None, None, None, None)?;
-		assert_eq!(txs.len(), 0);
-		Ok(())
-	})?;
+	mwc_wallet_controller::controller::owner_single_use(
+		Some(wallet1.clone()),
+		mask1,
+		None,
+		|api, m| {
+			let (_, wallet1_info) = api.retrieve_summary_info(m, false, 1)?;
+			assert_eq!(wallet1_info.last_confirmed_height, 12); // for mwc no failure case. we are already updated for all accounts. Refresh comes from prev update
+			let (wallet1_refreshed, wallet1_info) = api.retrieve_summary_info(m, true, 1)?;
+			assert!(wallet1_refreshed);
+			assert_eq!(wallet1_info.last_confirmed_height, 12);
+			assert_eq!(wallet1_info.total, 0,);
+			assert_eq!(wallet1_info.amount_currently_spendable, 0,);
+			// check tx log as well
+			let (_, txs) = api.retrieve_txs(m, true, None, None, None, None)?;
+			assert_eq!(txs.len(), 0);
+			Ok(())
+		},
+	)?;
 
 	// Send a tx to another wallet
 	{
 		wallet_inst!(wallet1, w);
 		w.set_parent_key_id_by_name("account1")?;
 	}
-	wallet::controller::owner_single_use(Some(wallet1.clone()), mask1, None, |api, m| {
-		let args = InitTxArgs {
-			src_acct_name: None,
-			amount: reward,
-			minimum_confirmations: 2,
-			max_outputs: 500,
-			num_change_outputs: 1,
-			selection_strategy_is_use_all: true,
-			..Default::default()
-		};
-		let mut slate = api.init_send_tx(m, None, &args, 1)?;
-		slate = client1.send_tx_slate_direct("wallet2", &slate)?;
-		api.tx_lock_outputs(m, None, &slate, None, 0)?;
-		slate = api.finalize_tx(m, None, &slate, true)?;
-		api.post_tx(m, slate.tx_or_err()?, false)?;
-		Ok(())
-	})?;
+	mwc_wallet_controller::controller::owner_single_use(
+		Some(wallet1.clone()),
+		mask1,
+		None,
+		|api, m| {
+			let args = InitTxArgs {
+				src_acct_name: None,
+				amount: reward,
+				minimum_confirmations: 2,
+				max_outputs: 500,
+				num_change_outputs: 1,
+				selection_strategy_is_use_all: true,
+				..Default::default()
+			};
+			let mut slate = api.init_send_tx(m, None, &args, 1)?;
+			slate = client1.send_tx_slate_direct("wallet2", &slate)?;
+			api.tx_lock_outputs(m, None, &slate, None, 0)?;
+			slate = api.finalize_tx(m, None, &slate, true)?;
+			api.post_tx(m, slate.tx_or_err()?, false)?;
+			Ok(())
+		},
+	)?;
 
 	// apply post txs
 	let _ = test_framework::award_blocks_to_wallet(
@@ -258,60 +287,80 @@ fn accounts_test_impl(test_dir: &str) -> Result<(), wallet::Error> {
 			.deref_mut(),
 	);
 
-	wallet::controller::owner_single_use(Some(wallet1.clone()), mask1, None, |api, m| {
-		let (_, wallet1_info) = api.retrieve_summary_info(m, false, 1)?;
-		assert_eq!(wallet1_info.last_confirmed_height, 12);
-		let (wallet1_refreshed, wallet1_info) = api.retrieve_summary_info(m, true, 1)?;
-		assert!(wallet1_refreshed);
-		assert_eq!(wallet1_info.last_confirmed_height, 13);
-		let (_, txs) = api.retrieve_txs(m, true, None, None, None, None)?;
-		assert_eq!(txs.len(), 9);
-		Ok(())
-	})?;
+	mwc_wallet_controller::controller::owner_single_use(
+		Some(wallet1.clone()),
+		mask1,
+		None,
+		|api, m| {
+			let (_, wallet1_info) = api.retrieve_summary_info(m, false, 1)?;
+			assert_eq!(wallet1_info.last_confirmed_height, 12);
+			let (wallet1_refreshed, wallet1_info) = api.retrieve_summary_info(m, true, 1)?;
+			assert!(wallet1_refreshed);
+			assert_eq!(wallet1_info.last_confirmed_height, 13);
+			let (_, txs) = api.retrieve_txs(m, true, None, None, None, None)?;
+			assert_eq!(txs.len(), 9);
+			Ok(())
+		},
+	)?;
 
 	// other account should be untouched
 	{
 		wallet_inst!(wallet1, w);
 		w.set_parent_key_id_by_name("account2")?;
 	}
-	wallet::controller::owner_single_use(Some(wallet1.clone()), mask1, None, |api, m| {
-		let (_, wallet1_info) = api.retrieve_summary_info(m, false, 1)?;
-		assert_eq!(wallet1_info.last_confirmed_height, 13); // mwc already updated that
-		let (_, wallet1_info) = api.retrieve_summary_info(m, true, 1)?;
-		assert_eq!(wallet1_info.last_confirmed_height, 13);
-		let (_, txs) = api.retrieve_txs(m, true, None, None, None, None)?;
-		println!("{:?}", txs);
-		assert_eq!(txs.len(), 5);
-		Ok(())
-	})?;
+	mwc_wallet_controller::controller::owner_single_use(
+		Some(wallet1.clone()),
+		mask1,
+		None,
+		|api, m| {
+			let (_, wallet1_info) = api.retrieve_summary_info(m, false, 1)?;
+			assert_eq!(wallet1_info.last_confirmed_height, 13); // mwc already updated that
+			let (_, wallet1_info) = api.retrieve_summary_info(m, true, 1)?;
+			assert_eq!(wallet1_info.last_confirmed_height, 13);
+			let (_, txs) = api.retrieve_txs(m, true, None, None, None, None)?;
+			println!("{:?}", txs);
+			assert_eq!(txs.len(), 5);
+			Ok(())
+		},
+	)?;
 
 	// wallet 2 should only have this tx on the listener account
-	wallet::controller::owner_single_use(Some(wallet2.clone()), mask2, None, |api, m| {
-		let (wallet2_refreshed, wallet2_info) = api.retrieve_summary_info(m, true, 1)?;
-		assert!(wallet2_refreshed);
-		assert_eq!(wallet2_info.last_confirmed_height, 13);
-		let (_, txs) = api.retrieve_txs(m, true, None, None, None, None)?;
-		assert_eq!(txs.len(), 1);
-		Ok(())
-	})?;
+	mwc_wallet_controller::controller::owner_single_use(
+		Some(wallet2.clone()),
+		mask2,
+		None,
+		|api, m| {
+			let (wallet2_refreshed, wallet2_info) = api.retrieve_summary_info(m, true, 1)?;
+			assert!(wallet2_refreshed);
+			assert_eq!(wallet2_info.last_confirmed_height, 13);
+			let (_, txs) = api.retrieve_txs(m, true, None, None, None, None)?;
+			assert_eq!(txs.len(), 1);
+			Ok(())
+		},
+	)?;
 	// Default account on wallet 2 should be untouched
 	{
 		wallet_inst!(wallet2, w);
 		w.set_parent_key_id_by_name("default")?;
 	}
-	wallet::controller::owner_single_use(Some(wallet2.clone()), mask2, None, |api, m| {
-		let (_, wallet2_info) = api.retrieve_summary_info(m, false, 1)?;
-		assert_eq!(wallet2_info.last_confirmed_height, 13); // mwc already update all accounts
-		let (wallet2_refreshed, wallet2_info) = api.retrieve_summary_info(m, true, 1)?;
-		assert!(wallet2_refreshed);
-		assert_eq!(wallet2_info.last_confirmed_height, 13);
-		assert_eq!(wallet2_info.total, 0,);
-		assert_eq!(wallet2_info.amount_currently_spendable, 0,);
-		// check tx log as well
-		let (_, txs) = api.retrieve_txs(m, true, None, None, None, None)?;
-		assert_eq!(txs.len(), 0);
-		Ok(())
-	})?;
+	mwc_wallet_controller::controller::owner_single_use(
+		Some(wallet2.clone()),
+		mask2,
+		None,
+		|api, m| {
+			let (_, wallet2_info) = api.retrieve_summary_info(m, false, 1)?;
+			assert_eq!(wallet2_info.last_confirmed_height, 13); // mwc already update all accounts
+			let (wallet2_refreshed, wallet2_info) = api.retrieve_summary_info(m, true, 1)?;
+			assert!(wallet2_refreshed);
+			assert_eq!(wallet2_info.last_confirmed_height, 13);
+			assert_eq!(wallet2_info.total, 0,);
+			assert_eq!(wallet2_info.amount_currently_spendable, 0,);
+			// check tx log as well
+			let (_, txs) = api.retrieve_txs(m, true, None, None, None, None)?;
+			assert_eq!(txs.len(), 0);
+			Ok(())
+		},
+	)?;
 
 	// let logging finish
 	stopper.store(false, Ordering::Relaxed);

@@ -36,19 +36,21 @@
 //!    orig_version: u16,
 //!    block_header_version: u16,
 
-use crate::mwc_core::core::transaction::OutputFeatures;
-use crate::mwc_core::libtx::secp_ser;
-use crate::mwc_keychain::{BlindingFactor, Identifier};
-use crate::mwc_util::secp;
-use crate::mwc_util::secp::key::PublicKey;
-use crate::mwc_util::secp::pedersen::{Commitment, RangeProof};
-use crate::mwc_util::secp::Signature;
 use crate::slate::CompatKernelFeatures;
 use crate::slate_versions::v3::{OutputV3, TxKernelV3};
 use crate::types::CbData;
-use uuid::Uuid;
+use mwc_wallet_util::mwc_core::core::transaction::OutputFeatures;
+use mwc_wallet_util::mwc_core::libtx::secp_ser;
+use mwc_wallet_util::mwc_crates::secp;
+use mwc_wallet_util::mwc_crates::secp::key::PublicKey;
+use mwc_wallet_util::mwc_crates::secp::pedersen::{Commitment, RangeProof};
+use mwc_wallet_util::mwc_crates::secp::Signature;
+use mwc_wallet_util::mwc_crates::serde::{self, Deserialize, Serialize};
+use mwc_wallet_util::mwc_crates::uuid::Uuid;
+use mwc_wallet_util::mwc_keychain::{BlindingFactor, Identifier};
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(crate = "serde")]
 pub struct SlateV2ParseTTL {
 	/// Versioning info
 	pub version_info: VersionCompatInfoV2,
@@ -88,6 +90,7 @@ pub struct SlateV2ParseTTL {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(crate = "serde")]
 pub struct SlateV2 {
 	/// Versioning info
 	pub version_info: VersionCompatInfoV2,
@@ -122,6 +125,7 @@ pub struct SlateV2 {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(crate = "serde")]
 pub struct VersionCompatInfoV2 {
 	/// The current version of the slate format
 	pub version: u16,
@@ -132,6 +136,7 @@ pub struct VersionCompatInfoV2 {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(crate = "serde")]
 pub struct ParticipantDataV2 {
 	/// Id of participant in the transaction. (For now, 0=sender, 1=rec)
 	#[serde(with = "secp_ser::string_or_u64")]
@@ -154,6 +159,7 @@ pub struct ParticipantDataV2 {
 
 /// A transaction
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(crate = "serde")]
 pub struct TransactionV2 {
 	/// The kernel "offset" k2
 	/// excess is k1G after splitting the key k = k1 + k2
@@ -168,6 +174,7 @@ pub struct TransactionV2 {
 
 /// TransactionBody is a common abstraction for transaction and block
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(crate = "serde")]
 pub struct TransactionBodyV2 {
 	/// List of inputs spent by the transaction.
 	pub inputs: Vec<InputV2>,
@@ -177,6 +184,7 @@ pub struct TransactionBodyV2 {
 	pub kernels: Vec<TxKernelV2>,
 }
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(crate = "serde")]
 pub struct InputV2 {
 	/// The features of the output being spent.
 	/// We will check maturity for coinbase output.
@@ -190,6 +198,7 @@ pub struct InputV2 {
 }
 
 #[derive(Debug, Copy, Clone, Serialize, Deserialize)]
+#[serde(crate = "serde")]
 pub struct OutputV2 {
 	/// Options for an output's structure or use
 	pub features: OutputFeatures,
@@ -208,6 +217,7 @@ pub struct OutputV2 {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(crate = "serde")]
 pub struct TxKernelV2 {
 	/// Options for a kernel's structure or use
 	pub features: CompatKernelFeatures,
@@ -234,6 +244,7 @@ pub struct TxKernelV2 {
 
 /// A mining node requests new coinbase via the foreign api every time a new candidate block is built.
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(crate = "serde")]
 pub struct CoinbaseV2 {
 	/// Output
 	pub output: OutputV2,

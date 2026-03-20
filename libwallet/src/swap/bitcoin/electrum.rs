@@ -18,9 +18,11 @@ use crate::mwc_util::{from_hex, to_hex};
 use crate::swap::types::Currency;
 use crate::swap::Error;
 use bitcoin::{OutPoint, Script, Txid};
-use bitcoin_hashes::sha256d::Hash;
-use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
+use mwc_wallet_util::mwc_crates::bitcoin_hashes::sha256d::Hash;
+use mwc_wallet_util::mwc_crates::log::debug;
+use mwc_wallet_util::mwc_crates::serde::{self, Deserialize, Serialize};
+use mwc_wallet_util::mwc_crates::serde_json;
+use mwc_wallet_util::mwc_crates::sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::mem::replace;
 use std::str::FromStr;
@@ -174,6 +176,7 @@ impl ElectrumRpcClient {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
+#[serde(crate = "serde")]
 struct VersionRequestParams {
 	client_name: String,
 	protocol_version: String,
@@ -189,6 +192,7 @@ impl VersionRequestParams {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
+#[serde(crate = "serde")]
 struct ScriptHashParams {
 	scripthash: String,
 }
@@ -204,6 +208,7 @@ impl ScriptHashParams {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
+#[serde(crate = "serde")]
 struct TransactionParams {
 	tx_hash: String,
 	verbose: bool,
@@ -219,6 +224,7 @@ impl TransactionParams {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
+#[serde(crate = "serde")]
 struct BroadcastParams {
 	raw_tx: String,
 }
@@ -232,6 +238,7 @@ impl BroadcastParams {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
+#[serde(crate = "serde")]
 pub struct Utxo {
 	pub tx_hash: String,
 	pub tx_pos: u32,
@@ -240,6 +247,7 @@ pub struct Utxo {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(crate = "serde")]
 pub struct ElectrumTransaction {
 	#[serde(default)]
 	pub blockhash: Option<String>,
@@ -415,6 +423,7 @@ impl BtcNodeClient for ElectrumNodeClient {
 
 /// ElectrumX client error response.
 #[derive(Serialize, Deserialize, Debug)]
+#[serde(crate = "serde")]
 struct ElectrumResponseError {
 	code: i64,
 	pub message: String,
@@ -425,12 +434,12 @@ mod tests {
 	/*	use super::*;
 	use crate::swap::bitcoin::BtcData;
 	use crate::swap::types::Network;
-	use bitcoin_hashes::hex::FromHex;
-	use bitcoin_hashes::sha256d::Hash;
-	use mwc_util::from_hex;
-	use mwc_util::secp::key::PublicKey;
-	use mwc_util::secp::{ContextFlag, Secp256k1};
-	use rand::{thread_rng, Rng};
+	use mwc_wallet_util::mwc_crates::bitcoin_hashes::hex::FromHex;
+	use mwc_wallet_util::mwc_crates::bitcoin_hashes::sha256d::Hash;
+	use mwc_wallet_util::mwc_util::from_hex;
+	use mwc_wallet_util::mwc_crates::secp::key::PublicKey;
+	use mwc_wallet_util::mwc_crates::secp::{ContextFlag, Secp256k1};
+	use mwc_wallet_util::mwc_crates::rand::{thread_rng, Rng};
 
 	#[test]
 	fn test_electrum() {

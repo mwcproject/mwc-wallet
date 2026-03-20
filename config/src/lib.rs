@@ -21,12 +21,6 @@
 #![deny(unused_mut)]
 #![warn(missing_docs)]
 
-#[macro_use]
-extern crate serde_derive;
-
-use mwc_wallet_util::mwc_core as core;
-use mwc_wallet_util::mwc_util as util;
-
 mod comments;
 pub mod config;
 #[allow(missing_docs)]

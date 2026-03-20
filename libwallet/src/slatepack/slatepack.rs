@@ -14,45 +14,47 @@
 // limitations under the License.
 
 /// Slatepack Types + Serialization implementation
-use ed25519_dalek::{PublicKey as DalekPublicKey, SecretKey as DalekSecretKey, PUBLIC_KEY_LENGTH};
+use mwc_wallet_util::mwc_crates::ed25519_dalek;
+use mwc_wallet_util::mwc_crates::ed25519_dalek::PUBLIC_KEY_LENGTH;
+use mwc_wallet_util::mwc_crates::serde::{self, Deserialize, Serialize};
+use mwc_wallet_util::mwc_crates::smaz;
 use std::convert::TryInto;
 
-use crate::mwc_util::secp::key::PublicKey;
+use mwc_wallet_util::mwc_crates::secp::key::PublicKey;
 
 use crate::{Error, ParticipantData, Slate, SlateVersion};
 
 use crate::proof::proofaddress::ProvableAddress;
 use std::io;
 
-use crate::mwc_core::core::CommitWrapper;
-use crate::mwc_core::core::{
-	Input, Inputs, KernelFeatures, Output, OutputFeatures, OutputIdentifier, TxKernel,
-};
-use crate::mwc_core::global;
-use crate::mwc_keychain::BlindingFactor;
-use crate::mwc_util::secp::constants::{PEDERSEN_COMMITMENT_SIZE, SECRET_KEY_SIZE};
-use crate::mwc_util::secp::pedersen::{Commitment, RangeProof};
-use crate::mwc_util::secp::Signature;
-use crate::mwc_util::{from_hex, ToHex};
 use crate::proof::proofaddress;
 use crate::slate::PaymentInfo;
-use bitstream_io::{BigEndian, BitReader, BitWriter, Endianness};
-use crc::{crc32, Hasher32};
 use mwc_wallet_util::mwc_core::consensus::WEEK_HEIGHT;
-use mwc_wallet_util::mwc_util::secp::Secp256k1;
-use rand::{thread_rng, Rng};
-use ring::aead;
-use smaz;
-use uuid::Uuid;
+use mwc_wallet_util::mwc_core::core::CommitWrapper;
+use mwc_wallet_util::mwc_core::core::{
+	Input, Inputs, KernelFeatures, Output, OutputFeatures, OutputIdentifier, TxKernel,
+};
+use mwc_wallet_util::mwc_core::global;
+use mwc_wallet_util::mwc_crates::bitstream_io::{BigEndian, BitReader, BitWriter, Endianness};
+use mwc_wallet_util::mwc_crates::crc::{crc32, Hasher32};
+use mwc_wallet_util::mwc_crates::rand::{thread_rng, Rng};
+use mwc_wallet_util::mwc_crates::ring::aead;
+use mwc_wallet_util::mwc_crates::secp::constants::{PEDERSEN_COMMITMENT_SIZE, SECRET_KEY_SIZE};
+use mwc_wallet_util::mwc_crates::secp::pedersen::{Commitment, RangeProof};
+use mwc_wallet_util::mwc_crates::secp::Secp256k1;
+use mwc_wallet_util::mwc_crates::secp::Signature;
+use mwc_wallet_util::mwc_crates::uuid::Uuid;
+use mwc_wallet_util::mwc_keychain::BlindingFactor;
+use mwc_wallet_util::mwc_util::{from_hex, ToHex};
 
 /// Basic Slatepack definition
 #[derive(Debug, Clone)]
 pub struct Slatepack {
 	// Optional Fields
 	/// Sender address, non if slate wasn'r encrypted
-	pub sender: Option<DalekPublicKey>,
+	pub sender: Option<ed25519_dalek::PublicKey>,
 	/// Recipient addresses, enrypted id defined
-	pub recipient: Option<DalekPublicKey>,
+	pub recipient: Option<ed25519_dalek::PublicKey>,
 	/// The content purpose. It customize serializer/deserializer for us.
 	pub content: SlatePurpose,
 
@@ -62,6 +64,7 @@ pub struct Slatepack {
 
 /// Slate state definition
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(crate = "serde")]
 pub enum SlatePurpose {
 	/// Standard flow, freshly init
 	SendInitial,
@@ -127,7 +130,7 @@ impl Slatepack {
 		context_id: u32,
 		data: &Vec<u8>,
 		encrypted: bool,
-		secret: &DalekSecretKey,
+		secret: &ed25519_dalek::SecretKey,
 		secp: &Secp256k1,
 	) -> Result<Self, Error> {
 		if encrypted && data.len() < SLATE_PACK_PLAIN_DATA_SIZE {
@@ -154,13 +157,13 @@ impl Slatepack {
 			debug_assert!(PUBLIC_KEY_LENGTH == 32);
 			let mut data: [u8; 32] = [0; 32];
 			r.read_bytes(&mut data)?;
-			let sender = DalekPublicKey::from_bytes(&data).map_err(|e| {
+			let sender = ed25519_dalek::PublicKey::from_bytes(&data).map_err(|e| {
 				Error::SlatepackDecodeError(format!("Unable to read a sender public key, {}", e))
 			})?;
 			// Receiver address, so this wallet open the message if it is in the archive
 			let mut data: [u8; 32] = [0; 32];
 			r.read_bytes(&mut data)?;
-			let recipient = DalekPublicKey::from_bytes(&data).map_err(|e| {
+			let recipient = ed25519_dalek::PublicKey::from_bytes(&data).map_err(|e| {
 				Error::SlatepackDecodeError(format!("Unable to read a sender public key, {}", e))
 			})?;
 
@@ -252,7 +255,7 @@ impl Slatepack {
 		&self,
 		context_id: u32,
 		slate_version: SlateVersion,
-		secret: &DalekSecretKey,
+		secret: &ed25519_dalek::SecretKey,
 		use_test_rng: bool,
 		secp: &Secp256k1,
 	) -> Result<(Vec<u8>, bool), Error> {
@@ -527,7 +530,7 @@ impl Slatepack {
 	}
 
 	// Write this address 'efficeint' way. The problem that it can be PublicKey aka MQS address
-	// or DalekPublicKey aka Tor Address.
+	// or ed25519_dalek::PublicKey aka Tor Address.
 	// We will need to save a a binary
 	fn write_provable_address<W: io::Write, E: Endianness>(
 		context_id: u32,
@@ -828,7 +831,7 @@ impl Slatepack {
 		} else {
 			let mut pk: [u8; PUBLIC_KEY_LENGTH] = [0; PUBLIC_KEY_LENGTH];
 			r.read_bytes(&mut pk)?;
-			let dalek_pk = DalekPublicKey::from_bytes(&pk).map_err(|e| {
+			let dalek_pk = ed25519_dalek::PublicKey::from_bytes(&pk).map_err(|e| {
 				Error::SlatepackDecodeError(format!("Unable decode Public Key data, {}", e))
 			})?;
 
@@ -1047,8 +1050,8 @@ impl Slatepack {
 	/// Then everything will be encrypted with EAED.
 	fn encrypt_payload(
 		payload: Vec<u8>,
-		secret: &DalekSecretKey,
-		recipient: &DalekPublicKey,
+		secret: &ed25519_dalek::SecretKey,
+		recipient: &ed25519_dalek::PublicKey,
 		use_test_rng: bool,
 	) -> Result<(Vec<u8>, [u8; 12]), Error> {
 		// https://github.com/dalek-cryptography/x25519-dalek
@@ -1085,8 +1088,8 @@ impl Slatepack {
 	fn decrypt_payload(
 		payload: Vec<u8>,
 		nonce: [u8; 12],
-		secret: &DalekSecretKey,
-		sender: &DalekPublicKey,
+		secret: &ed25519_dalek::SecretKey,
+		sender: &ed25519_dalek::PublicKey,
 	) -> Result<Vec<u8>, Error> {
 		// https://github.com/dalek-cryptography/x25519-dalek
 		// convert to xDalek PK & Secret

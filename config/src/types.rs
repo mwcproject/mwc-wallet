@@ -15,18 +15,21 @@
 
 //! Public types for config modules
 
+use mwc_wallet_util::mwc_crates::serde::{self, Deserialize, Serialize};
+use mwc_wallet_util::mwc_crates::thiserror;
 use std::io;
 use std::path::PathBuf;
 
 use crate::config::MWC_WALLET_DIR;
-use crate::core::global::ChainTypes;
-use crate::util::logger::LoggingConfig;
 use mwc_wallet_util::mwc_core::global;
+use mwc_wallet_util::mwc_core::global::ChainTypes;
 use mwc_wallet_util::mwc_p2p::TorConfig;
+use mwc_wallet_util::mwc_util::logger::LoggingConfig;
 use std::collections::BTreeMap;
 
 /// Command-line wallet configuration
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(crate = "serde")]
 pub struct WalletConfig {
 	/// Chain parameters (default to Mainnet if none at the moment)
 	pub chain_type: Option<ChainTypes>,
@@ -212,6 +215,7 @@ pub enum ConfigError {
 
 /// MQS configuration
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(crate = "serde")]
 pub struct MQSConfig {
 	/// mwcmqs domain
 	pub mwcmqs_domain: String,
@@ -230,6 +234,7 @@ impl Default for MQSConfig {
 
 /// Wallet should be split into a separate configuration file
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(crate = "serde")]
 pub struct GlobalWalletConfig {
 	/// Keep track of the file we've read
 	pub config_file_path: Option<PathBuf>,
@@ -239,6 +244,7 @@ pub struct GlobalWalletConfig {
 
 /// Wallet internal members
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(crate = "serde")]
 pub struct GlobalWalletConfigMembers {
 	/// Config file version (None == version 1)
 	#[serde(default)]

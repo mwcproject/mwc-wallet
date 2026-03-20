@@ -12,26 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#[macro_use]
-extern crate clap;
-
-#[macro_use]
-extern crate log;
-
-extern crate mwc_wallet;
-
 use mwc_wallet_api::{ECDHPubkey, JsonId};
 use mwc_wallet_impls::test_framework::{self, LocalWalletClient, WalletProxy};
+use mwc_wallet_util::mwc_crates::clap::{App, YamlLoader};
+use mwc_wallet_util::mwc_crates::log::error;
+use mwc_wallet_util::mwc_crates::serde_json;
 use std::ops::DerefMut;
-
-use clap::App;
 use std::thread;
 use std::time::Duration;
 
 use mwc_wallet_impls::DefaultLCProvider;
 use mwc_wallet_libwallet::{InitTxArgs, Slate, SlateVersion, VersionedSlate};
 use mwc_wallet_util::mwc_keychain::ExtKeychain;
-use serde_json;
 
 use mwc_wallet_util::mwc_core::global;
 use std::path::PathBuf;
@@ -46,7 +38,7 @@ use common::{
 	setup_global_chain_type, RetrieveSummaryInfoResp,
 };
 use mwc_wallet_util::mwc_core::core::Transaction;
-use mwc_wallet_util::mwc_util::secp::Secp256k1;
+use mwc_wallet_util::mwc_crates::secp::Secp256k1;
 
 #[test]
 fn owner_v3_lifecycle() -> Result<(), mwc_wallet_controller::Error> {
@@ -62,8 +54,8 @@ fn owner_v3_lifecycle() -> Result<(), mwc_wallet_controller::Error> {
 	let test_dir = "target/test_output/owner_v3_lifecycle";
 	setup(test_dir);
 
-	let yml = load_yaml!("../src/bin/mwc-wallet.yml");
-	let app = App::from_yaml(yml);
+	let yml = YamlLoader::load_from_str(include_str!("../src/bin/mwc-wallet.yml")).unwrap();
+	let app = App::from_yaml(&yml[0]);
 
 	// Create a new proxy to simulate server and wallet responses
 	let tx_pool: Arc<Mutex<Vec<Transaction>>> = Arc::new(Mutex::new(Vec::new()));
@@ -114,8 +106,8 @@ fn owner_v3_lifecycle() -> Result<(), mwc_wallet_controller::Error> {
 
 		thread::spawn(move || {
 			global::set_local_chain_type(global::ChainTypes::AutomatedTesting);
-			let yml = load_yaml!("../src/bin/mwc-wallet.yml");
-			let app = App::from_yaml(yml);
+			let yml = YamlLoader::load_from_str(include_str!("../src/bin/mwc-wallet.yml")).unwrap();
+			let app = App::from_yaml(&yml[0]);
 			execute_command_no_setup(
 				&app,
 				test_dir,

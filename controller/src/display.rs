@@ -13,30 +13,32 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::core::core::{self, amount_to_hr_string};
-use crate::core::global;
 #[cfg(feature = "swaps")]
-use crate::libwallet::swap::fsm::state::StateEtaInfo;
+use mwc_wallet_libwallet::swap::fsm::state::StateEtaInfo;
 #[cfg(feature = "swaps")]
-use crate::libwallet::swap::swap;
+use mwc_wallet_libwallet::swap::swap;
 #[cfg(feature = "swaps")]
-use crate::libwallet::swap::types::{Action, Currency, Role};
-use crate::libwallet::{
+use mwc_wallet_libwallet::swap::types::{Action, Currency, Role};
+use mwc_wallet_libwallet::{
 	AcctPathMapping, Error, OutputCommitMapping, OutputStatus, TxLogEntry, ViewWallet, WalletInfo,
 };
+use mwc_wallet_util::mwc_core::core::{self, amount_to_hr_string};
+use mwc_wallet_util::mwc_core::global;
+use mwc_wallet_util::mwc_crates::prettytable;
+use mwc_wallet_util::mwc_crates::term;
 
-use crate::util::{to_hex, ToHex};
-#[cfg(feature = "swaps")]
-use chrono::prelude::*;
-#[cfg(feature = "swaps")]
-use chrono::Local;
-use colored::*;
 #[cfg(feature = "swaps")]
 use mwc_wallet_libwallet::swap::swap::SwapJournalRecord;
 #[cfg(feature = "swaps")]
 use mwc_wallet_libwallet::swap::types::SwapTransactionsConfirmations;
-use mwc_wallet_util::mwc_util::secp::Secp256k1;
-use prettytable;
+#[cfg(feature = "swaps")]
+use mwc_wallet_util::mwc_crates::chrono::prelude::*;
+#[cfg(feature = "swaps")]
+use mwc_wallet_util::mwc_crates::chrono::Local;
+use mwc_wallet_util::mwc_crates::colored::*;
+use mwc_wallet_util::mwc_crates::prettytable::{row, table};
+use mwc_wallet_util::mwc_crates::secp::Secp256k1;
+use mwc_wallet_util::mwc_util::{to_hex, ToHex};
 
 /// Display outputs in a pretty way
 pub fn outputs(

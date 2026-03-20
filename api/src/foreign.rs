@@ -15,16 +15,16 @@
 
 //! Foreign API External Definition
 
-use crate::keychain::Keychain;
-use crate::libwallet::api_impl::foreign;
-use crate::libwallet::{
+use mwc_wallet_libwallet::api_impl::foreign;
+use mwc_wallet_libwallet::types::TxSession;
+use mwc_wallet_libwallet::wallet_lock;
+use mwc_wallet_libwallet::{
 	BlockFees, CbData, Error, NodeClient, NodeVersionInfo, Slate, SlatePurpose, SlateVersion,
 	VersionInfo, VersionedSlate, WalletInst, WalletLCProvider,
 };
-use crate::util::secp::key::SecretKey;
-use ed25519_dalek::PublicKey as DalekPublicKey;
-use libwallet::types::TxSession;
-use libwallet::wallet_lock;
+use mwc_wallet_util::mwc_crates::ed25519_dalek;
+use mwc_wallet_util::mwc_crates::secp::key::SecretKey;
+use mwc_wallet_util::mwc_keychain::Keychain;
 use std::sync::Arc;
 use std::sync::Mutex;
 
@@ -105,26 +105,23 @@ where
 	/// # Example
 	/// ```
 	/// use mwc_wallet_util::mwc_keychain as keychain;
-	/// use mwc_wallet_util::mwc_util as util;
-	/// use mwc_wallet_util::mwc_core;
 	/// use mwc_wallet_api as api;
 	/// use mwc_wallet_config as config;
 	/// use mwc_wallet_impls as impls;
-	/// use mwc_wallet_libwallet as libwallet;
 	///
 	/// use keychain::ExtKeychain;
-	/// use tempfile::tempdir;
+	/// use mwc_wallet_util::mwc_crates::tempfile::tempdir;
 	///
 	/// use std::sync::Arc;
-	/// use util::ZeroingString;
+	/// use mwc_wallet_util::mwc_util::ZeroingString;
 	/// use std::sync::Mutex;
 	///
-	/// use mwc_core::global;
+	/// use mwc_wallet_util::mwc_core::global;
 	///
 	/// use api::Foreign;
 	/// use config::WalletConfig;
 	/// use impls::{DefaultWalletImpl, DefaultLCProvider, HTTPNodeClient};
-	/// use libwallet::WalletInst;
+	/// use mwc_wallet_libwallet::WalletInst;
 	/// use mwc_wallet_config::parse_node_address_string;
 	///
 	/// global::set_local_chain_type(global::ChainTypes::AutomatedTesting);
@@ -251,7 +248,7 @@ where
 	/// # Returns
 	/// * `Ok`([`cb_data`](../mwc_wallet_libwallet/api_impl/types/struct.CbData.html)`)` if successful. This
 	/// will contain the corresponding output, kernel and keyID used to create the coinbase output.
-	/// * or [`libwallet::Error`](../mwc_wallet_libwallet/struct.Error.html) if an error is encountered.
+	/// * or [`mwc_wallet_libwallet::Error`](../mwc_wallet_libwallet/struct.Error.html) if an error is encountered.
 	///
 	/// # Example
 	/// Set up as in [`new`](struct.Foreign.html#method.new) method above.
@@ -306,7 +303,7 @@ where
 	///
 	/// # Returns
 	/// * `Ok(())` if successful and the signatures validate
-	/// * or [`libwallet::Error`](../mwc_wallet_libwallet/struct.Error.html) if an error is encountered.
+	/// * or [`mwc_wallet_libwallet::Error`](../mwc_wallet_libwallet/struct.Error.html) if an error is encountered.
 	///
 	/// # Example
 	/// Set up as in [`new`](struct.Foreign.html#method.new) method above.
@@ -377,7 +374,7 @@ where
 	/// * a result containing:
 	/// * `Ok`([`slate`](../mwc_wallet_libwallet/slate/struct.Slate.html)`)` if successful,
 	/// containing the new slate updated with the recipient's output and public signing information.
-	/// * or [`libwallet::Error`](../mwc_wallet_libwallet/struct.Error.html) if an error is encountered.
+	/// * or [`mwc_wallet_libwallet::Error`](../mwc_wallet_libwallet/struct.Error.html) if an error is encountered.
 	///
 	/// # Remarks
 	///
@@ -454,7 +451,7 @@ where
 	/// # Returns
 	/// * Ok([`slate`](../mwc_wallet_libwallet/slate/struct.Slate.html)) if successful,
 	/// containing the new finalized slate.
-	/// * or [`libwallet::Error`](../mwc_wallet_libwallet/struct.Error.html) if an error is encountered.
+	/// * or [`mwc_wallet_libwallet::Error`](../mwc_wallet_libwallet/struct.Error.html) if an error is encountered.
 	///
 	/// # Example
 	/// Set up as in [`new`](struct.Owner.html#method.new) method above.
@@ -529,7 +526,7 @@ where
 		&self,
 		encrypted_slate: VersionedSlate,
 		address_index: Option<u32>,
-	) -> Result<(Slate, SlatePurpose, Option<DalekPublicKey>), Error> {
+	) -> Result<(Slate, SlatePurpose, Option<ed25519_dalek::PublicKey>), Error> {
 		wallet_lock!(self.wallet_inst, w);
 		let (slate, content, sender, _receiver) = foreign::decrypt_slate(
 			&mut **w,
@@ -546,7 +543,7 @@ where
 		slate: &Slate,
 		version: Option<SlateVersion>,
 		content: SlatePurpose,
-		slatepack_recipient: Option<DalekPublicKey>,
+		slatepack_recipient: Option<ed25519_dalek::PublicKey>,
 		address_index: Option<u32>,
 		use_test_rng: bool,
 	) -> Result<VersionedSlate, Error> {
@@ -569,26 +566,20 @@ where
 #[macro_export]
 macro_rules! doctest_helper_setup_doc_env_foreign {
 	($wallet:ident, $wallet_config:ident) => {
-		use mwc_wallet_api as api;
-		use mwc_wallet_config as config;
-		use mwc_wallet_impls as impls;
-		use mwc_wallet_libwallet as libwallet;
 		use mwc_wallet_util::mwc_core;
-		use mwc_wallet_util::mwc_keychain as keychain;
-		use mwc_wallet_util::mwc_util as util;
 
-		use keychain::ExtKeychain;
-		use mwc_core::global;
-		use tempfile::tempdir;
+		use mwc_wallet_util::mwc_core::global;
+		use mwc_wallet_util::mwc_crates::tempfile::tempdir;
+		use mwc_wallet_util::mwc_keychain::ExtKeychain;
 
+		use mwc_wallet_util::mwc_util::ZeroingString;
 		use std::sync::Arc;
 		use std::sync::Mutex;
-		use util::ZeroingString;
 
-		use api::{Foreign, Owner};
-		use config::{parse_node_address_string, WalletConfig};
-		use impls::{DefaultLCProvider, DefaultWalletImpl, HTTPNodeClient};
-		use libwallet::{BlockFees, IssueInvoiceTxArgs, Slate, WalletInst};
+		use mwc_wallet_api::{Foreign, Owner};
+		use mwc_wallet_config::{parse_node_address_string, WalletConfig};
+		use mwc_wallet_impls::{DefaultLCProvider, DefaultWalletImpl, HTTPNodeClient};
+		use mwc_wallet_libwallet::{BlockFees, IssueInvoiceTxArgs, Slate, WalletInst};
 
 		// don't run on windows CI, which gives very inconsistent results
 		if cfg!(windows) {

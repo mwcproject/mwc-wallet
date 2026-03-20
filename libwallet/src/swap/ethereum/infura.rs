@@ -21,7 +21,12 @@ use crate::swap::is_test_mode;
 use crate::swap::set_test_mode;
 use crate::swap::types::Currency;
 use crate::swap::Error;
-use crossbeam_utils::thread::scope;
+use mwc_wallet_util::mwc_crates::crossbeam_utils::thread::scope;
+use mwc_wallet_util::mwc_crates::lazy_static::lazy_static;
+use mwc_wallet_util::mwc_crates::log::warn;
+use mwc_wallet_util::mwc_crates::rand;
+use mwc_wallet_util::mwc_crates::serde::{self, Deserialize, Serialize};
+use mwc_wallet_util::mwc_crates::tokio::runtime::Builder;
 use mwc_web3::{
 	api::{Accounts, Namespace},
 	contract::{Contract, Options},
@@ -32,7 +37,6 @@ use mwc_web3::{
 #[cfg(test)]
 use std::sync::RwLock;
 use std::u64;
-use tokio::runtime::Builder;
 
 const TRANSACTION_DEFAULT_GAS_LIMIT: u64 = 5_500_000u64;
 

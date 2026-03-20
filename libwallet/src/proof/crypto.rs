@@ -12,16 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use ed25519_dalek::PublicKey as DalekPublicKey;
-use ed25519_dalek::Signature as DalekSignature;
-use mwc_wallet_util::mwc_util::secp::key::{PublicKey, SecretKey};
-use mwc_wallet_util::mwc_util::secp::pedersen::Commitment;
-use mwc_wallet_util::mwc_util::secp::{ContextFlag, Message, Secp256k1, Signature};
+use mwc_wallet_util::mwc_crates::ed25519_dalek;
+use mwc_wallet_util::mwc_crates::secp::key::{PublicKey, SecretKey};
+use mwc_wallet_util::mwc_crates::secp::pedersen::Commitment;
+use mwc_wallet_util::mwc_crates::secp::{ContextFlag, Message, Secp256k1, Signature};
+use mwc_wallet_util::mwc_util;
 
 use super::base58;
 use crate::error::Error;
-use crate::mwc_util as util;
-use sha2::{Digest, Sha256};
+use mwc_wallet_util::mwc_crates::sha2::{Digest, Sha256};
 
 /// Build a public key for the given private key
 pub fn public_key_from_secret_key(
@@ -62,7 +61,7 @@ pub fn sign_challenge(
 
 /// convert to a signature from string
 pub fn signature_from_string(sig_str: &str, secp: &Secp256k1) -> Result<Signature, Error> {
-	let signature_ser = util::from_hex(sig_str).map_err(|e| {
+	let signature_ser = mwc_util::from_hex(sig_str).map_err(|e| {
 		Error::TxProofVerify(format!(
 			"Unable to build signature from HEX {}, {}",
 			sig_str, e
@@ -85,7 +84,7 @@ pub trait Hex<T> {
 
 impl Hex<PublicKey> for PublicKey {
 	fn from_hex(str: &str) -> Result<PublicKey, Error> {
-		let hex = util::from_hex(str).map_err(|e| {
+		let hex = mwc_util::from_hex(str).map_err(|e| {
 			Error::HexError(format!("Unable convert Public Key HEX {}, {}", str, e))
 		})?;
 		let secp = Secp256k1::with_caps(ContextFlag::None);
@@ -99,13 +98,13 @@ impl Hex<PublicKey> for PublicKey {
 
 	fn to_hex(&self) -> String {
 		let secp = Secp256k1::with_caps(ContextFlag::None);
-		util::to_hex(&base58::serialize_public_key(&secp, self))
+		mwc_util::to_hex(&base58::serialize_public_key(&secp, self))
 	}
 }
 
 impl Hex<Signature> for Signature {
 	fn from_hex(str: &str) -> Result<Signature, Error> {
-		let hex = util::from_hex(str)
+		let hex = mwc_util::from_hex(str)
 			.map_err(|e| Error::HexError(format!("Unable convert Signature HEX {}, {}", str, e)))?;
 		let secp = Secp256k1::with_caps(ContextFlag::None);
 		Signature::from_der(&secp, &hex).map_err(|e| {
@@ -116,16 +115,16 @@ impl Hex<Signature> for Signature {
 	fn to_hex(&self) -> String {
 		let secp = Secp256k1::with_caps(ContextFlag::None);
 		let signature = self.serialize_der(&secp);
-		util::to_hex(&signature)
+		mwc_util::to_hex(&signature)
 	}
 }
 
-impl Hex<DalekPublicKey> for DalekPublicKey {
-	fn from_hex(str: &str) -> Result<DalekPublicKey, Error> {
-		let hex = util::from_hex(str).map_err(|e| {
+impl Hex<ed25519_dalek::PublicKey> for ed25519_dalek::PublicKey {
+	fn from_hex(str: &str) -> Result<ed25519_dalek::PublicKey, Error> {
+		let hex = mwc_util::from_hex(str).map_err(|e| {
 			Error::HexError(format!("Unable convert Public Key HEX {}, {}", str, e))
 		})?;
-		DalekPublicKey::from_bytes(&hex).map_err(|e| {
+		ed25519_dalek::PublicKey::from_bytes(&hex).map_err(|e| {
 			Error::HexError(format!(
 				"Unable to build public key from HEX {}, {}",
 				str, e
@@ -134,27 +133,27 @@ impl Hex<DalekPublicKey> for DalekPublicKey {
 	}
 
 	fn to_hex(&self) -> String {
-		util::to_hex(self.as_bytes())
+		mwc_util::to_hex(self.as_bytes())
 	}
 }
 
-impl Hex<DalekSignature> for DalekSignature {
-	fn from_hex(str: &str) -> Result<DalekSignature, Error> {
-		let hex = util::from_hex(str)
+impl Hex<ed25519_dalek::Signature> for ed25519_dalek::Signature {
+	fn from_hex(str: &str) -> Result<ed25519_dalek::Signature, Error> {
+		let hex = mwc_util::from_hex(str)
 			.map_err(|e| Error::HexError(format!("Unable convert Signature HEX {}, {}", str, e)))?;
-		DalekSignature::from_bytes(&hex).map_err(|e| {
+		ed25519_dalek::Signature::from_bytes(&hex).map_err(|e| {
 			Error::HexError(format!("Unable to build Signature from HEX {}, {}", str, e))
 		})
 	}
 
 	fn to_hex(&self) -> String {
-		util::to_hex(&self.clone().to_bytes())
+		mwc_util::to_hex(&self.clone().to_bytes())
 	}
 }
 
 impl Hex<SecretKey> for SecretKey {
 	fn from_hex(str: &str) -> Result<SecretKey, Error> {
-		let data = util::from_hex(str)
+		let data = mwc_util::from_hex(str)
 			.map_err(|e| Error::HexError(format!("Unable convert key HEX, {}", e)))?;
 		let secp = Secp256k1::with_caps(ContextFlag::None);
 		SecretKey::from_slice(&secp, &data)
@@ -162,19 +161,19 @@ impl Hex<SecretKey> for SecretKey {
 	}
 
 	fn to_hex(&self) -> String {
-		util::to_hex(&self.0)
+		mwc_util::to_hex(&self.0)
 	}
 }
 
 impl Hex<Commitment> for Commitment {
 	fn from_hex(str: &str) -> Result<Commitment, Error> {
-		let data = util::from_hex(str).map_err(|e| {
+		let data = mwc_util::from_hex(str).map_err(|e| {
 			Error::HexError(format!("Unable convert Commitment HEX {}, {}", str, e))
 		})?;
 		Ok(Commitment::from_vec(data))
 	}
 
 	fn to_hex(&self) -> String {
-		util::to_hex(&self.0)
+		mwc_util::to_hex(&self.0)
 	}
 }

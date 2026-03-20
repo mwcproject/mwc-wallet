@@ -13,20 +13,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::api::TLSConfig;
 use crate::cli::command_loop;
-use crate::config::MWC_WALLET_DIR;
-use crate::util::file::get_first_line;
-use crate::util::secp::key::SecretKey;
-use crate::util::ZeroingString;
+use mwc_wallet_config::MWC_WALLET_DIR;
+use mwc_wallet_util::mwc_api::TLSConfig;
+use mwc_wallet_util::mwc_core;
+use mwc_wallet_util::mwc_crates::ed25519_dalek;
+use mwc_wallet_util::mwc_crates::rpassword;
+use mwc_wallet_util::mwc_crates::secp::key::SecretKey;
+use mwc_wallet_util::mwc_crates::thiserror;
+use mwc_wallet_util::mwc_keychain;
+use mwc_wallet_util::mwc_util::file::get_first_line;
+use mwc_wallet_util::mwc_util::ZeroingString;
 use std::sync::Mutex;
 
 use crate::cmd::wallet::MIN_COMPAT_NODE_VERSION;
-/// Argument parsing and error handling for wallet commands
-use clap::ArgMatches;
-use ed25519_dalek::SecretKey as DalekSecretKey;
-use linefeed::terminal::Signal;
-use linefeed::{Interface, ReadResult};
 use mwc_wallet_api::Owner;
 use mwc_wallet_config::{MQSConfig, WalletConfig};
 use mwc_wallet_controller::controller::stop_foreign_api_running;
@@ -46,12 +46,16 @@ use mwc_wallet_libwallet::{
 };
 use mwc_wallet_libwallet::{Slate, SlatePurpose};
 use mwc_wallet_util::mwc_core::core::amount_to_hr_string;
-use mwc_wallet_util::mwc_keychain as keychain;
+/// Argument parsing and error handling for wallet commands
+use mwc_wallet_util::mwc_crates::clap::ArgMatches;
+use mwc_wallet_util::mwc_crates::linefeed::terminal::Signal;
+use mwc_wallet_util::mwc_crates::linefeed::{Interface, ReadResult};
+use mwc_wallet_util::mwc_crates::secp::Secp256k1;
+use mwc_wallet_util::mwc_crates::semver::Version;
+#[cfg(feature = "swaps")]
+use mwc_wallet_util::mwc_crates::uuid::Uuid;
 use mwc_wallet_util::mwc_p2p::TorConfig;
-use mwc_wallet_util::mwc_util::secp::Secp256k1;
-use mwc_wallet_util::{mwc_core as core, OnionV3Address};
-use rpassword;
-use semver::Version;
+use mwc_wallet_util::OnionV3Address;
 use std::collections::HashSet;
 #[cfg(feature = "swaps")]
 use std::convert::TryFrom;
@@ -59,8 +63,6 @@ use std::fmt::Display;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::Arc;
-#[cfg(feature = "swaps")]
-use uuid::Uuid;
 
 // define what to do on argument error
 macro_rules! arg_parse {
@@ -126,7 +128,7 @@ where
 	DefaultWalletImpl<'static, C>: WalletInst<'static, L, C, K>,
 	L: WalletLCProvider<'static, C, K>,
 	C: NodeClient + 'static,
-	K: keychain::Keychain + 'static,
+	K: mwc_keychain::Keychain + 'static,
 {
 	let interface = Arc::new(Interface::new("recover")?);
 	let mut phrase = ZeroingString::from("");
@@ -230,7 +232,7 @@ where
 	DefaultWalletImpl<'static, C>: WalletInst<'static, L, C, K>,
 	L: WalletLCProvider<'static, C, K>,
 	C: NodeClient + 'static,
-	K: keychain::Keychain + 'static,
+	K: mwc_keychain::Keychain + 'static,
 {
 	let mut wallet = Box::new(DefaultWalletImpl::<'static, C>::new(
 		context_id,
@@ -345,7 +347,7 @@ where
 	DefaultWalletImpl<'static, C>: WalletInst<'static, L, C, K>,
 	L: WalletLCProvider<'static, C, K>,
 	C: NodeClient + 'static,
-	K: keychain::Keychain + 'static,
+	K: mwc_keychain::Keychain + 'static,
 {
 	// Checking is wallet data
 	let mut wallet_data_path = PathBuf::from(&config.data_file_dir);
@@ -482,7 +484,7 @@ pub fn parse_send_args(
 	let (amount, spend_max) = if amount.eq_ignore_ascii_case("max") {
 		(Ok(0), true)
 	} else {
-		(core::core::amount_from_hr_string(amount), false)
+		(mwc_core::core::amount_from_hr_string(amount), false)
 	};
 	let amount = match amount {
 		Ok(a) => a,
@@ -654,7 +656,7 @@ pub fn parse_send_args(
 	};
 
 	let min_fee = match args.value_of("min_fee") {
-		Some(min_fee) => match core::core::amount_from_hr_string(min_fee) {
+		Some(min_fee) => match mwc_core::core::amount_from_hr_string(min_fee) {
 			Ok(min_fee) => Some(min_fee),
 			Err(e) => {
 				return Err(ParseError::ArgumentError(format!(
@@ -702,7 +704,7 @@ pub fn parse_send_args(
 
 pub fn parse_faucet_request_args(args: &ArgMatches) -> Result<u64, ParseError> {
 	let amount = parse_optional(args, "amount")?.unwrap_or("3.0".into());
-	let amount = core::core::amount_from_hr_string(&amount);
+	let amount = mwc_core::core::amount_from_hr_string(&amount);
 	let amount = match amount {
 		Ok(a) => {
 			if a > 5000000000 {
@@ -777,7 +779,7 @@ pub fn parse_issue_invoice_args(
 	args: &ArgMatches,
 ) -> Result<command::IssueInvoiceArgs, ParseError> {
 	let amount = parse_required(args, "amount")?;
-	let amount = core::core::amount_from_hr_string(amount);
+	let amount = mwc_core::core::amount_from_hr_string(amount);
 	let amount = match amount {
 		Ok(a) => a,
 		Err(e) => {
@@ -839,7 +841,7 @@ pub fn parse_process_invoice_args(
 	context_id: u32,
 	args: &ArgMatches,
 	prompt: bool,
-	slatepack_secret: &DalekSecretKey,
+	slatepack_secret: &ed25519_dalek::SecretKey,
 	secp: &Secp256k1,
 ) -> Result<command::ProcessInvoiceArgs, ParseError> {
 	// TODO: display and prompt for confirmation of what we're doing
@@ -1160,7 +1162,7 @@ pub fn parse_verify_proof_args(args: &ArgMatches) -> Result<command::ProofVerify
 
 pub fn parse_swap_start_args(args: &ArgMatches) -> Result<SwapStartArgs, ParseError> {
 	let mwc_amount = parse_required(args, "mwc_amount")?;
-	let mwc_amount = core::core::amount_from_hr_string(mwc_amount);
+	let mwc_amount = mwc_core::core::amount_from_hr_string(mwc_amount);
 	let mwc_amount = match mwc_amount {
 		Ok(a) => a,
 		Err(e) => {
@@ -1373,7 +1375,7 @@ pub fn parse_integrity_args(args: &ArgMatches) -> Result<command::IntegrityArgs,
 	} else if args.is_present("fee") {
 		let fee_str = parse_required(args, "fee")?.split(",");
 		for fs in fee_str {
-			let fee_amount = core::core::amount_from_hr_string(fs).map_err(|e| {
+			let fee_amount = mwc_core::core::amount_from_hr_string(fs).map_err(|e| {
 				ParseError::ArgumentError(format!("Unable to parse create fee amount, {}", e))
 			})?;
 			fee.push(fee_amount);
@@ -1388,7 +1390,7 @@ pub fn parse_integrity_args(args: &ArgMatches) -> Result<command::IntegrityArgs,
 	};
 
 	let reserve = match args.value_of("reserve") {
-		Some(str) => Some(core::core::amount_from_hr_string(str).map_err(|e| {
+		Some(str) => Some(mwc_core::core::amount_from_hr_string(str).map_err(|e| {
 			ParseError::ArgumentError(format!("Unable to parse reserve MWC value, {}", e))
 		})?),
 		None => None,
@@ -1407,7 +1409,7 @@ pub fn parse_integrity_args(args: &ArgMatches) -> Result<command::IntegrityArgs,
 #[cfg(feature = "swaps")]
 pub fn parse_messaging_args(args: &ArgMatches) -> Result<command::MessagingArgs, ParseError> {
 	let fee = match args.value_of("fee") {
-		Some(s) => Some(core::core::amount_from_hr_string(s).map_err(|e| {
+		Some(s) => Some(mwc_core::core::amount_from_hr_string(s).map_err(|e| {
 			ParseError::ArgumentError(format!("Unable to parse create fee amount, {}", e))
 		})?),
 		None => None,
@@ -1514,9 +1516,9 @@ where
 				Box<
 					dyn WalletInst<
 						'static,
-						DefaultLCProvider<'static, C, keychain::ExtKeychain>,
+						DefaultLCProvider<'static, C, mwc_keychain::ExtKeychain>,
 						C,
-						keychain::ExtKeychain,
+						mwc_keychain::ExtKeychain,
 					>,
 				>,
 			>,
@@ -1577,16 +1579,15 @@ where
 	// ... if node isn't available, allow offline functions
 
 	// Instantiate wallet (doesn't open the wallet)
-	let wallet =
-		inst_wallet::<DefaultLCProvider<C, keychain::ExtKeychain>, C, keychain::ExtKeychain>(
-			context_id,
-			&wallet_config,
-			node_client.clone(),
-		)
-		.unwrap_or_else(|e| {
-			println!("{}", e);
-			std::process::exit(1);
-		});
+	let wallet = inst_wallet::<
+		DefaultLCProvider<C, mwc_keychain::ExtKeychain>,
+		C,
+		mwc_keychain::ExtKeychain,
+	>(context_id, &wallet_config, node_client.clone())
+	.unwrap_or_else(|e| {
+		println!("{}", e);
+		std::process::exit(1);
+	});
 
 	// provide wallet instance back to the caller (handy for testing with
 	// local wallet proxy, etc)
@@ -1704,7 +1705,7 @@ where
 	DefaultWalletImpl<'static, C>: WalletInst<'static, L, C, K>,
 	L: WalletLCProvider<'static, C, K> + 'static,
 	C: NodeClient + 'static,
-	K: keychain::Keychain + 'static,
+	K: mwc_keychain::Keychain + 'static,
 {
 	let km = (&keychain_mask).as_ref();
 

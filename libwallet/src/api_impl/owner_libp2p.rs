@@ -14,31 +14,33 @@
 
 //! Generic implementation libp2p related communication functionality
 
-use crate::mwc_util::secp::key::SecretKey;
+use mwc_wallet_util::mwc_crates::ed25519_dalek;
+use mwc_wallet_util::mwc_crates::secp::key::SecretKey;
+use mwc_wallet_util::mwc_crates::serde::{self, Deserialize, Serialize};
+use mwc_wallet_util::mwc_crates::serde_json;
 use std::cmp::Ordering;
 use std::sync::Mutex;
 
 use crate::api_impl::{foreign, owner};
 use crate::internal::{keys, updater};
-use crate::mwc_core::core::hash::Hash;
-use crate::mwc_core::libtx::tx_fee;
-use crate::mwc_core::ser;
-use crate::mwc_keychain::Keychain;
-use crate::mwc_keychain::{ExtKeychainPath, Identifier};
-use crate::mwc_p2p::libp2p_connection;
-use crate::mwc_util::secp;
-use crate::mwc_util::secp::pedersen::Commitment;
-use crate::mwc_util::secp::Signature;
-use crate::mwc_util::secp::{Message, PublicKey};
 use crate::types::NodeClient;
 use crate::{wallet_lock, WalletInst, WalletLCProvider};
 use crate::{AcctPathMapping, InitTxArgs, OutputCommitMapping, OutputStatus};
 use crate::{Context, Error};
-use ed25519_dalek::PublicKey as DalekPublicKey;
-use mwc_wallet_util::mwc_util::secp::Secp256k1;
+use mwc_wallet_util::mwc_core::core::hash::Hash;
+use mwc_wallet_util::mwc_core::libtx::tx_fee;
+use mwc_wallet_util::mwc_core::ser;
+use mwc_wallet_util::mwc_crates::secp;
+use mwc_wallet_util::mwc_crates::secp::pedersen::Commitment;
+use mwc_wallet_util::mwc_crates::secp::Secp256k1;
+use mwc_wallet_util::mwc_crates::secp::Signature;
+use mwc_wallet_util::mwc_crates::secp::{Message, PublicKey};
+use mwc_wallet_util::mwc_crates::uuid::Uuid;
+use mwc_wallet_util::mwc_keychain::Keychain;
+use mwc_wallet_util::mwc_keychain::{ExtKeychainPath, Identifier};
+use mwc_wallet_util::mwc_p2p::libp2p_connection;
 use std::collections::HashMap;
 use std::sync::Arc;
-use uuid::Uuid;
 
 /// Identity Index for integrity account. Let's put it at the end, so we can be sure that it exist
 pub const INTEGRITY_ACCOUNT_ID: u32 = 65536;
@@ -49,6 +51,7 @@ pub const INTEGRITY_FEE_MIN_CONFIRMATIONS: u64 = 2;
 
 /// Integral fee proof data. It build form the both contexts and a transaction.
 #[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(crate = "serde")]
 pub struct IntegrityContext {
 	/// Sender account id. Might be needed to request a transaction detail
 	pub sender_parent_key_id: Identifier,
@@ -92,7 +95,7 @@ impl IntegrityContext {
 	pub fn calc_kernel_excess(
 		&self,
 		secp: &secp::Secp256k1,
-		tor_pk: &DalekPublicKey,
+		tor_pk: &ed25519_dalek::PublicKey,
 	) -> Result<(Commitment, Signature), Error> {
 		let msg_hash = Hash::from_vec(tor_pk.as_bytes());
 		let message = Message::from_slice(msg_hash.as_bytes())?;
@@ -112,7 +115,7 @@ impl IntegrityContext {
 		#[cfg(debug_assertions)]
 		{
 			// Sanity check
-			crate::mwc_core::libtx::aggsig::verify_completed_sig(
+			mwc_core::libtx::aggsig::verify_completed_sig(
 				secp,
 				&signature,
 				&pk,

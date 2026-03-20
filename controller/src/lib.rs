@@ -15,25 +15,6 @@
 
 //! Library module for the main wallet functionalities provided by Mwc.
 
-#[macro_use]
-extern crate prettytable;
-#[macro_use]
-extern crate serde_derive;
-extern crate serde_json;
-
-#[macro_use]
-extern crate log;
-#[macro_use]
-extern crate lazy_static;
-use mwc_wallet_api as apiwallet;
-use mwc_wallet_config as config;
-use mwc_wallet_impls as impls;
-use mwc_wallet_libwallet as libwallet;
-use mwc_wallet_util::mwc_api as api;
-use mwc_wallet_util::mwc_core as core;
-use mwc_wallet_util::mwc_keychain as keychain;
-use mwc_wallet_util::mwc_util as util;
-
 pub mod command;
 pub mod controller;
 pub mod display;

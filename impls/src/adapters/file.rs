@@ -14,17 +14,18 @@
 // limitations under the License.
 
 /// File Output 'plugin' implementation
+use mwc_wallet_util::mwc_crates::ed25519_dalek;
 use std::fs::{metadata, File};
 use std::io::{Read, Write};
 
 use crate::adapters::SlateGetData;
 use crate::error::Error;
-use crate::libwallet::{Slate, SlateVersion, VersionedSlate};
 use crate::{SlateGetter, SlatePutter};
-use ed25519_dalek::{PublicKey as DalekPublicKey, SecretKey as DalekSecretKey};
 use mwc_wallet_libwallet::slatepack;
 use mwc_wallet_libwallet::slatepack::SlatePurpose;
-use mwc_wallet_util::mwc_util::secp::Secp256k1;
+use mwc_wallet_libwallet::{Slate, SlateVersion, VersionedSlate};
+use mwc_wallet_util::mwc_crates::log::warn;
+use mwc_wallet_util::mwc_crates::secp::Secp256k1;
 use std::path::PathBuf;
 
 #[derive(Clone)]
@@ -32,8 +33,8 @@ pub struct PathToSlatePutter {
 	context_id: u32,
 	path_buf: Option<PathBuf>,
 	content: Option<SlatePurpose>,
-	sender: Option<DalekPublicKey>,
-	recipient: Option<DalekPublicKey>,
+	sender: Option<ed25519_dalek::PublicKey>,
+	recipient: Option<ed25519_dalek::PublicKey>,
 	slatepack_format: bool,
 }
 
@@ -51,8 +52,8 @@ impl PathToSlatePutter {
 		context_id: u32,
 		path_buf: Option<PathBuf>,
 		content: SlatePurpose,
-		sender: DalekPublicKey,
-		recipient: Option<DalekPublicKey>,
+		sender: ed25519_dalek::PublicKey,
+		recipient: Option<ed25519_dalek::PublicKey>,
 		slatepack_format: bool,
 	) -> Self {
 		Self {
@@ -99,7 +100,7 @@ impl SlatePutter for PathToSlatePutter {
 	fn put_tx(
 		&self,
 		slate: &Slate,
-		slatepack_secret: Option<&DalekSecretKey>,
+		slatepack_secret: Option<&ed25519_dalek::SecretKey>,
 		use_test_rng: bool,
 		secp: &Secp256k1,
 	) -> Result<String, Error> {
@@ -185,7 +186,7 @@ impl SlatePutter for PathToSlatePutter {
 impl SlateGetter for PathToSlateGetter {
 	fn get_tx(
 		&self,
-		slatepack_secret: Option<&DalekSecretKey>,
+		slatepack_secret: Option<&ed25519_dalek::SecretKey>,
 		secp: &Secp256k1,
 	) -> Result<SlateGetData, Error> {
 		let content = match &self.slate_str {

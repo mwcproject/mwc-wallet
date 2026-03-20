@@ -13,19 +13,14 @@
 // limitations under the License.
 
 //! Test sender transaction with no change output
-#[macro_use]
-extern crate log;
-extern crate mwc_wallet_controller as wallet;
-extern crate mwc_wallet_impls as impls;
-
-use mwc_wallet_util::mwc_core as core;
+use mwc_wallet_util::mwc_core;
 use mwc_wallet_util::mwc_core::global;
+use mwc_wallet_util::mwc_crates::log::error;
 use std::ops::DerefMut;
 use std::sync::Arc;
 
-use impls::test_framework::{self, LocalWalletClient};
-use libwallet::{InitTxArgs, IssueInvoiceTxArgs, Slate};
-use mwc_wallet_libwallet as libwallet;
+use mwc_wallet_impls::test_framework::{self, LocalWalletClient};
+use mwc_wallet_libwallet::{InitTxArgs, IssueInvoiceTxArgs, Slate};
 use std::sync::atomic::Ordering;
 use std::thread;
 use std::time::Duration;
@@ -41,7 +36,7 @@ fn broken_change_test_impl(
 	put_into_change: u64,
 	expected_outputs: usize,
 	test_send: bool,
-) -> Result<(), wallet::Error> {
+) -> Result<(), mwc_wallet_controller::Error> {
 	global::set_local_chain_type(global::ChainTypes::AutomatedTesting);
 	let tx_pool: Arc<Mutex<Vec<Transaction>>> = Arc::new(Mutex::new(Vec::new()));
 	let mut wallet_proxy = create_wallet_proxy(test_dir.into(), tx_pool.clone());
@@ -83,7 +78,7 @@ fn broken_change_test_impl(
 	});
 
 	// few values to keep things shorter
-	let reward = core::consensus::reward(0, 0, 1);
+	let reward = mwc_core::consensus::reward(0, 0, 1);
 
 	let inputs_num = 4;
 	let output_num = 5;
@@ -100,59 +95,74 @@ fn broken_change_test_impl(
 			.unwrap_or_else(|e| e.into_inner())
 			.deref_mut(),
 	);
-	let fee = core::libtx::tx_fee(0, inputs_num, output_num + 1, 1);
+	let fee = mwc_core::libtx::tx_fee(0, inputs_num, output_num + 1, 1);
 
 	// send a single block's worth of transactions with minimal strategy
 	let mut slate = Slate::blank(2, false);
 	if test_send {
-		wallet::controller::owner_single_use(Some(wallet1.clone()), mask1, None, |api, m| {
-			let args = InitTxArgs {
-				src_acct_name: None,
-				amount: reward * inputs_num as u64 - fee - put_into_change,
-				minimum_confirmations: 2,
-				max_outputs: 500,
-				num_change_outputs: output_num as u32,
-				selection_strategy_is_use_all: false,
-				..Default::default()
-			};
-			slate = api.init_send_tx(m, None, &args, 1)?;
-			slate = client1.send_tx_slate_direct("wallet2", &slate)?;
-			api.tx_lock_outputs(m, None, &slate, None, 0)?;
-			slate = api.finalize_tx(m, None, &slate, true)?;
-			assert!(slate.tx.clone().unwrap().body.inputs.len() == inputs_num);
-			assert!(slate.tx.clone().unwrap().body.outputs.len() == expected_outputs);
-			api.post_tx(m, slate.tx_or_err()?, false)?;
-			Ok(())
-		})?;
+		mwc_wallet_controller::controller::owner_single_use(
+			Some(wallet1.clone()),
+			mask1,
+			None,
+			|api, m| {
+				let args = InitTxArgs {
+					src_acct_name: None,
+					amount: reward * inputs_num as u64 - fee - put_into_change,
+					minimum_confirmations: 2,
+					max_outputs: 500,
+					num_change_outputs: output_num as u32,
+					selection_strategy_is_use_all: false,
+					..Default::default()
+				};
+				slate = api.init_send_tx(m, None, &args, 1)?;
+				slate = client1.send_tx_slate_direct("wallet2", &slate)?;
+				api.tx_lock_outputs(m, None, &slate, None, 0)?;
+				slate = api.finalize_tx(m, None, &slate, true)?;
+				assert!(slate.tx.clone().unwrap().body.inputs.len() == inputs_num);
+				assert!(slate.tx.clone().unwrap().body.outputs.len() == expected_outputs);
+				api.post_tx(m, slate.tx_or_err()?, false)?;
+				Ok(())
+			},
+		)?;
 	} else {
 		// testing invoice
-		wallet::controller::owner_single_use(Some(wallet2.clone()), mask2, None, |api, m| {
-			// Wallet 2 inititates an invoice transaction, requesting payment
-			let args = IssueInvoiceTxArgs {
-				amount: reward * inputs_num as u64 - fee - put_into_change,
-				..Default::default()
-			};
-			slate = api.issue_invoice_tx(m, None, &args)?;
-			Ok(())
-		})?;
+		mwc_wallet_controller::controller::owner_single_use(
+			Some(wallet2.clone()),
+			mask2,
+			None,
+			|api, m| {
+				// Wallet 2 inititates an invoice transaction, requesting payment
+				let args = IssueInvoiceTxArgs {
+					amount: reward * inputs_num as u64 - fee - put_into_change,
+					..Default::default()
+				};
+				slate = api.issue_invoice_tx(m, None, &args)?;
+				Ok(())
+			},
+		)?;
 
-		wallet::controller::owner_single_use(Some(wallet1.clone()), mask1, None, |api, m| {
-			// Wallet 1 receives the invoice transaction
-			let args = InitTxArgs {
-				src_acct_name: None,
-				amount: slate.amount,
-				minimum_confirmations: 2,
-				max_outputs: 500,
-				num_change_outputs: output_num as u32,
-				selection_strategy_is_use_all: false,
-				..Default::default()
-			};
-			slate = api.process_invoice_tx(m, None, &slate, &args)?;
-			api.tx_lock_outputs(m, None, &slate, None, 1)?;
-			assert!(slate.tx.clone().unwrap().body.inputs.len() == inputs_num);
-			assert!(slate.tx.clone().unwrap().body.outputs.len() == expected_outputs);
-			Ok(())
-		})?;
+		mwc_wallet_controller::controller::owner_single_use(
+			Some(wallet1.clone()),
+			mask1,
+			None,
+			|api, m| {
+				// Wallet 1 receives the invoice transaction
+				let args = InitTxArgs {
+					src_acct_name: None,
+					amount: slate.amount,
+					minimum_confirmations: 2,
+					max_outputs: 500,
+					num_change_outputs: output_num as u32,
+					selection_strategy_is_use_all: false,
+					..Default::default()
+				};
+				slate = api.process_invoice_tx(m, None, &slate, &args)?;
+				api.tx_lock_outputs(m, None, &slate, None, 1)?;
+				assert!(slate.tx.clone().unwrap().body.inputs.len() == inputs_num);
+				assert!(slate.tx.clone().unwrap().body.outputs.len() == expected_outputs);
+				Ok(())
+			},
+		)?;
 	}
 
 	// let logging finish

@@ -15,28 +15,29 @@
 
 //! Default wallet lifecycle provider
 
-use crate::config::{
+use crate::lifecycle::seed::WalletSeed;
+use crate::LMDBBackend;
+use mwc_wallet_config::{
 	config, GlobalWalletConfig, GlobalWalletConfigMembers, MQSConfig, WalletConfig, MWC_WALLET_DIR,
 };
-use crate::core::global;
-use crate::keychain::{ChildNumber, Keychain};
 #[cfg(feature = "swaps")]
-use crate::libwallet::swap::ethereum::generate_ethereum_wallet;
-use crate::libwallet::{Error, NodeClient, WalletBackend, WalletLCProvider};
-use crate::lifecycle::seed::WalletSeed;
-use crate::util::secp::key::SecretKey;
-use crate::util::ZeroingString;
-use crate::LMDBBackend;
+use mwc_wallet_libwallet::swap::ethereum::generate_ethereum_wallet;
 use mwc_wallet_libwallet::types::{
 	FLAG_CONTEXT_CLEARED, FLAG_NEW_WALLET, FLAG_OUTPUTS_ROOT_KEY_ID_CORRECTION,
 };
 use mwc_wallet_libwallet::{Context, OutputData, TxLogEntryType};
+use mwc_wallet_libwallet::{Error, NodeClient, WalletBackend, WalletLCProvider};
+use mwc_wallet_util::mwc_core::global;
+use mwc_wallet_util::mwc_crates::log::{error, info, warn};
+use mwc_wallet_util::mwc_crates::secp::key::SecretKey;
+use mwc_wallet_util::mwc_crates::uuid::Uuid;
+use mwc_wallet_util::mwc_keychain::{ChildNumber, Keychain};
 use mwc_wallet_util::mwc_p2p::TorConfig;
 use mwc_wallet_util::mwc_util::logger::LoggingConfig;
+use mwc_wallet_util::mwc_util::ZeroingString;
 use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
-use uuid::Uuid;
 
 pub struct DefaultLCProvider<'a, C, K>
 where

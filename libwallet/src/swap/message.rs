@@ -14,22 +14,25 @@
 
 use super::bitcoin::BtcUpdate;
 use super::ethereum::EthUpdate;
-use super::multisig::ParticipantData as MultisigParticipant;
+use super::multisig;
 use super::ser::*;
 use super::types::{Currency, Network};
 use super::Error;
-use crate::mwc_core::libtx::secp_ser;
-use crate::mwc_util::secp::key::{PublicKey, SecretKey};
-use crate::mwc_util::secp::Signature;
 use crate::proof::message::EncryptedMessage;
 use crate::proof::proofaddress::ProvableAddress;
-use crate::{ParticipantData as TxParticipant, VersionedSlate};
-use chrono::{DateTime, Utc};
-use mwc_wallet_util::mwc_util::secp::Secp256k1;
-use uuid::Uuid;
+use crate::VersionedSlate;
+use mwc_wallet_util::mwc_core::libtx::secp_ser;
+use mwc_wallet_util::mwc_crates::chrono::{DateTime, Utc};
+use mwc_wallet_util::mwc_crates::secp::key::{PublicKey, SecretKey};
+use mwc_wallet_util::mwc_crates::secp::Secp256k1;
+use mwc_wallet_util::mwc_crates::secp::Signature;
+use mwc_wallet_util::mwc_crates::serde::{self, Deserialize, Serialize};
+use mwc_wallet_util::mwc_crates::serde_json;
+use mwc_wallet_util::mwc_crates::uuid::Uuid;
 
 /// Swap message that is used for Seller/Buyer interaction
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(crate = "serde")]
 pub struct Message {
 	/// Swap session UUID
 	pub id: Uuid,
@@ -122,6 +125,7 @@ impl Message {
 
 /// Swap core data of the Seller/Buyer message
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(crate = "serde")]
 pub enum Update {
 	/// Empty data placeholder
 	None,
@@ -140,6 +144,7 @@ pub enum Update {
 
 /// Seller, Status::Created  Seller creates initial offer
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(crate = "serde")]
 pub struct OfferUpdate {
 	/// Swap starting time.
 	pub start_time: DateTime<Utc>,
@@ -164,13 +169,13 @@ pub struct OfferUpdate {
 	/// BTC/ETH
 	pub secondary_currency: Currency,
 	/// Seller part of multisig
-	pub multisig: MultisigParticipant,
+	pub multisig: multisig::ParticipantData,
 	/// Lock V2 Slate that Buyer need to continue to build
 	pub lock_slate: VersionedSlate,
 	/// Refund V2 slate that byer need to sign.
 	pub refund_slate: VersionedSlate,
 	/// Needed info to build step 1 on redeem state (that saving some interaction)
-	pub redeem_participant: TxParticipant,
+	pub redeem_participant: crate::ParticipantData,
 	/// Required confirmations for MWC Locking
 	pub mwc_confirmations: u64,
 	/// Required confirmations for BTC/ETH Locking
@@ -183,20 +188,22 @@ pub struct OfferUpdate {
 
 /// Buyer, Status::Offered  Buyer responded for offer
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(crate = "serde")]
 pub struct AcceptOfferUpdate {
 	/// Buyer part of multisig
-	pub multisig: MultisigParticipant,
+	pub multisig: multisig::ParticipantData,
 	/// Public key for Redeem Slate
 	#[serde(serialize_with = "pubkey_to_hex", deserialize_with = "pubkey_from_hex")]
 	pub redeem_public: PublicKey,
 	/// Buyer part needed to build lock slate
-	pub lock_participant: TxParticipant,
+	pub lock_participant: crate::ParticipantData,
 	/// Buyer part needed to build refund slate
-	pub refund_participant: TxParticipant,
+	pub refund_participant: crate::ParticipantData,
 }
 
 /// Buyer, Status::Locked   Buyer building the redeem slate
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(crate = "serde")]
 pub struct InitRedeemUpdate {
 	/// redeem slate, construction in the progress
 	pub redeem_slate: VersionedSlate,
@@ -207,13 +214,15 @@ pub struct InitRedeemUpdate {
 
 /// Seller, Status::InitRedeem.  Sending it's part needed for redeem transaction
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(crate = "serde")]
 pub struct RedeemUpdate {
 	/// Needed data to build redeem transaction
-	pub redeem_participant: TxParticipant,
+	pub redeem_participant: crate::ParticipantData,
 }
 
 /// Update message about Secondary Currency (BTC)
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(crate = "serde")]
 pub enum SecondaryUpdate {
 	/// None, empty value
 	Empty,
@@ -243,6 +252,7 @@ impl SecondaryUpdate {
 
 /// encryption/decryption of swap message
 #[derive(Serialize, Deserialize, Debug)]
+#[serde(crate = "serde")]
 pub struct SwapMessage {
 	/// key to decrypt the message
 	pub key: [u8; 32],

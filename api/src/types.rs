@@ -12,35 +12,38 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::core::libtx::secp_ser;
-use crate::keychain::Identifier;
-use crate::libwallet::dalek_ser;
-use crate::libwallet::Error;
-use crate::libwallet::{ParticipantMessages, TxLogEntry, TxLogEntryType, VersionedSlate};
+use mwc_wallet_libwallet::ser;
+use mwc_wallet_libwallet::Error;
+use mwc_wallet_libwallet::{ParticipantMessages, TxLogEntry, TxLogEntryType, VersionedSlate};
+use mwc_wallet_util::mwc_core::libtx::secp_ser;
+use mwc_wallet_util::mwc_crates::base64;
+use mwc_wallet_util::mwc_crates::ed25519_dalek;
+use mwc_wallet_util::mwc_crates::serde::{self, Deserialize, Serialize};
+use mwc_wallet_util::mwc_crates::serde_json;
+use mwc_wallet_util::mwc_keychain::Identifier;
 
 #[cfg(feature = "grin_proof")]
-use crate::libwallet::StoredProofInfo;
+use mwc_wallet_libwallet::StoredProofInfo;
 
-use crate::util::secp::key::{PublicKey, SecretKey};
-use crate::util::secp::pedersen;
-use crate::util::{from_hex, ToHex};
 use mwc_wallet_libwallet::slatepack::SlatePurpose;
 use mwc_wallet_libwallet::types::option_duration_as_secs;
+use mwc_wallet_util::mwc_crates::secp::key::{PublicKey, SecretKey};
+use mwc_wallet_util::mwc_crates::secp::pedersen;
+use mwc_wallet_util::mwc_util::{from_hex, ToHex};
 
-use base64;
-use chrono::{DateTime, Utc};
-use ed25519_dalek::PublicKey as DalekPublicKey;
 use mwc_wallet_libwallet::proof::proofaddress::ProvableAddress;
-use rand::{thread_rng, Rng};
-use ring::aead;
-use serde_json::{self, Value};
+use mwc_wallet_util::mwc_crates::chrono::{DateTime, Utc};
+use mwc_wallet_util::mwc_crates::rand::{thread_rng, Rng};
+use mwc_wallet_util::mwc_crates::ring::aead;
+use mwc_wallet_util::mwc_crates::serde_json::Value;
+use mwc_wallet_util::mwc_crates::uuid::Uuid;
 use std::collections::HashMap;
 use std::time::Duration;
-use uuid::Uuid;
 
 /// Represents a compliant JSON RPC 2.0 id.
 /// Valid id: Integer, String.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(crate = "serde")]
 #[serde(untagged)]
 pub enum JsonId {
 	/// Integer Id
@@ -51,6 +54,7 @@ pub enum JsonId {
 
 /// Wrapper for API Tokens
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(crate = "serde")]
 #[serde(transparent)]
 pub struct Token {
 	#[serde(with = "secp_ser::option_seckey_serde")]
@@ -60,15 +64,17 @@ pub struct Token {
 
 /// Wrapper for dalek public keys, used as addresses
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(crate = "serde")]
 #[serde(transparent)]
 pub struct PubAddress {
-	#[serde(with = "dalek_ser::dalek_pubkey_serde")]
+	#[serde(with = "ser::dalek_pubkey_serde")]
 	/// Public address
-	pub address: DalekPublicKey,
+	pub address: ed25519_dalek::PublicKey,
 }
 
 /// Wrapper for ECDH Public keys
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(crate = "serde")]
 #[serde(transparent)]
 pub struct ECDHPubkey {
 	/// public key, flattened
@@ -77,6 +83,7 @@ pub struct ECDHPubkey {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(crate = "serde")]
 pub struct EncryptedBody {
 	/// nonce used for encryption
 	pub nonce: String,
@@ -185,6 +192,7 @@ impl EncryptedBody {
 
 /// Wrapper for secure JSON requests
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(crate = "serde")]
 pub struct EncryptedRequest {
 	/// JSON RPC response
 	pub jsonrpc: String,
@@ -238,6 +246,7 @@ impl EncryptedRequest {
 
 /// Wrapper for secure JSON requests
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(crate = "serde")]
 pub struct EncryptedResponse {
 	/// JSON RPC response
 	pub jsonrpc: String,
@@ -298,6 +307,7 @@ impl EncryptedResponse {
 
 /// Wrapper for encryption error responses
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(crate = "serde")]
 pub struct EncryptionError {
 	/// code
 	pub code: i32,
@@ -307,6 +317,7 @@ pub struct EncryptionError {
 
 /// Wrapper for encryption error responses
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(crate = "serde")]
 pub struct EncryptionErrorResponse {
 	/// JSON RPC response
 	pub jsonrpc: String,
@@ -357,6 +368,7 @@ impl EncryptionErrorResponse {
 /// TxLogEntry has commits  as pedersen::Commitment.  It is not user friendly,
 /// And we can't change TxLogEntry because of relased version. We can only convert for API
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(crate = "serde")]
 pub struct TxLogEntryAPI {
 	#[serde(default = "TxLogEntryAPI::default_parent_key_id")]
 	pub parent_key_id: Identifier,
@@ -465,6 +477,7 @@ impl TxLogEntryAPI {
 
 /// Information about slatepack
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(crate = "serde")]
 pub struct SlatepackInfo {
 	/// Slate V3 or V2
 	pub slate: VersionedSlate,
@@ -480,7 +493,7 @@ pub struct SlatepackInfo {
 
 #[test]
 fn encrypted_request() -> Result<(), Error> {
-	use crate::util::from_hex;
+	use mwc_wallet_util::mwc_util::from_hex;
 	use mwc_wallet_util::mwc_util::static_secp_instance;
 
 	let sec_key_str = "e00dcc4a009e3427c6b1e1a550c538179d46f3827a13ed74c759c860761caf1e";

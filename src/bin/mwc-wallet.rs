@@ -15,23 +15,17 @@
 
 //! Main for building the binary of a Mwc Reference Wallet
 
-#[macro_use]
-extern crate clap;
-
-extern crate mwc_wallet_util;
-#[macro_use]
-extern crate log;
-use crate::config::ConfigError;
-use crate::core::global;
-use clap::{App, AppSettings};
-use mwc_wallet_config as config;
+use mwc_wallet_config::ConfigError;
 use mwc_wallet_impls::HTTPNodeClient;
-use mwc_wallet_util::{mwc_core as core, mwc_node_workflow};
+use mwc_wallet_util::mwc_core::global;
+use mwc_wallet_util::mwc_crates::clap::{App, AppSettings, YamlLoader};
+use mwc_wallet_util::mwc_node_workflow::{context, logging};
 use std::env;
 use std::path::PathBuf;
 
 use mwc_wallet::cmd;
 use mwc_wallet_config::parse_node_address_string;
+use mwc_wallet_util::mwc_crates::log::{debug, error, info, warn};
 use mwc_wallet_util::mwc_util::logger::LoggingConfig;
 
 // include build information
@@ -70,8 +64,8 @@ fn main() {
 }
 
 fn real_main() -> i32 {
-	let yml = load_yaml!("mwc-wallet.yml");
-	let args = App::from_yaml(yml)
+	let yml = YamlLoader::load_from_str(include_str!("mwc-wallet.yml")).unwrap();
+	let args = App::from_yaml(&yml[0])
 		.version(built_info::PKG_VERSION)
 		.setting(AppSettings::VersionlessSubcommands)
 		.get_matches();
@@ -114,7 +108,12 @@ fn real_main() -> i32 {
 
 	// Load relevant config, try and load a wallet config file
 	// Use defaults for configuration if config file not found anywhere
-	let config = match config::initial_setup_wallet(&chain_type, current_dir, None, create_path) {
+	let config = match mwc_wallet_config::initial_setup_wallet(
+		&chain_type,
+		current_dir,
+		None,
+		create_path,
+	) {
 		Ok(c) => c,
 		Err(e) => match e {
 			ConfigError::PathNotFoundError(m) => {
@@ -141,7 +140,7 @@ fn real_main() -> i32 {
 		("cli", _) => l.log_to_stdout = true,
 		_ => {}
 	};
-	let logs_rx = match mwc_node_workflow::logging::init_bin_logs(&l) {
+	let logs_rx = match logging::init_bin_logs(&l) {
 		Ok(l) => l,
 		Err(e) => {
 			println!("Invalid logs configuration, {}", e);
@@ -165,7 +164,7 @@ fn real_main() -> i32 {
 
 	log_build_info();
 
-	let context_id = match mwc_node_workflow::context::allocate_new_context(
+	let context_id = match context::allocate_new_context(
 		*config
 			.members
 			.wallet
@@ -209,7 +208,7 @@ fn real_main() -> i32 {
 
 	// stopping all threads if they exist. We need to be clean them. Currently it is context, enough to release
 	mwc_wallet_workflow::wallet::release_wallet_context(context_id);
-	let _ = mwc_node_workflow::context::release_context(context_id);
+	let _ = context::release_context(context_id);
 
 	res
 }

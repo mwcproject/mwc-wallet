@@ -23,8 +23,10 @@
 
 use crate::Error;
 use mwc_wallet_util::mwc_core::global::max_tx_weight;
-use regex::Regex;
-use sha2::{Digest, Sha256};
+use mwc_wallet_util::mwc_crates::bs58;
+use mwc_wallet_util::mwc_crates::lazy_static::lazy_static;
+use mwc_wallet_util::mwc_crates::regex::Regex;
+use mwc_wallet_util::mwc_crates::sha2::{Digest, Sha256};
 use std::str;
 
 // Framing and formatting for slate armor. Headers and footers better to be the same size, otherwise formatting makes it ugly

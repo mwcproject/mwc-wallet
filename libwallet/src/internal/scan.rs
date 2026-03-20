@@ -20,30 +20,34 @@ use crate::api_impl::owner_updater::StatusMessage;
 use crate::api_impl::types::InitTxArgs;
 use crate::internal::tx;
 use crate::internal::{keys, updater};
-use crate::mwc_core::consensus::{valid_header_version, WEEK_HEIGHT};
-use crate::mwc_core::core::Committed;
-use crate::mwc_core::core::HeaderVersion;
-use crate::mwc_core::core::Transaction;
-use crate::mwc_core::global;
-use crate::mwc_core::libtx::{proof, tx_fee};
-use crate::mwc_keychain::{ChildNumber, Identifier, Keychain, SwitchCommitmentType};
-use crate::mwc_util::secp::key::SecretKey;
-use crate::mwc_util::secp::pedersen;
-use crate::mwc_util::secp::{ContextFlag, Secp256k1};
-use crate::mwc_util::{from_hex, ToHex};
 use crate::types::*;
+use crate::wallet_lock;
 use crate::Error;
 use crate::ReplayMitigationConfig;
-use crate::{mwc_util as util, wallet_lock};
-use blake2_rfc::blake2b::blake2b;
-use chrono::{Duration, Utc};
+use mwc_wallet_util::mwc_api;
 use mwc_wallet_util::mwc_chain::Chain;
 use mwc_wallet_util::mwc_core::consensus::DAY_HEIGHT;
+use mwc_wallet_util::mwc_core::consensus::{valid_header_version, WEEK_HEIGHT};
+use mwc_wallet_util::mwc_core::core::Committed;
+use mwc_wallet_util::mwc_core::core::HeaderVersion;
+use mwc_wallet_util::mwc_core::core::Transaction;
+use mwc_wallet_util::mwc_core::global;
+use mwc_wallet_util::mwc_core::libtx::{proof, tx_fee};
+use mwc_wallet_util::mwc_crates::blake2_rfc::blake2b::blake2b;
+use mwc_wallet_util::mwc_crates::chrono;
+use mwc_wallet_util::mwc_crates::chrono::{Duration, Utc};
+use mwc_wallet_util::mwc_crates::lazy_static::lazy_static;
+use mwc_wallet_util::mwc_crates::log::{debug, error, warn};
+use mwc_wallet_util::mwc_crates::secp::key::SecretKey;
+use mwc_wallet_util::mwc_crates::secp::pedersen;
+use mwc_wallet_util::mwc_crates::secp::{ContextFlag, Secp256k1};
+use mwc_wallet_util::mwc_crates::uuid::Uuid;
+use mwc_wallet_util::mwc_keychain::{ChildNumber, Identifier, Keychain, SwitchCommitmentType};
+use mwc_wallet_util::mwc_util;
 use std::cmp;
 use std::collections::{HashMap, HashSet};
 use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex, RwLock};
-use uuid::Uuid;
 // Wallet - node sync up strategy. We can request blocks from the node and analyze them. 1 week of blocks can be requested in theory.
 // Or we can validate tx kernels, outputs e.t.c
 
@@ -361,7 +365,7 @@ where
 		// Scanning outputs
 		for output in outputs.iter() {
 			let (commit, proof, is_coinbase, height, mmr_index) = output;
-			let rewind_hash = from_hex(vw.rewind_hash.as_str())
+			let rewind_hash = mwc_util::from_hex(vw.rewind_hash.as_str())
 				.map_err(|e| Error::RewindHash(format!("Unable to decode rewind hash: {}", e)))?;
 			let rewind_nonce = blake2b(32, &commit.0, &rewind_hash);
 			let nonce = SecretKey::from_slice(&secp, rewind_nonce.as_bytes())
@@ -379,7 +383,7 @@ where
 					};
 
 					let output_info = ViewWalletOutputResult {
-						commit: ToHex::to_hex(&commit),
+						commit: mwc_util::ToHex::to_hex(&commit),
 						value: info.value,
 						height: *height,
 						mmr_index: *mmr_index,
@@ -497,7 +501,7 @@ where
 	}
 
 	let log_id = {
-		if let Some(uuid) = commit2transactionuuid.get(&ToHex::to_hex(&commit)) {
+		if let Some(uuid) = commit2transactionuuid.get(&mwc_util::ToHex::to_hex(&commit)) {
 			// Transaction already exist. using it...
 			transaction
 				.get(uuid)
@@ -533,7 +537,7 @@ where
 		key_id: output.key_id,
 		n_child: output.n_child,
 		mmr_index: Some(output.mmr_index),
-		commit: Some(ToHex::to_hex(&commit)),
+		commit: Some(mwc_util::ToHex::to_hex(&commit)),
 		value: output.value,
 		status: OutputStatus::Unspent,
 		height: output.height,
@@ -629,12 +633,12 @@ impl WalletTxInfo {
 			input_commit: tx_log
 				.input_commits
 				.iter()
-				.map(|c| util::to_hex(&c.0))
+				.map(|c| mwc_util::to_hex(&c.0))
 				.collect(),
 			output_commit: tx_log
 				.output_commits
 				.iter()
-				.map(|c| util::to_hex(&c.0))
+				.map(|c| mwc_util::to_hex(&c.0))
 				.collect(),
 			tx_log,
 			kernel_validation: None,
@@ -644,11 +648,11 @@ impl WalletTxInfo {
 	// read all commit from the transaction tx.
 	pub fn add_transaction(&mut self, tx: Transaction) {
 		for input in &tx.inputs_committed() {
-			self.input_commit.insert(util::to_hex(&input.0));
+			self.input_commit.insert(mwc_util::to_hex(&input.0));
 		}
 
 		for output in tx.outputs_committed() {
-			self.output_commit.insert(util::to_hex(&output.0));
+			self.output_commit.insert(mwc_util::to_hex(&output.0));
 		}
 
 		// We have !tx_log.confirmed here because of Account to account transfer issue
@@ -769,7 +773,7 @@ where
 			let uuid_plus = TxUuidPlus::new(
 				tx_uuid_str.clone(),
 				tx.id,
-				util::to_hex(&tx.parent_key_id.to_bytes()),
+				mwc_util::to_hex(&tx.parent_key_id.to_bytes()),
 			);
 
 			let mut wtx = WalletTxInfo::new(uuid_plus, tx.clone());
@@ -841,7 +845,7 @@ where
 
 					if !tx.tx_log.confirmed {
 						tx.kernel_validation = Some(false);
-						let kernel = util::to_hex(&tx.tx_log.kernel_excess.clone().ok_or(Error::GenericError("get_wallet_and_chain_data internal error, tx.tx_log.kernel_excess is empty".into()))?.0);
+						let kernel = mwc_util::to_hex(&tx.tx_log.kernel_excess.clone().ok_or(Error::GenericError("get_wallet_and_chain_data internal error, tx.tx_log.kernel_excess is empty".into()))?.0);
 
 						if let Some(v) = txkernel_to_txuuid.get_mut(&kernel) {
 							v.push(tx_uuid.clone());
@@ -855,7 +859,7 @@ where
 			let client = wallet.w2n_client().clone();
 			let keychain = wallet.keychain(keychain_mask)?;
 
-			let mut blocks: Vec<crate::mwc_api::BlockPrintable> = Vec::new();
+			let mut blocks: Vec<mwc_api::BlockPrintable> = Vec::new();
 
 			let mut cur_height = start_height;
 			while cur_height <= end_height {
@@ -956,8 +960,8 @@ where
 							out.commit,
 							out.range_proof()?,
 							match out.output_type {
-								crate::mwc_api::OutputType::Coinbase => true,
-								crate::mwc_api::OutputType::Transaction => false,
+								mwc_api::OutputType::Coinbase => true,
+								mwc_api::OutputType::Transaction => false,
 							},
 							height,
 							out.mmr_index,
@@ -997,7 +1001,7 @@ where
 				);
 				let mut cnt = 8;
 				for ch_out in &chain_outs {
-					msg.push_str(&util::to_hex(&ch_out.commit.0));
+					msg.push_str(&mwc_util::to_hex(&ch_out.commit.0));
 					msg.push_str(",");
 					cnt -= 1;
 					if cnt == 0 {
@@ -1055,7 +1059,7 @@ where
 					chain_outs.len(),
 				);
 				for ch_out in &chain_outs {
-					msg.push_str(&util::to_hex(&ch_out.commit.0));
+					msg.push_str(&mwc_util::to_hex(&ch_out.commit.0));
 					msg.push_str(",");
 				}
 				if !chain_outs.is_empty() {
@@ -1118,7 +1122,7 @@ where
 
 			for out in outputs.values() {
 				if out.output.is_spendable() && !out.commit.is_empty() {
-					if let Ok(hex) = util::from_hex(
+					if let Ok(hex) = mwc_util::from_hex(
 						&out.output.commit.as_ref().ok_or(Error::GenericError(
 							"get_wallet_and_chain_data internal error, out.output.commit is empty"
 								.into(),
@@ -1222,7 +1226,7 @@ where
 		if !commits.is_empty() {
 			let wallet_outputs_to_check: Vec<pedersen::Commitment> = commits
 				.iter()
-				.map(|out| util::from_hex(out).ok())
+				.map(|out| mwc_util::from_hex(out).ok())
 				.flatten()
 				.map(|out| pedersen::Commitment::from_vec(out))
 				.collect();
@@ -1250,7 +1254,7 @@ where
 			self_spend_candidate_light_list.push(OutputResultLight {
 				key_id: output.key_id,
 				value: output.value.clone(),
-				commit: ToHex::to_hex(&commit),
+				commit: mwc_util::ToHex::to_hex(&commit),
 			});
 		}
 	}
@@ -1587,7 +1591,7 @@ where
 	// Update wallet outputs with found at the chain outputs
 	// Check how sync they are
 	for ch_out in chain_outs {
-		let commit = util::to_hex(&ch_out.commit.0);
+		let commit = mwc_util::to_hex(&ch_out.commit.0);
 
 		match outputs.get_mut(&commit) {
 			Some(w_out) => {
@@ -2275,7 +2279,7 @@ where
 				let secp = batch.keychain()?.secp();
 				let over_commit = secp.commit_value(w_out.output.value)?;
 				let commit =
-					pedersen::Commitment::from_vec(util::from_hex(commit).map_err(|e| {
+					pedersen::Commitment::from_vec(mwc_util::from_hex(commit).map_err(|e| {
 						Error::GenericError(format!("Output commit parse error, {}", e))
 					})?);
 				t.output_commits = vec![commit.clone()];

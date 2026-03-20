@@ -13,9 +13,11 @@
 // limitations under the License.
 
 use crate::Error;
-use colored::*;
-use rand::Rng;
-use serde::{Deserialize, Serialize};
+use mwc_wallet_util::mwc_crates::colored::*;
+use mwc_wallet_util::mwc_crates::rand::Rng;
+use mwc_wallet_util::mwc_crates::serde::{self, Deserialize, Serialize};
+use mwc_wallet_util::mwc_crates::serde_json;
+use mwc_wallet_util::mwc_crates::thiserror;
 use std::{fmt, fmt::Display, str::FromStr};
 
 use mwc_wagyu_ethereum::{
@@ -138,6 +140,7 @@ impl From<TransactionError> for EthError {
 
 /// Represents parameters for an Ethereum transaction input
 #[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(crate = "serde")]
 pub struct EthereumInput {
 	/// destination address
 	pub to: String,
@@ -155,6 +158,7 @@ pub struct EthereumInput {
 }
 /// Represents a generic wallet to output
 #[derive(Serialize, Deserialize, Debug, Default, Clone)]
+#[serde(crate = "serde")]
 pub struct EthereumWallet {
 	///hd wallet path
 	#[serde(skip_serializing_if = "Option::is_none")]

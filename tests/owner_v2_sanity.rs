@@ -12,19 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#[macro_use]
-extern crate clap;
-
-#[macro_use]
-extern crate log;
-
-extern crate mwc_wallet;
-
 use mwc_wallet_impls::test_framework::{self, LocalWalletClient, WalletProxy};
+use mwc_wallet_util::mwc_crates::clap::{App, YamlLoader};
 use std::ops::DerefMut;
 use std::sync::Arc;
-
-use clap::App;
 use std::thread;
 use std::time::Duration;
 
@@ -39,7 +30,10 @@ use common::{
 	clean_output_dir, execute_command, initial_setup_wallet, instantiate_wallet, send_request,
 	setup,
 };
+use mwc_wallet_util::mwc_core;
 use mwc_wallet_util::mwc_core::core::Transaction;
+use mwc_wallet_util::mwc_crates;
+use mwc_wallet_util::mwc_crates::log::error;
 use std::sync::Mutex;
 
 #[test]
@@ -79,8 +73,8 @@ fn owner_v2_sanity() -> Result<(), mwc_wallet_controller::Error> {
 	// Set running
 	thread::spawn(move || {
 		global::set_local_chain_type(global::ChainTypes::AutomatedTesting);
-		let yml = load_yaml!("../src/bin/mwc-wallet.yml");
-		let app = App::from_yaml(yml);
+		let yml = YamlLoader::load_from_str(include_str!("../src/bin/mwc-wallet.yml")).unwrap();
+		let app = App::from_yaml(&yml[0]);
 		execute_command(&app, test_dir, "wallet1", &client1, arg_vec.clone()).unwrap();
 	});
 
@@ -97,8 +91,8 @@ fn owner_v2_sanity() -> Result<(), mwc_wallet_controller::Error> {
 	// Set owner listener running
 	thread::spawn(move || {
 		global::set_local_chain_type(global::ChainTypes::AutomatedTesting);
-		let yml = load_yaml!("../src/bin/mwc-wallet.yml");
-		let app = App::from_yaml(yml);
+		let yml = YamlLoader::load_from_str(include_str!("../src/bin/mwc-wallet.yml")).unwrap();
+		let app = App::from_yaml(&yml[0]);
 		execute_command(&app, test_dir, "wallet2", &client2, arg_vec.clone()).unwrap();
 	});
 
@@ -122,8 +116,8 @@ fn owner_v2_sanity() -> Result<(), mwc_wallet_controller::Error> {
 		"http://127.0.0.1:23415",
 		"2", // mwc: 10    Only one block reward is spendable
 	];
-	let yml = load_yaml!("../src/bin/mwc-wallet.yml");
-	let app = App::from_yaml(yml);
+	let yml = YamlLoader::load_from_str(include_str!("../src/bin/mwc-wallet.yml")).unwrap();
+	let app = App::from_yaml(&yml[0]);
 	let res = execute_command(&app, test_dir, "wallet1", &client1_2, arg_vec.clone());
 	println!("Response 2: {:?}", res);
 	assert!(res.is_ok());

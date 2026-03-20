@@ -15,15 +15,17 @@
 
 //! Error types for libwallet
 
-use crate::mwc_core::core::{committed, transaction};
-use crate::mwc_core::libtx;
-use crate::mwc_keychain;
-use crate::mwc_util::secp;
-use crate::util::{self, mwc_store};
+use mwc_wallet_util::mwc_core::core::{committed, transaction};
+use mwc_wallet_util::mwc_core::libtx;
+use mwc_wallet_util::mwc_crates::secp;
+use mwc_wallet_util::mwc_crates::serde::{self, Deserialize, Serialize};
+use mwc_wallet_util::mwc_crates::thiserror;
+use mwc_wallet_util::OnionV3Error;
 use std::io;
 
 /// Wallet errors, mostly wrappers around underlying crypto or I/O errors.
 #[derive(Clone, Eq, PartialEq, Debug, thiserror::Error, Serialize, Deserialize)]
+#[serde(crate = "serde")]
 pub enum Error {
 	/// Not enough funds
 	#[error("Not enough funds. Required: {needed_disp:?}, Available: {available_disp:?}")]
@@ -52,7 +54,7 @@ pub enum Error {
 
 	/// Keychain error
 	#[error("Keychain error, {0}")]
-	Keychain(#[from] mwc_keychain::Error),
+	Keychain(#[from] mwc_wallet_util::mwc_keychain::Error),
 
 	/// Transaction Error
 	#[error("Transaction error, {0}")]
@@ -68,7 +70,7 @@ pub enum Error {
 
 	/// Onion V3 Address Error
 	#[error("Onion V3 Address Error, {0}")]
-	OnionV3Address(#[from] util::OnionV3AddressError),
+	OnionV3Address(#[from] OnionV3Error),
 
 	/// Callback implementation error conversion
 	#[error("Trait Implementation error, {0}")]
@@ -88,7 +90,7 @@ pub enum Error {
 
 	/// Other serialization errors
 	#[error("Ser/Deserialization error, {0}")]
-	Deser(#[from] crate::mwc_core::ser::Error),
+	Deser(#[from] mwc_wallet_util::mwc_core::ser::Error),
 
 	/// IO Error
 	#[error("I/O error, {0}")]
@@ -388,8 +390,8 @@ impl From<secp::Error> for Error {
 	}
 }
 
-impl From<mwc_store::Error> for Error {
-	fn from(error: mwc_store::Error) -> Error {
+impl From<mwc_wallet_util::mwc_store::Error> for Error {
+	fn from(error: mwc_wallet_util::mwc_store::Error) -> Error {
 		Error::Backend(format!("{}", error))
 	}
 }

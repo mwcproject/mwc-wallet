@@ -16,7 +16,8 @@ use crate::swap::message::Message;
 use crate::swap::swap::SwapJournalRecord;
 use crate::swap::types::{Action, SwapTransactionsConfirmations};
 use crate::swap::{Context, Error, Swap};
-use mwc_wallet_util::mwc_util::secp::Secp256k1;
+use mwc_wallet_util::mwc_crates::secp::Secp256k1;
+use mwc_wallet_util::mwc_crates::serde::{self, Deserialize, Serialize};
 use std::fmt;
 
 /// We need to reprty post transaction we we don't see it on the blockchain
@@ -43,6 +44,7 @@ pub const SECONDARY_INCREASE_FEE_K: f32 = 1.2; // In case the Tx is not mined du
 
 /// StateId of the swap finite state machine.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[serde(crate = "serde")]
 pub enum StateId {
 	// ---------------- Seller Happy path -----------------
 	/// Seller created Offer (Initial state for Seller)
@@ -373,6 +375,7 @@ impl StateProcessRespond {
 
 /// ETA or roadmap info the the state.
 #[derive(Serialize, Deserialize)]
+#[serde(crate = "serde")]
 pub struct StateEtaInfo {
 	/// True if this is current active state
 	pub active: bool,

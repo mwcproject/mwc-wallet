@@ -13,21 +13,24 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::mwc_util as util;
-use crate::mwc_util::secp::key::{PublicKey, SecretKey};
-use crate::mwc_util::secp::Secp256k1;
-use rand::{thread_rng, Rng};
+use mwc_wallet_util::mwc_crates::rand::{thread_rng, Rng};
+use mwc_wallet_util::mwc_crates::ring;
+use mwc_wallet_util::mwc_crates::secp::key::{PublicKey, SecretKey};
+use mwc_wallet_util::mwc_crates::secp::Secp256k1;
+use mwc_wallet_util::mwc_crates::serde::{self, Deserialize, Serialize};
+use mwc_wallet_util::mwc_util;
 
 use super::proofaddress;
 use crate::error::Error;
 
-use rand::rngs::mock::StepRng;
-use ring::aead;
-use ring::pbkdf2;
+use mwc_wallet_util::mwc_crates::rand::rngs::mock::StepRng;
+use mwc_wallet_util::mwc_crates::ring::aead;
+use mwc_wallet_util::mwc_crates::ring::pbkdf2;
 use std::num::NonZeroU32;
 
 /// Encrypted message, used for Tx Proofs
 #[derive(Debug, Serialize, Deserialize)]
+#[serde(crate = "serde")]
 pub struct EncryptedMessage {
 	/// Destination dddress for that massage
 	pub destination: proofaddress::ProvableAddress,
@@ -93,9 +96,9 @@ impl EncryptedMessage {
 
 		Ok(EncryptedMessage {
 			destination: destination.clone(),
-			encrypted_message: util::to_hex(&enc_bytes),
-			salt: util::to_hex(&salt),
-			nonce: util::to_hex(&nonce),
+			encrypted_message: mwc_util::to_hex(&enc_bytes),
+			salt: mwc_util::to_hex(&salt),
+			nonce: mwc_util::to_hex(&nonce),
 		})
 	}
 
@@ -106,7 +109,7 @@ impl EncryptedMessage {
 		secret_key: &SecretKey,
 		secp: &Secp256k1,
 	) -> Result<[u8; 32], Error> {
-		let salt = util::from_hex(&self.salt).map_err(|e| {
+		let salt = mwc_util::from_hex(&self.salt).map_err(|e| {
 			Error::PaymentProof(format!(
 				"Unable to decode salt from HEX {}, {}",
 				self.salt, e
@@ -133,13 +136,13 @@ impl EncryptedMessage {
 
 	/// Decrypt/verify message with a key
 	pub fn decrypt_with_key(&self, key: &[u8; 32]) -> Result<String, Error> {
-		let mut encrypted_message = util::from_hex(&self.encrypted_message).map_err(|e| {
+		let mut encrypted_message = mwc_util::from_hex(&self.encrypted_message).map_err(|e| {
 			Error::PaymentProof(format!(
 				"Unable decode message from HEX {}, {}",
 				self.encrypted_message, e
 			))
 		})?;
-		let nonce = util::from_hex(&self.nonce).map_err(|e| {
+		let nonce = mwc_util::from_hex(&self.nonce).map_err(|e| {
 			Error::PaymentProof(format!(
 				"Unable decode nonce from HEX {}, {}",
 				self.nonce, e

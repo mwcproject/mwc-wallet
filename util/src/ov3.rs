@@ -13,15 +13,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::mwc_util::from_hex;
-use data_encoding::BASE32;
-use ed25519_dalek::PublicKey as DalekPublicKey;
-use ed25519_dalek::SecretKey as DalekSecretKey;
-use sha3::{Digest, Sha3_256};
+use mwc_crates::data_encoding::BASE32;
+use mwc_crates::ed25519_dalek;
+use mwc_crates::serde::{self, Deserialize, Serialize};
+use mwc_crates::sha3::{Digest, Sha3_256};
+use mwc_crates::thiserror;
+use mwc_util::from_hex;
 use std::convert::TryFrom;
 use std::fmt;
 
 #[derive(Debug, Clone, Eq, PartialEq, thiserror::Error, Serialize, Deserialize)]
+#[serde(crate = "serde")]
 /// OnionV3 Address Errors
 pub enum OnionV3Error {
 	/// Error decoding an address from a string
@@ -33,6 +35,7 @@ pub enum OnionV3Error {
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(crate = "serde")]
 /// Struct to hold an onion V3 address, represented internally as a raw
 /// ed25519 public key
 pub struct OnionV3Address([u8; 32]);
@@ -50,7 +53,7 @@ impl OnionV3Address {
 
 	/// populate from a private key
 	pub fn from_private(key: &[u8; 32]) -> Result<Self, OnionV3Error> {
-		let d_skey = match DalekSecretKey::from_bytes(key) {
+		let d_skey = match ed25519_dalek::SecretKey::from_bytes(key) {
 			Ok(k) => k,
 			Err(e) => {
 				return Err(OnionV3Error::InvalidPrivateKey(format!(
@@ -59,13 +62,13 @@ impl OnionV3Address {
 				)));
 			}
 		};
-		let d_pub_key: DalekPublicKey = (&d_skey).into();
+		let d_pub_key: ed25519_dalek::PublicKey = (&d_skey).into();
 		Ok(OnionV3Address(*d_pub_key.as_bytes()))
 	}
 
 	/// return dalek public key
-	pub fn to_ed25519(&self) -> Result<DalekPublicKey, OnionV3Error> {
-		let d_skey = match DalekPublicKey::from_bytes(&self.0) {
+	pub fn to_ed25519(&self) -> Result<ed25519_dalek::PublicKey, OnionV3Error> {
+		let d_skey = match ed25519_dalek::PublicKey::from_bytes(&self.0) {
 			Ok(k) => k,
 			Err(e) => {
 				return Err(OnionV3Error::InvalidPrivateKey(format!(

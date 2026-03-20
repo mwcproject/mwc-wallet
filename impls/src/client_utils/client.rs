@@ -15,15 +15,16 @@
 
 //! High level JSON/HTTP client API
 
-use crate::core::global;
-use crate::util::to_base64;
-use mwc_wallet_util::mwc_util;
-use reqwest::header::{
+use mwc_wallet_util::mwc_core::global;
+use mwc_wallet_util::mwc_crates::reqwest;
+use mwc_wallet_util::mwc_crates::reqwest::header::{
 	HeaderMap, HeaderValue, ACCEPT, AUTHORIZATION, CONNECTION, CONTENT_TYPE, USER_AGENT,
 };
-use reqwest::{ClientBuilder, Method, Proxy, RequestBuilder};
-use serde::{Deserialize, Serialize};
-use serde_json;
+use mwc_wallet_util::mwc_crates::reqwest::{ClientBuilder, Method, Proxy, RequestBuilder};
+use mwc_wallet_util::mwc_crates::serde::{Deserialize, Serialize};
+use mwc_wallet_util::mwc_crates::serde_json;
+use mwc_wallet_util::mwc_crates::thiserror;
+use mwc_wallet_util::mwc_util::{run_global_async_block, to_base64};
 use std::net::SocketAddr;
 use std::time::Duration;
 
@@ -337,6 +338,6 @@ impl Client {
 		// This client is currently used both outside and inside of a tokio runtime
 		// context. In the latter case we are not allowed to do a blocking call to
 		// our global runtime, which unfortunately means we have to spawn a new thread
-		mwc_util::run_global_async_block(self.send_request_async(req))
+		run_global_async_block(self.send_request_async(req))
 	}
 }

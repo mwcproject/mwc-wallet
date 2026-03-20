@@ -15,18 +15,19 @@
 //! Functions defining wallet 'addresses', i.e. ed2559 keys based on
 //! a derivation path
 
-use crate::mwc_util::from_hex;
-use crate::mwc_util::secp::key::SecretKey;
 use crate::Error;
+use mwc_wallet_util::mwc_crates::ed25519_dalek;
+use mwc_wallet_util::mwc_crates::secp::key::SecretKey;
+use mwc_wallet_util::mwc_util::from_hex;
 
-use data_encoding::BASE32;
-use ed25519_dalek::PublicKey as DalekPublicKey;
-use ed25519_dalek::SecretKey as DalekSecretKey;
-use sha3::{Digest, Sha3_256};
+use mwc_wallet_util::mwc_crates::data_encoding::BASE32;
+use mwc_wallet_util::mwc_crates::sha3::{Digest, Sha3_256};
 
 /// Output ed25519 keypair given an rust_secp256k1 SecretKey
-pub fn ed25519_keypair(sec_key: &SecretKey) -> Result<(DalekSecretKey, DalekPublicKey), Error> {
-	let d_skey = match DalekSecretKey::from_bytes(&sec_key.0) {
+pub fn ed25519_keypair(
+	sec_key: &SecretKey,
+) -> Result<(ed25519_dalek::SecretKey, ed25519_dalek::PublicKey), Error> {
+	let d_skey = match ed25519_dalek::SecretKey::from_bytes(&sec_key.0) {
 		Ok(k) => k,
 		Err(e) => {
 			return Err(Error::ED25519Key(format!(
@@ -35,15 +36,15 @@ pub fn ed25519_keypair(sec_key: &SecretKey) -> Result<(DalekSecretKey, DalekPubl
 			)))?
 		}
 	};
-	let d_pub_key: DalekPublicKey = (&d_skey).into();
+	let d_pub_key: ed25519_dalek::PublicKey = (&d_skey).into();
 	Ok((d_skey, d_pub_key))
 }
 
 /// Output ed25519 pubkey represented by string
-pub fn ed25519_parse_pubkey(pub_key: &str) -> Result<DalekPublicKey, Error> {
+pub fn ed25519_parse_pubkey(pub_key: &str) -> Result<ed25519_dalek::PublicKey, Error> {
 	let bytes = from_hex(pub_key)
 		.map_err(|e| Error::AddressDecoding(format!("Can't parse pubkey {}, {}", pub_key, e)))?;
-	match DalekPublicKey::from_bytes(&bytes) {
+	match ed25519_dalek::PublicKey::from_bytes(&bytes) {
 		Ok(k) => Ok(k),
 		Err(e) => {
 			return Err(Error::AddressDecoding(format!(
@@ -55,7 +56,7 @@ pub fn ed25519_parse_pubkey(pub_key: &str) -> Result<DalekPublicKey, Error> {
 }
 
 /// Return the ed25519 public key represented in an onion address
-pub fn pubkey_from_onion_v3(onion_address: &str) -> Result<DalekPublicKey, Error> {
+pub fn pubkey_from_onion_v3(onion_address: &str) -> Result<ed25519_dalek::PublicKey, Error> {
 	let mut input = onion_address.to_uppercase();
 	if input.starts_with("HTTP://") || input.starts_with("HTTPS://") {
 		input = input.replace("HTTP://", "");
@@ -80,7 +81,7 @@ pub fn pubkey_from_onion_v3(onion_address: &str) -> Result<DalekPublicKey, Error
 		.to_vec();
 
 	address.truncate(32);
-	let key = DalekPublicKey::from_bytes(&address).map_err(|e| {
+	let key = ed25519_dalek::PublicKey::from_bytes(&address).map_err(|e| {
 		Error::AddressDecoding(format!(
 			"Provided onion V3 address is invalid (parsing dalek key), {}",
 			e
@@ -103,7 +104,7 @@ pub fn pubkey_from_onion_v3(onion_address: &str) -> Result<DalekPublicKey, Error
 }
 
 /// Generate an onion address from an ed25519_dalek public key
-pub fn onion_v3_from_pubkey(pub_key: &DalekPublicKey) -> Result<String, Error> {
+pub fn onion_v3_from_pubkey(pub_key: &ed25519_dalek::PublicKey) -> Result<String, Error> {
 	// calculate checksum
 	let mut hasher = Sha3_256::new();
 	hasher.input(b".onion checksum");
