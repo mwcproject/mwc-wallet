@@ -81,9 +81,10 @@ pub mod dalek_pubkey_serde {
 	use mwc_wallet_util::mwc_crates::ed25519_dalek;
 	use mwc_wallet_util::mwc_crates::serde::{Deserialize, Deserializer, Serializer};
 	use mwc_wallet_util::mwc_util::{from_hex, ToHex};
+	use std::convert::TryInto;
 
 	///
-	pub fn serialize<S>(key: &ed25519_dalek::PublicKey, serializer: S) -> Result<S::Ok, S::Error>
+	pub fn serialize<S>(key: &ed25519_dalek::VerifyingKey, serializer: S) -> Result<S::Ok, S::Error>
 	where
 		S: Serializer,
 	{
@@ -91,7 +92,7 @@ pub mod dalek_pubkey_serde {
 	}
 
 	///
-	pub fn deserialize<'de, D>(deserializer: D) -> Result<ed25519_dalek::PublicKey, D::Error>
+	pub fn deserialize<'de, D>(deserializer: D) -> Result<ed25519_dalek::VerifyingKey, D::Error>
 	where
 		D: Deserializer<'de>,
 	{
@@ -106,7 +107,15 @@ pub mod dalek_pubkey_serde {
 				})
 			})
 			.and_then(|bytes: Vec<u8>| {
-				ed25519_dalek::PublicKey::from_bytes(&bytes).map_err(|err| {
+				let blen = bytes.len();
+				let bytes: [u8; 32] = bytes.try_into().map_err(|_| {
+					Error::custom(format!(
+						"Unable to build ed25519_dalek::PublicKey, wrong length {}",
+						blen
+					))
+				})?;
+
+				ed25519_dalek::VerifyingKey::from_bytes(&bytes).map_err(|err| {
 					Error::custom(format!("Unable to build ed25519_dalek::PublicKey, {}", err))
 				})
 			})
@@ -123,7 +132,7 @@ pub mod option_dalek_pubkey_serde {
 
 	///
 	pub fn serialize<S>(
-		key: &Option<ed25519_dalek::PublicKey>,
+		key: &Option<ed25519_dalek::VerifyingKey>,
 		serializer: S,
 	) -> Result<S::Ok, S::Error>
 	where
@@ -138,7 +147,7 @@ pub mod option_dalek_pubkey_serde {
 	///
 	pub fn deserialize<'de, D>(
 		deserializer: D,
-	) -> Result<Option<ed25519_dalek::PublicKey>, D::Error>
+	) -> Result<Option<ed25519_dalek::VerifyingKey>, D::Error>
 	where
 		D: Deserializer<'de>,
 	{
@@ -153,7 +162,7 @@ pub mod option_dalek_pubkey_serde {
 				.and_then(|bytes: Vec<u8>| {
 					let mut b = [0u8; 32];
 					b.copy_from_slice(&bytes[0..32]);
-					ed25519_dalek::PublicKey::from_bytes(&b)
+					ed25519_dalek::VerifyingKey::from_bytes(&b)
 						.map(Some)
 						.map_err(|err| {
 							Error::custom(format!(
@@ -258,8 +267,8 @@ pub mod option_dalek_sig_serde {
 #[cfg(test)]
 mod test {
 	use super::*;
+	use crate::step_rng::StepRng;
 	use mwc_wallet_util::mwc_crates::ed25519_dalek::{self, Signer};
-	use mwc_wallet_util::mwc_crates::rand::rngs::mock::StepRng;
 	use mwc_wallet_util::mwc_crates::secp::{self, ContextFlag, Secp256k1};
 	use mwc_wallet_util::mwc_crates::serde::{self, Deserialize, Serialize};
 	use mwc_wallet_util::mwc_crates::serde_json;
@@ -268,9 +277,9 @@ mod test {
 	#[serde(crate = "serde")]
 	struct SerTest {
 		#[serde(with = "dalek_pubkey_serde")]
-		pub pub_key: ed25519_dalek::PublicKey,
+		pub pub_key: ed25519_dalek::VerifyingKey,
 		#[serde(with = "option_dalek_pubkey_serde")]
-		pub pub_key_opt: Option<ed25519_dalek::PublicKey>,
+		pub pub_key_opt: Option<ed25519_dalek::VerifyingKey>,
 		#[serde(with = "dalek_sig_serde")]
 		pub sig: ed25519_dalek::Signature,
 		#[serde(with = "option_dalek_sig_serde")]
@@ -282,15 +291,10 @@ mod test {
 			let mut test_rng = StepRng::new(1234567890u64, 1);
 			let secp = Secp256k1::with_caps(ContextFlag::None);
 			let sec_key = secp::key::SecretKey::new(&secp, &mut test_rng);
-			let d_skey = ed25519_dalek::SecretKey::from_bytes(&sec_key.0).unwrap();
-			let d_pub_key: ed25519_dalek::PublicKey = (&d_skey).into();
+			let d_skey = ed25519_dalek::SigningKey::from_bytes(&sec_key.0);
+			let d_pub_key: ed25519_dalek::VerifyingKey = d_skey.verifying_key();
 
-			let keypair = ed25519_dalek::Keypair {
-				public: d_pub_key,
-				secret: d_skey,
-			};
-
-			let d_sig = keypair.sign("test sig".as_bytes());
+			let d_sig = d_skey.sign("test sig".as_bytes());
 			println!("D sig: {:?}", d_sig);
 
 			SerTest {

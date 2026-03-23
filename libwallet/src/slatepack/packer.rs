@@ -26,9 +26,9 @@ use crate::slatepack::slatepack::SlatePurpose;
 /// Arguments, mostly for encrypting decrypting a slatepack
 pub struct Slatepacker {
 	/// Sender address, None for wrapped
-	pub sender: Option<ed25519_dalek::PublicKey>,
+	pub sender: Option<ed25519_dalek::VerifyingKey>,
 	/// Recipient addresses, None for wrapped
-	pub recipient: Option<ed25519_dalek::PublicKey>,
+	pub recipient: Option<ed25519_dalek::VerifyingKey>,
 	/// The content purpose. It customize serializer/deserializer for us.
 	pub content: SlatePurpose,
 	/// Slate data.
@@ -52,9 +52,9 @@ impl Slatepacker {
 		slate: Slate,
 		slate_version: SlateVersion,
 		content: SlatePurpose,
-		sender: ed25519_dalek::PublicKey,
-		recipient: Option<ed25519_dalek::PublicKey>, // Encrypted only if recipient is some
-		secret: &ed25519_dalek::SecretKey,
+		sender: ed25519_dalek::VerifyingKey,
+		recipient: Option<ed25519_dalek::VerifyingKey>, // Encrypted only if recipient is some
+		secret: &ed25519_dalek::SigningKey,
 		use_test_rng: bool,
 		secp: &Secp256k1,
 	) -> Result<String, Error> {
@@ -75,7 +75,7 @@ impl Slatepacker {
 	pub fn decrypt_slatepack(
 		context_id: u32,
 		data: &[u8],
-		dec_key: &ed25519_dalek::SecretKey,
+		dec_key: &ed25519_dalek::SigningKey,
 		secp: &Secp256k1,
 	) -> Result<Self, Error> {
 		let (slate_bytes, encrypted) = SlatepackArmor::decode(data)?;
@@ -103,12 +103,12 @@ impl Slatepacker {
 	}
 
 	/// Get Sender info. It is needed to send the response back
-	pub fn get_sender(&self) -> Option<ed25519_dalek::PublicKey> {
+	pub fn get_sender(&self) -> Option<ed25519_dalek::VerifyingKey> {
 		self.sender.clone()
 	}
 
 	/// Get Sender info. It is needed to send the response back
-	pub fn get_recipient(&self) -> Option<ed25519_dalek::PublicKey> {
+	pub fn get_recipient(&self) -> Option<ed25519_dalek::VerifyingKey> {
 		self.recipient.clone()
 	}
 
@@ -161,11 +161,11 @@ fn slatepack_io_test() {
 	let secp = Secp256k1::new();
 	let sk = SecretKey::from_slice(&secp, &bytes_32).unwrap();
 
-	let dalek_sk = ed25519_dalek::SecretKey::from_bytes(&bytes_32).unwrap();
-	let dalek_pk = ed25519_dalek::PublicKey::from(&dalek_sk);
+	let dalek_sk = ed25519_dalek::SigningKey::from_bytes(&bytes_32);
+	let dalek_pk = dalek_sk.verifying_key();
 
-	let dalek_sk2 = ed25519_dalek::SecretKey::from_bytes(&bytes_32_2).unwrap();
-	let dalek_pk2 = ed25519_dalek::PublicKey::from(&dalek_sk2);
+	let dalek_sk2 = ed25519_dalek::SigningKey::from_bytes(&bytes_32_2);
+	let dalek_pk2 = dalek_sk2.verifying_key();
 
 	// Let's test out Dalec 2 xDalec algebra.
 	let dalek_xpk = proofaddress::tor_pub_2_slatepack_pub(&dalek_pk).unwrap();
@@ -293,7 +293,7 @@ fn slatepack_io_test() {
 	let slatepack = Slatepacker::decrypt_slatepack(
 		0,
 		slatepack_string_binary.as_bytes(),
-		&ed25519_dalek::SecretKey::from_bytes(&[1; 32]).unwrap(),
+		&ed25519_dalek::SigningKey::from_bytes(&[1; 32]),
 		&secp,
 	)
 	.unwrap();

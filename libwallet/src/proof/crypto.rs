@@ -17,6 +17,7 @@ use mwc_wallet_util::mwc_crates::secp::key::{PublicKey, SecretKey};
 use mwc_wallet_util::mwc_crates::secp::pedersen::Commitment;
 use mwc_wallet_util::mwc_crates::secp::{ContextFlag, Message, Secp256k1, Signature};
 use mwc_wallet_util::mwc_util;
+use std::convert::TryInto;
 
 use super::base58;
 use crate::error::Error;
@@ -39,7 +40,6 @@ pub fn verify_signature(
 ) -> Result<(), Error> {
 	let mut hasher = Sha256::new();
 	hasher.update(challenge.as_bytes());
-	#[allow(deprecated)]
 	let message = Message::from_slice(hasher.finalize().as_slice())?;
 	secp.verify(&message, signature, public_key)
 		.map_err(|e| Error::from(e))?;
@@ -54,7 +54,6 @@ pub fn sign_challenge(
 ) -> Result<Signature, Error> {
 	let mut hasher = Sha256::new();
 	hasher.update(challenge.as_bytes());
-	#[allow(deprecated)]
 	let message = Message::from_slice(hasher.finalize().as_slice())?;
 	secp.sign(&message, secret_key).map_err(|e| Error::from(e))
 }
@@ -119,12 +118,21 @@ impl Hex<Signature> for Signature {
 	}
 }
 
-impl Hex<ed25519_dalek::PublicKey> for ed25519_dalek::PublicKey {
-	fn from_hex(str: &str) -> Result<ed25519_dalek::PublicKey, Error> {
+impl Hex<ed25519_dalek::VerifyingKey> for ed25519_dalek::VerifyingKey {
+	fn from_hex(str: &str) -> Result<ed25519_dalek::VerifyingKey, Error> {
 		let hex = mwc_util::from_hex(str).map_err(|e| {
 			Error::HexError(format!("Unable convert Public Key HEX {}, {}", str, e))
 		})?;
-		ed25519_dalek::PublicKey::from_bytes(&hex).map_err(|e| {
+
+		let bytes: [u8; 32] = hex.as_slice().try_into().map_err(|_| {
+			Error::HexError(format!(
+				"Unable to build public key from HEX {}, wrong length {}",
+				str,
+				hex.len()
+			))
+		})?;
+
+		ed25519_dalek::VerifyingKey::from_bytes(&bytes).map_err(|e| {
 			Error::HexError(format!(
 				"Unable to build public key from HEX {}, {}",
 				str, e
@@ -141,9 +149,16 @@ impl Hex<ed25519_dalek::Signature> for ed25519_dalek::Signature {
 	fn from_hex(str: &str) -> Result<ed25519_dalek::Signature, Error> {
 		let hex = mwc_util::from_hex(str)
 			.map_err(|e| Error::HexError(format!("Unable convert Signature HEX {}, {}", str, e)))?;
-		ed25519_dalek::Signature::from_bytes(&hex).map_err(|e| {
-			Error::HexError(format!("Unable to build Signature from HEX {}, {}", str, e))
-		})
+
+		let bytes: [u8; 64] = hex.as_slice().try_into().map_err(|_| {
+			Error::HexError(format!(
+				"Unable to build Signature from HEX {}, wrong length {}",
+				str,
+				hex.len()
+			))
+		})?;
+
+		Ok(ed25519_dalek::Signature::from_bytes(&bytes))
 	}
 
 	fn to_hex(&self) -> String {

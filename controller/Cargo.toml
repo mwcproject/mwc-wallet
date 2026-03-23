@@ -16,6 +16,7 @@ mwc_wallet_api = { path = "../api", version = "6.0.1" }
 mwc_wallet_impls = { path = "../impls", version = "6.0.1" }
 mwc_wallet_libwallet = { path = "../libwallet", version = "6.0.1" }
 mwc_wallet_config = { path = "../config", version = "6.0.1" }
+thiserror.workspace = true
 
 [features]
 # real dependency: libp2p = ["dep:mwc-libp2p"]

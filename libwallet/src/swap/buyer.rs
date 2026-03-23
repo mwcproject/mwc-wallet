@@ -29,13 +29,13 @@ use mwc_wallet_util::mwc_core::core::Committed;
 use mwc_wallet_util::mwc_core::core::KernelFeatures;
 use mwc_wallet_util::mwc_core::global;
 use mwc_wallet_util::mwc_core::libtx::{build, proof, tx_fee};
-use mwc_wallet_util::mwc_crates::rand::thread_rng;
 use mwc_wallet_util::mwc_crates::secp;
 use mwc_wallet_util::mwc_crates::secp::aggsig;
 use mwc_wallet_util::mwc_crates::secp::key::{PublicKey, SecretKey};
 use mwc_wallet_util::mwc_crates::secp::pedersen::RangeProof;
 use mwc_wallet_util::mwc_crates::uuid::Uuid;
 use mwc_wallet_util::mwc_keychain::{BlindSum, BlindingFactor, SwitchCommitmentType};
+use mwc_wallet_util::rand::thread_rng;
 use std::mem;
 
 /// Buyer API. Bunch of methods that cover buyer action for MWC swap

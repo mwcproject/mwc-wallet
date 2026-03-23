@@ -17,7 +17,6 @@ use crate::error::Error;
 use crate::proof::crypto;
 use crate::proof::hasher;
 use mwc_wallet_util::mwc_core::global;
-use mwc_wallet_util::mwc_crates::curve25519_dalek::edwards::CompressedEdwardsY;
 use mwc_wallet_util::mwc_crates::ed25519_dalek;
 use mwc_wallet_util::mwc_crates::secp::key::PublicKey;
 use mwc_wallet_util::mwc_crates::secp::key::SecretKey;
@@ -25,7 +24,7 @@ use mwc_wallet_util::mwc_crates::serde::{self, Deserialize, Deserializer, Serial
 use mwc_wallet_util::mwc_crates::sha2::{Digest, Sha512};
 use mwc_wallet_util::mwc_crates::x25519_dalek;
 use mwc_wallet_util::mwc_keychain::Keychain;
-use mwc_wallet_util::OnionV3Address;
+use mwc_wallet_util::mwc_util::OnionV3Address;
 use std::convert::TryFrom;
 use std::fmt::{self, Display};
 
@@ -94,7 +93,7 @@ impl ProvableAddress {
 		PublicKey::from_base58_check(&self.public_key, version_bytes(context_id))
 	}
 	/// Create address from public key
-	pub fn from_tor_pub_key(public_key: &ed25519_dalek::PublicKey) -> Self {
+	pub fn from_tor_pub_key(public_key: &ed25519_dalek::VerifyingKey) -> Self {
 		Self {
 			public_key: OnionV3Address::from_bytes(*public_key.as_bytes()).to_ov3_str(),
 			domain: String::new(),
@@ -103,7 +102,7 @@ impl ProvableAddress {
 	}
 
 	/// Get public key that represent this address
-	pub fn tor_public_key(&self) -> Result<ed25519_dalek::PublicKey, Error> {
+	pub fn tor_public_key(&self) -> Result<ed25519_dalek::VerifyingKey, Error> {
 		let addr = OnionV3Address::try_from(self.public_key.as_str())?;
 		Ok(addr.to_ed25519()?)
 	}
@@ -285,14 +284,12 @@ pub fn payment_proof_address_dalek_secret<K>(
 	context_id: u32,
 	keychain: &K,
 	address_index: u32,
-) -> Result<ed25519_dalek::SecretKey, Error>
+) -> Result<ed25519_dalek::SigningKey, Error>
 where
 	K: Keychain,
 {
 	let sk = payment_proof_address_secret(context_id, keychain, address_index)?;
-	let dalek_sk = ed25519_dalek::SecretKey::from_bytes(&sk.0).map_err(|e| {
-		Error::SlatepackDecodeError(format!("Unable to convert key to decrypt, {}", e))
-	})?;
+	let dalek_sk = ed25519_dalek::SigningKey::from_bytes(&sk.0);
 	Ok(dalek_sk)
 }
 
@@ -311,20 +308,20 @@ where
 }
 
 /// Build Tor public Key from the secret
-pub fn secret_2_tor_pub(secret: &SecretKey) -> Result<ed25519_dalek::PublicKey, Error> {
-	let secret = ed25519_dalek::SecretKey::from_bytes(&secret.0)
-		.map_err(|e| Error::GenericError(format!("Unable build dalek public key, {}", e)))?;
-	let d_pub_key: ed25519_dalek::PublicKey = (&secret).into();
+pub fn secret_2_tor_pub(secret: &SecretKey) -> Result<ed25519_dalek::VerifyingKey, Error> {
+	let signing = ed25519_dalek::SigningKey::from_bytes(&secret.0);
+	let d_pub_key = signing.verifying_key();
 	Ok(d_pub_key)
 }
 
 /// Conver the Secret to match what tor_pub_2_slatepack_pub calculate
 /// Here id explanation https://blog.filippo.io/using-ed25519-keys-for-encryption/
 pub fn tor_secret_2_slatepack_secret(
-	secret: &ed25519_dalek::SecretKey,
+	secret: &ed25519_dalek::SigningKey,
 ) -> x25519_dalek::StaticSecret {
 	let mut b = [0u8; 32];
-	b.copy_from_slice(&secret.as_bytes()[0..32]);
+	b.copy_from_slice(&secret.to_bytes());
+
 	let mut hasher = Sha512::new();
 	hasher.update(&b);
 	let result = hasher.finalize();
@@ -335,17 +332,9 @@ pub fn tor_secret_2_slatepack_secret(
 /// Build slatepack public key from tor public key
 /// https://blog.filippo.io/using-ed25519-keys-for-encryption/
 pub fn tor_pub_2_slatepack_pub(
-	tor_pub_key: &ed25519_dalek::PublicKey,
+	tor_pub_key: &ed25519_dalek::VerifyingKey,
 ) -> Result<x25519_dalek::PublicKey, Error> {
-	let cep = CompressedEdwardsY::from_slice(tor_pub_key.as_bytes());
-	let ep = match cep.decompress() {
-		Some(p) => p,
-		None => {
-			return Err(Error::ED25519Key(
-				"Can't decompress ed25519 Edwards Point".into(),
-			));
-		}
-	};
-	let res = x25519_dalek::PublicKey::from(ep.to_montgomery().to_bytes());
-	Ok(res)
+	Ok(x25519_dalek::PublicKey::from(
+		tor_pub_key.to_montgomery().to_bytes(),
+	))
 }

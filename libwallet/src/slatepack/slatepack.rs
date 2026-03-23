@@ -15,7 +15,6 @@
 
 /// Slatepack Types + Serialization implementation
 use mwc_wallet_util::mwc_crates::ed25519_dalek;
-use mwc_wallet_util::mwc_crates::ed25519_dalek::PUBLIC_KEY_LENGTH;
 use mwc_wallet_util::mwc_crates::serde::{self, Deserialize, Serialize};
 use mwc_wallet_util::mwc_crates::smaz;
 use std::convert::TryInto;
@@ -35,9 +34,12 @@ use mwc_wallet_util::mwc_core::core::{
 	Input, Inputs, KernelFeatures, Output, OutputFeatures, OutputIdentifier, TxKernel,
 };
 use mwc_wallet_util::mwc_core::global;
-use mwc_wallet_util::mwc_crates::bitstream_io::{BigEndian, BitReader, BitWriter, Endianness};
-use mwc_wallet_util::mwc_crates::crc::{crc32, Hasher32};
-use mwc_wallet_util::mwc_crates::rand::{thread_rng, Rng};
+use mwc_wallet_util::mwc_crates::bitstream_io::{
+	BigEndian, BitRead2, BitReader, BitWrite2, BitWriter, Endianness,
+};
+use mwc_wallet_util::mwc_crates::crc::{Crc, CRC_32_ISO_HDLC};
+use mwc_wallet_util::mwc_crates::ed25519_dalek::PUBLIC_KEY_LENGTH;
+use mwc_wallet_util::mwc_crates::rand::{rng, RngExt};
 use mwc_wallet_util::mwc_crates::ring::aead;
 use mwc_wallet_util::mwc_crates::secp::constants::{PEDERSEN_COMMITMENT_SIZE, SECRET_KEY_SIZE};
 use mwc_wallet_util::mwc_crates::secp::pedersen::{Commitment, RangeProof};
@@ -52,9 +54,9 @@ use mwc_wallet_util::mwc_util::{from_hex, ToHex};
 pub struct Slatepack {
 	// Optional Fields
 	/// Sender address, non if slate wasn'r encrypted
-	pub sender: Option<ed25519_dalek::PublicKey>,
+	pub sender: Option<ed25519_dalek::VerifyingKey>,
 	/// Recipient addresses, enrypted id defined
-	pub recipient: Option<ed25519_dalek::PublicKey>,
+	pub recipient: Option<ed25519_dalek::VerifyingKey>,
 	/// The content purpose. It customize serializer/deserializer for us.
 	pub content: SlatePurpose,
 
@@ -121,6 +123,7 @@ impl SlatePurpose {
 }
 
 const SLATE_PACK_PLAIN_DATA_SIZE: usize = 1 + 32 + 32;
+const CRC32: Crc<u32> = Crc::<u32>::new(&CRC_32_ISO_HDLC);
 
 impl Slatepack {
 	/// Decode and decrypt the Slatepack
@@ -130,7 +133,7 @@ impl Slatepack {
 		context_id: u32,
 		data: &Vec<u8>,
 		encrypted: bool,
-		secret: &ed25519_dalek::SecretKey,
+		secret: &ed25519_dalek::SigningKey,
 		secp: &Secp256k1,
 	) -> Result<Self, Error> {
 		if encrypted && data.len() < SLATE_PACK_PLAIN_DATA_SIZE {
@@ -138,10 +141,10 @@ impl Slatepack {
 				"Slatapack data is too short".to_string(),
 			));
 		}
-		let mut digest = crc32::Digest::new(crc32::IEEE);
+		let mut digest = CRC32.digest();
 
 		if encrypted {
-			digest.write(&data[..SLATE_PACK_PLAIN_DATA_SIZE]);
+			digest.update(&data[..SLATE_PACK_PLAIN_DATA_SIZE]);
 		}
 
 		let mut r = BitReader::endian(data.as_slice(), BigEndian);
@@ -157,13 +160,13 @@ impl Slatepack {
 			debug_assert!(PUBLIC_KEY_LENGTH == 32);
 			let mut data: [u8; 32] = [0; 32];
 			r.read_bytes(&mut data)?;
-			let sender = ed25519_dalek::PublicKey::from_bytes(&data).map_err(|e| {
+			let sender = ed25519_dalek::VerifyingKey::from_bytes(&data).map_err(|e| {
 				Error::SlatepackDecodeError(format!("Unable to read a sender public key, {}", e))
 			})?;
 			// Receiver address, so this wallet open the message if it is in the archive
 			let mut data: [u8; 32] = [0; 32];
 			r.read_bytes(&mut data)?;
-			let recipient = ed25519_dalek::PublicKey::from_bytes(&data).map_err(|e| {
+			let recipient = ed25519_dalek::VerifyingKey::from_bytes(&data).map_err(|e| {
 				Error::SlatepackDecodeError(format!("Unable to read a sender public key, {}", e))
 			})?;
 
@@ -191,10 +194,10 @@ impl Slatepack {
 
 			// Let's check the payload CRC first (crc32 is last 4 bytes.)
 			{
-				digest.write(&payload[..(payload.len() - 4)]);
+				digest.update(&payload[..(payload.len() - 4)]);
 				let mut crc_reader = BitReader::endian(&payload[(payload.len() - 4)..], BigEndian);
 				let read_crc32: u32 = crc_reader.read(32)?;
-				let data_crc32 = digest.sum32();
+				let data_crc32 = digest.finalize();
 				if read_crc32 != data_crc32 {
 					return Err(Error::SlatepackDecodeError(
 						"Slatepack content is not consistent".to_string(),
@@ -255,7 +258,7 @@ impl Slatepack {
 		&self,
 		context_id: u32,
 		slate_version: SlateVersion,
-		secret: &ed25519_dalek::SecretKey,
+		secret: &ed25519_dalek::SigningKey,
 		use_test_rng: bool,
 		secp: &Secp256k1,
 	) -> Result<(Vec<u8>, bool), Error> {
@@ -375,12 +378,12 @@ impl Slatepack {
 		let mut w_pack = BitWriter::endian(&mut pack_binary, BigEndian);
 
 		// Writing the version 0. The version is global for all slatepack.
-		w_pack.write(8, 0)?;
+		w_pack.write(8, 0u8)?;
 
 		if let Some(recipient) = &self.recipient {
 			// recipient is define, so we can do encryption
 
-			let sender = self.sender.ok_or(Error::SlatepackEncodeError(
+			let sender = self.sender.clone().ok_or(Error::SlatepackEncodeError(
 				"Not found expected sender value".to_string(),
 			))?;
 			// Sender address, so other party can open the message
@@ -393,16 +396,16 @@ impl Slatepack {
 
 			// Do CRC and encryption. CRC we want to be encrypted
 			{
-				let mut digest = crc32::Digest::new(crc32::IEEE);
+				let mut digest = CRC32.digest();
 				debug_assert!(pack_binary.len() == SLATE_PACK_PLAIN_DATA_SIZE);
-				digest.write(&pack_binary);
+				digest.update(&pack_binary);
 				w.byte_align()?;
 
-				digest.write(&encrypted_data);
+				digest.update(&encrypted_data);
 
 				// We have to destroy prev instance of w in order to read from the encrypted_data for crc32.
 				let mut w = BitWriter::endian(&mut encrypted_data, BigEndian);
-				let crc32: u32 = digest.sum32();
+				let crc32: u32 = digest.finalize();
 				w.write(32, crc32)?;
 			}
 			let (encrypted_data, nonce) =
@@ -481,18 +484,18 @@ impl Slatepack {
 
 		match part_data.part_sig {
 			Some(sig) => {
-				w.write(1, 1)?;
+				w.write(1, 1u8)?;
 				let sig_dt = sig.serialize_compact(secp);
 				w.write_bytes(&sig_dt)?;
 			}
 			None => {
-				w.write(1, 0)?;
+				w.write(1, 0u8)?;
 			}
 		}
 
 		match &part_data.message {
 			Some(message) => {
-				w.write(1, 1)?;
+				w.write(1, 1u8)?;
 				let mut message = message.clone();
 				// let's limit message with 32 k
 				let mut msg_enc = smaz::compress(message.as_bytes());
@@ -541,12 +544,12 @@ impl Slatepack {
 		match address.public_key(context_id) {
 			Ok(pk) => {
 				//
-				w.write(1, 1)?;
+				w.write(1, 1u8)?;
 				Self::write_publick_key(&pk, w, secp)?;
 			}
 			Err(_) => {
 				// it must be tor address.
-				w.write(1, 0)?;
+				w.write(1, 0u8)?;
 				// len is 32 bytes
 				w.write_bytes(address.tor_public_key()?.as_bytes())?;
 			}
@@ -575,9 +578,9 @@ impl Slatepack {
 		w.write_bytes(slate.id.as_bytes())?;
 		// Add network Info. 1 for mainnet, 0 for for the rest...
 		if global::is_mainnet(context_id) {
-			w.write(1, 1)?;
+			w.write(1, 1u8)?;
 		} else {
-			w.write(1, 0)?;
+			w.write(1, 0u8)?;
 		}
 
 		if write_amount {
@@ -594,11 +597,11 @@ impl Slatepack {
 
 		match slate.ttl_cutoff_height {
 			Some(h) => {
-				w.write(1, 1)?;
+				w.write(1, 1u8)?;
 				Self::write_u64(h, false, w)?;
 			}
 			None => {
-				w.write(1, 0)?;
+				w.write(1, 0u8)?;
 			}
 		}
 
@@ -611,32 +614,32 @@ impl Slatepack {
 		if write_inputs {
 			match &slate.tx_or_err()?.body.inputs {
 				Inputs::CommitOnly(commit_wrapper) => {
-					w.write(1, 0)?;
+					w.write(1, 0u8)?;
 					// Using stop bit because normally we have few inputs...
 					let mut has_data = false;
 					for commit in commit_wrapper {
 						if has_data {
-							w.write(1, 1)?; // go bit
+							w.write(1, 1u8)?; // go bit
 						}
 						// Len: constants::PEDERSEN_COMMITMENT_SIZE
 						w.write_bytes(&commit.commitment().0)?;
 						has_data = true;
 					}
-					w.write(1, 0)?; // stop bit
+					w.write(1, 0u8)?; // stop bit
 				}
 				Inputs::FeaturesAndCommit(inputs) => {
-					w.write(1, 1)?;
+					w.write(1, 1u8)?;
 					// Using stop bit because normally we have few inputs...
 					let mut has_data = false;
 					for inp in inputs {
 						if has_data {
-							w.write(1, 1)?; // go bit
+							w.write(1, 1u8)?; // go bit
 						}
 						w.write(1, inp.features as u8)?;
 						w.write_bytes(&inp.commit.0)?;
 						has_data = true;
 					}
-					w.write(1, 0)?; // stop bit
+					w.write(1, 0u8)?; // stop bit
 				}
 			}
 		}
@@ -647,7 +650,7 @@ impl Slatepack {
 			// Because usually expecting 1 output, it is better to use a stop symbol instead on length
 			for out in &slate.tx_or_err()?.body.outputs {
 				if has_data {
-					w.write(1, 1)?; // go bit
+					w.write(1, 1u8)?; // go bit
 				}
 				// Feature can be only plain
 				// Len: constants::PEDERSEN_COMMITMENT_SIZE
@@ -656,7 +659,7 @@ impl Slatepack {
 				w.write_bytes(out.proof.bytes())?;
 				has_data = true;
 			}
-			w.write(1, 0)?; // stop bit
+			w.write(1, 0u8)?; // stop bit
 		}
 
 		if write_kernels {
@@ -665,7 +668,7 @@ impl Slatepack {
 			// Because usually expecting 1 output, it is better to use a stop symbol instead on length
 			for kernel in &slate.tx_or_err()?.body.kernels {
 				if has_data {
-					w.write(1, 1)?; // go bit
+					w.write(1, 1u8)?; // go bit
 				}
 				// Expecting only Plain kernels. It is about wallet basic operations, so nothing extra
 				match kernel.features {
@@ -682,7 +685,7 @@ impl Slatepack {
 				w.write_bytes(&kernel.excess_sig.serialize_compact(secp))?;
 				has_data = true;
 			}
-			w.write(1, 0)?; // stop bit
+			w.write(1, 0u8)?; // stop bit
 		}
 
 		if write_participan_data_0 {
@@ -705,20 +708,20 @@ impl Slatepack {
 		if write_proof_addresses {
 			match &slate.payment_proof {
 				Some(pp) => {
-					w.write(1, 1)?;
+					w.write(1, 1u8)?;
 					// len is 32 bytes
 					Self::write_provable_address(context_id, &pp.sender_address, w, secp)?;
 					Self::write_provable_address(context_id, &pp.receiver_address, w, secp)?;
 					// signature is None
 				}
-				None => w.write(1, 0)?,
+				None => w.write(1, 0u8)?,
 			}
 		}
 
 		if write_proof_signature {
 			match &slate.payment_proof {
 				Some(pp) => {
-					w.write(1, 1)?;
+					w.write(1, 1u8)?;
 					let sign_str =
 						pp.receiver_signature
 							.clone()
@@ -740,7 +743,7 @@ impl Slatepack {
 					w.write(4, sign_len)?;
 					w.write_bytes(&sign_v)?;
 				}
-				None => w.write(1, 0)?,
+				None => w.write(1, 0u8)?,
 			}
 		}
 
@@ -831,7 +834,7 @@ impl Slatepack {
 		} else {
 			let mut pk: [u8; PUBLIC_KEY_LENGTH] = [0; PUBLIC_KEY_LENGTH];
 			r.read_bytes(&mut pk)?;
-			let dalek_pk = ed25519_dalek::PublicKey::from_bytes(&pk).map_err(|e| {
+			let dalek_pk = ed25519_dalek::VerifyingKey::from_bytes(&pk).map_err(|e| {
 				Error::SlatepackDecodeError(format!("Unable decode Public Key data, {}", e))
 			})?;
 
@@ -1050,8 +1053,8 @@ impl Slatepack {
 	/// Then everything will be encrypted with EAED.
 	fn encrypt_payload(
 		payload: Vec<u8>,
-		secret: &ed25519_dalek::SecretKey,
-		recipient: &ed25519_dalek::PublicKey,
+		secret: &ed25519_dalek::SigningKey,
+		recipient: &ed25519_dalek::VerifyingKey,
 		use_test_rng: bool,
 	) -> Result<(Vec<u8>, [u8; 12]), Error> {
 		// https://github.com/dalek-cryptography/x25519-dalek
@@ -1063,7 +1066,7 @@ impl Slatepack {
 		let nonce: [u8; 12] = if use_test_rng {
 			[1; 12]
 		} else {
-			thread_rng().gen()
+			rng().random::<[u8; 12]>()
 		};
 
 		let mut enc_bytes = payload;
@@ -1088,8 +1091,8 @@ impl Slatepack {
 	fn decrypt_payload(
 		payload: Vec<u8>,
 		nonce: [u8; 12],
-		secret: &ed25519_dalek::SecretKey,
-		sender: &ed25519_dalek::PublicKey,
+		secret: &ed25519_dalek::SigningKey,
+		sender: &ed25519_dalek::VerifyingKey,
 	) -> Result<Vec<u8>, Error> {
 		// https://github.com/dalek-cryptography/x25519-dalek
 		// convert to xDalek PK & Secret

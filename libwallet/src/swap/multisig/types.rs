@@ -20,12 +20,12 @@ use crate::mwc_core::libtx::secp_ser;
 use crate::swap::ser::*;
 use mwc_wallet_util::mwc_crates::blake2_rfc::blake2b::blake2b;
 use mwc_wallet_util::mwc_crates::hex::FromHex;
-use mwc_wallet_util::mwc_crates::rand::thread_rng;
 use mwc_wallet_util::mwc_crates::secp::constants::SECRET_KEY_SIZE;
 use mwc_wallet_util::mwc_crates::secp::key::{PublicKey, SecretKey};
 use mwc_wallet_util::mwc_crates::secp::pedersen::{Commitment, RangeProof};
 use mwc_wallet_util::mwc_crates::secp::Secp256k1;
 use mwc_wallet_util::mwc_crates::serde::{self, Deserialize, Deserializer, Serialize, Serializer};
+use mwc_wallet_util::rand::thread_rng;
 
 /// Multisig builder
 #[derive(Serialize, Deserialize, Debug, Clone)]

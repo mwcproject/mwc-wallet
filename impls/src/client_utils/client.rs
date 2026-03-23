@@ -23,7 +23,6 @@ use mwc_wallet_util::mwc_crates::reqwest::header::{
 use mwc_wallet_util::mwc_crates::reqwest::{ClientBuilder, Method, Proxy, RequestBuilder};
 use mwc_wallet_util::mwc_crates::serde::{Deserialize, Serialize};
 use mwc_wallet_util::mwc_crates::serde_json;
-use mwc_wallet_util::mwc_crates::thiserror;
 use mwc_wallet_util::mwc_util::{run_global_async_block, to_base64};
 use std::net::SocketAddr;
 use std::time::Duration;

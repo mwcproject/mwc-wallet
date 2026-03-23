@@ -37,6 +37,9 @@ pub mod slatepack;
 pub mod swap;
 pub mod types;
 
+/// legacy StepRng implementation
+pub mod step_rng;
+
 pub use crate::slatepack::{SlatePurpose, Slatepack, SlatepackArmor, Slatepacker};
 
 pub use crate::error::Error;

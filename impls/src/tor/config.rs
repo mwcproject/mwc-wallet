@@ -15,7 +15,7 @@
 
 //! Tor Configuration + Onion (Hidden) Service operations
 use crate::Error;
-use mwc_wallet_util::OnionV3Address;
+use mwc_wallet_util::mwc_util::OnionV3Address;
 use std::convert::TryFrom;
 
 /// Validate if it is a tor address

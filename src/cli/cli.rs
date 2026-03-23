@@ -28,11 +28,14 @@ use mwc_wallet_impls::DefaultWalletImpl;
 use mwc_wallet_libwallet::{NodeClient, WalletInst, WalletLCProvider};
 use mwc_wallet_util::mwc_crates::rustyline::completion::{Completer, FilenameCompleter, Pair};
 use mwc_wallet_util::mwc_crates::rustyline::error::ReadlineError;
-use mwc_wallet_util::mwc_crates::rustyline::highlight::{Highlighter, MatchingBracketHighlighter};
+use mwc_wallet_util::mwc_crates::rustyline::highlight::{
+	CmdKind, Highlighter, MatchingBracketHighlighter,
+};
 use mwc_wallet_util::mwc_crates::rustyline::hint::Hinter;
+use mwc_wallet_util::mwc_crates::rustyline::history::DefaultHistory;
 use mwc_wallet_util::mwc_crates::rustyline::validate::Validator;
 use mwc_wallet_util::mwc_crates::rustyline::{
-	CompletionType, Config, Context, EditMode, Editor, Helper, OutputStreamType,
+	CompletionType, Config, Context, EditMode, Editor, Helper,
 };
 use mwc_wallet_util::mwc_keychain::Keychain;
 use mwc_wallet_util::mwc_p2p::TorConfig;
@@ -108,10 +111,10 @@ where
 		.history_ignore_space(true)
 		.completion_type(CompletionType::List)
 		.edit_mode(EditMode::Emacs)
-		.output_stream(OutputStreamType::Stdout)
 		.build();
 
-	let mut reader = Editor::with_config(editor);
+	let mut reader = Editor::<EditorHelper, DefaultHistory>::with_config(editor)
+		.map_err(|e| Error::IO(format!("Unable to initialize CLI editor, {}", e)))?;
 	reader.set_helper(Some(EditorHelper(
 		FilenameCompleter::new(),
 		MatchingBracketHighlighter::new(),
@@ -265,7 +268,7 @@ where
 						false
 					}
 				};
-				reader.add_history_entry(command);
+				let _ = reader.add_history_entry(command);
 				if done {
 					println!();
 					break;
@@ -298,6 +301,8 @@ impl Completer for EditorHelper {
 }
 
 impl Hinter for EditorHelper {
+	type Hint = String;
+
 	fn hint(&self, line: &str, _pos: usize, _ctx: &Context<'_>) -> Option<String> {
 		let mut contents = STDIN_CONTENTS.lock().unwrap_or_else(|e| e.into_inner());
 		*contents = line.into();
@@ -326,8 +331,8 @@ impl Highlighter for EditorHelper {
 		Owned("\x1b[1m".to_owned() + hint + "\x1b[m")
 	}
 
-	fn highlight_char(&self, line: &str, pos: usize) -> bool {
-		self.1.highlight_char(line, pos)
+	fn highlight_char(&self, line: &str, pos: usize, kind: CmdKind) -> bool {
+		self.1.highlight_char(line, pos, kind)
 	}
 }
 impl Validator for EditorHelper {}

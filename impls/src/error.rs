@@ -15,7 +15,6 @@
 
 //! Implementation specific error types
 use mwc_wallet_util::mwc_core::libtx;
-use mwc_wallet_util::mwc_crates::thiserror;
 
 /// Wallet errors, mostly wrappers around underlying crypto or I/O errors.
 #[derive(Clone, thiserror::Error, Eq, PartialEq, Debug)]
@@ -34,7 +33,7 @@ pub enum Error {
 
 	/// Onion V3 Address Error
 	#[error("Onion V3 Address Error, {0}")]
-	OnionV3Address(#[from] mwc_wallet_util::OnionV3Error),
+	OnionV3Address(#[from] mwc_wallet_util::mwc_util::OnionV3Error),
 
 	/// Error when obfs4proxy is not in the user path if TOR brigde is enabled
 	#[error("Unable to find obfs4proxy binary in your path; {0}")]

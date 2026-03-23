@@ -12,10 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#[allow(deprecated)]
 use mwc_wallet_util::mwc_crates::digest::generic_array::GenericArray;
-use mwc_wallet_util::mwc_crates::hmac::{Hmac, Mac, NewMac};
-use mwc_wallet_util::mwc_crates::ripemd160::Ripemd160;
+use mwc_wallet_util::mwc_crates::hmac::{Hmac, Mac};
+use mwc_wallet_util::mwc_crates::ripemd::Ripemd160;
 use mwc_wallet_util::mwc_crates::sha2::{Digest, Sha256, Sha512};
 
 use mwc_wallet_util::mwc_core::global::is_floonet;
@@ -41,7 +40,6 @@ impl BIP32MwcboxHasher {
 	pub fn new(is_floonet: bool) -> Self {
 		Self {
 			is_floonet,
-			#[allow(deprecated)]
 			hmac_sha512: HmacSha512::new(GenericArray::from_slice(&[0u8; 128])),
 		}
 	}
@@ -80,7 +78,6 @@ impl BIP32Hasher for BIP32MwcboxHasher {
 	}
 	fn result_sha512(&mut self) -> [u8; 64] {
 		let mut result = [0; 64];
-		#[allow(deprecated)]
 		result.copy_from_slice(self.hmac_sha512.clone().finalize().into_bytes().as_slice());
 		result
 	}
@@ -88,7 +85,6 @@ impl BIP32Hasher for BIP32MwcboxHasher {
 		let mut sha2_res = [0; 32];
 		let mut sha2 = Sha256::new();
 		sha2.update(input);
-		#[allow(deprecated)]
 		sha2_res.copy_from_slice(sha2.finalize().as_slice());
 		sha2_res
 	}
@@ -96,7 +92,6 @@ impl BIP32Hasher for BIP32MwcboxHasher {
 		let mut ripemd_res = [0; 20];
 		let mut ripemd = Ripemd160::new();
 		ripemd.update(input);
-		#[allow(deprecated)]
 		ripemd_res.copy_from_slice(ripemd.finalize().as_slice());
 		ripemd_res
 	}

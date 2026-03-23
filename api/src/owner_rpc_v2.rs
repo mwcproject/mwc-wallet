@@ -3812,7 +3812,7 @@ where
 			Error::SlatepackDecodeError(format!("Expected to get slate in Json format, {}", e))
 		})?;
 
-		let recipient: Option<ed25519_dalek::PublicKey> = match recipient {
+		let recipient: Option<ed25519_dalek::VerifyingKey> = match recipient {
 			Some(recipient) => Some(recipient.tor_public_key().map_err(|e| {
 				Error::SlatepackEncodeError(format!("Expecting recipient tor address, {}", e))
 			})?),
@@ -4043,7 +4043,7 @@ pub fn run_doctest_owner(
 		let w = w_lock.lc_provider().unwrap().wallet_inst().unwrap();
 		let k = w.keychain((&mask1).as_ref()).unwrap();
 		let secret = proofaddress::payment_proof_address_dalek_secret(0, &k, 0).unwrap();
-		let tor_pk = ed25519_dalek::PublicKey::from(&secret);
+		let tor_pk = ed25519_dalek::VerifyingKey::from(&secret);
 		(secret, tor_pk)
 	};
 	let _w1_slatepack_address = ProvableAddress::from_tor_pub_key(&w1_tor_pubkey);
@@ -4053,7 +4053,7 @@ pub fn run_doctest_owner(
 		let w = w_lock.lc_provider().unwrap().wallet_inst().unwrap();
 		let k = w.keychain((&mask2).as_ref()).unwrap();
 		let secret = proofaddress::payment_proof_address_dalek_secret(0, &k, 0).unwrap();
-		let tor_pk = ed25519_dalek::PublicKey::from(&secret);
+		let tor_pk = ed25519_dalek::VerifyingKey::from(&secret);
 		(secret, tor_pk)
 	};
 	let w2_slatepack_address = ProvableAddress::from_tor_pub_key(&w2_tor_pubkey);

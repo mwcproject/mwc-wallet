@@ -17,7 +17,6 @@
 //! JSON RPC Client functionality
 use mwc_wallet_util::mwc_crates::serde::{self, Deserialize, Serialize};
 use mwc_wallet_util::mwc_crates::serde_json;
-use mwc_wallet_util::mwc_crates::thiserror;
 
 /// Builds a request
 pub fn build_request<'a, 'b>(name: &'a str, params: &'b serde_json::Value) -> Request<'a, 'b> {

@@ -51,14 +51,14 @@ use mwc_wallet_util::mwc_core::consensus::WEEK_HEIGHT;
 
 // use crate::slate_versions::{CURRENT_SLATE_VERSION, MWC_BLOCK_HEADER_VERSION};
 use crate::proof::proofaddress::ProvableAddress;
+use crate::step_rng::StepRng;
 use crate::types::CbData;
 use crate::{SlateVersion, Slatepacker, CURRENT_SLATE_VERSION};
 use mwc_wallet_util::mwc_core::core::FeeFields;
 use mwc_wallet_util::mwc_core::core::{Inputs, NRDRelativeHeight, OutputIdentifier};
 use mwc_wallet_util::mwc_core::global;
 use mwc_wallet_util::mwc_crates::log::{debug, error, info, trace};
-use mwc_wallet_util::mwc_crates::rand::rngs::mock::StepRng;
-use mwc_wallet_util::mwc_crates::rand::thread_rng;
+use mwc_wallet_util::mwc_crates::rand::rng;
 use mwc_wallet_util::mwc_crates::secp::ContextFlag;
 use mwc_wallet_util::mwc_crates::secp::Secp256k1;
 
@@ -396,7 +396,7 @@ impl Slate {
 	pub fn deserialize_upgrade_slatepack(
 		context_id: u32,
 		slate_str: &str,
-		dec_key: &ed25519_dalek::SecretKey,
+		dec_key: &ed25519_dalek::SigningKey,
 		secp: &Secp256k1,
 	) -> Result<Slatepacker, Error> {
 		let sp = Slatepacker::decrypt_slatepack(context_id, slate_str.as_bytes(), dec_key, secp)?;
@@ -848,9 +848,7 @@ impl Slate {
 		// and subtract it from the blind_sum so we create
 		// the aggsig context with the "split" key
 		self.tx_or_err_mut()?.offset = match use_test_rng {
-			false => {
-				BlindingFactor::from_secret_key(SecretKey::new(keychain.secp(), &mut thread_rng()))
-			}
+			false => BlindingFactor::from_secret_key(SecretKey::new(keychain.secp(), &mut rng())),
 			true => {
 				// allow for consistent test results
 				let mut test_rng = StepRng::new(1_234_567_890_u64, 1);

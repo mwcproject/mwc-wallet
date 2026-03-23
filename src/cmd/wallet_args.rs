@@ -20,7 +20,6 @@ use mwc_wallet_util::mwc_core;
 use mwc_wallet_util::mwc_crates::ed25519_dalek;
 use mwc_wallet_util::mwc_crates::rpassword;
 use mwc_wallet_util::mwc_crates::secp::key::SecretKey;
-use mwc_wallet_util::mwc_crates::thiserror;
 use mwc_wallet_util::mwc_keychain;
 use mwc_wallet_util::mwc_util::file::get_first_line;
 use mwc_wallet_util::mwc_util::ZeroingString;
@@ -55,7 +54,7 @@ use mwc_wallet_util::mwc_crates::semver::Version;
 #[cfg(feature = "swaps")]
 use mwc_wallet_util::mwc_crates::uuid::Uuid;
 use mwc_wallet_util::mwc_p2p::TorConfig;
-use mwc_wallet_util::OnionV3Address;
+use mwc_wallet_util::mwc_util::OnionV3Address;
 use std::collections::HashSet;
 #[cfg(feature = "swaps")]
 use std::convert::TryFrom;
@@ -99,9 +98,7 @@ impl From<std::io::Error> for ParseError {
 }
 
 fn prompt_password_stdout(prompt: &str) -> Result<ZeroingString, ParseError> {
-	Ok(ZeroingString::from(rpassword::prompt_password_stdout(
-		prompt,
-	)?))
+	Ok(ZeroingString::from(rpassword::prompt_password(prompt)?))
 }
 
 pub fn prompt_password(password: &Option<ZeroingString>) -> Result<ZeroingString, ParseError> {
@@ -841,7 +838,7 @@ pub fn parse_process_invoice_args(
 	context_id: u32,
 	args: &ArgMatches,
 	prompt: bool,
-	slatepack_secret: &ed25519_dalek::SecretKey,
+	slatepack_secret: &ed25519_dalek::SigningKey,
 	secp: &Secp256k1,
 ) -> Result<command::ProcessInvoiceArgs, ParseError> {
 	// TODO: display and prompt for confirmation of what we're doing
@@ -1567,7 +1564,19 @@ where
 
 	// This will also cache the node version info for calls to foreign API check middleware
 	if let Some(v) = node_client.clone().get_version_info() {
-		if Version::parse(&v.node_version) < Version::parse(MIN_COMPAT_NODE_VERSION) {
+		let node_version = Version::parse(&v.node_version).map_err(|e| {
+			Error::GenericError(format!(
+				"Unable to parse node version {}, {}",
+				v.node_version, e
+			))
+		})?;
+		let min_version = Version::parse(MIN_COMPAT_NODE_VERSION).map_err(|e| {
+			Error::GenericError(format!(
+				"Unable to parse minimum compatible node version {}, {}",
+				MIN_COMPAT_NODE_VERSION, e
+			))
+		})?;
+		if node_version < min_version {
 			println!("The MWC Node in use (version {}) is outdated and incompatible with this wallet version.", v.node_version);
 			println!(
 				"Please update the node to version {} or later and try again.",

@@ -16,7 +16,6 @@ use super::multisig;
 use mwc_wallet_util::mwc_core::core::committed;
 use mwc_wallet_util::mwc_crates::secp;
 use mwc_wallet_util::mwc_crates::serde_json;
-use mwc_wallet_util::mwc_crates::thiserror;
 use std::io;
 
 /// Swap crate errors

@@ -22,7 +22,7 @@ use mwc_wallet_util::mwc_crates::serde::{self, Deserialize, Serialize};
 use mwc_wallet_util::mwc_crates::serde_json;
 use mwc_wallet_util::mwc_crates::serde_json::{json, Value};
 use mwc_wallet_util::mwc_crates::url::Url;
-use mwc_wallet_util::mwc_crates::{easy_jsonrpc_mwc, remove_dir_all, thiserror};
+use mwc_wallet_util::mwc_crates::{easy_jsonrpc_mwc, remove_dir_all};
 use mwc_wallet_util::mwc_util::ZeroingString;
 use std::path::PathBuf;
 use std::sync::Arc;

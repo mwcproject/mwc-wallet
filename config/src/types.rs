@@ -16,7 +16,6 @@
 //! Public types for config modules
 
 use mwc_wallet_util::mwc_crates::serde::{self, Deserialize, Serialize};
-use mwc_wallet_util::mwc_crates::thiserror;
 use std::io;
 use std::path::PathBuf;
 

@@ -31,7 +31,7 @@ pub fn encode_slatepack(
 		.into_slate_plain(context_id, false)
 		.map_err(|e| format!("Expected to get slate in Json format, {}", e))?;
 
-	let recipient: Option<ed25519_dalek::PublicKey> = match recipient {
+	let recipient: Option<ed25519_dalek::VerifyingKey> = match recipient {
 		Some(recipient) => {
 			let recipient = ProvableAddress::from_str(context_id, &recipient)
 				.map_err(|e| format!("Invalid recipient address, {}", e))?;

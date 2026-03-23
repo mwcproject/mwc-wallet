@@ -92,7 +92,7 @@ pub fn receive(
 		context_id,
 		None,
 		SlatePurpose::SendResponse,
-		ed25519_dalek::PublicKey::from(&slatepack_secret),
+		ed25519_dalek::VerifyingKey::from(&slatepack_secret),
 		sender,
 		slatepack_format,
 	)

@@ -14,7 +14,7 @@
 
 //! Generic implementation libp2p related communication functionality
 
-use mwc_wallet_util::mwc_crates::ed25519_dalek;
+use mwc_wallet_util::ed25519_dalek;
 use mwc_wallet_util::mwc_crates::secp::key::SecretKey;
 use mwc_wallet_util::mwc_crates::serde::{self, Deserialize, Serialize};
 use mwc_wallet_util::mwc_crates::serde_json;

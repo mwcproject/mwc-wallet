@@ -847,7 +847,7 @@ where
 
 				res_tx_uuid = Some(slate.id.clone());
 
-				let mut recipient: Option<ed25519_dalek::PublicKey> = None;
+				let mut recipient: Option<ed25519_dalek::VerifyingKey> = None;
 				if let Some(sp_address) = &args.slatepack_recipient {
 					recipient = Some(sp_address.tor_public_key()?);
 				}
@@ -865,7 +865,7 @@ where
 						&keychain,
 						address_index,
 					)?;
-					let slate_pub_key = ed25519_dalek::PublicKey::from(&slatepack_secret);
+					let slate_pub_key = ed25519_dalek::VerifyingKey::from(&slatepack_secret);
 					(slatepack_secret, slate_pub_key, keychain.secp().clone())
 				};
 
@@ -888,7 +888,7 @@ where
 							dest,
 							SlatePurpose::SendInitial,
 							slatepack_sender,
-							recipient,
+							recipient.clone(),
 							slatepack_format,
 						)
 						.put_tx(&slate, Some(&slatepack_secret), false, &secp)
@@ -1341,8 +1341,8 @@ where
 			context_id,
 			response_file.clone().map(|s| s.into()),
 			SlatePurpose::SendResponse,
-			ed25519_dalek::PublicKey::from(&slatepack_secret),
-			sender,
+			ed25519_dalek::VerifyingKey::from(&slatepack_secret),
+			sender.clone(),
 			slatepack_format,
 		)
 		.put_tx(&slate, Some(&slatepack_secret), false, &secp)?;
@@ -1512,8 +1512,7 @@ where
 			};
 			let slatepack_secret =
 				proofaddress::payment_proof_address_secret(context_id, &keychain, address_index)?;
-			let slatepack_secret = ed25519_dalek::SecretKey::from_bytes(&slatepack_secret.0)
-				.map_err(|e| Error::GenericError(format!("Unable to build secret, {}", e)))?;
+			let slatepack_secret = ed25519_dalek::SigningKey::from_bytes(&slatepack_secret.0);
 			(slatepack_secret, keychain.secp().clone(), context_id)
 		};
 
@@ -1623,8 +1622,7 @@ where
 					&keychain,
 					address_index,
 				)?;
-				let slatepack_secret = ed25519_dalek::SecretKey::from_bytes(&slatepack_secret.0)
-					.map_err(|e| Error::GenericError(format!("Unable to build secret, {}", e)))?;
+				let slatepack_secret = ed25519_dalek::SigningKey::from_bytes(&slatepack_secret.0);
 				(slatepack_secret, keychain.secp().clone(), context_id)
 			};
 
@@ -1638,8 +1636,8 @@ where
 				context_id,
 				path_buf,
 				SlatePurpose::FullSlate,
-				ed25519_dalek::PublicKey::from(&slatepack_secret),
-				sender,
+				ed25519_dalek::VerifyingKey::from(&slatepack_secret),
+				sender.clone(),
 				slatepack_format,
 			)
 			.put_tx(&slate, Some(&slatepack_secret), false, &secp)?;
@@ -1684,7 +1682,7 @@ where
 	K: Keychain + 'static,
 {
 	controller::owner_single_use(None, keychain_mask, Some(owner_api), |api, m| {
-		let mut recipient: Option<ed25519_dalek::PublicKey> = None;
+		let mut recipient: Option<ed25519_dalek::VerifyingKey> = None;
 		if let Some(sp_address) = &args.issue_args.slatepack_recipient {
 			recipient = Some(sp_address.tor_public_key()?);
 		}
@@ -1705,7 +1703,7 @@ where
 				&keychain,
 				address_index,
 			)?;
-			let slatepack_pk = ed25519_dalek::PublicKey::from(&slatepack_secret);
+			let slatepack_pk = ed25519_dalek::VerifyingKey::from(&slatepack_secret);
 			(
 				slatepack_secret,
 				slatepack_pk,
@@ -1720,7 +1718,7 @@ where
 			Some((&args.dest).into()),
 			SlatePurpose::InvoiceInitial,
 			tor_address,
-			recipient,
+			recipient.clone(),
 			slatepack_format,
 		)
 		.put_tx(&slate, Some(&slatepack_secret), false, &secp)?;
@@ -1782,7 +1780,7 @@ where
 		let base_dir = w.get_data_file_dir().to_string();
 		let slatepack_secret =
 			proofaddress::payment_proof_address_dalek_secret(context_id, &keychain, address_index)?;
-		let slatepack_pk = ed25519_dalek::PublicKey::from(&slatepack_secret);
+		let slatepack_pk = ed25519_dalek::VerifyingKey::from(&slatepack_secret);
 		(
 			slatepack_secret,
 			slatepack_pk,
@@ -1885,7 +1883,7 @@ where
 						Some((&args.dest).into()),
 						SlatePurpose::InvoiceResponse,
 						tor_address,
-						sender_pk,
+						sender_pk.clone(),
 						slatepack_format,
 					)
 					.put_tx(&slate, Some(&slatepack_secret), false, &secp)?;

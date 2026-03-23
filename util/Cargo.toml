@@ -23,8 +23,7 @@ edition = "2018"
 #mwc-wagyu-model = { git = "https://github.com/mwcproject/wagyu-model",version = "0.6.3",  branch = "master" }
 #mwc-zcash_primitives = { git = "https://github.com/mwcproject/librustzcash", version = "0.4.0", branch = "master", features = ["transparent-inputs"] }
 #zcash_primitives = { path = "../../librustzcash/zcash_primitives", features = ["transparent-inputs"] }
-
-
+#bitcoin_hashes = { version = "0.9.1", features = ["serde"] }
 
 # For Release
 #mwc_crates = { git = "https://github.com/mwcproject/mwc-node", version="6.0.1", tag = "6.0.1" }

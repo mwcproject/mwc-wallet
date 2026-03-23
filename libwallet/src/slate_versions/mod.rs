@@ -123,9 +123,9 @@ impl VersionedSlate {
 		slate: Slate,
 		version: SlateVersion,
 		content: SlatePurpose,
-		sender: ed25519_dalek::PublicKey,
-		recipient: Option<ed25519_dalek::PublicKey>,
-		secret: &ed25519_dalek::SecretKey,
+		sender: ed25519_dalek::VerifyingKey,
+		recipient: Option<ed25519_dalek::VerifyingKey>,
+		secret: &ed25519_dalek::SigningKey,
 		use_test_rng: bool,
 		secp: &Secp256k1,
 	) -> Result<VersionedSlate, Error> {
@@ -175,7 +175,7 @@ impl VersionedSlate {
 	pub fn into_slatepack(
 		&self,
 		context_id: u32,
-		dec_key: &ed25519_dalek::SecretKey,
+		dec_key: &ed25519_dalek::SigningKey,
 		secp: &Secp256k1,
 	) -> Result<Slatepacker, Error> {
 		match self {

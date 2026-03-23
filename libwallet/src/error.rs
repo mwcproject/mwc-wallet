@@ -19,8 +19,7 @@ use mwc_wallet_util::mwc_core::core::{committed, transaction};
 use mwc_wallet_util::mwc_core::libtx;
 use mwc_wallet_util::mwc_crates::secp;
 use mwc_wallet_util::mwc_crates::serde::{self, Deserialize, Serialize};
-use mwc_wallet_util::mwc_crates::thiserror;
-use mwc_wallet_util::OnionV3Error;
+use mwc_wallet_util::mwc_util::OnionV3Error;
 use std::io;
 
 /// Wallet errors, mostly wrappers around underlying crypto or I/O errors.

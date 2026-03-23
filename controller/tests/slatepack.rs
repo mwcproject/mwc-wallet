@@ -44,9 +44,9 @@ fn output_slatepack(
 	slate: &Slate,
 	content: SlatePurpose,
 	file_name: &str,
-	sender: ed25519_dalek::PublicKey,
-	recipients: Option<ed25519_dalek::PublicKey>,
-	sender_secret: &ed25519_dalek::SecretKey,
+	sender: ed25519_dalek::VerifyingKey,
+	recipients: Option<ed25519_dalek::VerifyingKey>,
+	sender_secret: &ed25519_dalek::SigningKey,
 	secp: &Secp256k1,
 ) -> Result<(), mwc_wallet_libwallet::Error> {
 	PathToSlatePutter::build_encrypted(
@@ -66,7 +66,7 @@ fn output_slatepack(
 
 fn slate_from_packed(
 	file: &str,
-	dec_key: &ed25519_dalek::SecretKey,
+	dec_key: &ed25519_dalek::SigningKey,
 	secp: &Secp256k1,
 ) -> Result<Slatepacker, mwc_wallet_libwallet::Error> {
 	match PathToSlateGetter::build_form_path(0, file.into())
@@ -177,8 +177,8 @@ fn slatepack_exchange_test_impl(test_dir: &str) -> Result<(), mwc_wallet_libwall
 	);
 
 	let (_address1, recipients_1, secret_1, sender_1) = {
-		let mut pub_key = ed25519_dalek::PublicKey::from_bytes(&[0; 32]).unwrap();
-		let mut sec_key = ed25519_dalek::SecretKey::from_bytes(&[0u8; 32]).unwrap();
+		let mut pub_key = ed25519_dalek::VerifyingKey::from_bytes(&[0; 32]).unwrap();
+		let mut sec_key = ed25519_dalek::SigningKey::from_bytes(&[0u8; 32]);
 		let mut address = proofaddress::ProvableAddress::blank();
 		mwc_wallet_controller::controller::owner_single_use(
 			Some(wallet1.clone()),
@@ -189,7 +189,7 @@ fn slatepack_exchange_test_impl(test_dir: &str) -> Result<(), mwc_wallet_libwall
 				let w = w_lock.lc_provider()?.wallet_inst()?;
 				let k = w.keychain(m)?;
 				sec_key = proofaddress::payment_proof_address_dalek_secret(0, &k, 0)?;
-				pub_key = ed25519_dalek::PublicKey::from(&sec_key);
+				pub_key = ed25519_dalek::VerifyingKey::from(&sec_key);
 				address = proofaddress::ProvableAddress::from_tor_pub_key(&pub_key);
 				Ok(())
 			},
@@ -199,8 +199,8 @@ fn slatepack_exchange_test_impl(test_dir: &str) -> Result<(), mwc_wallet_libwall
 	};
 
 	let (address2, recipients_2, secret_2, sender_2) = {
-		let mut pub_key = ed25519_dalek::PublicKey::from_bytes(&[0; 32]).unwrap();
-		let mut sec_key = ed25519_dalek::SecretKey::from_bytes(&[0u8; 32]).unwrap();
+		let mut pub_key = ed25519_dalek::VerifyingKey::from_bytes(&[0; 32]).unwrap();
+		let mut sec_key = ed25519_dalek::SigningKey::from_bytes(&[0u8; 32]);
 		let mut address = proofaddress::ProvableAddress::blank();
 		mwc_wallet_controller::controller::owner_single_use(
 			Some(wallet2.clone()),
@@ -211,7 +211,7 @@ fn slatepack_exchange_test_impl(test_dir: &str) -> Result<(), mwc_wallet_libwall
 				let w = w_lock.lc_provider()?.wallet_inst()?;
 				let k = w.keychain(m)?;
 				sec_key = proofaddress::payment_proof_address_dalek_secret(0, &k, 0)?;
-				pub_key = ed25519_dalek::PublicKey::from(&sec_key);
+				pub_key = ed25519_dalek::VerifyingKey::from(&sec_key);
 				address = proofaddress::ProvableAddress::from_tor_pub_key(&pub_key);
 				Ok(())
 			},

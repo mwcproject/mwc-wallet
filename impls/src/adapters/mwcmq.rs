@@ -193,8 +193,8 @@ impl SlateSender for MwcMqsChannel {
 		send_tx: bool, // false if invoice, true if send operation
 		slate: &Slate,
 		_slate_content: SlatePurpose,
-		_slatepack_secret: &ed25519_dalek::SecretKey,
-		_recipients: Option<ed25519_dalek::PublicKey>,
+		_slatepack_secret: &ed25519_dalek::SigningKey,
+		_recipients: Option<ed25519_dalek::VerifyingKey>,
 		_other_wallet_version: Option<(SlateVersion, Option<String>)>,
 		secp: &Secp256k1,
 	) -> Result<Slate, Error> {
@@ -805,7 +805,7 @@ impl MWCMQSBroker {
 			Some(self.mwcmqs_port),
 		);
 
-		let nanoid = nanoid::simple();
+		let nanoid = nanoid::nanoid!();
 		self.running.store(true, Ordering::SeqCst);
 
 		loop {

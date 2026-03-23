@@ -24,11 +24,11 @@ use crate::swap::fsm::state::StateId;
 use crate::{Slate, SlateVersion, VersionedSlate};
 use mwc_wallet_util::mwc_core::libtx::{build, proof, tx_fee};
 use mwc_wallet_util::mwc_crates::chrono::{TimeZone, Utc};
-use mwc_wallet_util::mwc_crates::rand::thread_rng;
 use mwc_wallet_util::mwc_crates::secp::aggsig;
 use mwc_wallet_util::mwc_crates::secp::key::{PublicKey, SecretKey};
 use mwc_wallet_util::mwc_crates::secp::pedersen::{Commitment, RangeProof};
 use mwc_wallet_util::mwc_keychain::{BlindSum, BlindingFactor};
+use mwc_wallet_util::rand::thread_rng;
 
 use crate::slate::SlateCtx;
 use mwc_wallet_util::mwc_core::global;

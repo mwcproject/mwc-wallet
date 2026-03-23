@@ -17,7 +17,7 @@ extern crate mwc_wallet_util;
 
 use mwc_wallet_impls::test_framework::LocalWalletClient;
 use mwc_wallet_util::mwc_core::core::{OutputFeatures, Transaction};
-use mwc_wallet_util::mwc_crates::rand::{thread_rng, Rng};
+use mwc_wallet_util::mwc_crates::rand::{rng, RngExt};
 use mwc_wallet_util::mwc_crates::secp;
 use mwc_wallet_util::mwc_keychain::{
 	mnemonic, BlindingFactor, ExtKeychain, ExtKeychainPath, Keychain, SwitchCommitmentType,
@@ -35,7 +35,7 @@ use common::{clean_output_dir, create_wallet_proxy, setup};
 
 fn build_output_test_impl(test_dir: &str) -> Result<(), mwc_wallet_libwallet::Error> {
 	// Generate seed so we can verify the blinding factor is derived correctly
-	let seed: [u8; 32] = thread_rng().gen();
+	let seed: [u8; 32] = rng().random();
 	let keychain = ExtKeychain::from_seed(&seed, false).unwrap();
 	let mnemonic = mnemonic::from_entropy(&seed).unwrap();
 

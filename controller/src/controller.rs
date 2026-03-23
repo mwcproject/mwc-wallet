@@ -22,11 +22,12 @@ use mwc_wallet_libwallet::{
 	NodeClient, NodeVersionInfo, Slate, WalletInst, WalletLCProvider, MWC_BLOCK_HEADER_VERSION,
 };
 use mwc_wallet_util::mwc_api::{ApiServer, BasicAuthMiddleware, ResponseFuture, Router, TLSConfig};
+use mwc_wallet_util::mwc_crates::bytes::Bytes;
 use mwc_wallet_util::mwc_crates::ed25519_dalek;
+use mwc_wallet_util::mwc_crates::http_body_util::Full;
 use mwc_wallet_util::mwc_crates::hyper;
-use mwc_wallet_util::mwc_crates::hyper::body;
 use mwc_wallet_util::mwc_crates::hyper::header::HeaderValue;
-use mwc_wallet_util::mwc_crates::hyper::{Body, Request, Response, StatusCode};
+use mwc_wallet_util::mwc_crates::hyper::{Request, Response, StatusCode};
 use mwc_wallet_util::mwc_crates::lazy_static::lazy_static;
 use mwc_wallet_util::mwc_crates::qr_code::QrCode;
 use mwc_wallet_util::mwc_crates::secp::key::SecretKey;
@@ -36,8 +37,8 @@ use mwc_wallet_util::mwc_crates::serde_json;
 use mwc_wallet_util::mwc_crates::tokio;
 use mwc_wallet_util::mwc_crates::uuid;
 use mwc_wallet_util::mwc_p2p;
+use mwc_wallet_util::mwc_util::OnionV3Address;
 use mwc_wallet_util::mwc_util::{from_hex, to_base64};
-use mwc_wallet_util::OnionV3Address;
 
 use mwc_wallet_impls::{
 	Address, CloseReason, MWCMQPublisher, MWCMQSAddress, MWCMQSubscriber, Publisher, Subscriber,
@@ -67,12 +68,12 @@ use mwc_wallet_util::mwc_core::global;
 #[cfg(feature = "libp2p")]
 use mwc_wallet_util::mwc_crates::chrono::Utc;
 use mwc_wallet_util::mwc_crates::easy_jsonrpc_mwc::{Handler, MaybeReply};
-use mwc_wallet_util::mwc_crates::ed25519_dalek::ExpandedSecretKey;
 use mwc_wallet_util::mwc_crates::log::Level;
 use mwc_wallet_util::mwc_crates::log::{debug, error, info, log_enabled, warn};
 #[cfg(feature = "libp2p")]
 use mwc_wallet_util::mwc_crates::secp::pedersen::Commitment;
 use mwc_wallet_util::mwc_crates::secp::{ContextFlag, Secp256k1};
+use mwc_wallet_util::mwc_crates::tor_llcrypto::pk::ed25519::{ExpandedKeypair, Keypair};
 use mwc_wallet_util::mwc_keychain::Keychain;
 #[cfg(feature = "libp2p")]
 use mwc_wallet_util::mwc_p2p::libp2p_connection;
@@ -80,6 +81,7 @@ use mwc_wallet_util::mwc_p2p::tor::tcp_data_stream::TcpDataStream;
 use mwc_wallet_util::mwc_p2p::{PeerAddr, TorConfig};
 use mwc_wallet_util::mwc_util::static_secp_instance;
 use std::collections::HashMap;
+use std::io::Cursor;
 use std::net::SocketAddr;
 #[cfg(feature = "libp2p")]
 use std::net::SocketAddrV4;
@@ -1142,7 +1144,7 @@ where
 		};
 		let slatepack_secret =
 			proofaddress::payment_proof_address_dalek_secret(context_id, &keychain, address_index)?;
-		let slatepack_pk = ed25519_dalek::PublicKey::from(&slatepack_secret);
+		let slatepack_pk = ed25519_dalek::VerifyingKey::from(&slatepack_secret);
 		(slatepack_secret, slatepack_pk, context_id)
 	};
 
@@ -1166,7 +1168,10 @@ where
 		);
 	}
 
-	let onion_expanded_key = ExpandedSecretKey::from(&slatepack_secret).to_bytes();
+	let keypair = Keypair::from_bytes(&slatepack_secret.as_bytes());
+	let exp_key = ExpandedKeypair::from(&keypair);
+	let onion_expanded_key = exp_key.to_secret_key_bytes();
+
 	let service_started_callback = move |onion_address: Option<String>| {
 		tor::status::set_tor_address(context_id, onion_address.clone());
 		match onion_address {
@@ -1372,7 +1377,10 @@ where
 		OwnerAPIHandlerV2 { wallet, tor_config }
 	}
 
-	async fn call_api(req: Request<Body>, api: Owner<L, C, K>) -> Result<serde_json::Value, Error> {
+	async fn call_api(
+		req: Request<Bytes>,
+		api: Owner<L, C, K>,
+	) -> Result<serde_json::Value, Error> {
 		let val: serde_json::Value = parse_body(req).await?;
 
 		if log_enabled!(Level::Debug) {
@@ -1395,10 +1403,10 @@ where
 	}
 
 	async fn handle_post_request(
-		req: Request<Body>,
+		req: Request<Bytes>,
 		wallet: Arc<Mutex<Box<dyn WalletInst<'static, L, C, K> + 'static>>>,
 		tor_config: Option<TorConfig>,
-	) -> Result<Response<Body>, Error> {
+	) -> Result<Response<Full<Bytes>>, Error> {
 		let context_id = {
 			wallet_lock!(wallet, w);
 			w.get_context_id()
@@ -1424,7 +1432,7 @@ where
 	C: NodeClient + 'static,
 	K: Keychain + 'static,
 {
-	fn post(&self, req: Request<Body>) -> ResponseFuture {
+	fn post(&self, req: Request<Bytes>) -> ResponseFuture {
 		let wallet = self.wallet.clone();
 		let tor_config = self.tor_config.clone();
 		Box::pin(async move {
@@ -1438,7 +1446,7 @@ where
 		})
 	}
 
-	fn options(&self, _req: Request<Body>) -> ResponseFuture {
+	fn options(&self, _req: Request<Bytes>) -> ResponseFuture {
 		Box::pin(async {
 			let res = match create_ok_response("{}") {
 				Ok(r) => r,
@@ -1706,7 +1714,7 @@ where
 	}
 
 	async fn call_api(
-		req: Request<Body>,
+		req: Request<Bytes>,
 		key: Arc<Mutex<Option<SecretKey>>>,
 		mask: Arc<Mutex<Option<SecretKey>>>,
 		running_foreign: bool,
@@ -1775,12 +1783,12 @@ where
 	}
 
 	async fn handle_post_request(
-		req: Request<Body>,
+		req: Request<Bytes>,
 		key: Arc<Mutex<Option<SecretKey>>>,
 		mask: Arc<Mutex<Option<SecretKey>>>,
 		running_foreign: bool,
 		api: Arc<Owner<L, C, K>>,
-	) -> Result<Response<Body>, Error> {
+	) -> Result<Response<Full<Bytes>>, Error> {
 		//Here is a wrapper to call future from that.
 		// Problem that we can't call future from future
 		let handler = move || -> Pin<Box<dyn std::future::Future<Output=Result<serde_json::Value, Error>>>> {
@@ -1804,7 +1812,7 @@ where
 	C: NodeClient + 'static,
 	K: Keychain + 'static,
 {
-	fn post(&self, req: Request<Body>) -> ResponseFuture {
+	fn post(&self, req: Request<Bytes>) -> ResponseFuture {
 		let key = self.shared_key.clone();
 		let mask = self.keychain_mask.clone();
 		let running_foreign = self.running_foreign;
@@ -1821,7 +1829,7 @@ where
 		})
 	}
 
-	fn options(&self, _req: Request<Body>) -> ResponseFuture {
+	fn options(&self, _req: Request<Bytes>) -> ResponseFuture {
 		Box::pin(async {
 			let res = match create_ok_response("{}") {
 				Ok(r) => r,
@@ -1862,7 +1870,7 @@ where
 	}
 
 	async fn call_api(
-		req: Request<Body>,
+		req: Request<Bytes>,
 		api: Foreign<'static, L, C, K>,
 	) -> Result<serde_json::Value, Error> {
 		let val: serde_json::Value = parse_body(req).await?;
@@ -1887,10 +1895,10 @@ where
 	}
 
 	async fn handle_post_request(
-		req: Request<Body>,
+		req: Request<Bytes>,
 		mask: Option<SecretKey>,
 		wallet: Arc<Mutex<Box<dyn WalletInst<'static, L, C, K> + 'static>>>,
-	) -> Result<Response<Body>, Error> {
+	) -> Result<Response<Full<Bytes>>, Error> {
 		let api = Foreign::new(wallet, mask, Some(check_middleware));
 
 		//Here is a wrapper to call future from that.
@@ -1910,7 +1918,7 @@ where
 	C: NodeClient + 'static,
 	K: Keychain + 'static,
 {
-	fn post(&self, req: Request<Body>) -> ResponseFuture {
+	fn post(&self, req: Request<Bytes>) -> ResponseFuture {
 		let mask = self
 			.keychain_mask
 			.lock()
@@ -1929,7 +1937,7 @@ where
 		})
 	}
 
-	fn options(&self, _req: Request<Body>) -> ResponseFuture {
+	fn options(&self, _req: Request<Bytes>) -> ResponseFuture {
 		Box::pin(async {
 			let res = match create_ok_response("{}") {
 				Ok(r) => r,
@@ -1942,7 +1950,7 @@ where
 
 // Utility to serialize a struct into JSON and produce a sensible Response
 // out of it.
-fn _json_response<T>(s: &T) -> Result<Response<Body>, Error>
+fn _json_response<T>(s: &T) -> Result<Response<Full<Bytes>>, Error>
 where
 	T: Serialize,
 {
@@ -1956,7 +1964,7 @@ where
 }
 
 // pretty-printed version of above
-fn json_response_pretty<T>(s: &T) -> Result<Response<Body>, Error>
+fn json_response_pretty<T>(s: &T) -> Result<Response<Full<Bytes>>, Error>
 where
 	T: Serialize,
 {
@@ -1969,7 +1977,7 @@ where
 	}
 }
 
-fn create_error_response(e: Error) -> Response<Body> {
+fn create_error_response(e: Error) -> Response<Full<Bytes>> {
 	Response::builder()
 		.status(StatusCode::INTERNAL_SERVER_ERROR)
 		.header("access-control-allow-origin", "*")
@@ -1981,7 +1989,7 @@ fn create_error_response(e: Error) -> Response<Body> {
 		.unwrap()
 }
 
-fn create_ok_response(json: &str) -> Result<Response<Body>, Error> {
+fn create_ok_response(json: &str) -> Result<Response<Full<Bytes>>, Error> {
 	Response::builder()
 		.status(StatusCode::OK)
 		.header("access-control-allow-origin", "*")
@@ -1990,7 +1998,7 @@ fn create_ok_response(json: &str) -> Result<Response<Body>, Error> {
 			"Content-Type, Authorization",
 		)
 		.header(hyper::header::CONTENT_TYPE, "application/json")
-		.body(json.to_string().into())
+		.body(Full::new(Bytes::from(json.to_string())))
 		.map_err(|e| Error::IO(format!("Unable to build a response, {}", e)))
 }
 
@@ -1998,7 +2006,7 @@ fn create_ok_response(json: &str) -> Result<Response<Body>, Error> {
 ///
 /// Whenever the status code is `StatusCode::OK` the text parameter should be
 /// valid JSON as the content type header will be set to `application/json'
-fn response<T: Into<Body>>(status: StatusCode, text: T) -> Result<Response<Body>, Error> {
+fn response<T: Into<Bytes>>(status: StatusCode, text: T) -> Result<Response<Full<Bytes>>, Error> {
 	let mut builder = Response::builder()
 		.status(status)
 		.header("access-control-allow-origin", "*")
@@ -2012,18 +2020,14 @@ fn response<T: Into<Body>>(status: StatusCode, text: T) -> Result<Response<Body>
 	}
 
 	builder
-		.body(text.into())
+		.body(Full::new(text.into()))
 		.map_err(|e| Error::IO(format!("Unable to build a response, {}", e)))
 }
 
-async fn parse_body<T>(req: Request<Body>) -> Result<T, Error>
+async fn parse_body<T>(req: Request<Bytes>) -> Result<T, Error>
 where
 	for<'de> T: Deserialize<'de> + Send + 'static,
 {
-	let body = body::to_bytes(req.into_body())
-		.await
-		.map_err(|e| Error::GenericError(format!("Failed to read request, {}", e)))?;
-
-	serde_json::from_reader(&body[..])
+	serde_json::from_reader(Cursor::new(req.into_body()))
 		.map_err(|e| Error::GenericError(format!("Invalid request body, {}", e)))
 }

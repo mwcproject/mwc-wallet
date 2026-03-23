@@ -21,6 +21,7 @@ use mwc_wallet_util::mwc_crates::secp::pedersen::Commitment;
 use mwc_wallet_util::mwc_crates::secp::{pedersen, Secp256k1, Signature};
 use mwc_wallet_util::mwc_crates::serde::{self, Deserialize, Serialize};
 use mwc_wallet_util::mwc_crates::serde_json;
+use mwc_wallet_util::mwc_crates::signature::Verifier;
 use mwc_wallet_util::mwc_crates::uuid;
 
 use super::crypto;
@@ -29,7 +30,6 @@ use super::proofaddress::{version_bytes, ProvableAddress};
 use crate::error::Error;
 use crate::slate_versions::VersionedSlate;
 use crate::Slate;
-use mwc_wallet_util::mwc_crates::ed25519_dalek::Verifier;
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{Read, Write};
@@ -44,6 +44,7 @@ use mwc_wallet_util::mwc_core::global;
 use mwc_wallet_util::mwc_crates::colored::*;
 use mwc_wallet_util::mwc_util;
 use std::collections::HashSet;
+use std::convert::TryInto;
 
 /// Dir name with proof files
 pub const TX_PROOF_SAVE_DIR: &'static str = "saved_proofs";
@@ -152,13 +153,15 @@ impl TxProof {
 					))
 				})?;
 
-				let dalek_sig = ed25519_dalek::Signature::from_bytes(dalek_sig_vec.as_ref())
-					.map_err(|e| {
+				let dalek_sig_bytes: [u8; 64] =
+					dalek_sig_vec.as_slice().try_into().map_err(|_| {
 						Error::TxProofVerify(format!(
-							"Unable to deserialize tor payment proof receiver signature, {}",
-							e
-						))
+						"Unable to deserialize tor payment proof receiver signature, wrong length {}",
+						dalek_sig_vec.len()
+					))
 					})?;
+
+				let dalek_sig = ed25519_dalek::Signature::from_bytes(&dalek_sig_bytes);
 
 				let receiver_dalek_pub_key = self.address.tor_public_key().map_err(|e| {
 					Error::TxProofVerify(format!(

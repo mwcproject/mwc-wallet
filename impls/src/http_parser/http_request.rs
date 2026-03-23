@@ -14,10 +14,10 @@
 
 use crate::http_parser::parse_utils;
 use crate::Error;
+use mwc_wallet_util::mwc_crates::bytes::Bytes;
 use mwc_wallet_util::mwc_crates::futures;
 use mwc_wallet_util::mwc_crates::http;
-use mwc_wallet_util::mwc_crates::hyper;
-use mwc_wallet_util::mwc_crates::hyper::body::to_bytes;
+use mwc_wallet_util::mwc_crates::http_body_util::{BodyExt, Full};
 use mwc_wallet_util::mwc_p2p::tor::tcp_data_stream::TcpDataStream;
 use std::io::Write;
 use std::time::Duration;
@@ -28,7 +28,7 @@ pub fn read_http_request(
 	stream: &mut TcpDataStream,
 	try_read_timeout: &Duration,
 	data_wait_timeout: &Duration,
-) -> Result<(http::Request<hyper::Body>, bool), Error> {
+) -> Result<(http::Request<Bytes>, bool), Error> {
 	// Reading the response:
 	stream.set_read_timeout(try_read_timeout.clone());
 
@@ -47,7 +47,7 @@ pub fn read_http_request(
 	// Not printing timeout into the error
 	let body = parse_utils::read_exact_bytes(stream, buf, body_len)
 		.map_err(|_e| Error::ConnectionError(format!("Unable to read the request")))?;
-	let body = hyper::Body::from(body);
+	let body = Bytes::from(body);
 
 	let mut builder = http::Request::builder()
 		.method(method)
@@ -70,7 +70,7 @@ pub fn read_http_request(
 
 pub fn send_http_response(
 	stream: &mut TcpDataStream,
-	response: http::Response<hyper::Body>,
+	response: http::Response<Full<Bytes>>,
 	close_connection: bool,
 ) -> Result<(), Error> {
 	// 1. status line
@@ -126,8 +126,8 @@ pub fn send_http_response(
 	Ok(())
 }
 
-fn body_to_bytes(body: hyper::body::Body) -> Result<Vec<u8>, Error> {
-	futures::executor::block_on(to_bytes(body))
-		.map(|b| b.to_vec())
-		.map_err(|e| Error::ConnectionError(format!("Broken body data, {}", e)))
+fn body_to_bytes(body: Full<Bytes>) -> Result<Vec<u8>, Error> {
+	let collected = futures::executor::block_on(body.collect())
+		.map_err(|e| Error::ConnectionError(format!("Broken body data, {}", e)))?;
+	Ok(collected.to_bytes().to_vec())
 }

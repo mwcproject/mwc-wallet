@@ -21,7 +21,7 @@ use mwc_wallet_util::mwc_crates::rand;
 use mwc_wallet_impls::test_framework::{self, LocalWalletClient};
 use mwc_wallet_libwallet::{InitTxArgs, Slate};
 use mwc_wallet_util::mwc_core;
-use mwc_wallet_util::mwc_crates::rand::Rng;
+use mwc_wallet_util::mwc_crates::rand::RngExt;
 use std::ops::DerefMut;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
@@ -98,7 +98,7 @@ fn build_chain(test_dir: &str, block_height: usize) -> Result<(), mwc_wallet_lib
 	.unwrap();
 
 	// few values to keep things shorter
-	let mut rng = rand::thread_rng();
+	let mut rng = rand::rng();
 
 	// Start off with a few blocks
 	let _ = test_framework::award_blocks_to_wallet(
@@ -138,7 +138,7 @@ fn build_chain(test_dir: &str, block_height: usize) -> Result<(), mwc_wallet_lib
 		.unwrap();
 
 		// let's say 1 in every 3 blocks has a transaction (i.e. random 0 here and wallet1 has funds)
-		let transact = rng.gen_range(0, 2) == 0;
+		let transact = rng.random_range(0..2) == 0;
 		if !transact || !wallet_1_has_funds {
 			let _ = test_framework::award_blocks_to_wallet(
 				&chain,
@@ -155,9 +155,9 @@ fn build_chain(test_dir: &str, block_height: usize) -> Result<(), mwc_wallet_lib
 		}
 
 		// send a random tx or three
-		let num_txs = rng.gen_range(0, 3);
+		let num_txs = rng.random_range(0..3);
 		for _ in 0..num_txs {
-			let amount: u64 = rng.gen_range(1, 1_000_000_001);
+			let amount: u64 = rng.random_range(1..1_000_000_001);
 			let mut slate = Slate::blank(1, false);
 			debug!("Creating TX for {}", amount);
 			mwc_wallet_controller::controller::owner_single_use(

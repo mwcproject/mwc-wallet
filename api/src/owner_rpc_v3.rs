@@ -16,8 +16,6 @@
 //! JSON-RPC Stub generation for the Owner API
 
 use mwc_wallet_util::mwc_crates::easy_jsonrpc_mwc;
-use mwc_wallet_util::mwc_crates::ed25519_dalek;
-use mwc_wallet_util::mwc_crates::rand::thread_rng;
 use mwc_wallet_util::mwc_crates::uuid::Uuid;
 
 use mwc_wallet_config::{MQSConfig, WalletConfig};
@@ -41,7 +39,9 @@ use mwc_wallet_libwallet::proof::proofaddress::ProvableAddress;
 use mwc_wallet_libwallet::proof::tx_proof::VerifyProofResult;
 use mwc_wallet_libwallet::types::TxSession;
 use mwc_wallet_libwallet::{wallet_lock, RetrieveTxQueryArgs, TxProof};
+use mwc_wallet_util::mwc_crates::ed25519_dalek;
 use mwc_wallet_util::mwc_crates::log::info;
+use mwc_wallet_util::mwc_crates::rand::rng;
 use mwc_wallet_util::mwc_crates::secp::key::{PublicKey, SecretKey};
 use mwc_wallet_util::mwc_crates::secp::pedersen;
 use mwc_wallet_util::mwc_p2p::TorConfig;
@@ -4688,12 +4688,10 @@ where
 	}
 
 	// we have to use e.description  because of the bug at rust-secp256k1-zkp
-	#[allow(deprecated)]
-
 	fn init_secure_api(&self, ecdh_pubkey: ECDHPubkey) -> Result<ECDHPubkey, Error> {
 		let secp_inst = static_secp_instance();
 		let secp = secp_inst.lock().unwrap_or_else(|e| e.into_inner());
-		let sec_key = SecretKey::new(&secp, &mut thread_rng());
+		let sec_key = SecretKey::new(&secp, &mut rng());
 
 		let mut shared_pubkey = ecdh_pubkey.ecdh_pubkey;
 		shared_pubkey
@@ -4893,7 +4891,7 @@ where
 			Error::SlatepackDecodeError(format!("Expected to get slate in Json format, {}", e))
 		})?;
 
-		let recipient: Option<ed25519_dalek::PublicKey> = match recipient {
+		let recipient: Option<ed25519_dalek::VerifyingKey> = match recipient {
 			Some(recipient) => Some(recipient.tor_public_key().map_err(|e| {
 				Error::SlatepackEncodeError(format!("Expecting recipient tor address, {}", e))
 			})?),

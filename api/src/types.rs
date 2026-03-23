@@ -17,6 +17,7 @@ use mwc_wallet_libwallet::Error;
 use mwc_wallet_libwallet::{ParticipantMessages, TxLogEntry, TxLogEntryType, VersionedSlate};
 use mwc_wallet_util::mwc_core::libtx::secp_ser;
 use mwc_wallet_util::mwc_crates::base64;
+use mwc_wallet_util::mwc_crates::base64::Engine as _;
 use mwc_wallet_util::mwc_crates::ed25519_dalek;
 use mwc_wallet_util::mwc_crates::serde::{self, Deserialize, Serialize};
 use mwc_wallet_util::mwc_crates::serde_json;
@@ -33,7 +34,7 @@ use mwc_wallet_util::mwc_util::{from_hex, ToHex};
 
 use mwc_wallet_libwallet::proof::proofaddress::ProvableAddress;
 use mwc_wallet_util::mwc_crates::chrono::{DateTime, Utc};
-use mwc_wallet_util::mwc_crates::rand::{thread_rng, Rng};
+use mwc_wallet_util::mwc_crates::rand::{rng, RngExt};
 use mwc_wallet_util::mwc_crates::ring::aead;
 use mwc_wallet_util::mwc_crates::serde_json::Value;
 use mwc_wallet_util::mwc_crates::uuid::Uuid;
@@ -69,7 +70,7 @@ pub struct Token {
 pub struct PubAddress {
 	#[serde(with = "ser::dalek_pubkey_serde")]
 	/// Public address
-	pub address: ed25519_dalek::PublicKey,
+	pub address: ed25519_dalek::VerifyingKey,
 }
 
 /// Wrapper for ECDH Public keys
@@ -101,7 +102,7 @@ impl EncryptedBody {
 			.as_bytes()
 			.to_vec();
 
-		let nonce: [u8; 12] = thread_rng().gen();
+		let nonce: [u8; 12] = rng().random();
 
 		let unbound_key = aead::UnboundKey::new(&aead::AES_256_GCM, &enc_key.0)
 			.map_err(|e| Error::GenericError(format!("aead key creation error, {}", e)))?;
@@ -121,7 +122,7 @@ impl EncryptedBody {
 
 		Ok(EncryptedBody {
 			nonce: nonce.to_hex(),
-			body_enc: base64::encode(&to_encrypt),
+			body_enc: base64::engine::general_purpose::STANDARD.encode(&to_encrypt),
 		})
 	}
 
@@ -147,12 +148,14 @@ impl EncryptedBody {
 
 	/// Return original request
 	pub fn decrypt(&self, dec_key: &SecretKey) -> Result<Value, Error> {
-		let mut to_decrypt = base64::decode(&self.body_enc).map_err(|e| {
-			Error::APIEncryption(format!(
-				"EncryptedBody Dec: Encrypted request contains invalid Base64, {}",
-				e
-			))
-		})?;
+		let mut to_decrypt = base64::engine::general_purpose::STANDARD
+			.decode(&self.body_enc)
+			.map_err(|e| {
+				Error::APIEncryption(format!(
+					"EncryptedBody Dec: Encrypted request contains invalid Base64, {}",
+					e
+				))
+			})?;
 
 		let nonce = from_hex(&self.nonce).map_err(|e| {
 			Error::APIEncryption(format!(

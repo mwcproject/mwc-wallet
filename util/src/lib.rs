@@ -21,11 +21,6 @@
 #![deny(unused_mut)]
 #![warn(missing_docs)]
 
-mod ov3;
-
-pub use ov3::OnionV3Address;
-pub use ov3::OnionV3Error;
-
 pub use mwc_api;
 pub use mwc_chain;
 pub use mwc_core;

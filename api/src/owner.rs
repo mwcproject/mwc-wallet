@@ -771,7 +771,7 @@ where
 			None => {}
 		}
 
-		let mut recipient: Option<ed25519_dalek::PublicKey> = None;
+		let mut recipient: Option<ed25519_dalek::VerifyingKey> = None;
 		if let Some(r) = &args.slatepack_recipient {
 			recipient = Some(r.tor_public_key()?);
 		}
@@ -2468,7 +2468,7 @@ where
 	/// * `keychain_mask` - Wallet secret mask to XOR against the stored wallet seed before using, if
 	///
 	/// # Returns
-	/// * Ok(ed25519_dalek::PublicKey) representing the public key associated with the address, if successful
+	/// * Ok(ed25519_dalek::VerifyingKey) representing the public key associated with the address, if successful
 	/// * or [`mwc_wallet_libwallet::Error`](../mwc_wallet_libwallet/struct.Error.html) if an error is encountered
 	/// or the address provided is invalid
 	///
@@ -2495,7 +2495,7 @@ where
 	pub fn get_wallet_public_address(
 		&self,
 		keychain_mask: Option<&SecretKey>,
-	) -> Result<ed25519_dalek::PublicKey, Error> {
+	) -> Result<ed25519_dalek::VerifyingKey, Error> {
 		owner::get_wallet_public_address(self.wallet_inst.clone(), keychain_mask)
 	}
 
@@ -2938,7 +2938,7 @@ where
 		(
 			Slate,
 			Option<SlatePurpose>,
-			Option<ed25519_dalek::PublicKey>,
+			Option<ed25519_dalek::VerifyingKey>,
 		),
 		Error,
 	> {
@@ -2970,8 +2970,8 @@ where
 		(
 			Slate,
 			SlatePurpose,
-			Option<ed25519_dalek::PublicKey>,
-			Option<ed25519_dalek::PublicKey>,
+			Option<ed25519_dalek::VerifyingKey>,
+			Option<ed25519_dalek::VerifyingKey>,
 		),
 		Error,
 	> {
@@ -2986,7 +2986,7 @@ where
 		slate: &Slate,
 		version: Option<SlateVersion>,
 		content: SlatePurpose,
-		slatepack_recipient: Option<ed25519_dalek::PublicKey>,
+		slatepack_recipient: Option<ed25519_dalek::VerifyingKey>,
 		address_index: Option<u32>,
 		use_test_rng: bool,
 	) -> Result<VersionedSlate, Error> {

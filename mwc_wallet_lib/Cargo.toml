@@ -19,7 +19,7 @@ path = "src/generate_headers.rs"
 
 [dependencies]
 # Note, safer-ffi can't be reexported because of macro aspects
-safer-ffi = { version = "0.1", features = ["std", "headers"] }
+safer-ffi.workspace = true
 
 mwc_wallet_api = { path = "../api", version = "6.0.1" }
 mwc_wallet_impls = { path = "../impls", version = "6.0.1" }

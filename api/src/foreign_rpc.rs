@@ -987,7 +987,9 @@ where
 			self,
 			None,
 			&slate_from,
-			sender.map(|p| ProvableAddress::from_tor_pub_key(&p).public_key), // We don't want to change RPC. New fields required new version
+			sender
+				.as_ref()
+				.map(|p| ProvableAddress::from_tor_pub_key(p).public_key), // We don't want to change RPC. New fields required new version
 			&dest_acct_name,
 			message,
 		)?;
@@ -1237,7 +1239,7 @@ pub fn run_doctest_foreign(
 		let w = w_lock.lc_provider().unwrap().wallet_inst().unwrap();
 		let k = w.keychain((&mask1).as_ref()).unwrap();
 		let secret = proofaddress::payment_proof_address_dalek_secret(0, &k, 0).unwrap();
-		let tor_pk = ed25519_dalek::PublicKey::from(&secret);
+		let tor_pk = ed25519_dalek::VerifyingKey::from(&secret);
 		(secret, tor_pk)
 	};
 	let w1_slatepack_address = ProvableAddress::from_tor_pub_key(&w1_tor_pubkey);
@@ -1247,7 +1249,7 @@ pub fn run_doctest_foreign(
 		let w = w_lock.lc_provider().unwrap().wallet_inst().unwrap();
 		let k = w.keychain((&mask2).as_ref()).unwrap();
 		let secret = proofaddress::payment_proof_address_dalek_secret(0, &k, 0).unwrap();
-		let tor_pk = ed25519_dalek::PublicKey::from(&secret);
+		let tor_pk = ed25519_dalek::VerifyingKey::from(&secret);
 		(secret, tor_pk)
 	};
 	let w2_slatepack_address = ProvableAddress::from_tor_pub_key(&w2_tor_pubkey);

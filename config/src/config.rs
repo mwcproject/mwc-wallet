@@ -20,8 +20,8 @@ use crate::types::{ConfigError, GlobalWalletConfig, GlobalWalletConfigMembers};
 use crate::types::{MQSConfig, WalletConfig};
 use mwc_wallet_util::mwc_core::global;
 use mwc_wallet_util::mwc_crates::dirs;
-use mwc_wallet_util::mwc_crates::rand::distributions::{Alphanumeric, Distribution};
-use mwc_wallet_util::mwc_crates::rand::thread_rng;
+use mwc_wallet_util::mwc_crates::rand::distr::{Alphanumeric, SampleString};
+use mwc_wallet_util::mwc_crates::rand::rng;
 use mwc_wallet_util::mwc_crates::toml;
 use mwc_wallet_util::mwc_p2p::TorConfig;
 use mwc_wallet_util::mwc_util::logger::LoggingConfig;
@@ -92,10 +92,7 @@ pub fn config_file_exists(path: &str) -> bool {
 /// Create file with api secret
 pub fn init_api_secret(api_secret_path: &PathBuf) -> Result<(), ConfigError> {
 	let mut api_secret_file = File::create(api_secret_path)?;
-	let api_secret: String = Alphanumeric
-		.sample_iter(&mut thread_rng())
-		.take(20)
-		.collect();
+	let api_secret: String = Alphanumeric.sample_string(&mut rng(), 20);
 	api_secret_file.write_all(api_secret.as_bytes())?;
 	Ok(())
 }

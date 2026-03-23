@@ -526,7 +526,7 @@ where
 		&self,
 		encrypted_slate: VersionedSlate,
 		address_index: Option<u32>,
-	) -> Result<(Slate, SlatePurpose, Option<ed25519_dalek::PublicKey>), Error> {
+	) -> Result<(Slate, SlatePurpose, Option<ed25519_dalek::VerifyingKey>), Error> {
 		wallet_lock!(self.wallet_inst, w);
 		let (slate, content, sender, _receiver) = foreign::decrypt_slate(
 			&mut **w,
@@ -543,7 +543,7 @@ where
 		slate: &Slate,
 		version: Option<SlateVersion>,
 		content: SlatePurpose,
-		slatepack_recipient: Option<ed25519_dalek::PublicKey>,
+		slatepack_recipient: Option<ed25519_dalek::VerifyingKey>,
 		address_index: Option<u32>,
 		use_test_rng: bool,
 	) -> Result<VersionedSlate, Error> {

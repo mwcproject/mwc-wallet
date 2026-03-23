@@ -17,108 +17,90 @@
 
 use crate::Error;
 use mwc_wallet_util::mwc_crates::ed25519_dalek;
+use mwc_wallet_util::mwc_crates::safelog::DispUnredacted;
 use mwc_wallet_util::mwc_crates::secp::key::SecretKey;
+use mwc_wallet_util::mwc_crates::tor_hscrypto::pk::HsId;
 use mwc_wallet_util::mwc_util::from_hex;
-
-use mwc_wallet_util::mwc_crates::data_encoding::BASE32;
-use mwc_wallet_util::mwc_crates::sha3::{Digest, Sha3_256};
+use std::convert::TryInto;
+use std::str::FromStr;
 
 /// Output ed25519 keypair given an rust_secp256k1 SecretKey
 pub fn ed25519_keypair(
 	sec_key: &SecretKey,
-) -> Result<(ed25519_dalek::SecretKey, ed25519_dalek::PublicKey), Error> {
-	let d_skey = match ed25519_dalek::SecretKey::from_bytes(&sec_key.0) {
-		Ok(k) => k,
-		Err(e) => {
-			return Err(Error::ED25519Key(format!(
-				"Unable to build Dalek key, {}",
-				e
-			)))?
-		}
-	};
-	let d_pub_key: ed25519_dalek::PublicKey = (&d_skey).into();
+) -> Result<(ed25519_dalek::SigningKey, ed25519_dalek::VerifyingKey), Error> {
+	let d_skey = ed25519_dalek::SigningKey::from_bytes(&sec_key.0);
+	let d_pub_key = (&d_skey).verifying_key();
 	Ok((d_skey, d_pub_key))
 }
 
 /// Output ed25519 pubkey represented by string
-pub fn ed25519_parse_pubkey(pub_key: &str) -> Result<ed25519_dalek::PublicKey, Error> {
+pub fn ed25519_parse_pubkey(pub_key: &str) -> Result<ed25519_dalek::VerifyingKey, Error> {
 	let bytes = from_hex(pub_key)
 		.map_err(|e| Error::AddressDecoding(format!("Can't parse pubkey {}, {}", pub_key, e)))?;
-	match ed25519_dalek::PublicKey::from_bytes(&bytes) {
-		Ok(k) => Ok(k),
-		Err(e) => {
+
+	let bytes: [u8; 32] = match bytes.try_into() {
+		Ok(b) => b,
+		Err(_) => {
 			return Err(Error::AddressDecoding(format!(
-				"Not a valid public key {}, {}",
-				pub_key, e
-			)))?
+				"Not a valid public key {}, wrong length",
+				pub_key
+			)))
 		}
+	};
+
+	match ed25519_dalek::VerifyingKey::from_bytes(&bytes) {
+		Ok(k) => Ok(k),
+		Err(e) => Err(Error::AddressDecoding(format!(
+			"Not a valid public key {}, {}",
+			pub_key, e
+		))),
 	}
 }
 
 /// Return the ed25519 public key represented in an onion address
-pub fn pubkey_from_onion_v3(onion_address: &str) -> Result<ed25519_dalek::PublicKey, Error> {
-	let mut input = onion_address.to_uppercase();
-	if input.starts_with("HTTP://") || input.starts_with("HTTPS://") {
-		input = input.replace("HTTP://", "");
-		input = input.replace("HTTPS://", "");
-	}
-	if input.ends_with(".ONION") {
-		input = input.replace(".ONION", "");
-	}
-	let orig_address_raw = input.clone();
-	// for now, just check input is the right length and try and decode from base32
-	if input.len() != 56 {
-		return Err(Error::AddressDecoding(format!(
-			"Input address {} is wrong length, expected 56 symbols",
-			input
-		)))?;
-	}
-	let mut address = BASE32
-		.decode(input.as_bytes())
-		.map_err(|e| {
-			Error::AddressDecoding(format!("Input address {} is not base 32, {}", input, e))
-		})?
-		.to_vec();
+pub fn pubkey_from_onion_v3(onion_address: &str) -> Result<ed25519_dalek::VerifyingKey, Error> {
+	let mut s = onion_address.trim().to_lowercase();
 
-	address.truncate(32);
-	let key = ed25519_dalek::PublicKey::from_bytes(&address).map_err(|e| {
+	// Accept URLs too, like your current code did.
+	if let Some(rest) = s.strip_prefix("http://") {
+		s = rest.to_string();
+	} else if let Some(rest) = s.strip_prefix("https://") {
+		s = rest.to_string();
+	}
+
+	// If a full URL/path was passed, keep only the host part.
+	if let Some((host, _)) = s.split_once('/') {
+		s = host.to_string();
+	}
+
+	// Normalize to the representation HsId::from_str expects: "... .onion"
+	let onion_host = if s.ends_with(".onion") {
+		s
+	} else {
+		format!("{}.onion", s)
+	};
+
+	let hsid = HsId::from_str(&onion_host).map_err(|e| {
+		Error::AddressDecoding(format!("Provided onion V3 address is invalid, {}", e))
+	})?;
+
+	let key_bytes = hsid.as_ref();
+
+	let key = ed25519_dalek::VerifyingKey::from_bytes(key_bytes).map_err(|e| {
 		Error::AddressDecoding(format!(
 			"Provided onion V3 address is invalid (parsing dalek key), {}",
 			e
 		))
 	})?;
 
-	let test_v3 = onion_v3_from_pubkey(&key).map_err(|e| {
-		Error::AddressDecoding(format!(
-			"Provided onion V3 address is invalid (converting from pubkey), {}",
-			e
-		))
-	})?;
-
-	if test_v3.to_uppercase() != orig_address_raw.to_uppercase() {
-		return Err(Error::AddressDecoding(
-			"Provided onion V3 address is invalid (no match)".to_string(),
-		))?;
-	}
 	Ok(key)
 }
 
 /// Generate an onion address from an ed25519_dalek public key
-pub fn onion_v3_from_pubkey(pub_key: &ed25519_dalek::PublicKey) -> Result<String, Error> {
-	// calculate checksum
-	let mut hasher = Sha3_256::new();
-	hasher.input(b".onion checksum");
-	hasher.input(pub_key.as_bytes());
-	hasher.input([0x03u8]);
-	let checksum = hasher.result();
-
-	let mut address_bytes = pub_key.as_bytes().to_vec();
-	address_bytes.push(checksum[0]);
-	address_bytes.push(checksum[1]);
-	address_bytes.push(0x03u8);
-
-	let ret = BASE32.encode(&address_bytes);
-	Ok(ret.to_lowercase())
+pub fn onion_v3_from_pubkey(pub_key: &ed25519_dalek::VerifyingKey) -> String {
+	let hsid = HsId::from(*pub_key.as_bytes());
+	let onion = DispUnredacted(&hsid).to_string();
+	onion.strip_suffix(".onion").unwrap_or(&onion).to_string()
 }
 
 #[cfg(test)]
@@ -132,7 +114,22 @@ mod test {
 		let key = pubkey_from_onion_v3(onion_address).unwrap();
 		println!("Key: {:?}", &key);
 
-		let out_address = onion_v3_from_pubkey(&key).unwrap();
+		let key2 = pubkey_from_onion_v3(&format!("{}.onion", onion_address)).unwrap();
+		assert_eq!(key, key2);
+		let key2 = pubkey_from_onion_v3(&format!("{}.ONION", onion_address)).unwrap();
+		assert_eq!(key, key2);
+		let key2 = pubkey_from_onion_v3(&format!("{}.ONioN", onion_address)).unwrap();
+		assert_eq!(key, key2);
+		let key2 = pubkey_from_onion_v3(&format!("http://{}", onion_address)).unwrap();
+		assert_eq!(key, key2);
+		let key2 = pubkey_from_onion_v3(&format!("https://{}", onion_address)).unwrap();
+		assert_eq!(key, key2);
+		let key2 = pubkey_from_onion_v3(&format!("http://{}.onion", onion_address)).unwrap();
+		assert_eq!(key, key2);
+		let key2 = pubkey_from_onion_v3(&format!("hTTp://{}.onIOn", onion_address)).unwrap();
+		assert_eq!(key, key2);
+
+		let out_address = onion_v3_from_pubkey(&key);
 		println!("Address: {:?}", &out_address);
 
 		assert_eq!(onion_address, out_address);

@@ -277,7 +277,7 @@ fn aggsig_sender_receiver_interaction_offset() {
 	// This is the kernel offset that we use to split the key
 	// Summing these at the block level prevents the
 	// kernels from being used to reconstruct (or identify) individual transactions
-	let kernel_offset = SecretKey::new(sender_keychain.secp(), &mut rand::thread_rng());
+	let kernel_offset = SecretKey::new(sender_keychain.secp(), &mut rand::rng());
 
 	// Calculate the kernel excess here for convenience.
 	// Normally this would happen during transaction building.
@@ -613,7 +613,7 @@ fn blind_factor() {
 	// This is the kernel offset that we use to split the key
 	// Summing these at the block level prevents the
 	// kernels from being used to reconstruct (or identify) individual transactions
-	let _kernel_offset = SecretKey::new(receiver_keychain.secp(), &mut rand::thread_rng());
+	let _kernel_offset = SecretKey::new(receiver_keychain.secp(), &mut rand::rng());
 
 	let bytes_32: [u8; 32] = [
 		2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26,

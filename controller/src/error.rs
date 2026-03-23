@@ -16,7 +16,6 @@
 //! Implementation specific error types
 use mwc_wallet_util::mwc_core::core::transaction;
 use mwc_wallet_util::mwc_core::libtx;
-use mwc_wallet_util::mwc_crates::thiserror;
 
 /// Wallet errors, mostly wrappers around underlying crypto or I/O errors.
 #[derive(Clone, Eq, PartialEq, Debug, thiserror::Error)]

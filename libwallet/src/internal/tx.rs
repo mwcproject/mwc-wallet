@@ -16,6 +16,7 @@
 //! Transaction building functions
 
 use mwc_wallet_util::mwc_crates::ed25519_dalek;
+use mwc_wallet_util::mwc_crates::ed25519_dalek::{Signer, Verifier};
 use mwc_wallet_util::mwc_crates::lazy_static::lazy_static;
 use mwc_wallet_util::mwc_crates::uuid::Uuid;
 use mwc_wallet_util::mwc_util;
@@ -37,14 +38,13 @@ use crate::Error;
 use crate::InitTxArgs;
 use mwc_wallet_util::mwc_core::consensus::valid_header_version;
 use mwc_wallet_util::mwc_core::core::HeaderVersion;
-use mwc_wallet_util::mwc_crates::ed25519_dalek::{Signer, Verifier};
 use mwc_wallet_util::mwc_crates::log::{debug, trace};
 use mwc_wallet_util::mwc_crates::secp::key::SecretKey;
 use mwc_wallet_util::mwc_crates::secp::Secp256k1;
 use mwc_wallet_util::mwc_crates::secp::{pedersen, Signature};
 use mwc_wallet_util::mwc_keychain::{Identifier, Keychain};
-use mwc_wallet_util::OnionV3Address;
-use std::convert::TryFrom;
+use mwc_wallet_util::mwc_util::OnionV3Address;
+use std::convert::TryInto;
 use std::sync::Mutex;
 
 // static for incrementing test UUIDs
@@ -730,19 +730,8 @@ pub fn create_payment_proof_signature(
 		Ok(signature)
 	} else {
 		//this is tor oninion address and the length should be 56
-		let d_skey = match ed25519_dalek::SecretKey::from_bytes(&sec_key.0) {
-			Ok(k) => k,
-			Err(e) => {
-				return Err(Error::ED25519Key(format!("{}", e)));
-			}
-		};
-		let pub_key: ed25519_dalek::PublicKey = (&d_skey).into();
-		let keypair = ed25519_dalek::Keypair {
-			public: pub_key,
-			secret: d_skey,
-		};
-		let signature = keypair.sign(&message_ser.as_bytes());
-		//let signature_string = mwc_util::to_hex(signature.to_bytes());
+		let d_skey = ed25519_dalek::SigningKey::from_bytes(&sec_key.0);
+		let signature = d_skey.sign(message_ser.as_bytes());
 		let signature_vec = signature.to_bytes().to_vec();
 		Ok(mwc_util::to_hex(&signature_vec))
 	}
@@ -879,13 +868,14 @@ where
 				))
 			})?;
 
-			let dalek_sig_vec: &[u8] = &dalek_sig_vec;
-			let dalek_sig = ed25519_dalek::Signature::try_from(dalek_sig_vec).map_err(|e| {
+			let dalek_sig_bytes: [u8; 64] = dalek_sig_vec.as_slice().try_into().map_err(|_| {
 				Error::PaymentProof(format!(
-					"Unable to deserialize tor payment proof receiver signature, {}",
-					e
+					"Unable to deserialize tor payment proof receiver signature, wrong length {}",
+					dalek_sig_vec.len()
 				))
 			})?;
+
+			let dalek_sig = ed25519_dalek::Signature::from_bytes(&dalek_sig_bytes);
 
 			let receiver_dalek_pub_key = p.receiver_address.tor_public_key().map_err(|e| {
 				Error::PaymentProof(format!(

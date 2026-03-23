@@ -13,8 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use mwc_wallet_util::mwc_crates::rand::rngs::mock::StepRng;
-use mwc_wallet_util::mwc_crates::rand::thread_rng;
+use mwc_wallet_util::mwc_crates::rand::rng;
 use std::cell::RefCell;
 use std::{fs, path};
 
@@ -43,6 +42,7 @@ use mwc_wallet_util::mwc_store::{self, option_to_not_found, to_key, to_key_u64, 
 use mwc_wallet_util::mwc_util;
 use mwc_wallet_util::mwc_util::ToHex;
 
+use mwc_wallet_libwallet::step_rng::StepRng;
 #[cfg(feature = "libp2p")]
 use mwc_wallet_libwallet::IntegrityContext;
 use mwc_wallet_util::mwc_core::ser::{DeserializationMode, Readable};
@@ -304,7 +304,7 @@ where
 							let mut test_rng = StepRng::new(1_234_567_890_u64, 1);
 							SecretKey::new(k.secp(), &mut test_rng)
 						}
-						false => SecretKey::new(k.secp(), &mut thread_rng()),
+						false => SecretKey::new(k.secp(), &mut rng()),
 					};
 					k.mask_master_key(&mask_value)?;
 					Some(mask_value)

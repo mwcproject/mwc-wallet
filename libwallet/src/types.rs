@@ -18,6 +18,7 @@
 
 use crate::error::Error;
 use crate::slate::ParticipantMessages;
+use crate::step_rng::StepRng;
 use crate::InitTxArgs;
 #[cfg(feature = "libp2p")]
 use crate::IntegrityContext;
@@ -33,8 +34,7 @@ use mwc_wallet_util::mwc_core::libtx::{aggsig, secp_ser};
 use mwc_wallet_util::mwc_core::{global, ser};
 use mwc_wallet_util::mwc_crates::chrono::prelude::*;
 use mwc_wallet_util::mwc_crates::lazy_static::lazy_static;
-use mwc_wallet_util::mwc_crates::rand::rngs::mock::StepRng;
-use mwc_wallet_util::mwc_crates::rand::thread_rng;
+use mwc_wallet_util::mwc_crates::rand::rng;
 use mwc_wallet_util::mwc_crates::secp;
 use mwc_wallet_util::mwc_crates::secp::key::{PublicKey, SecretKey, ZERO_KEY};
 use mwc_wallet_util::mwc_crates::secp::pedersen::Commitment;
@@ -792,7 +792,7 @@ impl Context {
 		compact_slate: bool,
 	) -> Result<Context, Error> {
 		let sec_key = match use_test_rng {
-			false => SecretKey::new(secp, &mut thread_rng()),
+			false => SecretKey::new(secp, &mut rng()),
 			true => {
 				// allow for consistent test results
 				let mut test_rng = if is_initiator {

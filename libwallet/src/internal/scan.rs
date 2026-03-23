@@ -762,9 +762,7 @@ where
 				Some(tx_slate_id) => tx_slate_id.to_string(),
 				None => {
 					non_uuid_tx_counter += 1;
-					Uuid::from_fields(non_uuid_tx_counter, 0, 0, &temp_uuid_data)
-						.map_err(|e| Error::GenericError(format!("Unable to create UUID, {}", e)))?
-						.to_string()
+					Uuid::from_fields(non_uuid_tx_counter, 0, 0, &temp_uuid_data).to_string()
 				}
 			};
 

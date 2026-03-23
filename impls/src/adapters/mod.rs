@@ -23,7 +23,6 @@ mod types;
 
 pub use self::file::{PathToSlateGetter, PathToSlatePutter};
 pub use self::http::HttpDataSender;
-use mwc_wallet_util::mwc_crates::ed25519_dalek;
 use std::path::Path;
 
 use crate::error::Error;
@@ -34,6 +33,7 @@ use mwc_wallet_libwallet::slatepack::SlatePurpose;
 use mwc_wallet_libwallet::swap::message::Message;
 use mwc_wallet_libwallet::Slate;
 use mwc_wallet_libwallet::{SlateVersion, Slatepacker};
+use mwc_wallet_util::mwc_crates::ed25519_dalek;
 use mwc_wallet_util::mwc_crates::secp::Secp256k1;
 use mwc_wallet_util::mwc_p2p::TorConfig;
 use mwc_wallet_util::mwc_util::ZeroingString;
@@ -63,8 +63,8 @@ pub trait SlateSender {
 		send_tx: bool, // false if invoice, true if send operation
 		slate: &Slate,
 		slate_content: SlatePurpose,
-		slatepack_secret: &ed25519_dalek::SecretKey,
-		recipient: Option<ed25519_dalek::PublicKey>,
+		slatepack_secret: &ed25519_dalek::SigningKey,
+		recipient: Option<ed25519_dalek::VerifyingKey>,
 		other_wallet_version: Option<(SlateVersion, Option<String>)>,
 		secp: &Secp256k1,
 	) -> Result<Slate, Error>;
@@ -89,7 +89,7 @@ pub trait SlatePutter {
 	fn put_tx(
 		&self,
 		slate: &Slate,
-		slatepack_secret: Option<&ed25519_dalek::SecretKey>,
+		slatepack_secret: Option<&ed25519_dalek::SigningKey>,
 		use_test_rng: bool,
 		secp: &Secp256k1,
 	) -> Result<String, Error>;
@@ -108,7 +108,7 @@ pub trait SlateGetter {
 	/// Receive a transaction sync. Just read it from wherever and return the slate.
 	fn get_tx(
 		&self,
-		slatepack_secret: Option<&ed25519_dalek::SecretKey>,
+		slatepack_secret: Option<&ed25519_dalek::SigningKey>,
 		secp: &Secp256k1,
 	) -> Result<SlateGetData, Error>;
 }
@@ -142,8 +142,8 @@ impl SlateGetData {
 	) -> Result<
 		(
 			Slate,
-			Option<ed25519_dalek::PublicKey>,
-			Option<ed25519_dalek::PublicKey>,
+			Option<ed25519_dalek::VerifyingKey>,
+			Option<ed25519_dalek::VerifyingKey>,
 			SlatePurpose,
 			bool,
 		),

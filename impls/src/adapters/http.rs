@@ -336,12 +336,7 @@ impl HttpDataSender {
 		let slatepack_address: Option<String> =
 			if supported_slate_versions.contains(&"SP".to_owned()) {
 				match address::pubkey_from_onion_v3(destination_address) {
-					Ok(pk) => Some(address::onion_v3_from_pubkey(&pk).map_err(|e| {
-						Error::LibWallet(format!(
-							"Unable to build onion address from public key, {}",
-							e
-						))
-					})?),
+					Ok(pk) => Some(address::onion_v3_from_pubkey(&pk)),
 					Err(_) => {
 						// Destination is not tor address, so making foreign API request for get an address
 						Some(self.check_receiver_proof_address(timeout.clone())?)
@@ -519,8 +514,8 @@ impl SlateSender for HttpDataSender {
 		send_tx: bool, // false if invoice, true if send operation
 		slate: &Slate,
 		slate_content: SlatePurpose,
-		slatepack_secret: &ed25519_dalek::SecretKey,
-		recipient: Option<ed25519_dalek::PublicKey>,
+		slatepack_secret: &ed25519_dalek::SigningKey,
+		recipient: Option<ed25519_dalek::VerifyingKey>,
 		other_wallet_version: Option<(SlateVersion, Option<String>)>,
 		secp: &Secp256k1,
 	) -> Result<Slate, Error> {
@@ -554,7 +549,7 @@ impl SlateSender for HttpDataSender {
 						"Not provided expected recipient address for Slate Pack".to_string(),
 					));
 				}
-				let tor_pk = ed25519_dalek::PublicKey::from(slatepack_secret);
+				let tor_pk = ed25519_dalek::VerifyingKey::from(slatepack_secret);
 
 				VersionedSlate::into_version(
 					self.context_id,

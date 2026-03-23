@@ -14,10 +14,9 @@
 
 use crate::Error;
 use mwc_wallet_util::mwc_crates::colored::*;
-use mwc_wallet_util::mwc_crates::rand::Rng;
 use mwc_wallet_util::mwc_crates::serde::{self, Deserialize, Serialize};
 use mwc_wallet_util::mwc_crates::serde_json;
-use mwc_wallet_util::mwc_crates::thiserror;
+use mwc_wallet_util::rand::Rng;
 use std::{fmt, fmt::Display, str::FromStr};
 
 use mwc_wagyu_ethereum::{

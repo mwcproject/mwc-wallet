@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use mwc_wallet_util::mwc_crates::rand::{thread_rng, Rng};
+use mwc_wallet_util::mwc_crates::rand::{rng, RngExt};
 use mwc_wallet_util::mwc_crates::ring;
 use mwc_wallet_util::mwc_crates::secp::key::{PublicKey, SecretKey};
 use mwc_wallet_util::mwc_crates::secp::Secp256k1;
@@ -23,7 +23,7 @@ use mwc_wallet_util::mwc_util;
 use super::proofaddress;
 use crate::error::Error;
 
-use mwc_wallet_util::mwc_crates::rand::rngs::mock::StepRng;
+use crate::step_rng::StepRng;
 use mwc_wallet_util::mwc_crates::ring::aead;
 use mwc_wallet_util::mwc_crates::ring::pbkdf2;
 use std::num::NonZeroU32;
@@ -64,12 +64,12 @@ impl EncryptedMessage {
 
 		let (salt, nonce) = if use_test_rng {
 			let mut test_rng = StepRng::new(1_234_567_891_u64, 1);
-			let salt: [u8; 8] = test_rng.gen();
-			let nonce: [u8; 12] = test_rng.gen();
+			let salt: [u8; 8] = test_rng.random();
+			let nonce: [u8; 12] = test_rng.random();
 			(salt, nonce)
 		} else {
-			let salt: [u8; 8] = thread_rng().gen();
-			let nonce: [u8; 12] = thread_rng().gen();
+			let salt: [u8; 8] = rng().random();
+			let nonce: [u8; 12] = rng().random();
 			(salt, nonce)
 		};
 

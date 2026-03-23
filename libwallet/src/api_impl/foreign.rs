@@ -39,7 +39,7 @@ use mwc_wallet_util::mwc_crates::secp::key::SecretKey;
 use mwc_wallet_util::mwc_crates::serde::{self, Deserialize, Serialize};
 use mwc_wallet_util::mwc_keychain::Identifier;
 use mwc_wallet_util::mwc_keychain::Keychain;
-use mwc_wallet_util::OnionV3Address;
+use mwc_wallet_util::mwc_util::OnionV3Address;
 use std::collections::HashMap;
 #[cfg(feature = "swaps")]
 use std::sync::Arc;
@@ -549,8 +549,8 @@ pub fn decrypt_slate<'a, T: ?Sized, C, K>(
 	(
 		Slate,
 		SlatePurpose,
-		Option<ed25519_dalek::PublicKey>,
-		Option<ed25519_dalek::PublicKey>,
+		Option<ed25519_dalek::VerifyingKey>,
+		Option<ed25519_dalek::VerifyingKey>,
 	),
 	Error,
 >
@@ -591,7 +591,7 @@ pub fn encrypt_slate<'a, T: ?Sized, C, K>(
 	slate: &Slate,
 	version: Option<SlateVersion>,
 	content: SlatePurpose,
-	slatepack_recipient: Option<ed25519_dalek::PublicKey>,
+	slatepack_recipient: Option<ed25519_dalek::VerifyingKey>,
 	address_index: Option<u32>,
 	use_test_rng: bool,
 ) -> Result<VersionedSlate, Error>
@@ -620,7 +620,7 @@ where
 				&keychain,
 				address_index,
 			)?;
-			let slatepack_pk = ed25519_dalek::PublicKey::from(&slatepack_secret);
+			let slatepack_pk = slatepack_secret.verifying_key();
 			(slatepack_secret, slatepack_pk)
 		};
 

@@ -15,6 +15,7 @@
 //! Generic implementation of owner API functions
 
 use mwc_wallet_util::mwc_crates::ed25519_dalek;
+use mwc_wallet_util::mwc_crates::ed25519_dalek::Verifier;
 use mwc_wallet_util::mwc_crates::uuid::Uuid;
 
 use crate::proof::crypto::Hex;
@@ -52,8 +53,8 @@ use crate::proof::tx_proof::{pop_proof_for_slate, TxProof};
 use mwc_wallet_util::mwc_crates::digest::Digest;
 use mwc_wallet_util::mwc_crates::ed25519_dalek::Signer;
 use mwc_wallet_util::mwc_crates::sha2::Sha256;
-use mwc_wallet_util::mwc_crates::signature::Verifier;
 use std::cmp;
+use std::convert::TryInto;
 use std::fs::File;
 use std::io::Write;
 use std::sync::mpsc::Sender;
@@ -148,7 +149,7 @@ where
 pub fn get_wallet_public_address<'a, L, C, K>(
 	wallet_inst: Arc<Mutex<Box<dyn WalletInst<'a, L, C, K>>>>,
 	keychain_mask: Option<&SecretKey>,
-) -> Result<ed25519_dalek::PublicKey, Error>
+) -> Result<ed25519_dalek::VerifyingKey, Error>
 where
 	L: WalletLCProvider<'a, C, K>,
 	C: NodeClient + 'a,
@@ -1899,7 +1900,6 @@ where
 		let secret = keychain.private_root_key();
 		let signature = secp
 			.sign(
-				#[allow(deprecated)]
 				&Message::from_slice(message_hash.as_slice()).map_err(|e| {
 					Error::GenericError(format!("Unable to build a message, {}", e))
 				})?,
@@ -1920,14 +1920,13 @@ where
 			&keychain,
 			address_index,
 		)?;
-		let secret = ed25519_dalek::SecretKey::from_bytes(&secret.0)
-			.map_err(|e| Error::GenericError(format!("Unable build dalek public key, {}", e)))?;
-		let public = ed25519_dalek::PublicKey::from(&secret);
-		let keypair = ed25519_dalek::Keypair { secret, public };
-		#[allow(deprecated)]
-		let signature = keypair
+		let secret = ed25519_dalek::SigningKey::from_bytes(&secret.0);
+		let public = secret.verifying_key();
+
+		let signature = secret
 			.try_sign(message_hash.as_slice())
 			.map_err(|e| Error::GenericError(format!("Unable build dalek signature, {}", e)))?;
+
 		Some(PubKeySignature {
 			public_key: public.to_hex(),
 			signature: signature.to_hex(),
@@ -1944,7 +1943,6 @@ where
 		)?;
 		let signature = secp
 			.sign(
-				#[allow(deprecated)]
 				&Message::from_slice(message_hash.as_slice()).map_err(|e| {
 					Error::GenericError(format!("Unable to build a message, {}", e))
 				})?,
@@ -2032,7 +2030,6 @@ where
 			Error::InvalidOwnershipProof(format!("Unable to decode wallet root signature, {}", e))
 		})?;
 		secp.verify(
-			#[allow(deprecated)]
 			&Message::from_slice(message_hash.as_slice())
 				.map_err(|e| Error::GenericError(format!("Unable to build a message, {}", e)))?,
 			&signature,
@@ -2055,7 +2052,6 @@ where
 			Error::InvalidOwnershipProof(format!("Unable to decode mqs address signature, {}", e))
 		})?;
 		secp.verify(
-			#[allow(deprecated)]
 			&Message::from_slice(message_hash.as_slice())
 				.map_err(|e| Error::GenericError(format!("Unable to build a message, {}", e)))?,
 			&signature,
@@ -2075,18 +2071,32 @@ where
 			Error::InvalidOwnershipProof(format!("Unable to decode tor address public key, {}", e))
 		})?;
 
-		let public_key = ed25519_dalek::PublicKey::from_bytes(&public_key).map_err(|e| {
-			Error::InvalidOwnershipProof(format!("Unable to decode tor address public key, {}", e))
+		let public_key_bytes: [u8; 32] = public_key.as_slice().try_into().map_err(|_| {
+			Error::InvalidOwnershipProof(format!(
+				"Unable to decode tor address public key, wrong length {}",
+				public_key.len()
+			))
 		})?;
+
+		let public_key =
+			ed25519_dalek::VerifyingKey::from_bytes(&public_key_bytes).map_err(|e| {
+				Error::InvalidOwnershipProof(format!(
+					"Unable to decode tor address public key, {}",
+					e
+				))
+			})?;
 
 		let signature = from_hex(&tor_address.signature).map_err(|e| {
 			Error::InvalidOwnershipProof(format!("Unable to decode tor address signature, {}", e))
 		})?;
-		let signature = ed25519_dalek::Signature::from_bytes(&signature).map_err(|e| {
-			Error::InvalidOwnershipProof(format!("Unable to decode tor address signature, {}", e))
-		})?;
+		let signature =
+			ed25519_dalek::Signature::from_slice(signature.as_slice()).map_err(|e| {
+				Error::InvalidOwnershipProof(format!(
+					"Unable to decode tor address signature, {}",
+					e
+				))
+			})?;
 
-		#[allow(deprecated)]
 		public_key
 			.verify(message_hash.as_slice(), &signature)
 			.map_err(|e| {

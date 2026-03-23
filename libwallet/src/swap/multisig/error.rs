@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use mwc_wallet_util::mwc_crates::secp;
-use mwc_wallet_util::mwc_crates::thiserror;
 
 /// Multisig error
 #[derive(Clone, Eq, PartialEq, Debug, thiserror::Error)]
