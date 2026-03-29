@@ -60,6 +60,17 @@ pub struct HttpDataSender {
 impl Drop for HttpDataSender {
 	fn drop(&mut self) {
 		if self.need_stop_arti {
+			// Need to close socket fist. Arti will wait for release of all open sockets
+			{
+				let mut stream = self
+					.connection_cache
+					.write()
+					.unwrap_or_else(|e| e.into_inner());
+
+				let strm = stream.take();
+				// Explicitly dropping socket, so it will be closed
+				drop(strm);
+			}
 			arti::stop_arti();
 		}
 	}
