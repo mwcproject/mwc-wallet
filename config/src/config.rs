@@ -1092,6 +1092,7 @@ fn group_or_other_accessible_config_file_is_rejected() {
 	}
 }
 
+#[cfg(unix)]
 #[cfg(test)]
 fn api_secret_test_path(name: &str) -> PathBuf {
 	let mut dir = env::temp_dir();

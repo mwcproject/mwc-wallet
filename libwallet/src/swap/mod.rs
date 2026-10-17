@@ -174,6 +174,7 @@ mod tests {
 
 	const MWC_UNIT: u64 = 1_000_000_000;
 
+	#[cfg(not(target_os = "windows"))]
 	fn assert_json_fixture<T>(path: &str, actual: &T)
 	where
 		T: DeserializeOwned + Serialize,
