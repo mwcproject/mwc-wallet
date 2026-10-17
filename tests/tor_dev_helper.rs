@@ -12,37 +12,30 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#[macro_use]
-extern crate clap;
-
-#[macro_use]
-extern crate log;
-
-extern crate mwc_wallet;
+#![cfg(feature = "test-support")]
 
 use mwc_wallet_impls::test_framework::{self, LocalWalletClient, WalletProxy};
+use mwc_wallet_util::mwc_crates::clap::{App, YamlLoader};
+use mwc_wallet_util::mwc_util;
 use std::ops::DerefMut;
 use std::sync::Arc;
-
-use clap::App;
 use std::thread;
 use std::time::Duration;
 
 use mwc_wallet_impls::DefaultLCProvider;
+use mwc_wallet_util::mwc_crates;
 use mwc_wallet_util::mwc_keychain::ExtKeychain;
-
-use mwc_wallet_util::mwc_util as util;
 
 #[macro_use]
 mod common;
 use common::{execute_command, initial_setup_wallet, instantiate_wallet, setup_global_chain_type};
+use mwc_wallet_util::Mutex;
 use mwc_wallet_util::mwc_core::core::Transaction;
-use std::sync::Mutex;
 // Development testing helper for tor/socks investigation.
 // Not (yet) to be run as part of automated testing
 
 fn setup_no_clean() {
-	util::init_test_logger();
+	mwc_util::init_test_logger().unwrap();
 	setup_global_chain_type();
 }
 
@@ -56,12 +49,15 @@ fn socks_tor() -> Result<(), mwc_wallet_controller::Error> {
 	}
 
 	let test_dir = "target/test_output/socks_tor";
-	let yml = load_yaml!("../src/bin/mwc-wallet.yml");
-	let app = App::from_yaml(yml);
+	let yml = YamlLoader::load_from_str(include_str!("../src/bin/mwc-wallet.yml")).unwrap();
+	let app = App::from_yaml(&yml[0]);
 	setup_no_clean();
 
 	let tx_pool: Arc<Mutex<Vec<Transaction>>> = Arc::new(Mutex::new(Vec::new()));
-	setup_proxy!(test_dir, tx_pool, chain, wallet1, client1, mask1, wallet2, client2, _mask2);
+	setup_proxy!(
+		test_dir, tx_pool, chain, _proxy_handle, wallet1, client1, mask1, wallet2, client2,
+		_mask2
+	);
 
 	// Tor should be running at this point for wallet 2, with a hidden service
 	// bound to the listening port 53415. By default, tor will also be running
@@ -80,8 +76,8 @@ fn socks_tor() -> Result<(), mwc_wallet_controller::Error> {
 	let arg_vec = vec!["mwc-wallet", "-p", "password", "listen"];
 	// Set owner listener running
 	thread::spawn(move || {
-		let yml = load_yaml!("../src/bin/mwc-wallet.yml");
-		let app = App::from_yaml(yml);
+		let yml = YamlLoader::load_from_str(include_str!("../src/bin/mwc-wallet.yml")).unwrap();
+		let app = App::from_yaml(&yml[0]);
 		execute_command(&app, test_dir, "wallet2", &client2, arg_vec.clone()).unwrap();
 	});
 
@@ -96,10 +92,7 @@ fn socks_tor() -> Result<(), mwc_wallet_controller::Error> {
 		mask1,
 		bh as usize,
 		false,
-		tx_pool
-			.lock()
-			.unwrap_or_else(|e| e.into_inner())
-			.deref_mut(),
+		tx_pool.lock().deref_mut(),
 	);
 
 	// now, test send from wallet 1 over tor

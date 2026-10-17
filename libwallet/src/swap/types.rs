@@ -13,15 +13,25 @@
 // limitations under the License.
 
 use super::bitcoin::{BtcBuyerContext, BtcData, BtcSellerContext};
-use super::ethereum::{EthBuyerContext, EthData, EthSellerContext, EthereumAddress};
+use super::ethereum::{EthBuyerContext, EthData, EthSellerContext};
 use super::ser::*;
 use super::Error;
-use crate::mwc_core::global::ChainTypes;
-use crate::mwc_core::{global, ser};
-use crate::mwc_keychain::Identifier;
-use crate::mwc_util::secp::key::SecretKey;
 use crate::swap::message::Message;
+use crate::SecondaryFeeUnits;
 use bitcoin::Address;
+use mwc_wallet_util::mwc_bch;
+use mwc_wallet_util::mwc_bitcoin as bitcoin;
+use mwc_wallet_util::mwc_core::core::OutputFeatures;
+use mwc_wallet_util::mwc_core::global::ChainTypes;
+use mwc_wallet_util::mwc_core::{global, ser};
+use mwc_wallet_util::mwc_crates::secp::key::SecretKey;
+use mwc_wallet_util::mwc_crates::serde::{self, Deserialize, Serialize};
+use mwc_wallet_util::mwc_crates::serde_json;
+use mwc_wallet_util::mwc_crates::zeroize::Zeroizing;
+use mwc_wallet_util::mwc_keychain::Identifier;
+use mwc_wallet_util::mwc_wagyu_ethereum::EthereumAddress;
+use mwc_wallet_util::mwc_web3;
+use mwc_wallet_util::sensitive;
 use mwc_web3::types::H160;
 use std::convert::TryInto;
 use std::fmt;
@@ -29,6 +39,7 @@ use std::{convert::TryFrom, str::FromStr};
 
 /// MWC Network where SWAP happens.
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[serde(crate = "serde")]
 pub enum Network {
 	/// Floonet (testnet)
 	Floonet,
@@ -73,6 +84,7 @@ impl PartialEq<Network> for ChainTypes {
 
 /// Roles of MWC swap participants
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(crate = "serde")]
 pub enum Role {
 	/// Seller - sell MWC for BTC. Params: (<Secondary redeem address>, <change amount>)
 	Seller(String, u64),
@@ -82,6 +94,7 @@ pub enum Role {
 
 /// Secondary currency that swap supports
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[serde(crate = "serde")]
 pub enum Currency {
 	/// Bitcoin Segwit
 	Btc,
@@ -163,7 +176,7 @@ impl Currency {
 			| Currency::Usdt
 			| Currency::Usdc
 			| Currency::Trx
-			| Currency::Tst => 15,
+			| Currency::Tst => 12, // Ethereum proof-of-stake slot duration.
 		}
 	}
 
@@ -173,16 +186,23 @@ impl Currency {
 		let a = format!("{}", amount);
 		let len = a.len();
 		let pos = len.saturating_sub(exp);
+		// `a` is an ASCII decimal rendering and pos is bounded by its byte length,
+		// so pos is necessarily a UTF-8 boundary accepted by split_at.
+		let (whole, fractional) = a.split_at(pos);
 		let (characteristic, mantissa_prefix) = if pos > 0 {
-			(&a[..(len - exp)], String::new())
+			(whole, String::new())
 		} else {
+			// The branch is reached only when len <= exp.
+			#[allow(
+				clippy::arithmetic_side_effects,
+				reason = "pos == 0 implies len <= exp, so exp - len cannot underflow"
+			)]
 			("0", "0".repeat(exp - len))
 		};
-		let mut mantissa = &a[pos..];
+		let mut mantissa = fractional;
 		if truncate {
-			let nzeroes = mantissa.chars().rev().take_while(|c| c == &'0').count();
-			mantissa = &a[pos..(a.len().saturating_sub(nzeroes))];
-			if mantissa.len() == 0 {
+			mantissa = mantissa.trim_end_matches('0');
+			if mantissa.is_empty() {
 				mantissa = "0";
 			}
 		}
@@ -205,7 +225,24 @@ impl Currency {
 			None => (parse_characteristic(hr)?, 0),
 		};
 
-		let amount = characteristic * 10u64.pow(exp as u32) + mantissa;
+		// Currency::exponent is at most 9, so 10^exp is at most 1_000_000_000.
+		#[allow(
+			clippy::arithmetic_side_effects,
+			reason = "the currency exponent is at most 9, so 10_u64.pow(exp) fits u64"
+		)]
+		let scale = 10_u64.pow(exp as u32);
+		let scaled_characteristic = characteristic.checked_mul(scale).ok_or_else(|| {
+			Error::DataOverflow(format!(
+				"Currency::amount_from_hr_string, amount characteristic scaling overflow, characteristic={} scale={}",
+				characteristic, scale
+			))
+		})?;
+		let amount = scaled_characteristic.checked_add(mantissa).ok_or_else(|| {
+			Error::DataOverflow(format!(
+				"Currency::amount_from_hr_string, amount mantissa addition overflow, scaled_characteristic={} mantissa={}",
+				scaled_characteristic, mantissa
+			))
+		})?;
 		if amount == 0 {
 			return Err(Error::InvalidAmountString("zero amoount".to_string()));
 		}
@@ -247,7 +284,7 @@ impl Currency {
 				return Err(Error::Generic(format!(
 					"Address is from invalid {} network",
 					coin_name
-				)))
+				)));
 			}
 		}
 		Ok(())
@@ -409,6 +446,9 @@ impl Currency {
 							addr_type,
 							Self::bch_network(context_id),
 						)
+						.map_err(|e| {
+							Error::BchError(format!("Unable to encode legacy BCH address, {}", e))
+						})?
 					}
 				}
 			}
@@ -463,54 +503,36 @@ impl Currency {
 		let addr = Address::new_btc().from_str(&addr_str).map_err(|e| {
 			Error::Generic(format!("Unable to parse BTC address {}, {}", address, e))
 		})?;
-		Ok(addr.script_pubkey())
+		Ok(addr.script_pubkey()?)
 	}
 
 	/// Return default fee for this coin
-	pub fn get_default_fee(&self, network: &Network) -> f32 {
+	pub fn get_default_fee(&self, network: &Network) -> SecondaryFeeUnits {
 		match self {
-			Currency::Btc => {
-				// Default values
-				match network {
-					Network::Floonet => 1.4 as f32,
-					Network::Mainnet => 26.0 as f32,
-				}
-			}
-			Currency::Bch => {
-				// Default values
-				match network {
-					Network::Floonet => 1.4 as f32,
-					Network::Mainnet => 24.0 as f32,
-				}
-			}
-			Currency::Ltc => {
-				// Default values
-				match network {
-					Network::Floonet => 1.4 as f32,
-					Network::Mainnet => 100.0 as f32,
-				}
-			}
-			Currency::Dash => {
-				// Default values
-				match network {
-					Network::Floonet => 1.4 as f32,
-					Network::Mainnet => 26.0 as f32,
-				}
-			}
-			Currency::ZCash => {
-				// Default values
-				match network {
-					Network::Floonet => 0.0001 as f32,
-					Network::Mainnet => 0.0001 as f32,
-				}
-			}
-			Currency::Doge => {
-				// Default values
-				match network {
-					Network::Floonet => 1.0 as f32,
-					Network::Mainnet => 3.0 as f32,
-				}
-			}
+			Currency::Btc => SecondaryFeeUnits::RatePerKvb(match network {
+				Network::Floonet => 1_400,
+				Network::Mainnet => 26_000,
+			}),
+			Currency::Bch => SecondaryFeeUnits::RatePerKvb(match network {
+				Network::Floonet => 1_400,
+				Network::Mainnet => 24_000,
+			}),
+			Currency::Ltc => SecondaryFeeUnits::RatePerKvb(match network {
+				Network::Floonet => 1_400,
+				Network::Mainnet => 100_000,
+			}),
+			Currency::Dash => SecondaryFeeUnits::RatePerKvb(match network {
+				Network::Floonet => 1_400,
+				Network::Mainnet => 26_000,
+			}),
+			Currency::ZCash => SecondaryFeeUnits::FlatAtomic(match network {
+				Network::Floonet => 10_000,
+				Network::Mainnet => 10_000,
+			}),
+			Currency::Doge => SecondaryFeeUnits::FlatAtomic(match network {
+				Network::Floonet => 100_000_000,
+				Network::Mainnet => 300_000_000,
+			}),
 			Currency::Ether
 			| Currency::Busd
 			| Currency::Bnb
@@ -524,25 +546,146 @@ impl Currency {
 			| Currency::Trx
 			| Currency::Tst => {
 				// Default values
-				match network {
-					Network::Floonet => 5500000.0 as f32, //gwei
-					Network::Mainnet => 5500000.0 as f32,
-				}
+				SecondaryFeeUnits::EthereumGwei(match network {
+					Network::Floonet => 5_500_000, // gwei
+					Network::Mainnet => 5_500_000,
+				})
 			}
+		}
+	}
+
+	/// Convert an API/CLI decimal fee into canonical integer units.
+	pub fn normalize_secondary_fee(&self, fee: &str) -> Result<SecondaryFeeUnits, Error> {
+		let fee = match self {
+			Currency::Btc | Currency::Bch | Currency::Ltc | Currency::Dash => {
+				SecondaryFeeUnits::RatePerKvb(parse_secondary_fee_scaled(fee, 3)?)
+			}
+			Currency::ZCash | Currency::Doge => {
+				SecondaryFeeUnits::FlatAtomic(parse_secondary_fee_scaled(fee, 8)?)
+			}
+			_ => SecondaryFeeUnits::EthereumGwei(parse_secondary_fee_scaled(fee, 0)?),
+		};
+		self.validate_secondary_fee_units(fee)?;
+		Ok(fee)
+	}
+
+	/// Validate that a persisted fee uses the units required by this currency.
+	pub fn validate_secondary_fee_units(&self, fee: SecondaryFeeUnits) -> Result<(), Error> {
+		let value = match (self, fee) {
+			(
+				Currency::Btc | Currency::Bch | Currency::Ltc | Currency::Dash,
+				SecondaryFeeUnits::RatePerKvb(value),
+			) => value,
+			(Currency::ZCash | Currency::Doge, SecondaryFeeUnits::FlatAtomic(value)) => value,
+			(_, SecondaryFeeUnits::EthereumGwei(value)) if !self.is_btc_family() => value,
+			_ => return Err(Error::UnexpectedCoinType),
+		};
+		if value == 0 {
+			return Err(Error::Generic(
+				"Secondary transaction fee must be greater than zero".to_string(),
+			));
+		}
+		Ok(())
+	}
+
+	/// Return a validated BTC-family fee amount in atomic units.
+	pub fn secondary_fee_amount(
+		&self,
+		fee: SecondaryFeeUnits,
+		tx_vbytes: u64,
+	) -> Result<u64, Error> {
+		const VBYTES_PER_KVB: u128 = 1_000;
+
+		self.validate_secondary_fee_units(fee)?;
+		match fee {
+			SecondaryFeeUnits::RatePerKvb(rate_per_kvb) => {
+				// The API rate is expressed per vbyte. RatePerKvb is merely its
+				// exact fixed-point representation: 1.4 atomic units/vB becomes
+				// 1,400 atomic units/kvB. Convert it back while calculating the
+				// transaction fee, rounding upward so the resulting integer fee
+				// never falls below the requested per-vbyte rate.
+				let scaled_fee = u128::from(rate_per_kvb)
+					.checked_mul(u128::from(tx_vbytes))
+					.ok_or_else(|| {
+						Error::DataOverflow(format!(
+							"Secondary fee multiplication overflow, rate_per_kvb={} tx_vbytes={}",
+							rate_per_kvb, tx_vbytes
+						))
+					})?;
+				let whole_atomic_units = scaled_fee / VBYTES_PER_KVB;
+				let fee_atomic_units = if scaled_fee % VBYTES_PER_KVB == 0 {
+					whole_atomic_units
+				} else {
+					whole_atomic_units.checked_add(1).ok_or_else(|| {
+						Error::DataOverflow("Secondary fee rounding overflow".to_string())
+					})?
+				};
+				u64::try_from(fee_atomic_units).map_err(|_| {
+					Error::DataOverflow(format!(
+						"Secondary transaction fee exceeds u64, fee={}",
+						fee_atomic_units
+					))
+				})
+			}
+			SecondaryFeeUnits::FlatAtomic(value) => Ok(value),
+			SecondaryFeeUnits::EthereumGwei(_) => Err(Error::UnexpectedCoinType),
+		}
+	}
+
+	/// Increase a fee by a rational factor, rounding upward in integer units.
+	pub fn bump_secondary_fee(
+		&self,
+		fee: SecondaryFeeUnits,
+		numerator: u64,
+		denominator: u64,
+	) -> Result<SecondaryFeeUnits, Error> {
+		self.validate_secondary_fee_units(fee)?;
+		if numerator == 0 || denominator == 0 {
+			return Err(Error::Generic(
+				"Invalid secondary fee multiplier".to_string(),
+			));
+		}
+		let value = match fee {
+			SecondaryFeeUnits::RatePerKvb(value)
+			| SecondaryFeeUnits::FlatAtomic(value)
+			| SecondaryFeeUnits::EthereumGwei(value) => value,
+		};
+		let scaled = u128::from(value)
+			.checked_mul(u128::from(numerator))
+			.and_then(|value| value.checked_add(u128::from(denominator) - 1))
+			.ok_or_else(|| Error::DataOverflow("Secondary fee bump overflow".to_string()))?
+			/ u128::from(denominator);
+		let scaled = u64::try_from(scaled)
+			.map_err(|_| Error::DataOverflow("Secondary fee bump exceeds u64".to_string()))?;
+		Ok(match fee {
+			SecondaryFeeUnits::RatePerKvb(_) => SecondaryFeeUnits::RatePerKvb(scaled),
+			SecondaryFeeUnits::FlatAtomic(_) => SecondaryFeeUnits::FlatAtomic(scaled),
+			SecondaryFeeUnits::EthereumGwei(_) => SecondaryFeeUnits::EthereumGwei(scaled),
+		})
+	}
+
+	/// Return a validated Ethereum-family gas budget in whole gwei.
+	pub fn secondary_fee_gwei(&self, fee: SecondaryFeeUnits) -> Result<u64, Error> {
+		self.validate_secondary_fee_units(fee)?;
+		match fee {
+			SecondaryFeeUnits::EthereumGwei(value) => Ok(value),
+			_ => Err(Error::UnexpectedCoinType),
 		}
 	}
 
 	/// Fee units for this coin
 	/// - Unit String
 	/// - Unit multiplier
-	/// - true: per byte, false: flat unit price
+	/// - true: size-based rate, false: flat fee
 	pub fn get_fee_units(&self) -> (String, u64, bool) {
 		match self {
-			Currency::Btc | Currency::Bch => ("satoshi per byte".to_string(), 1, true),
-			Currency::Ltc => ("litoshi per byte".to_string(), 1, true),
-			Currency::Dash => ("duff per byte".to_string(), 1, true),
-			Currency::ZCash => ("ZEC".to_string(), 100_000_000, false),
-			Currency::Doge => ("doge".to_string(), 100_000_000, false),
+			Currency::Btc | Currency::Bch => {
+				("satoshi per virtual byte (sat/vB)".to_string(), 1, true)
+			}
+			Currency::Ltc => ("litoshi per virtual byte".to_string(), 1, true),
+			Currency::Dash => ("duff per virtual byte".to_string(), 1, true),
+			Currency::ZCash => ("flat fee in ZEC".to_string(), 100_000_000, false),
+			Currency::Doge => ("flat fee in DOGE".to_string(), 100_000_000, false),
 			Currency::Ether
 			| Currency::Busd
 			| Currency::Bnb
@@ -554,7 +697,7 @@ impl Currency {
 			| Currency::Usdt
 			| Currency::Usdc
 			| Currency::Trx
-			| Currency::Tst => ("gwei".to_string(), 1, true),
+			| Currency::Tst => ("total gas budget in gwei".to_string(), 1, true),
 		}
 	}
 
@@ -641,6 +784,11 @@ impl Currency {
 		}
 	}
 
+	/// Check whether this currency is supported by the Ethereum wallet surface.
+	pub fn is_ethereum_family(&self) -> bool {
+		matches!(self, Currency::Ether) || self.is_erc20()
+	}
+
 	/// check is erc20 tokens
 	pub fn is_erc20(&self) -> bool {
 		match self {
@@ -661,42 +809,26 @@ impl Currency {
 
 	/// get erc20 token contract address
 	pub fn erc20_token_address(&self) -> Result<H160, Error> {
-		match self {
-			Currency::Usdt => {
-				Ok(H160::from_str("dac17f958d2ee523a2206206994597c13d831ec7").unwrap())
-			}
-			Currency::Busd => {
-				Ok(H160::from_str("4fabb145d64652a948d72533023f6e7a623c7c53").unwrap())
-			}
-			Currency::Bnb => {
-				Ok(H160::from_str("B8c77482e45F1F44dE1745F52C74426C631bDD52").unwrap())
-			}
-			Currency::Usdc => {
-				Ok(H160::from_str("a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48").unwrap())
-			}
-			Currency::Link => {
-				Ok(H160::from_str("514910771af9ca656af840dff83e8264ecf986ca").unwrap())
-			}
-			Currency::Trx => {
-				Ok(H160::from_str("e1be5d3f34e89de342ee97e6e90d405884da6c67").unwrap())
-			}
-			Currency::Dai => {
-				Ok(H160::from_str("6b175474e89094c44da98b954eedeac495271d0f").unwrap())
-			}
-			Currency::Tusd => {
-				Ok(H160::from_str("0000000000085d4780B73119b644AE5ecd22b376").unwrap())
-			}
-			Currency::Usdp => {
-				Ok(H160::from_str("8e870d67f660d95d5be530380d0ec0bd388289e1").unwrap())
-			}
-			Currency::Wbtc => {
-				Ok(H160::from_str("2260fac5e5542a773aa44fbcfedf7c193bc2c599").unwrap())
-			}
-			Currency::Tst => {
-				Ok(H160::from_str("722dd3F80BAC40c951b51BdD28Dd19d435762180").unwrap())
-			}
-			_ => Err(Error::EthUnsupportedERC20TokenError(format!("{}", self))),
-		}
+		let address = match self {
+			Currency::Usdt => "dac17f958d2ee523a2206206994597c13d831ec7",
+			Currency::Busd => "4fabb145d64652a948d72533023f6e7a623c7c53",
+			Currency::Bnb => "B8c77482e45F1F44dE1745F52C74426C631bDD52",
+			Currency::Usdc => "a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+			Currency::Link => "514910771af9ca656af840dff83e8264ecf986ca",
+			Currency::Trx => "e1be5d3f34e89de342ee97e6e90d405884da6c67",
+			Currency::Dai => "6b175474e89094c44da98b954eedeac495271d0f",
+			Currency::Tusd => "0000000000085d4780B73119b644AE5ecd22b376",
+			Currency::Usdp => "8e870d67f660d95d5be530380d0ec0bd388289e1",
+			Currency::Wbtc => "2260fac5e5542a773aa44fbcfedf7c193bc2c599",
+			Currency::Tst => "722dd3F80BAC40c951b51BdD28Dd19d435762180",
+			_ => return Err(Error::EthUnsupportedERC20TokenError(format!("{}", self))),
+		};
+		H160::from_str(address).map_err(|e| {
+			Error::Generic(format!(
+				"Invalid built-in ERC20 token address {}: {}",
+				address, e
+			))
+		})
 	}
 
 	/// check if token decimals shrinked from 18 to 9
@@ -780,19 +912,98 @@ fn parse_characteristic(characteristic: &str) -> Result<u64, Error> {
 }
 
 fn parse_mantissa(mantissa: &str, exp: usize) -> Result<u64, Error> {
-	let mut m = format!("{:0<w$}", mantissa, w = exp);
-	m.truncate(exp);
-
-	let m = m.trim_start_matches("0");
-	if m.len() == 0 {
-		return Ok(0);
+	// Reject excess precision instead of silently truncating it
+	if mantissa.len() > exp {
+		return Err(Error::InvalidAmountString(format!(
+			"Too many digits in fractional part {}, maximum supported digits {}",
+			mantissa, exp
+		)));
 	}
-	m.parse()
-		.map_err(|_| Error::InvalidAmountString(m.to_string()))
+	// Reject anything that is not an ASCII digit. Besides being malformed input,
+	// multibyte characters make byte-based truncation panic off a char boundary.
+	if !mantissa.bytes().all(|b| b.is_ascii_digit()) {
+		return Err(Error::InvalidAmountString(format!(
+			"Invalid fractional part {}, expected digits only",
+			mantissa
+		)));
+	}
+
+	format!("{:0<w$}", mantissa, w = exp)
+		.parse::<u64>()
+		.map_err(|e| {
+			Error::InvalidAmountString(format!(
+				"Unable to parse fractional part {}, {}",
+				mantissa, e
+			))
+		})
+}
+
+fn parse_secondary_fee_scaled(value: &str, decimal_places: u32) -> Result<u64, Error> {
+	let (characteristic, mantissa) = match value.split_once('.') {
+		Some((characteristic, mantissa)) => (characteristic, mantissa),
+		None => (value, ""),
+	};
+	let has_digit = !characteristic.is_empty() || !mantissa.is_empty();
+	let is_decimal = has_digit
+		&& characteristic.bytes().all(|byte| byte.is_ascii_digit())
+		&& mantissa.bytes().all(|byte| byte.is_ascii_digit());
+	if !is_decimal {
+		return Err(Error::InvalidAmountString(format!(
+			"Invalid secondary fee {}, expected an unsigned ASCII decimal without a unit suffix",
+			value
+		)));
+	}
+	let characteristic = if characteristic.is_empty() {
+		0_u128
+	} else {
+		characteristic
+			.parse::<u128>()
+			.map_err(|_| Error::InvalidAmountString(format!("Invalid secondary fee {}", value)))?
+	};
+	let significant_mantissa = mantissa.trim_end_matches('0');
+	if significant_mantissa.len() > decimal_places as usize {
+		return Err(Error::InvalidAmountString(format!(
+			"Secondary fee {} has more than {} decimal places for this currency",
+			value, decimal_places
+		)));
+	}
+	let mantissa = if significant_mantissa.is_empty() {
+		0_u128
+	} else {
+		significant_mantissa
+			.parse::<u128>()
+			.map_err(|_| Error::InvalidAmountString(format!("Invalid secondary fee {}", value)))?
+	};
+	let scale = 10_u128.pow(decimal_places);
+	let mantissa_scale = 10_u128.pow(
+		decimal_places
+			.checked_sub(significant_mantissa.len() as u32)
+			.ok_or_else(|| Error::InvalidAmountString(value.to_string()))?,
+	);
+	let scaled = characteristic
+		.checked_mul(scale)
+		.and_then(|value| {
+			mantissa
+				.checked_mul(mantissa_scale)
+				.and_then(|m| value.checked_add(m))
+		})
+		.ok_or_else(|| {
+			Error::DataOverflow(format!(
+				"Secondary fee conversion overflow, fee={} decimal_places={}",
+				value, decimal_places
+			))
+		})?;
+	u64::try_from(scaled).map_err(|_| {
+		Error::DataOverflow(format!(
+			"Secondary fee exceeds u64, fee={} scaled_fee={}",
+			value, scaled
+		))
+	})
 }
 
 /// Secondary currency related data
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(crate = "serde")]
 pub enum SecondaryData {
 	/// None
 	Empty,
@@ -835,6 +1046,7 @@ impl SecondaryData {
 
 /// Buyer/Seller single deal context
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(crate = "serde")]
 pub struct Context {
 	/// Multisig key. Both Buyer and Seller using it
 	pub multisig_key: Identifier,
@@ -878,16 +1090,18 @@ impl Context {
 
 impl ser::Writeable for Context {
 	fn write<W: ser::Writer>(&self, writer: &mut W) -> Result<(), ser::Error> {
-		writer.write_bytes(&serde_json::to_vec(self).map_err(|e| {
+		// Keep the secret nonces in one fixed allocation that is wiped on every exit path.
+		let data = sensitive::serialize_json(self).map_err(|e| {
 			ser::Error::CorruptedData(format!("OutputData to json conversion failed, {}", e))
-		})?)
+		})?;
+		writer.write_bytes(&data[..])
 	}
 }
 
 impl ser::Readable for Context {
 	fn read<R: ser::Reader>(reader: &mut R) -> Result<Context, ser::Error> {
-		let data = reader.read_bytes_len_prefix()?;
-		serde_json::from_slice(&data[..]).map_err(|e| {
+		let data = Zeroizing::new(reader.read_bytes_len_prefix()?);
+		serde_json::from_slice(data.as_slice()).map_err(|e| {
 			ser::Error::CorruptedData(format!("Json to OutputData conversion failed, {}", e))
 		})
 	}
@@ -895,6 +1109,7 @@ impl ser::Readable for Context {
 
 /// Context specfic to the swap party role
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(crate = "serde")]
 pub enum RoleContext {
 	/// Seller role
 	Seller(SellerContext),
@@ -902,13 +1117,87 @@ pub enum RoleContext {
 	Buyer(BuyerContext),
 }
 
+/// One MWC output selected as an input to the seller's lock transaction.
+///
+/// The output feature is part of the output identifier and must survive the
+/// conversion from wallet `OutputData` into the persisted swap context.  Older
+/// contexts stored these values as a three-item tuple and implicitly treated
+/// every input as plain, so deserialization retains that representation as a
+/// compatibility fallback.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SellerInput {
+	/// Wallet derivation identifier.
+	pub key_id: Identifier,
+	/// PMMR index, when known.
+	pub mmr_index: Option<u64>,
+	/// Input value.
+	pub amount: u64,
+	/// Consensus-relevant output feature.
+	pub features: OutputFeatures,
+}
+
+impl SellerInput {
+	/// Build a seller input from a wallet output.
+	pub fn new(key_id: Identifier, mmr_index: Option<u64>, amount: u64, is_coinbase: bool) -> Self {
+		Self {
+			key_id,
+			mmr_index,
+			amount,
+			features: if is_coinbase {
+				OutputFeatures::Coinbase
+			} else {
+				OutputFeatures::Plain
+			},
+		}
+	}
+}
+
+impl Serialize for SellerInput {
+	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+	where
+		S: serde::Serializer,
+	{
+		(&self.key_id, self.mmr_index, self.amount, self.features).serialize(serializer)
+	}
+}
+
+impl<'de> Deserialize<'de> for SellerInput {
+	fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+	where
+		D: serde::Deserializer<'de>,
+	{
+		#[derive(Deserialize)]
+		#[serde(crate = "serde", untagged)]
+		enum SellerInputWire {
+			FeaturePreserving((Identifier, Option<u64>, u64, OutputFeatures)),
+			Legacy((Identifier, Option<u64>, u64)),
+		}
+
+		match SellerInputWire::deserialize(deserializer)? {
+			SellerInputWire::FeaturePreserving((key_id, mmr_index, amount, features)) => Ok(Self {
+				key_id,
+				mmr_index,
+				amount,
+				features,
+			}),
+			SellerInputWire::Legacy((key_id, mmr_index, amount)) => Ok(Self {
+				key_id,
+				mmr_index,
+				amount,
+				features: OutputFeatures::Plain,
+			}),
+		}
+	}
+}
+
 /// Context for the seller party
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(crate = "serde")]
 pub struct SellerContext {
 	/// Seller account. Both lock and redeem will go to the same account (not receive)
 	pub parent_key_id: Identifier,
-	/// MWC Inputs that we are agree to sell: <Id, mmr_index (if known), amount>
-	pub inputs: Vec<(Identifier, Option<u64>, u64)>,
+	/// MWC inputs that the seller agrees to spend in the lock transaction.
+	pub inputs: Vec<SellerInput>,
 	/// MWC Change outputs from the lock slate (Derivative ID)
 	pub change_output: Identifier,
 	/// Lock slate change amount
@@ -939,6 +1228,7 @@ impl SellerContext {
 
 /// Context for the Buyer party
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(crate = "serde")]
 pub struct BuyerContext {
 	/// Buyer recieve account
 	pub parent_key_id: Identifier,
@@ -970,6 +1260,7 @@ impl BuyerContext {
 
 /// Seller Secondary currency spepicif context
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(crate = "serde")]
 pub enum SecondarySellerContext {
 	/// BTC context
 	Btc(BtcSellerContext),
@@ -979,6 +1270,7 @@ pub enum SecondarySellerContext {
 
 /// Buyer secondary currency context
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(crate = "serde")]
 pub enum SecondaryBuyerContext {
 	/// BTC context
 	Btc(BtcBuyerContext),
@@ -988,6 +1280,7 @@ pub enum SecondaryBuyerContext {
 
 /// Action or step of the swap process
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(crate = "serde")]
 pub enum Action {
 	/// No further action required
 	None,
@@ -1015,6 +1308,24 @@ pub enum Action {
 		/// Type of secondary currency (BTC)
 		currency: Currency,
 		/// Redeem Address
+		address: String,
+	},
+	/// Seller transferring redeemed Ethereum-family funds from the shared
+	/// internal account to the private destination recorded by this swap.
+	SellerTransferSecondary {
+		/// Ethereum-family currency being transferred.
+		currency: Currency,
+		/// Owner-selected destination address.
+		address: String,
+		/// Amount in the currency's canonical integer units.
+		amount: u64,
+	},
+	/// Seller waiting for the recorded private-wallet redirect transaction to
+	/// receive a successful receipt.
+	SellerWaitForSecondaryTransferConfirmations {
+		/// Ethereum-family currency being transferred.
+		currency: Currency,
+		/// Owner-selected destination address.
 		address: String,
 	},
 	/// Deposit secondary currency
@@ -1132,6 +1443,7 @@ impl Action {
 				currency: _,
 				address: _,
 			}
+			| Action::SellerTransferSecondary { .. }
 			| Action::BuyerPublishMwcRedeemTx
 			| Action::SellerPublishMwcRefundTx
 			| Action::BuyerPublishSecondaryRefundTx {
@@ -1159,6 +1471,10 @@ impl Action {
 				currency: _,
 				address: _,
 			} => "SellerPublishTxSecondaryRedeem",
+			Action::SellerTransferSecondary { .. } => "SellerTransferSecondary",
+			Action::SellerWaitForSecondaryTransferConfirmations { .. } => {
+				"SellerWaitForSecondaryTransferConfirmations"
+			}
 			Action::DepositSecondary {
 				currency: _,
 				amount: _,
@@ -1229,8 +1545,10 @@ impl fmt::Display for Action {
 			}
 			Action::WaitingForTradeBackup => "Backup trade data".to_string(),
 			Action::SellerPublishMwcLockTx => "Posting MWC lock transaction".to_string(),
-			Action::SellerPublishTxSecondaryRedeem { currency , address } => {
-				if !currency.is_btc_family() && address.as_str() == "0x0000000000000000000000000000000000000000" {
+			Action::SellerPublishTxSecondaryRedeem { currency, address } => {
+				if !currency.is_btc_family()
+					&& address.as_str() == "0x0000000000000000000000000000000000000000"
+				{
 					let address = &"Internal Ethereum Wallet Address!".to_string();
 					format!("Posting {} redeem transaction to {}", currency, address)
 				} else {
@@ -1251,6 +1569,22 @@ impl fmt::Display for Action {
 					address.join(" or ")
 				)
 			},
+			Action::SellerTransferSecondary {
+				currency,
+				address,
+				amount,
+			} => format!(
+				"Transferring {} {} from the internal Ethereum wallet to {}",
+				currency.amount_to_hr_string(*amount, true),
+				currency,
+				address
+			),
+			Action::SellerWaitForSecondaryTransferConfirmations { currency, address } => {
+				format!(
+					"Waiting for the {} transfer from the internal Ethereum wallet to {} to confirm",
+					currency, address
+				)
+			}
 			Action::BuyerDepositToContractAccount => "Buyer Depositing Secondary Currency to Contract Account".to_string(),
 			Action::WaitForMwcConfirmations {
 				name,
@@ -1304,7 +1638,7 @@ impl fmt::Display for Action {
 
 				let sec_str = if *sec_expected_to_be_posted==0 {
 					if let Some(sec_actual) = sec_actual {
-						if !currency.is_btc_family() {
+						if currency.is_btc_family() {
 							if *sec_actual == 0 {
 								format!("{} {} are in memory pool", currency, address.join(","))
 							} else if *sec_actual >= *sec_required {
@@ -1314,7 +1648,7 @@ impl fmt::Display for Action {
 							}
 						} else {
 							if *sec_actual == 0 {
-								format!("{} {} are in memory pool", currency, address.join(","))
+								format!("{} {}, waiting for Ethereum finality", currency, address.join(","))
 							} else {
 								format!("{} {}, are locked", currency, address.join(","))
 							}
@@ -1334,19 +1668,30 @@ impl fmt::Display for Action {
 			Action::SellerWaitForBuyerRedeemPublish {
 				mwc_tip,
 				lock_height,
-			} => format!("Waiting for Buyer to redeem MWC. If we do not receive a response, a refund will be posted in {} minutes",(lock_height.saturating_sub(*mwc_tip))),
+			} => format!(
+				"Waiting for Buyer to redeem MWC. If we do not receive a response, a refund will be posted in {} minutes",
+				// This is a display-only countdown; a tip beyond the lock height means zero remains.
+				(lock_height.saturating_sub(*mwc_tip))
+			),
 			Action::WaitForMwcRefundUnlock {
 				mwc_tip,
 				lock_height,
 			} => {
+				// This is a display-only countdown; a tip beyond the lock height means zero remains.
 				let blocks_left = lock_height.saturating_sub(*mwc_tip);
 				let hours = blocks_left / 60;
 				let minutes = blocks_left % 60;
-				format!( "Waiting for locked MWC to be refunded ({} hour{} and {} minute{} remaining)", hours, if hours == 1 { "" } else { "s" }, minutes, if minutes == 1 { "" } else { "s" })
-			},
+				format!(
+					"Waiting for locked MWC to be refunded ({} hour{} and {} minute{} remaining)",
+					hours,
+					if hours == 1 { "" } else { "s" },
+					minutes,
+					if minutes == 1 { "" } else { "s" }
+				)
+			}
 			Action::BuyerPublishMwcRedeemTx => "Posting MWC redeem transaction".to_string(),
 			Action::SellerPublishMwcRefundTx => "Posting MWC refund transaction".to_string(),
-			Action::BuyerPublishSecondaryRefundTx{ currency , address } => {
+			Action::BuyerPublishSecondaryRefundTx { currency, address } => {
 				format!("Sending {} refund to {}", currency, address)
 			}
 			Action::WaitingForBtcRefund {
@@ -1355,10 +1700,20 @@ impl fmt::Display for Action {
 				required,
 				current,
 			} => {
-				let time_left_sec = required - current + 30; // 30 seconds for rounding
+				// This is display-only: expired deadlines clamp to zero and the rounding
+				// allowance clamps at u64::MAX instead of affecting workflow decisions.
+				let time_left_sec = required.saturating_sub(*current).saturating_add(30); // 30 seconds for rounding
 				let hours = time_left_sec / 3600;
 				let minutes = (time_left_sec % 3600) / 60;
-				format!("Waiting for locked {} to be refunded to {}. ({} hour{} and {} minute{} remaining)", currency, address, hours, if hours==1 {""} else {"s"} , minutes, if minutes==1 {""} else {"s"} )
+				format!(
+					"Waiting for locked {} to be refunded to {}. ({} hour{} and {} minute{} remaining)",
+					currency,
+					address,
+					hours,
+					if hours == 1 { "" } else { "s" },
+					minutes,
+					if minutes == 1 { "" } else { "s" }
+				)
 			}
 		};
 		write!(f, "{}", disp)
@@ -1368,6 +1723,12 @@ impl fmt::Display for Action {
 /// Status of the transactions that can be published.
 ///  None for confirmations - Unable to verify, probably Transaction data is not here.
 pub struct SwapTransactionsConfirmations {
+	/// False when MWC is unavailable during independent secondary recovery.
+	/// MWC fields then carry no observations.
+	pub mwc_observed: bool,
+	/// False when only MWC was queried for seller refund recovery. Secondary
+	/// fields then carry no observations and must not drive state transitions.
+	pub secondary_observed: bool,
 	/// MWC node tip
 	pub mwc_tip: u64,
 	/// Number of confirmations for the lock transaction
@@ -1378,7 +1739,7 @@ pub struct SwapTransactionsConfirmations {
 	pub mwc_refund_conf: Option<u64>,
 	/// BTC/ETH node tip
 	pub secondary_tip: u64,
-	/// In ETH: 1 means confirmed, 0 means not confirmed
+	/// For ETH locks: 1 means valid and finalized; 0 means not yet accepted.
 	/// BTC/ETH lock (multisug account) number of confirmations
 	pub secondary_lock_conf: Option<u64>,
 	/// How much is locked. This process is manual, so Buyer might make a mistake
@@ -1387,23 +1748,118 @@ pub struct SwapTransactionsConfirmations {
 	pub secondary_redeem_conf: Option<u64>,
 	/// BTC/ETH  refund transaciton number of confirmations
 	pub secondary_refund_conf: Option<u64>,
+	/// BTC refund-plan progress; account-based currencies use the single counter.
+	pub secondary_refund_progress: Option<crate::swap::bitcoin::BtcRefundProgress>,
 }
 
-/// check transactin confirmed
-pub fn check_txs_confirmed(currency: Currency, lock: u64, lock_conf: u64) -> bool {
+impl SwapTransactionsConfirmations {
+	/// A verified MWC snapshot with explicitly unobserved secondary-chain data.
+	pub(crate) fn mwc_only(
+		mwc_tip: u64,
+		mwc_lock_conf: Option<u64>,
+		mwc_redeem_conf: Option<u64>,
+		mwc_refund_conf: Option<u64>,
+	) -> Self {
+		Self {
+			mwc_observed: true,
+			secondary_observed: false,
+			mwc_tip,
+			mwc_lock_conf,
+			mwc_redeem_conf,
+			mwc_refund_conf,
+			secondary_tip: 0,
+			secondary_lock_conf: None,
+			secondary_lock_amount: 0,
+			secondary_redeem_conf: None,
+			secondary_refund_conf: None,
+			secondary_refund_progress: None,
+		}
+	}
+
+	/// Add the verified MWC observations to a secondary snapshot.
+	pub(crate) fn with_mwc(mut self, mwc: Self) -> Self {
+		self.mwc_observed = mwc.mwc_observed;
+		self.mwc_tip = mwc.mwc_tip;
+		self.mwc_lock_conf = mwc.mwc_lock_conf;
+		self.mwc_redeem_conf = mwc.mwc_redeem_conf;
+		self.mwc_refund_conf = mwc.mwc_refund_conf;
+		self
+	}
+
+	/// Check that the current state has the chain observations it needs.
+	///
+	/// Recovery can use one chain, but the FSM may advance through several
+	/// states with the same snapshot. For example, an MWC refund check can
+	/// discover a buyer redemption and switch toward secondary redemption.
+	/// Checking at entry and after each transition stops processing until the
+	/// required observations are available, so unobserved `None`/`0` fields
+	/// cannot be mistaken for absent transactions or an empty balance.
+	pub(crate) fn supports_state(&self, swap: &super::Swap) -> bool {
+		(self.mwc_observed || swap.can_use_secondary_confirmations())
+			&& (self.secondary_observed || (swap.is_seller() && swap.state.is_seller_refund()))
+			&& (self.mwc_observed || self.secondary_observed)
+	}
+}
+
+/// Reconciliation status for the seller's Ethereum private-wallet redirect.
+/// The transaction hash itself is stored in [`crate::swap::ethereum::EthData`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SecondaryTransferStatus {
+	/// No redirect transaction hash has been recorded yet.
+	NotPosted,
+	/// A hash is recorded, but no mined receipt is available yet.
+	Pending,
+	/// The recorded transaction has a successful mined receipt.
+	Confirmed,
+	/// The recorded transaction was mined with a failed receipt.
+	Failed,
+}
+
+/// Validate the chain confirmation requirements carried by a swap offer.
+///
+/// Zero is not a meaningful security threshold: it would let an absent
+/// transaction satisfy `actual >= required` checks.
+pub fn validate_confirmation_requirements(
+	mwc_confirmations: u64,
+	secondary_confirmations: u64,
+) -> Result<(), Error> {
+	if mwc_confirmations < 30 {
+		return Err(Error::InvalidMessageData(
+			"Required at least 30 confirmations for MWC".to_string(),
+		));
+	}
+	if secondary_confirmations < 3 {
+		return Err(Error::InvalidMessageData(
+			"Required at least 3 confirmations for secondary currency".to_string(),
+		));
+	}
+	Ok(())
+}
+
+/// Return whether an observed secondary transaction is confirmed.
+///
+/// BTC-family swaps honor the negotiated confirmation count. Account-based
+/// chains use an acceptance marker: a lock marker is set only after finality.
+/// A positive negotiated threshold and an observed transaction are still required.
+pub fn check_txs_confirmed(
+	currency: Currency,
+	actual: Option<u64>,
+	required: u64,
+) -> bool {
+	if required == 0 {
+		return false;
+	}
+	let Some(actual) = actual else {
+		return false;
+	};
+
 	match currency {
 		Currency::Btc
 		| Currency::Bch
 		| Currency::Ltc
 		| Currency::Dash
 		| Currency::ZCash
-		| Currency::Doge => {
-			if lock < lock_conf {
-				false
-			} else {
-				true
-			}
-		}
+		| Currency::Doge => actual >= required,
 		Currency::Ether
 		| Currency::Busd
 		| Currency::Bnb
@@ -1415,19 +1871,72 @@ pub fn check_txs_confirmed(currency: Currency, lock: u64, lock_conf: u64) -> boo
 		| Currency::Usdt
 		| Currency::Usdc
 		| Currency::Trx
-		| Currency::Tst => {
-			if lock >= 1 {
-				true
-			} else {
-				false
-			}
-		}
+		| Currency::Tst => actual >= 1,
 	}
 }
 
 #[cfg(test)]
 mod tests {
 	use super::*;
+
+	#[test]
+	fn context_write_preserves_encoding_and_propagates_short_writes() {
+		for fixture in [
+			include_str!("../../swap_test/context_buy.json"),
+			include_str!("../../swap_test/context_sell.json"),
+		] {
+			let context: Context = serde_json::from_str(fixture).unwrap();
+			let json = serde_json::to_vec(&context).unwrap();
+			let mut encoded = Vec::new();
+			ser::serialize_default(0, &mut encoded, &context, true).unwrap();
+			assert_eq!(&encoded[..8], &(json.len() as u64).to_be_bytes());
+			assert_eq!(&encoded[8..], &json);
+
+			let decoded: Context = ser::deserialize_default(0, &mut &encoded[..], true).unwrap();
+			assert_eq!(serde_json::to_vec(&decoded).unwrap(), json);
+
+			// Fail while writing either the length prefix or the JSON body.
+			for length in [0, 7, 8, 64] {
+				let mut short = vec![0u8; length];
+				let error =
+					ser::serialize_default(0, &mut short.as_mut_slice(), &context, true).unwrap_err();
+				assert!(
+					matches!(error, ser::Error::IOErr(e) if e.kind() == std::io::ErrorKind::WriteZero)
+				);
+			}
+		}
+	}
+
+	#[test]
+	fn seller_input_preserves_features_and_reads_legacy_contexts() {
+		let key_id = Identifier::from_hex("0200000000000000010000000000000000").unwrap();
+		let legacy = serde_json::to_value((key_id.clone(), None::<u64>, 42u64)).unwrap();
+		let legacy: SellerInput = serde_json::from_value(legacy).unwrap();
+		assert_eq!(legacy.key_id, key_id);
+		assert_eq!(legacy.amount, 42);
+		assert_eq!(legacy.features, OutputFeatures::Plain);
+
+		let coinbase = SellerInput::new(key_id, Some(7), 43, true);
+		let encoded = serde_json::to_value(&coinbase).unwrap();
+		assert_eq!(encoded.as_array().unwrap().len(), 4);
+		let decoded: SellerInput = serde_json::from_value(encoded).unwrap();
+		assert_eq!(decoded, coinbase);
+		assert_eq!(decoded.features, OutputFeatures::Coinbase);
+	}
+
+	#[test]
+	fn confirmation_checks_reject_zero_requirements_and_missing_transactions() {
+		assert!(validate_confirmation_requirements(30, 3).is_ok());
+		assert!(validate_confirmation_requirements(0, 3).is_err());
+		assert!(validate_confirmation_requirements(30, 0).is_err());
+
+		assert!(!check_txs_confirmed(Currency::Btc, None, 1));
+		assert!(!check_txs_confirmed(Currency::Btc, Some(0), 0));
+		assert!(!check_txs_confirmed(Currency::Btc, Some(1), 2));
+		assert!(check_txs_confirmed(Currency::Btc, Some(2), 2));
+		assert!(!check_txs_confirmed(Currency::Ether, None, 1));
+		assert!(check_txs_confirmed(Currency::Ether, Some(1), 1));
+	}
 
 	#[test]
 	fn test_amounts_to_hr() {
@@ -1482,6 +1991,37 @@ mod tests {
 	}
 
 	#[test]
+	fn ethereum_family_is_an_explicit_allowlist() {
+		for currency in [
+			Currency::Ether,
+			Currency::Busd,
+			Currency::Bnb,
+			Currency::Link,
+			Currency::Dai,
+			Currency::Tusd,
+			Currency::Usdp,
+			Currency::Wbtc,
+			Currency::Usdt,
+			Currency::Usdc,
+			Currency::Trx,
+			Currency::Tst,
+		] {
+			assert!(currency.is_ethereum_family(), "{}", currency);
+		}
+
+		for currency in [
+			Currency::Btc,
+			Currency::Bch,
+			Currency::Ltc,
+			Currency::Dash,
+			Currency::ZCash,
+			Currency::Doge,
+		] {
+			assert!(!currency.is_ethereum_family(), "{}", currency);
+		}
+	}
+
+	#[test]
 	fn test_amounts_from_hr() {
 		let c = Currency::Btc;
 		assert!(c.amount_from_hr_string("").is_err());
@@ -1499,13 +2039,97 @@ mod tests {
 		assert_eq!(c.amount_from_hr_string("0.10").unwrap(), 10_000_000);
 		assert_eq!(c.amount_from_hr_string(".1").unwrap(), 10_000_000);
 		assert_eq!(c.amount_from_hr_string(".10").unwrap(), 10_000_000);
-		assert_eq!(c.amount_from_hr_string("0.123456789").unwrap(), 12_345_678);
+		// Excess precision is rejected, not silently truncated
+		assert!(c.amount_from_hr_string("0.123456789").is_err());
+		// Trailing junk past the exponent is rejected, not truncated away
+		assert!(c.amount_from_hr_string("0.12345678junk").is_err());
+		// Multibyte characters are rejected (previously panicked in String::truncate)
+		assert!(c.amount_from_hr_string("0.0000000\u{1F4A3}").is_err());
 		assert_eq!(c.amount_from_hr_string("1").unwrap(), 100_000_000);
 		assert_eq!(c.amount_from_hr_string("1.").unwrap(), 100_000_000);
 		assert_eq!(c.amount_from_hr_string("1.0").unwrap(), 100_000_000);
 		assert_eq!(
 			c.amount_from_hr_string("123456.789").unwrap(),
 			12_345_678_900_000
+		);
+	}
+
+	#[test]
+	fn amount_from_hr_rejects_overflow_with_operands() {
+		let amount = "184467440737.09551616";
+		match Currency::Btc.amount_from_hr_string(amount) {
+			Err(Error::DataOverflow(message)) => {
+				assert!(message.contains("Currency::amount_from_hr_string"));
+				assert!(message.contains("scaled_characteristic=18446744073700000000"));
+				assert!(message.contains("mantissa=9551616"));
+			}
+			other => panic!("expected operand-rich DataOverflow error, got {:?}", other),
+		}
+	}
+
+	#[test]
+	fn ethereum_fees_are_integer_gwei() {
+		assert_eq!(
+			Currency::Ether
+				.normalize_secondary_fee("5500000")
+				.unwrap(),
+			SecondaryFeeUnits::EthereumGwei(5_500_000)
+		);
+		assert!(Currency::Ether
+			.normalize_secondary_fee("5500000.5")
+			.is_err());
+		assert_eq!(
+			Currency::Ether.get_default_fee(&Network::Mainnet),
+			SecondaryFeeUnits::EthereumGwei(5_500_000)
+		);
+		assert!(Currency::Ether
+			.secondary_fee_gwei(SecondaryFeeUnits::EthereumGwei(0))
+			.is_err());
+	}
+
+	#[test]
+	fn btc_family_fees_use_checked_fixed_point_units() {
+		let fee = Currency::Btc
+			.normalize_secondary_fee("1.400")
+			.unwrap();
+		assert_eq!(fee, SecondaryFeeUnits::RatePerKvb(1_400));
+		// 1.4 atomic units/vB * 300 vB is exactly 420 atomic units.
+		assert_eq!(Currency::Btc.secondary_fee_amount(fee, 300).unwrap(), 420);
+		// 1.4 atomic units/vB * 301 vB is 421.4, so pay 422 rather than
+		// falling below the requested rate.
+		assert_eq!(Currency::Btc.secondary_fee_amount(fee, 301).unwrap(), 422);
+		// Even a fractional result below one half rounds upward because a fee
+		// rate is a lower bound, not a nearest-value measurement.
+		assert_eq!(Currency::Btc.secondary_fee_amount(fee, 1).unwrap(), 2);
+		assert!(Currency::Btc
+			.normalize_secondary_fee("1.4001")
+			.is_err());
+		assert_eq!(
+			Currency::ZCash
+				.normalize_secondary_fee("0.0001")
+				.unwrap(),
+			SecondaryFeeUnits::FlatAtomic(10_000)
+		);
+	}
+
+	#[test]
+	fn secondary_fee_strings_reject_invalid_syntax() {
+		for invalid in ["", ".", "+1", "-1", "1e3", "1.2.3", " 1.4", "1 gwei"] {
+			assert!(
+				Currency::Btc.normalize_secondary_fee(invalid).is_err(),
+				"fee input unexpectedly accepted: {:?}",
+				invalid
+			);
+		}
+	}
+
+	#[test]
+	fn secondary_fee_bump_uses_a_rounded_up_rational() {
+		assert_eq!(
+			Currency::Btc
+				.bump_secondary_fee(SecondaryFeeUnits::RatePerKvb(1_401), 6, 5)
+				.unwrap(),
+			SecondaryFeeUnits::RatePerKvb(1_682)
 		);
 	}
 

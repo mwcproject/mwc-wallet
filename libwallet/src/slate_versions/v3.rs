@@ -19,27 +19,33 @@
 //! * Addition of a u64 ttl_cutoff_height field
 
 use crate::error::Error;
-use crate::mwc_core::core::transaction::OutputFeatures;
-use crate::mwc_core::libtx::secp_ser;
-use crate::mwc_core::map_vec;
-use crate::mwc_keychain::{BlindingFactor, Identifier};
-use crate::mwc_util::secp;
-use crate::mwc_util::secp::key::PublicKey;
-use crate::mwc_util::secp::pedersen::{Commitment, RangeProof};
-use crate::mwc_util::secp::Signature;
 use crate::proof::proofaddress::ProvableAddress;
 use crate::slate::CompatKernelFeatures;
+use mwc_wallet_util::mwc_core::core::transaction::OutputFeatures;
+use mwc_wallet_util::mwc_core::libtx::secp_ser;
+use mwc_wallet_util::mwc_core::map_vec;
+use mwc_wallet_util::mwc_crates::secp;
+use mwc_wallet_util::mwc_crates::secp::key::PublicKey;
+use mwc_wallet_util::mwc_crates::secp::pedersen::{Commitment, RangeProof};
+use mwc_wallet_util::mwc_crates::secp::AggSigSignature;
+use mwc_wallet_util::mwc_crates::serde::{self, Deserialize, Serialize};
+use mwc_wallet_util::mwc_crates::uuid::Uuid;
+use mwc_wallet_util::mwc_keychain::BlindingFactor;
+use mwc_wallet_util::mwc_util::{from_hex, ToHex};
 use std::convert::TryFrom;
-use uuid::Uuid;
 
-use crate::mwc_core::core::transaction::Transaction;
 use crate::slate::{ParticipantData, PaymentInfo, Slate, VersionCompatInfo};
 use crate::slate_versions::v2::{
 	InputV2, OutputV2, ParticipantDataV2, SlateV2, TransactionBodyV2, TransactionV2, TxKernelV2,
 	VersionCompatInfoV2,
 };
+use mwc_wallet_util::mwc_core::core::transaction::Transaction;
+
+/// Maximum number of bytes from a network name included in a mismatch error.
+const MAX_NETWORK_ERROR_DISPLAY_LEN: usize = 64;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(crate = "serde")]
 pub struct SlateV3 {
 	/// Versioning info
 	pub version_info: VersionCompatInfoV3,
@@ -67,7 +73,7 @@ pub struct SlateV3 {
 	/// TTL, the block height at which wallets
 	/// should refuse to process the transaction and unlock all
 	/// associated outputs
-	#[serde(with = "secp_ser::opt_string_or_u64")]
+	#[serde(default, with = "secp_ser::opt_string_or_u64")]
 	pub ttl_cutoff_height: Option<u64>,
 	///we are not changing slate version with this two extra fields. If
 	/// a wallet doesn't support them, they will be filtered out.
@@ -102,13 +108,179 @@ fn u8_is_blank(u: &u8) -> bool {
 	*u == 0
 }
 
-pub fn sig_is_blank(s: &secp::Signature) -> bool {
-	for b in s.to_raw_data().iter() {
-		if *b != 0 {
-			return false;
+pub fn sig_is_blank(s: &secp::AggSigSignature) -> bool {
+	s == &secp::AggSigSignature::blank()
+}
+
+pub fn blank_commitment() -> Commitment {
+	Commitment([0; secp::constants::PEDERSEN_COMMITMENT_SIZE])
+}
+
+pub fn commitment_is_blank(commitment: &Commitment) -> bool {
+	commitment.0.iter().all(|b| *b == 0)
+}
+
+pub(crate) mod kernel_excess_serde {
+	use super::*;
+	use mwc_wallet_util::mwc_crates::serde::{Deserializer, Serializer};
+
+	pub fn serialize<S>(commitment: &Commitment, serializer: S) -> Result<S::Ok, S::Error>
+	where
+		S: Serializer,
+	{
+		use mwc_wallet_util::mwc_crates::serde::ser::Error;
+
+		if commitment_is_blank(commitment) {
+			return serializer
+				.serialize_str(&[0u8; secp::constants::PEDERSEN_COMMITMENT_SIZE].to_hex());
 		}
+		let secp = secp::Secp256k1::with_caps(secp::ContextFlag::Commit)
+			.map_err(|err| Error::custom(format!("Unable create Secp, {}", err)))?;
+		secp.validate_commitment(commitment).map_err(|err| {
+			Error::custom(format!("Invalid Commit {}, {}", commitment.to_hex(), err))
+		})?;
+		serializer.serialize_str(&commitment.to_hex())
 	}
-	true
+
+	pub fn deserialize<'de, D>(deserializer: D) -> Result<Commitment, D::Error>
+	where
+		D: Deserializer<'de>,
+	{
+		use mwc_wallet_util::mwc_crates::serde::de::Error;
+
+		let string = String::deserialize(deserializer)?;
+		let bytes = from_hex(&string).map_err(|err| {
+			Error::custom(format!("Fail to parse Commit from HEX {}, {}", string, err))
+		})?;
+		if bytes.len() != secp::constants::PEDERSEN_COMMITMENT_SIZE {
+			return Err(Error::invalid_length(
+				bytes.len(),
+				&"PEDERSEN_COMMITMENT_SIZE bytes",
+			));
+		}
+		if bytes.iter().all(|v| *v == 0) {
+			return Ok(blank_commitment());
+		}
+		let commitment = Commitment::from_vec(bytes)
+			.map_err(|err| Error::custom(format!("Invalid Commit {}, {}", string, err)))?;
+		let secp = secp::Secp256k1::with_caps(secp::ContextFlag::Commit)
+			.map_err(|err| Error::custom(format!("Unable create Secp, {}", err)))?;
+		secp.validate_commitment(&commitment)
+			.map_err(|err| Error::custom(format!("Invalid Commit {}, {}", string, err)))?;
+		Ok(commitment)
+	}
+}
+
+pub(crate) mod kernel_sig_serde {
+	use super::*;
+	use mwc_wallet_util::mwc_crates::serde::{Deserializer, Serializer};
+
+	pub fn serialize<S>(sig: &secp::AggSigSignature, serializer: S) -> Result<S::Ok, S::Error>
+	where
+		S: Serializer,
+	{
+		use mwc_wallet_util::mwc_crates::serde::ser::Error;
+
+		if sig_is_blank(sig) {
+			return serializer.serialize_str(&[0u8; 64].to_hex());
+		}
+		let secp = secp::Secp256k1::with_caps(secp::ContextFlag::None)
+			.map_err(|err| Error::custom(format!("Unable create Secp, {}", err)))?;
+		let sig_ser = sig
+			.serialize_compact(&secp)
+			.map_err(|err| Error::custom(format!("Unable serialize signature, {}", err)))?;
+		serializer.serialize_str(&sig_ser.as_ref().to_hex())
+	}
+
+	pub fn deserialize<'de, D>(deserializer: D) -> Result<secp::AggSigSignature, D::Error>
+	where
+		D: Deserializer<'de>,
+	{
+		use mwc_wallet_util::mwc_crates::serde::de::Error;
+
+		let string = String::deserialize(deserializer)?;
+		let bytes = from_hex(&string).map_err(|err| {
+			Error::custom(format!("Fail to parse signature HEX {}, {}", string, err))
+		})?;
+		if bytes.len() != 64 {
+			return Err(Error::invalid_length(bytes.len(), &"64 bytes"));
+		}
+		let mut compact = [0u8; 64];
+		compact.copy_from_slice(&bytes);
+		if compact.iter().all(|v| *v == 0) {
+			return Ok(secp::AggSigSignature::blank());
+		}
+		let secp = secp::Secp256k1::with_caps(secp::ContextFlag::None)
+			.map_err(|err| Error::custom(format!("Unable create Secp, {}", err)))?;
+		secp::AggSigSignature::from_compact(&secp, &compact)
+			.map_err(|err| Error::custom(format!("Fail to decode signature, {}", err)))
+	}
+}
+
+pub(crate) mod option_aggsig_serde {
+	use super::*;
+	use mwc_wallet_util::mwc_crates::serde::{Deserializer, Serializer};
+
+	pub fn serialize<S>(
+		sig: &Option<secp::AggSigSignature>,
+		serializer: S,
+	) -> Result<S::Ok, S::Error>
+	where
+		S: Serializer,
+	{
+		use mwc_wallet_util::mwc_crates::serde::ser::Error;
+
+		let sig = match sig {
+			Some(sig) if !sig_is_blank(sig) => sig,
+			_ => return serializer.serialize_none(),
+		};
+		let secp = secp::Secp256k1::with_caps(secp::ContextFlag::None)
+			.map_err(|err| Error::custom(format!("Unable create Secp, {}", err)))?;
+		let sig_ser = sig
+			.serialize_compact(&secp)
+			.map_err(|err| Error::custom(format!("Unable serialize signature, {}", err)))?;
+		serializer.serialize_str(&sig_ser.as_ref().to_hex())
+	}
+
+	pub fn deserialize<'de, D>(deserializer: D) -> Result<Option<secp::AggSigSignature>, D::Error>
+	where
+		D: Deserializer<'de>,
+	{
+		use mwc_wallet_util::mwc_crates::serde::de::Error;
+
+		Option::<String>::deserialize(deserializer).and_then(|res| match res {
+			Some(string) => from_hex(&string)
+				.map_err(|err| {
+					Error::custom(format!("Fail to parse signature HEX {}, {}", string, err))
+				})
+				.and_then(|bytes: Vec<u8>| {
+					if bytes.len() != 64 {
+						return Err(Error::invalid_length(bytes.len(), &"64 bytes"));
+					}
+					let mut compact = [0u8; 64];
+					compact.copy_from_slice(&bytes);
+					if compact.iter().all(|v| *v == 0) {
+						return Ok(None);
+					}
+					let secp = secp::Secp256k1::with_caps(secp::ContextFlag::None)
+						.map_err(|err| Error::custom(format!("Unable create Secp, {}", err)))?;
+					secp::AggSigSignature::from_compact(&secp, &compact)
+						.map(Some)
+						.map_err(|err| Error::custom(format!("Fail to decode signature, {}", err)))
+				}),
+			None => Ok(None),
+		})
+	}
+}
+
+/// Serialize a core transaction using the legacy compact AggSig JSON encoding.
+/// Core's kernel serializer already provides this encoding, so no second pass
+/// over the signatures or additional secp context is needed.
+pub fn transaction_to_legacy_json(
+	tx: &Transaction,
+) -> Result<mwc_wallet_util::mwc_crates::serde_json::Value, Error> {
+	mwc_wallet_util::mwc_crates::serde_json::to_value(tx)
+		.map_err(|err| Error::Format(format!("Unable to serialize transaction, {}", err)))
 }
 
 impl SlateV3 {
@@ -128,7 +300,14 @@ impl SlateV3 {
 				if network != *expected_network {
 					return Err(Error::SlateDeser(format!(
 						"slate from {} network, expected {} network",
-						network, expected_network
+						crate::types::bounded_escape_for_display(
+							&network,
+							MAX_NETWORK_ERROR_DISPLAY_LEN,
+						),
+						crate::types::bounded_escape_for_display(
+							expected_network,
+							MAX_NETWORK_ERROR_DISPLAY_LEN,
+						),
 					)));
 				}
 			}
@@ -153,7 +332,7 @@ impl SlateV3 {
 		let mut lock_height = self.lock_height;
 
 		if fix_kernel && kernel_features == 0 {
-			kernel_features = if self.lock_height > self.lock_height {
+			kernel_features = if self.lock_height > 0 {
 				2
 			}
 			// NRD is not expect to be here, that is why it can be lock height or plain
@@ -183,6 +362,7 @@ impl SlateV3 {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(crate = "serde")]
 pub struct VersionCompatInfoV3 {
 	/// The current version of the slate format
 	pub version: u16,
@@ -193,6 +373,7 @@ pub struct VersionCompatInfoV3 {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(crate = "serde")]
 pub struct ParticipantDataV3 {
 	/// Id of participant in the transaction. (For now, 0=sender, 1=rec)
 	#[serde(with = "secp_ser::string_or_u64")]
@@ -204,16 +385,17 @@ pub struct ParticipantDataV3 {
 	#[serde(with = "secp_ser::pubkey_serde")]
 	pub public_nonce: PublicKey,
 	/// Public partial signature
-	#[serde(with = "secp_ser::option_sig_serde")]
-	pub part_sig: Option<Signature>,
+	#[serde(default, with = "option_aggsig_serde")]
+	pub part_sig: Option<AggSigSignature>,
 	/// A message for other participants
 	pub message: Option<String>,
 	/// Signature, created with private key corresponding to 'public_blind_excess'
-	#[serde(with = "secp_ser::option_sig_serde")]
-	pub message_sig: Option<Signature>,
+	#[serde(default, with = "option_aggsig_serde")]
+	pub message_sig: Option<AggSigSignature>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(crate = "serde")]
 pub struct PaymentInfoV3 {
 	#[serde(serialize_with = "ProvableAddress::serialize_as_string")]
 	pub sender_address: ProvableAddress,
@@ -224,6 +406,7 @@ pub struct PaymentInfoV3 {
 
 /// A transaction
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(crate = "serde")]
 pub struct TransactionV3 {
 	/// The kernel "offset" k2
 	/// excess is k1G after splitting the key k = k1 + k2
@@ -238,6 +421,7 @@ pub struct TransactionV3 {
 
 /// TransactionBody is a common abstraction for transaction and block
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(crate = "serde")]
 pub struct TransactionBodyV3 {
 	/// List of inputs spent by the transaction.
 	pub inputs: Vec<InputV3>,
@@ -247,6 +431,7 @@ pub struct TransactionBodyV3 {
 	pub kernels: Vec<TxKernelV3>,
 }
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(crate = "serde")]
 pub struct InputV3 {
 	/// The features of the output being spent.
 	/// We will check maturity for coinbase output.
@@ -260,6 +445,7 @@ pub struct InputV3 {
 }
 
 #[derive(Debug, Copy, Clone, Serialize, Deserialize)]
+#[serde(crate = "serde")]
 pub struct OutputV3 {
 	/// Options for an output's structure or use
 	pub features: OutputFeatures,
@@ -271,13 +457,14 @@ pub struct OutputV3 {
 	pub commit: Commitment,
 	/// A proof that the commitment is in the right range
 	#[serde(
-		serialize_with = "secp_ser::as_hex",
+		serialize_with = "secp_ser::rangeproof_as_hex",
 		deserialize_with = "secp_ser::rangeproof_from_hex"
 	)]
 	pub proof: RangeProof,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(crate = "serde")]
 pub struct TxKernelV3 {
 	/// Options for a kernel's structure or use
 	pub features: CompatKernelFeatures,
@@ -291,26 +478,12 @@ pub struct TxKernelV3 {
 	/// Remainder of the sum of all transaction commitments. If the transaction
 	/// is well formed, amounts components should sum to zero and the excess
 	/// is hence a valid public key.
-	#[serde(
-		serialize_with = "secp_ser::as_hex",
-		deserialize_with = "secp_ser::commitment_from_hex"
-	)]
+	#[serde(with = "kernel_excess_serde")]
 	pub excess: Commitment,
 	/// The signature proving the excess is a valid public key, which signs
 	/// the transaction fee.
-	#[serde(with = "secp_ser::sig_serde")]
-	pub excess_sig: secp::Signature,
-}
-
-/// A mining node requests new coinbase via the foreign api every time a new candidate block is built.
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct CoinbaseV3 {
-	/// Output
-	pub output: OutputV3,
-	/// Kernel
-	pub kernel: TxKernelV3,
-	/// Key Id
-	pub key_id: Option<Identifier>,
+	#[serde(with = "kernel_sig_serde")]
+	pub excess_sig: secp::AggSigSignature,
 }
 
 // V2 to V3 For Slate
@@ -484,8 +657,20 @@ impl TryFrom<&SlateV3> for SlateV2 {
 			compact_slate,
 			kernel_features,
 		} = slate;
+		if ttl_cutoff_height.is_some() {
+			return Err(Error::SlateInvalidDowngrade(
+				"Slate V3 to V2 conversion error. V2 doesn't support TTL cutoff height".to_string(),
+			));
+		}
+		if payment_proof.is_some() {
+			return Err(Error::SlateInvalidDowngrade(
+				"Slate V3 to V2 conversion error. V2 doesn't support payment proofs".to_string(),
+			));
+		}
 		if compact_slate.unwrap_or(false) {
-			panic!("Slate V3 to V2 conversion error. V2 doesn't support compact model");
+			return Err(Error::SlateInvalidDowngrade(
+				"Slate V3 to V2 conversion error. V2 doesn't support compact model".to_string(),
+			));
 		}
 		if !(*kernel_features == 0 || *kernel_features == 2) {
 			return Err(Error::SlateInvalidDowngrade(format!(
@@ -515,7 +700,7 @@ impl TryFrom<&SlateV3> for SlateV2 {
 			None => {
 				return Err(Error::SlateInvalidDowngrade(
 					"Full transaction info required".to_owned(),
-				))
+				));
 			}
 		};
 		Ok(SlateV2 {
@@ -638,5 +823,166 @@ impl From<&TxKernelV3> for TxKernelV2 {
 			excess: kernel.excess,
 			excess_sig: kernel.excess_sig,
 		}
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use mwc_wallet_util::mwc_crates::serde_json;
+
+	#[derive(Serialize, Deserialize)]
+	#[serde(crate = "serde")]
+	struct OptionalSignature {
+		#[serde(with = "option_aggsig_serde")]
+		sig: Option<AggSigSignature>,
+	}
+
+	#[test]
+	fn legacy_compact_signature_round_trips_unchanged() -> Result<(), Box<dyn std::error::Error>> {
+		let legacy = concat!(
+			r#"{"sig":"86180705ccdc4fed4c6c1010379b48062d0342ff451c74886e3dcf64d719c77b"#,
+			r#"829ff75c6cab39dc8f2e082852add9b10232cc8859b5a32d46ae543e1ce71d9d"}"#,
+		);
+		let parsed: OptionalSignature = serde_json::from_str(legacy)?;
+		let Some(_) = parsed.sig else {
+			return Err("legacy signature decoded as absent".into());
+		};
+		let current = serde_json::to_string(&parsed)?;
+		assert_eq!(current, legacy);
+		let reparsed: OptionalSignature = serde_json::from_str(&current)?;
+		assert_eq!(reparsed.sig, parsed.sig);
+		Ok(())
+	}
+
+	#[test]
+	fn transaction_json_preserves_legacy_signature_encoding() {
+		use mwc_wallet_util::mwc_core::core::{FeeFields, KernelFeatures, TxKernel};
+
+		// Pin the submission format independently of core's serde implementation.
+		let legacy_signature = concat!(
+			"86180705ccdc4fed4c6c1010379b48062d0342ff451c74886e3dcf64d719c77b",
+			"829ff75c6cab39dc8f2e082852add9b10232cc8859b5a32d46ae543e1ce71d9d",
+		);
+		let secp = secp::Secp256k1::with_caps(secp::ContextFlag::Commit).unwrap();
+		let kernel = TxKernel {
+			features: KernelFeatures::Plain {
+				fee: FeeFields::new(42).unwrap(),
+			},
+			excess: secp.commit_value(1).unwrap(),
+			excess_sig: AggSigSignature::from_compact(&secp, &from_hex(legacy_signature).unwrap())
+				.unwrap(),
+		};
+		let tx = Transaction::empty().replace_kernel(kernel);
+
+		let value = transaction_to_legacy_json(&tx).unwrap();
+		assert_eq!(value["body"]["kernels"][0]["excess_sig"], legacy_signature);
+		let decoded: Transaction = serde_json::from_value(value).unwrap();
+		assert_eq!(decoded.kernels()[0].excess_sig, kernel.excess_sig);
+	}
+
+	#[test]
+	fn malformed_optional_signatures_are_rejected() {
+		let short = format!(r#"{{"sig":"{}"}}"#, "01".repeat(63));
+		let invalid = format!(r#"{{"sig":"{}"}}"#, "ff".repeat(64));
+
+		assert!(serde_json::from_str::<OptionalSignature>(&short).is_err());
+		assert!(serde_json::from_str::<OptionalSignature>(&invalid).is_err());
+	}
+
+	#[test]
+	fn blank_kernel_uses_legacy_zero_hex_fields() -> Result<(), Box<dyn std::error::Error>> {
+		let kernel = TxKernelV3 {
+			features: CompatKernelFeatures::Plain,
+			fee: 0,
+			lock_height: 0,
+			excess: blank_commitment(),
+			excess_sig: AggSigSignature::blank(),
+		};
+
+		let value = serde_json::to_value(&kernel)?;
+		assert_eq!(
+			value["excess"],
+			serde_json::Value::String("00".repeat(secp::constants::PEDERSEN_COMMITMENT_SIZE))
+		);
+		assert_eq!(
+			value["excess_sig"],
+			serde_json::Value::String("00".repeat(64))
+		);
+
+		let decoded: TxKernelV3 = serde_json::from_value(value)?;
+		assert!(commitment_is_blank(&decoded.excess));
+		assert!(sig_is_blank(&decoded.excess_sig));
+		Ok(())
+	}
+
+	#[test]
+	fn output_proof_with_oversized_length_fails_deserialization() {
+		// RangeProof's constructor prevents invalid in-memory lengths. Check
+		// that oversized peer-supplied proofs are rejected at the JSON boundary.
+		let secp = secp::Secp256k1::with_caps(secp::ContextFlag::Commit).unwrap();
+		let output = OutputV3 {
+			features: OutputFeatures::Plain,
+			commit: secp.commit_value(1).unwrap(),
+			proof: RangeProof::zero(),
+		};
+		let mut value = serde_json::to_value(&output).unwrap();
+		assert!(serde_json::from_value::<OutputV3>(value.clone()).is_ok());
+		value["proof"] =
+			serde_json::Value::String("00".repeat(secp::constants::MAX_PROOF_SIZE + 1));
+		let error = serde_json::from_value::<OutputV3>(value).unwrap_err();
+		assert!(error.to_string().contains("at most MAX_PROOF_SIZE bytes"));
+	}
+
+	#[test]
+	fn output_proof_round_trips_with_valid_length() -> Result<(), Box<dyn std::error::Error>> {
+		// commitment_from_hex validates commitments, so the zeroed
+		// blank_commitment() cannot be used for the round trip.
+		let ctx = secp::Secp256k1::with_caps(secp::ContextFlag::Commit)
+			.map_err(|e| format!("Unable to create secp context, {}", e))?;
+		let blind = secp::key::SecretKey::from_slice(&ctx, &[1u8; 32])
+			.map_err(|e| format!("Invalid secret key, {}", e))?;
+		let output = OutputV3 {
+			features: OutputFeatures::Plain,
+			commit: ctx
+				.commit(0u64, blind)
+				.map_err(|e| format!("Unable to build commitment, {}", e))?,
+			proof: RangeProof::from_bytes(&[7u8; secp::constants::MAX_PROOF_SIZE])
+				.map_err(|e| format!("Invalid range proof, {}", e))?,
+		};
+		let json = serde_json::to_string(&output)?;
+		let decoded: OutputV3 = serde_json::from_str(&json)?;
+		assert_eq!(decoded.proof.bytes().unwrap(), output.proof.bytes().unwrap());
+		Ok(())
+	}
+
+	fn v2_compatible_slate() -> SlateV3 {
+		SlateV3::from(&crate::slate::SlateCtx {
+			slate: Slate::blank(2, false).unwrap(),
+			network_name: None,
+		})
+	}
+
+	#[test]
+	fn v2_downgrade_rejects_v3_only_fields() {
+		let mut slate = v2_compatible_slate();
+		assert!(SlateV2::try_from(&slate).is_ok());
+
+		slate.ttl_cutoff_height = Some(42);
+		assert!(matches!(
+			SlateV2::try_from(&slate),
+			Err(Error::SlateInvalidDowngrade(_))
+		));
+
+		slate.ttl_cutoff_height = None;
+		slate.payment_proof = Some(PaymentInfoV3 {
+			sender_address: ProvableAddress::blank(),
+			receiver_address: ProvableAddress::blank(),
+			receiver_signature: None,
+		});
+		assert!(matches!(
+			SlateV2::try_from(&slate),
+			Err(Error::SlateInvalidDowngrade(_))
+		));
 	}
 }

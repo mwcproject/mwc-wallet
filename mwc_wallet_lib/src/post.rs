@@ -13,13 +13,15 @@
 // limitations under the License.
 
 use crate::wallet_lock;
-use mwc_wallet_libwallet::NodeClient;
+use mwc_wallet_libwallet::owner;
 use mwc_wallet_util::mwc_core::core::Transaction;
 use mwc_wallet_util::mwc_core::ser;
-use mwc_wallet_util::mwc_core::ser::DeserializationMode;
+use mwc_wallet_util::mwc_crates::dirs;
 use mwc_wallet_util::mwc_util::from_hex;
 use std::fs::File;
 use std::io::Read;
+
+const STORED_TX_PROTOCOL_VERSION: ser::ProtocolVersion = ser::ProtocolVersion(3);
 
 pub fn post(context_id: u32, input_path: String, fluff: Option<bool>) -> Result<(), String> {
 	let wallet = crate::mwc_wallet_calls::get_wallet_instance(context_id)?;
@@ -52,20 +54,26 @@ pub fn post(context_id: u32, input_path: String, fluff: Option<bool>) -> Result<
 	let tx_bin = from_hex(&txn_file)
 		.map_err(|_s| format!("Unable to parse the content of the file {}", input_path))?;
 
-	let tx: Transaction = ser::deserialize(
-		&mut &tx_bin[..],
+	let mut tx = None;
+	for version in [
+		STORED_TX_PROTOCOL_VERSION,
+		ser::ProtocolVersion(2),
 		ser::ProtocolVersion(1),
-		context_id,
-		DeserializationMode::default(),
-	)
-	.map_err(|e| format!("Unable deserealize transaction from {}, {}", input_path, e))?;
+	] {
+		if let Ok(parsed) =
+			ser::deserialize_strict::<Transaction, _>(&mut &tx_bin[..], version, context_id, true)
+		{
+			tx = Some(parsed);
+			break;
+		}
+	}
+	let tx = tx.ok_or_else(|| format!("Unable deserealize transaction from {}", input_path))?;
 
 	let client = {
 		wallet_lock!(wallet, w);
 		w.w2n_client().clone()
 	};
-	client
-		.post_tx(&tx, fluff.unwrap_or(false))
+	owner::post_tx(context_id, &client, &tx, fluff.unwrap_or(false))
 		.map_err(|e| format!("Unable to post transaction, {}", e))?;
 	Ok(())
 }

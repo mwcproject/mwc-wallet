@@ -16,11 +16,11 @@
 
 /// Serializes an OnionV3Address to and from hex
 pub mod option_ov3_serde {
-	use serde::de::Error;
-	use serde::{Deserialize, Deserializer, Serializer};
+	use mwc_wallet_util::mwc_crates::serde::de::Error;
+	use mwc_wallet_util::mwc_crates::serde::{Deserialize, Deserializer, Serializer};
 	use std::convert::TryFrom;
 
-	use crate::util::{OnionV3Address, OnionV3AddressError};
+	use mwc_wallet_util::mwc_util::{OnionV3Address, OnionV3Error};
 
 	///
 	pub fn serialize<S>(addr: &Option<OnionV3Address>, serializer: S) -> Result<S::Ok, S::Error>
@@ -40,7 +40,7 @@ pub mod option_ov3_serde {
 	{
 		Option::<String>::deserialize(deserializer).and_then(|res| match res {
 			Some(s) => OnionV3Address::try_from(s.as_str())
-				.map_err(|err: OnionV3AddressError| Error::custom(format!("{:?}", err)))
+				.map_err(|err: OnionV3Error| Error::custom(format!("{:?}", err)))
 				.and_then(|a| Ok(Some(a))),
 			None => Ok(None),
 		})
@@ -49,11 +49,11 @@ pub mod option_ov3_serde {
 
 /// Serializes an OnionV3Address to and from hex
 pub mod ov3_serde {
-	use serde::de::Error;
-	use serde::{Deserialize, Deserializer, Serializer};
+	use mwc_wallet_util::mwc_crates::serde::de::Error;
+	use mwc_wallet_util::mwc_crates::serde::{Deserialize, Deserializer, Serializer};
 	use std::convert::TryFrom;
 
-	use crate::util::{OnionV3Address, OnionV3AddressError};
+	use mwc_wallet_util::mwc_util::{OnionV3Address, OnionV3Error};
 
 	///
 	pub fn serialize<S>(addr: &OnionV3Address, serializer: S) -> Result<S::Ok, S::Error>
@@ -70,7 +70,7 @@ pub mod ov3_serde {
 	{
 		String::deserialize(deserializer).and_then(|s| {
 			OnionV3Address::try_from(s.as_str())
-				.map_err(|err: OnionV3AddressError| Error::custom(format!("{:?}", err)))
+				.map_err(|err: OnionV3Error| Error::custom(format!("{:?}", err)))
 				.and_then(Ok)
 		})
 	}
@@ -78,12 +78,13 @@ pub mod ov3_serde {
 
 /// Serializes an ed25519 PublicKey to and from hex
 pub mod dalek_pubkey_serde {
-	use crate::mwc_util::{from_hex, ToHex};
-	use ed25519_dalek::PublicKey as DalekPublicKey;
-	use serde::{Deserialize, Deserializer, Serializer};
+	use mwc_wallet_util::mwc_crates::ed25519_dalek;
+	use mwc_wallet_util::mwc_crates::serde::{Deserialize, Deserializer, Serializer};
+	use mwc_wallet_util::mwc_util::{from_hex, ToHex};
+	use std::convert::TryInto;
 
 	///
-	pub fn serialize<S>(key: &DalekPublicKey, serializer: S) -> Result<S::Ok, S::Error>
+	pub fn serialize<S>(key: &ed25519_dalek::VerifyingKey, serializer: S) -> Result<S::Ok, S::Error>
 	where
 		S: Serializer,
 	{
@@ -91,23 +92,31 @@ pub mod dalek_pubkey_serde {
 	}
 
 	///
-	pub fn deserialize<'de, D>(deserializer: D) -> Result<DalekPublicKey, D::Error>
+	pub fn deserialize<'de, D>(deserializer: D) -> Result<ed25519_dalek::VerifyingKey, D::Error>
 	where
 		D: Deserializer<'de>,
 	{
-		use serde::de::Error;
+		use mwc_wallet_util::mwc_crates::serde::de::Error;
 		String::deserialize(deserializer)
 			.and_then(|string| {
 				from_hex(&string).map_err(|err| {
 					Error::custom(format!(
-						"DalekPublicKey, Unable to parse HEX {}, {}",
+						"ed25519_dalek::PublicKey, Unable to parse HEX {}, {}",
 						string, err
 					))
 				})
 			})
 			.and_then(|bytes: Vec<u8>| {
-				DalekPublicKey::from_bytes(&bytes).map_err(|err| {
-					Error::custom(format!("Unable to build DalekPublicKey, {}", err))
+				let blen = bytes.len();
+				let bytes: [u8; 32] = bytes.try_into().map_err(|_| {
+					Error::custom(format!(
+						"Unable to build ed25519_dalek::PublicKey, wrong length {}",
+						blen
+					))
+				})?;
+
+				ed25519_dalek::VerifyingKey::from_bytes(&bytes).map_err(|err| {
+					Error::custom(format!("Unable to build ed25519_dalek::PublicKey, {}", err))
 				})
 			})
 	}
@@ -115,14 +124,18 @@ pub mod dalek_pubkey_serde {
 
 /// Serializes an Option<ed25519_dalek::PublicKey> to and from hex
 pub mod option_dalek_pubkey_serde {
-	use ed25519_dalek::PublicKey as DalekPublicKey;
-	use serde::de::Error;
-	use serde::{Deserialize, Deserializer, Serializer};
+	use mwc_wallet_util::mwc_crates::ed25519_dalek;
+	use mwc_wallet_util::mwc_crates::serde::de::Error;
+	use mwc_wallet_util::mwc_crates::serde::{Deserialize, Deserializer, Serializer};
+	use std::convert::TryInto;
 
-	use crate::mwc_util::{from_hex, ToHex};
+	use mwc_wallet_util::mwc_util::{from_hex, ToHex};
 
 	///
-	pub fn serialize<S>(key: &Option<DalekPublicKey>, serializer: S) -> Result<S::Ok, S::Error>
+	pub fn serialize<S>(
+		key: &Option<ed25519_dalek::VerifyingKey>,
+		serializer: S,
+	) -> Result<S::Ok, S::Error>
 	where
 		S: Serializer,
 	{
@@ -133,7 +146,9 @@ pub mod option_dalek_pubkey_serde {
 	}
 
 	///
-	pub fn deserialize<'de, D>(deserializer: D) -> Result<Option<DalekPublicKey>, D::Error>
+	pub fn deserialize<'de, D>(
+		deserializer: D,
+	) -> Result<Option<ed25519_dalek::VerifyingKey>, D::Error>
 	where
 		D: Deserializer<'de>,
 	{
@@ -141,16 +156,26 @@ pub mod option_dalek_pubkey_serde {
 			Some(string) => from_hex(&string)
 				.map_err(|err| {
 					Error::custom(format!(
-						"DalekPublicKey, Unable to parse HEX {}, {}",
+						"ed25519_dalek::PublicKey, Unable to parse HEX {}, {}",
 						string, err
 					))
 				})
 				.and_then(|bytes: Vec<u8>| {
-					let mut b = [0u8; 32];
-					b.copy_from_slice(&bytes[0..32]);
-					DalekPublicKey::from_bytes(&b).map(Some).map_err(|err| {
-						Error::custom(format!("Unable to build DalekPublicKey, {}", err))
-					})
+					let blen = bytes.len();
+					let b: [u8; 32] = bytes.try_into().map_err(|_| {
+						Error::custom(format!(
+							"Unable to build ed25519_dalek::PublicKey, wrong length {}",
+							blen
+						))
+					})?;
+					ed25519_dalek::VerifyingKey::from_bytes(&b)
+						.map(Some)
+						.map_err(|err| {
+							Error::custom(format!(
+								"Unable to build ed25519_dalek::PublicKey, {}",
+								err
+							))
+						})
 				}),
 			None => Ok(None),
 		})
@@ -159,15 +184,15 @@ pub mod option_dalek_pubkey_serde {
 
 /// Serializes an ed25519_dalek::Signature to and from hex
 pub mod dalek_sig_serde {
-	use ed25519_dalek::Signature as DalekSignature;
-	use serde::de::Error;
-	use serde::{Deserialize, Deserializer, Serializer};
-	use std::convert::TryFrom;
+	use mwc_wallet_util::mwc_crates::ed25519_dalek;
+	use mwc_wallet_util::mwc_crates::serde::de::Error;
+	use mwc_wallet_util::mwc_crates::serde::{Deserialize, Deserializer, Serializer};
+	use std::convert::TryInto;
 
-	use crate::mwc_util::{from_hex, ToHex};
+	use mwc_wallet_util::mwc_util::{from_hex, ToHex};
 
 	///
-	pub fn serialize<S>(sig: &DalekSignature, serializer: S) -> Result<S::Ok, S::Error>
+	pub fn serialize<S>(sig: &ed25519_dalek::Signature, serializer: S) -> Result<S::Ok, S::Error>
 	where
 		S: Serializer,
 	{
@@ -175,31 +200,39 @@ pub mod dalek_sig_serde {
 	}
 
 	///
-	pub fn deserialize<'de, D>(deserializer: D) -> Result<DalekSignature, D::Error>
+	pub fn deserialize<'de, D>(deserializer: D) -> Result<ed25519_dalek::Signature, D::Error>
 	where
 		D: Deserializer<'de>,
 	{
 		String::deserialize(deserializer)
 			.and_then(|string| from_hex(&string).map_err(|err| Error::custom(err.to_string())))
 			.and_then(|bytes: Vec<u8>| {
-				let mut b = [0u8; 64];
-				b.copy_from_slice(&bytes[0..64]);
-				DalekSignature::try_from(b).map_err(|err| Error::custom(err.to_string()))
+				let blen = bytes.len();
+				let b: [u8; 64] = bytes.try_into().map_err(|_| {
+					Error::custom(format!(
+						"Unable to build ed25519_dalek::Signature, wrong length {}",
+						blen
+					))
+				})?;
+				Ok(ed25519_dalek::Signature::from_bytes(&b))
 			})
 	}
 }
 
 /// Serializes an Option<ed25519_dalek::PublicKey> to and from hex
 pub mod option_dalek_sig_serde {
-	use ed25519_dalek::Signature as DalekSignature;
-	use serde::de::Error;
-	use serde::{Deserialize, Deserializer, Serializer};
-	use std::convert::TryFrom;
+	use mwc_wallet_util::mwc_crates::ed25519_dalek;
+	use mwc_wallet_util::mwc_crates::serde::de::Error;
+	use mwc_wallet_util::mwc_crates::serde::{Deserialize, Deserializer, Serializer};
+	use std::convert::TryInto;
 
-	use crate::mwc_util::{from_hex, ToHex};
+	use mwc_wallet_util::mwc_util::{from_hex, ToHex};
 
 	///
-	pub fn serialize<S>(sig: &Option<DalekSignature>, serializer: S) -> Result<S::Ok, S::Error>
+	pub fn serialize<S>(
+		sig: &Option<ed25519_dalek::Signature>,
+		serializer: S,
+	) -> Result<S::Ok, S::Error>
 	where
 		S: Serializer,
 	{
@@ -210,7 +243,9 @@ pub mod option_dalek_sig_serde {
 	}
 
 	///
-	pub fn deserialize<'de, D>(deserializer: D) -> Result<Option<DalekSignature>, D::Error>
+	pub fn deserialize<'de, D>(
+		deserializer: D,
+	) -> Result<Option<ed25519_dalek::Signature>, D::Error>
 	where
 		D: Deserializer<'de>,
 	{
@@ -218,16 +253,19 @@ pub mod option_dalek_sig_serde {
 			Some(string) => from_hex(&string)
 				.map_err(|err| {
 					Error::custom(format!(
-						"DalekPublicKey, Unable to parse HEX {}, {}",
+						"ed25519_dalek::PublicKey, Unable to parse HEX {}, {}",
 						string, err
 					))
 				})
 				.and_then(|bytes: Vec<u8>| {
-					let mut b = [0u8; 64];
-					b.copy_from_slice(&bytes[0..64]);
-					DalekSignature::try_from(b).map(Some).map_err(|err| {
-						Error::custom(format!("Unable to build DalekPublicKey, {}", err))
-					})
+					let blen = bytes.len();
+					let b: [u8; 64] = bytes.try_into().map_err(|_| {
+						Error::custom(format!(
+							"Unable to build ed25519_dalek::Signature, wrong length {}",
+							blen
+						))
+					})?;
+					Ok(Some(ed25519_dalek::Signature::from_bytes(&b)))
 				}),
 			None => Ok(None),
 		})
@@ -238,45 +276,53 @@ pub mod option_dalek_sig_serde {
 #[cfg(test)]
 mod test {
 	use super::*;
-	use rand::rngs::mock::StepRng;
-
-	use crate::mwc_util::secp;
-	use ed25519_dalek::Keypair;
-	use ed25519_dalek::PublicKey as DalekPublicKey;
-	use ed25519_dalek::SecretKey as DalekSecretKey;
-	use ed25519_dalek::Signature as DalekSignature;
-	use serde::Deserialize;
-
-	use ed25519_dalek::Signer;
-	use mwc_wallet_util::mwc_util::secp::{ContextFlag, Secp256k1};
-	use serde_json;
+	use mwc_wallet_util::mwc_crates::ed25519_dalek::{self, Signer};
+	use mwc_wallet_util::mwc_crates::secp::{self, ContextFlag, Secp256k1};
+	use mwc_wallet_util::mwc_crates::serde::{self, Deserialize, Serialize};
+	use mwc_wallet_util::mwc_crates::serde_json;
 
 	#[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
+	#[serde(crate = "serde")]
 	struct SerTest {
 		#[serde(with = "dalek_pubkey_serde")]
-		pub pub_key: DalekPublicKey,
+		pub pub_key: ed25519_dalek::VerifyingKey,
 		#[serde(with = "option_dalek_pubkey_serde")]
-		pub pub_key_opt: Option<DalekPublicKey>,
+		pub pub_key_opt: Option<ed25519_dalek::VerifyingKey>,
 		#[serde(with = "dalek_sig_serde")]
-		pub sig: DalekSignature,
+		pub sig: ed25519_dalek::Signature,
 		#[serde(with = "option_dalek_sig_serde")]
-		pub sig_opt: Option<DalekSignature>,
+		pub sig_opt: Option<ed25519_dalek::Signature>,
+	}
+
+	#[derive(Deserialize)]
+	#[serde(crate = "serde")]
+	struct OptionalPubkey {
+		#[serde(with = "option_dalek_pubkey_serde")]
+		pub_key: Option<ed25519_dalek::VerifyingKey>,
+	}
+
+	#[derive(Deserialize)]
+	#[serde(crate = "serde")]
+	struct Signature {
+		#[serde(with = "dalek_sig_serde")]
+		sig: ed25519_dalek::Signature,
+	}
+
+	#[derive(Deserialize)]
+	#[serde(crate = "serde")]
+	struct OptionalSignature {
+		#[serde(with = "option_dalek_sig_serde")]
+		sig: Option<ed25519_dalek::Signature>,
 	}
 
 	impl SerTest {
 		pub fn random() -> SerTest {
-			let mut test_rng = StepRng::new(1234567890u64, 1);
-			let secp = Secp256k1::with_caps(ContextFlag::None);
-			let sec_key = secp::key::SecretKey::new(&secp, &mut test_rng);
-			let d_skey = DalekSecretKey::from_bytes(&sec_key.0).unwrap();
-			let d_pub_key: DalekPublicKey = (&d_skey).into();
+			let secp = Secp256k1::with_caps(ContextFlag::None).unwrap();
+			let sec_key = secp::key::SecretKey::from_slice(&secp, &[1u8; 32]).unwrap();
+			let d_skey = ed25519_dalek::SigningKey::from_bytes(&sec_key.0);
+			let d_pub_key: ed25519_dalek::VerifyingKey = d_skey.verifying_key();
 
-			let keypair = Keypair {
-				public: d_pub_key,
-				secret: d_skey,
-			};
-
-			let d_sig = keypair.sign("test sig".as_bytes());
+			let d_sig = d_skey.sign("test sig".as_bytes());
 			println!("D sig: {:?}", d_sig);
 
 			SerTest {
@@ -299,6 +345,26 @@ mod test {
 			println!("After Serialization: {:?}", deserialized);
 			println!();
 			assert_eq!(s, deserialized);
+		}
+	}
+
+	#[test]
+	fn malformed_dalek_lengths_are_rejected() {
+		for len in [31, 33] {
+			let json = format!(r#"{{"pub_key":"{}"}}"#, "00".repeat(len));
+			assert!(serde_json::from_str::<OptionalPubkey>(&json)
+				.map(|value| value.pub_key)
+				.is_err());
+		}
+
+		for len in [63, 65] {
+			let json = format!(r#"{{"sig":"{}"}}"#, "00".repeat(len));
+			assert!(serde_json::from_str::<Signature>(&json)
+				.map(|value| value.sig)
+				.is_err());
+			assert!(serde_json::from_str::<OptionalSignature>(&json)
+				.map(|value| value.sig)
+				.is_err());
 		}
 	}
 }

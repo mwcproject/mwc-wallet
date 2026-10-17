@@ -13,9 +13,10 @@
 // limitations under the License.
 
 use crate::wallet_lock;
-use ed25519_dalek::PublicKey as DalekPublicKey;
 use mwc_wallet_libwallet::proof::proofaddress::ProvableAddress;
 use mwc_wallet_libwallet::{foreign, SlatePurpose, SlateVersion, VersionedSlate};
+use mwc_wallet_util::mwc_crates::ed25519_dalek;
+use mwc_wallet_util::mwc_crates::secp::{ContextFlag, Secp256k1};
 
 pub fn encode_slatepack(
 	context_id: u32,
@@ -25,15 +26,17 @@ pub fn encode_slatepack(
 	address_index: Option<u32>,
 ) -> Result<String, String> {
 	let wallet = crate::mwc_wallet_calls::get_wallet_instance(context_id)?;
+	let secp = Secp256k1::with_caps(ContextFlag::Commit)
+		.map_err(|e| format!("Unable to initialize secp context, {}", e))?;
 
 	// Expected Slate in Json (plain) format
 	let slate = slate
 		.into_slate_plain(context_id, false)
 		.map_err(|e| format!("Expected to get slate in Json format, {}", e))?;
 
-	let recipient: Option<DalekPublicKey> = match recipient {
+	let recipient: Option<ed25519_dalek::VerifyingKey> = match recipient {
 		Some(recipient) => {
-			let recipient = ProvableAddress::from_str(context_id, &recipient)
+			let recipient = ProvableAddress::from_str(&secp, context_id, &recipient)
 				.map_err(|e| format!("Invalid recipient address, {}", e))?;
 			let recipient = recipient
 				.tor_public_key()
@@ -46,12 +49,14 @@ pub fn encode_slatepack(
 	wallet_lock!(wallet, w);
 	let res_slate = foreign::encrypt_slate(
 		&mut **w,
+		&secp,
 		None,
 		&slate,
 		Some(SlateVersion::SP),
 		content,
 		recipient,
 		address_index,
+		#[cfg(feature = "test-support")]
 		false,
 	)
 	.map_err(|e| format!("Slate encryption error, {}", e))?;

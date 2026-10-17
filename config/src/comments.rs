@@ -14,6 +14,8 @@
 // limitations under the License.
 
 //! Comments for configuration + injection into output .toml
+use crate::types::{ConfigError, GlobalWalletConfig, GlobalWalletConfigMembers};
+use mwc_wallet_util::mwc_crates::toml;
 use std::collections::HashMap;
 
 /// maps entries to Comments that should precede them
@@ -51,20 +53,18 @@ fn comments() -> HashMap<String, String> {
 #port for wallet listener
 #api_listen_port = 13415
 
+#Additional source IP allowed to call the mining-only build_coinbase RPC.
+#Loopback IPv4 and IPv6 addresses are always allowed. Built-in Tor connections are never allowed.
+#IPv4 and IPv6 link-local addresses are rejected because their interface scope is ambiguous.
+#A local reverse proxy is treated as a local client and must enforce its own equivalent restriction.
+#mining_node_ip = \"127.0.0.1\"
+
 # Minimum acceptable fee per unit of transaction weight. Please note that fee can't be lower than
 # network has, otherwise your transactions will be rejected.
 # If you are running fresh wallet, there is no needs to adjust this value.
 # tx_fee_base = 1000
 "
 			.to_string(),
-	);
-
-	retval.insert(
-		"libp2p_listen_port".to_string(),
-		"
-#socks port for wallet libp2p listener. Note, libp2p activated with TOR listener
-"
-		.to_string(),
 	);
 
 	retval.insert(
@@ -79,7 +79,12 @@ fn comments() -> HashMap<String, String> {
 		"api_secret_path".to_string(),
 		"
 #path of the secret token used by the API to authenticate the calls
-#comment it to disable basic auth
+#comment it to disable basic auth by explicit user choice
+#WARNING: without this secret, every client that can reach the Owner API,
+#including a browser origin able to reach loopback, can invoke state-changing
+#Owner RPC methods. Only disable it when your deployment provides the access
+#controls you consider appropriate (for example a trusted proxy, firewall,
+#process isolation, or an otherwise restricted environment).
 "
 		.to_string(),
 	);
@@ -251,25 +256,13 @@ fn comments() -> HashMap<String, String> {
 
 	retval.insert(
 		"[tor]_END".to_string(),
-		"#Enable tor for http method listening. Default is true
+		format!(
+			"#Enable tor for http method listening. Default is true
 #tor_enabled = true
 
-#Use external Tor daemon instead of embedded Atri client.
-#Note, mwc-wallet does expect that external Tor listening address will match the slatepack address.
-#tor_external = false
-
-#External Tor wallet listening address
-#Note, mwc-wallet does expect that external Tor listening address will match the slatepack address.
-#onion_address =
-
-# Webtunnel bridge for internal tor (Arti client). Webtunnel will be used for Tor connection in the
-# regions/networks where Tor usage is blocked by firewall.
-# If you are using such network, you might consider install your own for extra privacy. Otherwise
-# public webtunnels will be used.
-# https://community.torproject.org/relay/setup/webtunnel/source/
-# webtunnel_bridge =
-"
-		.to_string(),
+{}",
+			mwc_wallet_util::mwc_config::TOR_CONFIG_COMMENTS
+		),
 	);
 
 	retval.insert(
@@ -310,10 +303,11 @@ fn comments() -> HashMap<String, String> {
 }
 
 fn get_key(line: &str) -> String {
-	if line.contains('[') && line.contains(']') {
+	let line = line.trim();
+	if line.starts_with('[') && line.ends_with(']') {
 		line.to_owned()
-	} else if line.contains('=') {
-		line.split('=').collect::<Vec<&str>>()[0].trim().to_owned()
+	} else if let Some((key, _)) = line.split_once('=') {
+		key.trim().to_owned()
 	} else {
 		"NOT_FOUND".to_owned()
 	}
@@ -357,11 +351,36 @@ pub fn insert_comments(orig: String) -> String {
 	ret_val
 }
 
+/// Merge the comments of `old_config` into `new_config`.
+///
+/// The merged document is validated before it is returned: it must parse as
+/// a GlobalWalletConfigMembers and no user-configured value may be lost or
+/// altered (see migration_preserves_members). On any validation failure an
+/// error is returned so the caller leaves the original config file untouched.
+///
+/// # Limitations (accepted)
+///
+/// The merge is intentionally line-based: `get_key` classifies every
+/// non-comment line as a table header, a `key = value` line or `NOT_FOUND`,
+/// and only recognized key lines are re-emitted. Multiline TOML constructs
+/// (`"""` / `'''` strings, arrays spanning several lines) are not supported:
+/// their continuation lines are silently dropped or misread as keys, which
+/// can alter such a value. The validation does not detect this for a newly
+/// introduced section either, because an absent optional section (`None`) is
+/// allowed to become populated (see migration_preserves_members).
+///
+/// This is accepted by design: the wallet configuration is a simple document
+/// of single-line `key = value` entries, and we deliberately keep processing
+/// it on a line-by-line basis instead of maintaining a full TOML document
+/// model.
 pub fn migrate_comments(
 	old_config: String,
 	new_config: String,
 	old_version: Option<u32>,
-) -> String {
+) -> Result<String, ConfigError> {
+	// Normalize legacy log level values so the equivalence check below does
+	// not trip over the intentional Warning -> WARN migration.
+	let old_config = GlobalWalletConfig::fix_warning_level(old_config);
 	let comments = comments();
 	// Prohibe the key we are basing on to introduce new comments for [tor.proxy]
 	let prohibited_key = match old_version {
@@ -377,7 +396,7 @@ pub fn migrate_comments(
 		.filter_map(|line| {
 			let line_nospace = line.trim();
 			let is_ascii_control = line_nospace.chars().all(|x| x.is_ascii_control());
-			match line.contains("#") || is_ascii_control {
+			match line.trim_start().starts_with('#') || is_ascii_control {
 				true => {
 					vec_old_conf.push(line.to_owned());
 					None
@@ -406,7 +425,7 @@ pub fn migrate_comments(
 		.filter_map(|line| {
 			let line_nospace = line.trim();
 			let is_ascii_control = line_nospace.chars().all(|x| x.is_ascii_control());
-			match !(line.contains("#") || is_ascii_control) {
+			match !(line.trim_start().starts_with('#') || is_ascii_control) {
 				true => {
 					let key = get_key(line_nospace);
 					match !(key == "NOT_FOUND") {
@@ -422,29 +441,260 @@ pub fn migrate_comments(
 	let mut new_config_str = String::from("");
 	// Merging old comments in the new config (except if the key is contained in the prohibited vec) with all new introduced key comments
 	for (key, key_line) in vec_key_cmt_new {
+		// Linear scan over all old keys, so the merge is O(n*m) in the number
+		// of config keys. Accepted: migration is a one-time job per config
+		// file and the number of keys is small, so maintaining a HashSet
+		// index is not worth the extra code.
 		let old_key_exist = vec_key_old.iter().any(|old_key| *old_key == key);
 		let key_fmt = format!("{}\n", key_line);
 		if old_key_exist {
 			if prohibited_key.contains(&key.as_str()) {
-				// push new config key/comments
+				// push new config comments
 				if let Some(value) = comments.get(&key) {
 					new_config_str.push_str(value);
-					new_config_str.push_str(&key_fmt);
 				}
 			} else {
-				// push old config key/comment
+				// push old config comments
 				if let Some(value) = hm_key_cmt_old.get(&key) {
 					new_config_str.push_str(value);
-					new_config_str.push_str(&key_fmt);
 				}
 			}
 		} else {
-			// old key does not exist, we push new key/comments
+			// old key does not exist, we push new comments when available
 			if let Some(value) = comments.get(&key) {
 				new_config_str.push_str(value);
-				new_config_str.push_str(&key_fmt);
 			}
 		}
+		// Comments are optional metadata. The new configuration key is not.
+		new_config_str.push_str(&key_fmt);
 	}
-	new_config_str
+
+	// Equivalence check, mirroring mwc-node's config migration: the merged
+	// document must parse, and no value the wallet actually uses may be lost
+	// or altered. A migration may legitimately change the file — it adds the
+	// config_file_version stamp, introduces new sections (e.g. tor), and keys
+	// unknown to GlobalWalletConfigMembers (obsolete or foreign keys) are
+	// dropped by deserialization. What must never happen is a user-set value
+	// being silently altered or dropped before the original file is replaced.
+	let old_members: GlobalWalletConfigMembers = toml::from_str(&old_config).map_err(|e| {
+		ConfigError::SerializationError(format!(
+			"Internal error, unable to parse the original config: {}",
+			e
+		))
+	})?;
+	let merged_members: GlobalWalletConfigMembers =
+		toml::from_str(&new_config_str).map_err(|e| {
+			ConfigError::SerializationError(format!(
+				"Internal error, migrated config is not valid TOML: {}",
+				e
+			))
+		})?;
+	if !migration_preserves_members(&old_members, &merged_members) {
+		return Err(ConfigError::InvalidConfig(
+			"Internal error, config migration would lose existing settings".into(),
+		));
+	}
+	Ok(new_config_str)
+}
+
+/// Check that no user-configured value was lost or altered by the migration.
+/// A section that was not set (`None`) may be populated with defaults, but a
+/// configured section must survive unchanged. Keys unknown to
+/// GlobalWalletConfigMembers are not visible here; they are dropped by
+/// deserialization, which is how obsolete keys are retired.
+///
+/// Note that accepting any content for a previously absent (`None`) section
+/// also means that a value garbled by the line-based merge inside a newly
+/// introduced section is not detected here. That limitation is accepted; see
+/// the `migrate_comments` documentation.
+fn migration_preserves_members(
+	old: &GlobalWalletConfigMembers,
+	merged: &GlobalWalletConfigMembers,
+) -> bool {
+	fn preserved<T: PartialEq>(old: &Option<T>, merged: &Option<T>) -> bool {
+		old.is_none() || old == merged
+	}
+	old.wallet == merged.wallet
+		&& preserved(&old.config_file_version, &merged.config_file_version)
+		&& preserved(&old.logging, &merged.logging)
+		&& preserved(&old.tor, &merged.tor)
+		&& preserved(&old.mqs, &merged.mqs)
+}
+
+#[cfg(test)]
+mod tests {
+	use super::{get_key, migrate_comments};
+	use mwc_wallet_util::mwc_crates::toml;
+
+	#[test]
+	fn get_key_distinguishes_table_headers_from_brackets_in_values() {
+		assert_eq!(get_key("[wallet]"), "[wallet]");
+		assert_eq!(get_key("[[wallet.nodes]]"), "[[wallet.nodes]]");
+		assert_eq!(
+			get_key(r#"api_secret_path = ".secrets/[owner]""#),
+			"api_secret_path"
+		);
+		assert_eq!(
+			get_key(r#"api_listen_interface = "[::1]""#),
+			"api_listen_interface"
+		);
+		assert_eq!(get_key(r#"nodes = ["node1", "node2"]"#), "nodes");
+	}
+
+	#[test]
+	fn migration_preserves_assignment_with_brackets_when_formatting_changes() {
+		let old_config =
+			"[wallet]\napi_secret_path='.secrets/[owner]'\ndata_file_dir = \".\"\n".to_owned();
+		let new_config =
+			"[wallet]\napi_secret_path = \".secrets/[owner]\"\ndata_file_dir = \".\"\n".to_owned();
+
+		let migrated =
+			migrate_comments(old_config, new_config, Some(1)).expect("migration must succeed");
+		let parsed: toml::Value =
+			toml::from_str(&migrated).expect("migrated configuration must remain valid TOML");
+
+		assert_eq!(
+			parsed
+				.get("wallet")
+				.and_then(toml::Value::as_table)
+				.and_then(|wallet| wallet.get("api_secret_path"))
+				.and_then(toml::Value::as_str),
+			Some(".secrets/[owner]")
+		);
+	}
+
+	#[test]
+	fn migration_preserves_hash_inside_quoted_value_before_logging() {
+		let old_config = "[wallet]\napi_secret_path = \"secret#file\"\ndata_file_dir = \".\"\n\
+		                  [logging]\nlog_to_stdout = true\nstdout_log_level = \"WARN\"\n\
+		                  log_to_file = true\nfile_log_level = \"Info\"\n\
+		                  log_file_path = \"mwc-wallet.log\"\nlog_file_append = true\n"
+			.to_owned();
+		let new_config = old_config.clone();
+
+		let migrated =
+			migrate_comments(old_config, new_config, None).expect("migration must succeed");
+		let parsed: toml::Value =
+			toml::from_str(&migrated).expect("migrated configuration must remain valid TOML");
+
+		assert_eq!(
+			parsed
+				.get("wallet")
+				.and_then(toml::Value::as_table)
+				.and_then(|wallet| wallet.get("api_secret_path"))
+				.and_then(toml::Value::as_str),
+			Some("secret#file")
+		);
+	}
+
+	#[test]
+	fn migration_keeps_assignment_with_inline_comment() {
+		let old_config = "[wallet]\n\
+		                  api_secret_path = \"old#secret\" # keep this comment\n\
+		                  data_file_dir = \".\"\n"
+			.to_owned();
+		let new_config = "[wallet]\n\
+		                  api_secret_path = \"old#secret\"\n\
+		                  data_file_dir = \".\"\n"
+			.to_owned();
+
+		let migrated =
+			migrate_comments(old_config, new_config, Some(1)).expect("migration must succeed");
+		let parsed: toml::Value =
+			toml::from_str(&migrated).expect("migrated configuration must remain valid TOML");
+
+		assert_eq!(
+			parsed
+				.get("wallet")
+				.and_then(toml::Value::as_table)
+				.and_then(|wallet| wallet.get("api_secret_path"))
+				.and_then(toml::Value::as_str),
+			Some("old#secret")
+		);
+	}
+
+	#[test]
+	fn migration_emits_keys_without_default_comments() {
+		// chain_type and owner_api_include_mqs_listener have no entry in the
+		// comments map; the key lines must still be emitted.
+		let old_config = "[wallet]\n\
+		                  chain_type = \"Mainnet\"\n\
+		                  owner_api_include_mqs_listener = false\n\
+		                  data_file_dir = \".\"\n"
+			.to_owned();
+		let new_config = old_config.clone();
+
+		let migrated =
+			migrate_comments(old_config, new_config, Some(1)).expect("migration must succeed");
+		let parsed: toml::Value =
+			toml::from_str(&migrated).expect("migrated configuration must remain valid TOML");
+		let wallet = parsed
+			.get("wallet")
+			.and_then(toml::Value::as_table)
+			.expect("wallet table must be present");
+
+		assert_eq!(
+			wallet.get("chain_type").and_then(toml::Value::as_str),
+			Some("Mainnet")
+		);
+		assert_eq!(
+			wallet
+				.get("owner_api_include_mqs_listener")
+				.and_then(toml::Value::as_bool),
+			Some(false)
+		);
+	}
+
+	#[test]
+	fn migration_rejects_new_config_that_alters_existing_values() {
+		let old_config =
+			"[wallet]\napi_secret_path = \".secrets/owner\"\ndata_file_dir = \".\"\n".to_owned();
+		let new_config =
+			"[wallet]\napi_secret_path = \".other/path\"\ndata_file_dir = \".\"\n".to_owned();
+
+		assert!(migrate_comments(old_config, new_config, Some(1)).is_err());
+	}
+
+	#[test]
+	fn migration_rejects_new_config_that_drops_existing_keys() {
+		let old_config =
+			"[wallet]\napi_secret_path = \".secrets/owner\"\ndata_file_dir = \".\"\n".to_owned();
+		let new_config = "[wallet]\ndata_file_dir = \".\"\n".to_owned();
+
+		assert!(migrate_comments(old_config, new_config, Some(1)).is_err());
+	}
+
+	#[test]
+	fn migration_allows_introducing_new_sections() {
+		// Migration may populate a section that was absent (None -> Some).
+		let old_config = "[wallet]\ndata_file_dir = \".\"\n".to_owned();
+		let new_config = "[wallet]\ndata_file_dir = \".\"\n\
+		                  [mqs]\nmwcmqs_domain = \"mqs.mwc.mw\"\nmwcmqs_port = 443\n"
+			.to_owned();
+
+		migrate_comments(old_config, new_config, None).expect("migration must succeed");
+	}
+
+	#[test]
+	fn migration_tolerates_keys_unknown_to_the_config_struct() {
+		// Obsolete or foreign keys are dropped by deserialization (same as
+		// mwc-node); they must not block the migration.
+		let old_config = "[wallet]\ndata_file_dir = \".\"\nobsolete_key = 1\n".to_owned();
+		let new_config = "[wallet]\ndata_file_dir = \".\"\n".to_owned();
+
+		migrate_comments(old_config, new_config, Some(1)).expect("migration must succeed");
+	}
+
+	#[test]
+	fn migration_rejects_changes_to_a_configured_optional_section() {
+		// A configured section (Some) must survive the migration unchanged.
+		let old_config = "[wallet]\ndata_file_dir = \".\"\n\
+		                  [mqs]\nmwcmqs_domain = \"mqs.mwc.mw\"\nmwcmqs_port = 443\n"
+			.to_owned();
+		let new_config = "[wallet]\ndata_file_dir = \".\"\n\
+		                  [mqs]\nmwcmqs_domain = \"other.mwc.mw\"\nmwcmqs_port = 443\n"
+			.to_owned();
+
+		assert!(migrate_comments(old_config, new_config, Some(1)).is_err());
+	}
 }

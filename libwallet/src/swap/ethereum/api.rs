@@ -13,28 +13,54 @@
 // limitations under the License.
 
 use super::ethereum::*;
-use super::types::{to_eth_address, EthBuyerContext, EthData, EthSellerContext};
-use super::{client::EthNodeClient, eth_address};
-use crate::mwc_keychain::{Identifier, Keychain, SwitchCommitmentType};
-use crate::mwc_util::{
-	secp::aggsig::export_secnonce_single as generate_nonce, secp::pedersen, to_hex,
+use super::secret_key::SecretKeyGuard;
+use super::types::{
+	to_eth_address, EthBuyerContext, EthData, EthSellerContext, EthTransactionRecovery,
 };
+use super::{
+	client::{EthChainTip, EthNodeClient},
+	eth_address,
+};
+use crate::internal::chain_session::NodeReadSession;
 use crate::swap::fsm::machine::StateMachine;
 use crate::swap::fsm::{buyer_swap, seller_swap};
 use crate::swap::message::SecondaryUpdate;
 use crate::swap::swap;
 use crate::swap::types::{
 	BuyerContext, Context, Currency, RoleContext, SecondaryBuyerContext, SecondarySellerContext,
-	SellerContext, SwapTransactionsConfirmations,
+	SecondaryTransferStatus, SellerContext, SellerInput, SwapTransactionsConfirmations,
 };
 use crate::swap::{Error, SellApi, Swap, SwapApi};
 use crate::{NodeClient, Slate};
-use mwc_wallet_util::mwc_core::core::Committed;
-use mwc_wallet_util::mwc_util::secp::Secp256k1;
-use mwc_web3::types::{Address, H256};
+use mwc_wallet_util::mwc_crates::secp::aggsig::export_secnonce_single as generate_nonce;
+use mwc_wallet_util::mwc_crates::secp::Secp256k1;
+use mwc_wallet_util::mwc_crates::zeroize::Zeroizing;
+use mwc_wallet_util::mwc_keychain::{Identifier, Keychain, SwitchCommitmentType};
+use mwc_wallet_util::mwc_util::to_hex;
+use mwc_wallet_util::mwc_web3;
+use mwc_wallet_util::Mutex;
+use mwc_web3::types::{Address, H256, U256};
 use std::marker::PhantomData;
 use std::sync::Arc;
-use std::sync::Mutex;
+
+/// A locally signed Ethereum transaction has a stable hash even when the RPC
+/// response cannot say whether the node accepted it. Record that hash before
+/// propagating the error so a live wallet can reconcile instead of constructing
+/// another transaction.
+fn submitted_or_ambiguous_hash(result: &Result<H256, Error>) -> Option<H256> {
+	match result {
+		Ok(tx_hash) => Some(*tx_hash),
+		Err(error) => error.ethereum_submission_hash(),
+	}
+}
+
+/// Observed funds remain refundable even when the lock cannot advance the trade.
+#[derive(Default)]
+struct EthLockStatus {
+	amount: u64,
+	acceptable: bool,
+	finalized: bool,
+}
 
 /// SwapApi trait implementaiton for ETH
 #[derive(Clone)]
@@ -59,6 +85,11 @@ where
 	C: NodeClient + 'a,
 	E: EthNodeClient + 'a,
 {
+	fn secondary_fee_gwei(&self, swap: &Swap) -> Result<u64, Error> {
+		self.secondary_currency
+			.secondary_fee_gwei(swap.secondary_fee_units)
+	}
+
 	/// Create Eth Swap API instance
 	pub fn new(
 		context_id: u32,
@@ -97,43 +128,42 @@ where
 		}
 	}
 
-	/// Get Eth Chain Height.
-	pub(crate) fn eth_height(&self) -> Result<u64, Error> {
-		let c = self
-			.eth_node_client
-			.lock()
-			.unwrap_or_else(|e| e.into_inner());
-		c.height()
+	/// Read the height and timestamp of the same mined Ethereum block.
+	fn eth_tip(&self) -> Result<EthChainTip, Error> {
+		let c = self.eth_node_client.lock();
+		c.chain_tip()
 	}
 
 	/// Check ETH amount at the chain.
+	///
+	/// A missing `address_from_secret` means the trade has not derived its lock
+	/// address yet (expected before initiation) and maps to
+	/// InvalidEthSwapTradeIndex. Query failures propagate unchanged so callers
+	/// can tell an endpoint outage apart from an absent lock.
 	pub(crate) fn eth_swap_details(
 		&self,
 		swap: &Swap,
 		address_from_secret: Option<Address>,
-	) -> Result<(u64, Option<Address>, Address, Address, u64), Error> {
+	) -> Result<(U256, Option<Address>, Address, Address, u64), Error> {
 		let address_from_secret = address_from_secret.ok_or(Error::InvalidEthSwapTradeIndex)?;
 
-		let c = self
-			.eth_node_client
-			.lock()
-			.unwrap_or_else(|e| e.into_inner());
-		let res = c.get_swap_details(swap.secondary_currency, address_from_secret);
-		match res {
-			Ok((_refund_time, _contract_address, _initiator, _participant, _value)) => res,
-			_ => Err(Error::InvalidEthSwapTradeIndex),
-		}
+		let c = self.eth_node_client.lock();
+		c.get_swap_details(swap.secondary_currency, address_from_secret)
 	}
 
 	/// Seller call contract function to redeem their Ethers, Status::Redeem
-	fn seller_post_redeem_tx<K: Keychain>(&self, keychain: &K, swap: &Swap) -> Result<H256, Error> {
-		let c = self
-			.eth_node_client
-			.lock()
-			.unwrap_or_else(|e| e.into_inner());
+	fn seller_post_redeem_tx<K: Keychain>(
+		&self,
+		secp: &Secp256k1,
+		_keychain: &K,
+		swap: &Swap,
+		recovery: &mut Option<EthTransactionRecovery>,
+	) -> Result<H256, Error> {
+		let c = self.eth_node_client.lock();
+		c.validate_chain_and_contracts()?;
 		let eth_data = swap.secondary_data.unwrap_eth()?;
-		let redeem_secret = SellApi::calculate_redeem_secret(keychain, swap)?;
-		let secret_key = mwc_web3::signing::SecretKey::from_slice(&redeem_secret.0)
+		let redeem_secret = SellApi::calculate_redeem_secret(secp, swap)?;
+		let secret_key = SecretKeyGuard::from_bytes(&redeem_secret.0)
 			.map_err(|e| Error::Generic(format!("Building mwc_web3 secret error, {}", e)))?;
 		c.redeem(
 			swap.secondary_currency,
@@ -141,17 +171,15 @@ where
 				.address_from_secret
 				.clone()
 				.ok_or(Error::Generic("address_from_secret is not set".into()))?,
-			secret_key,
-			swap.secondary_fee,
+			&secret_key,
+			self.secondary_fee_gwei(swap)?,
+			recovery,
 		)
 	}
 
 	/// Seller transfer eth from internal wallet to users' wallet
 	fn seller_transfer_secondary(&self, swap: &Swap) -> Result<H256, Error> {
-		let c = self
-			.eth_node_client
-			.lock()
-			.unwrap_or_else(|e| e.into_inner());
+		let c = self.eth_node_client.lock();
 		let address = swap.unwrap_seller()?.0;
 		c.transfer(
 			swap.secondary_currency,
@@ -165,13 +193,11 @@ where
 		&self,
 		_keychain: &K,
 		_context: &Context,
-		swap: &mut Swap,
-		_post_tx: bool,
+		swap: &Swap,
+		recovery: &mut Option<EthTransactionRecovery>,
 	) -> Result<H256, Error> {
-		let c = self
-			.eth_node_client
-			.lock()
-			.unwrap_or_else(|e| e.into_inner());
+		let c = self.eth_node_client.lock();
+		c.validate_chain_and_contracts()?;
 		let eth_data = swap.secondary_data.unwrap_eth()?;
 		c.refund(
 			swap.secondary_currency,
@@ -179,56 +205,119 @@ where
 				.address_from_secret
 				.clone()
 				.ok_or(Error::Generic("address_from_secret is not set".into()))?,
-			swap.secondary_fee,
+			self.secondary_fee_gwei(swap)?,
+			recovery,
 		)
 	}
 
-	/// buyer deposit eth to contract address
-	fn erc20_approve(&self, swap: &mut Swap) -> Result<H256, Error> {
-		let nc = self
-			.eth_node_client
-			.lock()
-			.unwrap_or_else(|e| e.into_inner());
-		nc.erc20_approve(
+	/// Advance ERC20 reset/approval/deposit while reserving the shared allowance.
+	fn advance_erc20_funding(&self, swap: &mut Swap) -> Result<(), Error> {
+		if swap.state.is_final_state() {
+			return Err(Error::UnexpectedAction(
+				"Cannot fund a finished swap".into(),
+			));
+		}
+		let gas_gwei = self.secondary_fee_gwei(swap)?;
+		let mut data = swap.secondary_data.unwrap_eth()?.clone();
+		let nc = self.eth_node_client.lock();
+		let result = super::funding::advance(
+			&*nc,
+			swap.id,
 			swap.secondary_currency,
 			swap.secondary_amount,
-			swap.secondary_fee,
-		)
+			gas_gwei,
+			&mut data,
+			|recovery| self.buyer_deposit_with_client(swap, &*nc, recovery),
+		);
+		// The owner persists swap changes even on errors, including ambiguous hashes.
+		*swap.secondary_data.unwrap_eth_mut()? = data;
+		result
 	}
 
 	/// buyer deposit eth to contract address
-	fn buyer_deposit(&self, swap: &mut Swap) -> Result<H256, Error> {
-		let eth_lock_time = swap.get_time_secondary_lock_script() as u64;
-		// Don't lock for more than 4 weeks. 4 weeks + 2 day, because max locking is expecting 2 weeks and 1 day to do the swap and 1 extra day for Buyer
-		if eth_lock_time > (swap::get_cur_time() + 3600 * 24 * (7 * 4 + 2)) as u64 {
-			return Err(Error::Generic(
-				"ETH locking time interval is larger than 4 weeks. Rejecting, looks like a scam."
-					.to_string(),
+	fn buyer_deposit(
+		&self,
+		swap: &Swap,
+		recovery: &mut Option<EthTransactionRecovery>,
+	) -> Result<H256, Error> {
+		let nc = self.eth_node_client.lock();
+		self.buyer_deposit_with_client(swap, &*nc, recovery)
+	}
+
+	/// Anchor funding and acceptance to a block timestamp, so RPC latency and
+	/// the position within a slot cannot shorten or shift the negotiated lock.
+	fn eth_refund_height(
+		swap: &Swap,
+		current_timestamp: i64,
+		tip: EthChainTip,
+	) -> Result<u64, Error> {
+		let lock_time = swap.get_time_secondary_lock_script()?;
+		let current_time = u64::try_from(current_timestamp).map_err(|e| {
+			Error::DataOverflow(format!(
+				"EthSwapApi::eth_refund_height, current wall-clock time is before the Unix epoch or does not fit u64, current_time={} error={}",
+				current_timestamp, e
+			))
+		})?;
+		let eth_lock_time = u64::from(swap::validate_secondary_lock_time(
+			lock_time,
+			current_timestamp,
+		)?);
+		if eth_lock_time < current_time {
+			return Err(Error::InvalidMessageData(
+				"Ethereum lock deadline has already passed".into(),
 			));
 		}
 
-		if eth_lock_time >= u32::MAX as u64 {
-			return Err(Error::Generic(
-				"ETH locking time is out of range. Rejecting, looks like a scam.".to_string(),
-			));
-		}
+		let block_period_seconds = swap.secondary_currency.block_time_period_sec();
+		let block_period = u64::try_from(block_period_seconds).map_err(|e| {
+			Error::DataOverflow(format!(
+				"EthSwapApi::eth_refund_height, secondary currency block period is negative or does not fit u64, block_period_seconds={} error={}",
+				block_period_seconds, e
+			))
+		})?;
+		let lock_seconds = eth_lock_time.checked_sub(tip.timestamp).ok_or_else(|| {
+			Error::DataOverflow(format!(
+				"EthSwapApi::eth_refund_height, ETH lock timestamp precedes the chain tip, eth_lock_time={} block_timestamp={}",
+				eth_lock_time, tip.timestamp
+			))
+		})?;
+		// Block periods are fixed positive constants. Round up so a fractional
+		// block never shortens the negotiated lock duration.
+		let refund_blocks = lock_seconds.div_ceil(block_period);
 
-		let refund_blocks = (eth_lock_time - swap::get_cur_time() as u64)
-			/ swap.secondary_currency.block_time_period_sec() as u64;
+		// Retain one extra block of safety. With consecutive 12-second slots this
+		// cutoff stays constant as the tip advances; skipped slots can only lower
+		// the later acceptance requirement, leaving an existing deposit safe.
+		tip.height
+			.checked_add(refund_blocks)
+			.and_then(|height| height.checked_add(1))
+			.ok_or_else(|| {
+				Error::DataOverflow(format!(
+					"EthSwapApi::eth_refund_height, ETH refund height overflow, current_height={} refund_blocks={} safety_blocks=1",
+					tip.height, refund_blocks
+				))
+			})
+	}
 
-		if mwc_wallet_util::mwc_util::is_console_output_enabled() {
-			println!(
-				"eth_lock_time: {},  current_time: {}, refund_blocks: {}",
-				eth_lock_time,
-				swap::get_cur_time(),
-				refund_blocks
+	fn buyer_deposit_with_client(
+		&self,
+		swap: &Swap,
+		nc: &E,
+		recovery: &mut Option<EthTransactionRecovery>,
+	) -> Result<H256, Error> {
+		let eth_data = swap.secondary_data.unwrap_eth()?;
+		let tip = nc.validate_chain_and_contracts()?;
+		if let Some(record) = recovery.as_mut() {
+			return nc.retry_deposit(
+				swap.secondary_currency,
+				record,
+				self.secondary_fee_gwei(swap)?,
 			);
 		}
-		let eth_data = swap.secondary_data.unwrap_eth()?;
-		let height = self.eth_height()?;
-		let refund_time = height + refund_blocks;
+		nc.finalized_block()?;
+		let refund_time = Self::eth_refund_height(swap, swap::get_cur_time(), tip)?;
 		if mwc_wallet_util::mwc_util::is_console_output_enabled() {
-			println!("height: {}, refund_time: {}", height, refund_time);
+			println!("height: {}, refund_time: {}", tip.height, refund_time);
 		}
 		let address_from_secret = eth_data
 			.address_from_secret
@@ -240,155 +329,215 @@ where
 			.ok_or(Error::Generic("redeem_address is not set".into()))?;
 		let value = swap.secondary_amount;
 
-		let nc = self
-			.eth_node_client
-			.lock()
-			.unwrap_or_else(|e| e.into_inner());
 		nc.initiate(
 			swap.secondary_currency,
 			refund_time,
 			address_from_secret,
 			participant,
 			value,
-			swap.secondary_fee,
+			self.secondary_fee_gwei(swap)?,
+			recovery,
 		)
 	}
 
-	fn get_slate_confirmation_number(
+	/// Confirm the expected transaction kernel. For slates finalized by the other
+	/// party, derive the excess from the complete transaction body even if the
+	/// stored excess is nonzero: it may identify an unrelated transaction. A
+	/// matching change output alone does not prove that the swap lock exists.
+	fn get_slate_confirmation_height(
 		&self,
-		mwc_tip: &u64,
+		secp: &Secp256k1,
 		slate: &Slate,
-		outputs_ok: bool,
+		derive_kernel: bool,
+		max_height: u64,
 	) -> Result<Option<u64>, Error> {
-		let result: Option<u64> = if slate.tx_or_err()?.kernels().is_empty() {
-			None
-		} else {
-			debug_assert!(slate.tx_or_err()?.kernels().len() == 1);
-
-			let kernel = &slate.tx_or_err()?.kernels()[0].excess;
-			if kernel.0.to_vec().iter().any(|v| *v != 0) {
-				// kernel is non zero - we can check transaction by kernel
-				match self
-					.node_client
-					.get_kernel(kernel, Some(slate.height), None)?
-				{
-					Some((_tx_kernel, height, _mmr_index)) => {
-						Some(mwc_tip.saturating_sub(height) + 1)
-					}
-					None => None,
-				}
-			} else {
-				if outputs_ok {
-					// kernel is not valid, still can use outputs.
-					let wallet_outputs: Vec<pedersen::Commitment> =
-						slate.tx_or_err()?.outputs_committed();
-					let res = self.node_client.get_outputs_from_node(&wallet_outputs)?;
-					let height = res.values().map(|v| v.1).max();
-					match height {
-						Some(h) => Some(mwc_tip.saturating_sub(h) + 1),
-						None => None,
-					}
-				} else {
-					None
-				}
-			}
+		let tx = slate.tx_or_err()?;
+		let Some(kernel) = tx.kernels().first() else {
+			return Ok(None);
 		};
-		Ok(result)
-	}
-
-	/// Check transaction confirm status
-	pub(crate) fn check_eth_transaction_status(&self, tx_id: Option<H256>) -> Result<u64, Error> {
-		let tx_id = tx_id.ok_or(Error::InvalidTxHash)?;
-
-		let c = self
-			.eth_node_client
-			.lock()
-			.unwrap_or_else(|e| e.into_inner());
-		let res = c.retrieve_receipt(tx_id);
-		match res {
-			Ok(receipt) => match receipt.block_number {
-				Some(_block_number) => match receipt.status {
-					Some(status) => {
-						if status == 1.into() {
-							Ok(1)
-						} else {
-							Ok(0)
-						}
-					}
-					_ => Ok(0),
-				},
-				_ => Err(Error::EthTransactionInPending),
-			},
-			_ => Err(Error::EthRetrieveTransReciptError),
-		}
-	}
-
-	/// check deposit transaction status
-	fn get_eth_initiate_tx_status(&self, swap: &Swap) -> Result<u64, Error> {
-		let eth_data = swap.secondary_data.unwrap_eth()?;
-		let eth_tip = self.eth_height()?;
-		match self.eth_swap_details(swap, eth_data.address_from_secret.clone()) {
-			Ok((refund_time, erc20_token_addr, _, participant, value)) => {
-				if swap.secondary_currency.is_erc20() {
-					match erc20_token_addr {
-						None => return Ok(0),
-						Some(erc20_token_addr) => {
-							if swap.secondary_currency.erc20_token_address()? != erc20_token_addr {
-								return Ok(0);
-							}
-						}
-					}
-				}
-
-				if (eth_data.redeem_address.clone().ok_or(Error::Generic("redeem_address is not set".into()))? == participant)
-						&& (refund_time > eth_tip + 100u64) //100 about 25 minutes, make sure we have enough time to redeem ether
-						&& value == swap.secondary_amount
-						&& swap.redeem_public.is_some()
-				{
-					let public_key = swap.redeem_public.clone().unwrap();
-					// convert mwc public key to ethereum public key format
-					let pub_key_array = public_key.0 .0;
-					let first_part: Vec<u8> = pub_key_array[..pub_key_array.len() / 2]
-						.to_owned()
-						.iter()
-						.rev()
-						.cloned()
-						.collect();
-					let second_part: Vec<u8> = pub_key_array[pub_key_array.len() / 2..]
-						.to_owned()
-						.iter()
-						.rev()
-						.cloned()
-						.collect();
-					let pub_key_vec: Vec<u8> = first_part
-						.into_iter()
-						.chain(second_part.into_iter())
-						.collect();
-					let wallet = EthereumWallet::from_public_key(to_hex(&pub_key_vec).as_str())
-						.map_err(|e| {
-							Error::Generic(format!("Eth wallet build public key error, {}", e))
-						})?;
-					let address = to_eth_address(
-						wallet
-							.address
-							.clone()
-							.ok_or(Error::Generic("Eth wallet address is empty".into()))?,
-					)?;
-					if eth_data
-						.address_from_secret
-						.ok_or(Error::Generic("address_from_secret is not set".into()))?
-						== address
-					{
-						Ok(value)
-					} else {
-						Ok(0)
-					}
-				} else {
-					Ok(0)
-				}
+		let excess = if derive_kernel {
+			if tx.outputs().is_empty() {
+				return Ok(None);
 			}
-			_ => Ok(0),
+			// Compact slates derive excess from participant keys, not the body.
+			if slate.compact_slate {
+				return Err(Error::InvalidMessageData(
+					"Swap confirmation requires a non-compact slate".to_string(),
+				));
+			}
+			slate.calc_excess(secp)?
+		} else {
+			// Locally unfinished transactions have no on-chain kernel yet.
+			if kernel.excess.0.iter().all(|byte| *byte == 0) {
+				return Ok(None);
+			}
+			kernel.excess
+		};
+		match self
+			.node_client
+			.get_kernel(&excess, Some(slate.height), Some(max_height))?
+		{
+			Some((_tx_kernel, height, _mmr_index)) if height <= max_height => Ok(Some(height)),
+			_ => Ok(None),
 		}
+	}
+
+	fn confirmations_at_tip(
+		tip_height: u64,
+		output_height: Option<u64>,
+	) -> Result<Option<u64>, Error> {
+		output_height
+			.map(|height| {
+				tip_height
+					.checked_sub(height)
+					.and_then(|confirmations| confirmations.checked_add(1))
+					.ok_or_else(|| {
+						Error::DataOverflow(format!(
+							"EthSwapApi::confirmations_at_tip, confirmation count overflow, tip_height={} output_height={}",
+							tip_height, height
+						))
+					})
+			})
+			.transpose()
+	}
+
+	/// Keep a mined payment in the waiting state until its canonical block is final.
+	fn finalized_tx_confirmation(
+		&self,
+		tx_hash: Option<H256>,
+		recovery: Option<&EthTransactionRecovery>,
+	) -> Result<Option<u64>, Error> {
+		let client = self.eth_node_client.lock();
+		match super::recovery::transaction_receipt(&*client, tx_hash, recovery) {
+			Ok(receipt) if receipt.status == Some(1.into()) => {
+				Ok(Some(u64::from(client.receipt_is_finalized(&receipt)?)))
+			}
+			// Missing, pending, or reverted transactions remain eligible for recovery.
+			Ok(_) | Err(Error::InvalidTxHash) | Err(Error::EthTransactionInPending) => Ok(None),
+			Err(error) => Err(error),
+		}
+	}
+
+	/// Recovery polls retain current funds without requiring finalized lock acceptance.
+	fn secondary_tx_confirmations(
+		&self,
+		secp: &Secp256k1,
+		swap: &Swap,
+		check_finality: bool,
+	) -> Result<SwapTransactionsConfirmations, Error> {
+		let secondary_tip = self.eth_tip()?;
+		let lock_status = self.get_eth_initiate_tx_status(secp, swap, secondary_tip, check_finality)?;
+		let secondary_lock_amount = lock_status.amount;
+		// A skipped finality query must never produce permission to advance.
+		let secondary_lock_conf = lock_status
+			.acceptable
+			.then_some(u64::from(lock_status.finalized));
+
+		let eth_data = swap.secondary_data.unwrap_eth()?;
+		// Payment finality is required even when recovery skips lock acceptance:
+		// a positive marker lets the state machine stop monitoring the swap.
+		let secondary_redeem_conf =
+			self.finalized_tx_confirmation(eth_data.redeem_tx, eth_data.redeem_recovery.as_ref())?;
+		let secondary_refund_conf =
+			self.finalized_tx_confirmation(eth_data.refund_tx, eth_data.refund_recovery.as_ref())?;
+
+		Ok(SwapTransactionsConfirmations {
+			mwc_observed: false,
+			secondary_observed: true,
+			mwc_tip: 0,
+			mwc_lock_conf: None,
+			mwc_redeem_conf: None,
+			mwc_refund_conf: None,
+			secondary_tip: secondary_tip.height,
+			secondary_lock_conf,
+			secondary_lock_amount,
+			secondary_redeem_conf,
+			secondary_refund_conf,
+			secondary_refund_progress: None,
+		})
+	}
+
+	/// Read the deposited amount independently of whether its terms are acceptable.
+	fn get_eth_initiate_tx_status(
+		&self,
+		secp: &Secp256k1,
+		swap: &Swap,
+		eth_tip: EthChainTip,
+		check_finality: bool,
+	) -> Result<EthLockStatus, Error> {
+		let eth_data = swap.secondary_data.unwrap_eth()?;
+		let details = match self.eth_swap_details(swap, eth_data.address_from_secret) {
+			Ok(details) => details,
+			// Missing lock address: expected before initiation, nothing is locked.
+			Err(Error::InvalidEthSwapTradeIndex) => return Ok(EthLockStatus::default()),
+			// A failed contract query is not proof that no funds are locked.
+			// Propagating keeps the state machine off cancel/timeout paths that
+			// an unverified absence would trigger.
+			Err(e) => return Err(e),
+		};
+		let (refund_time, erc20_token_addr, _, participant, value) = details;
+		let mut status = EthLockStatus {
+			amount: value,
+			..Default::default()
+		};
+		if value == 0 || value != swap.secondary_amount {
+			return Ok(status);
+		}
+		if swap.secondary_currency.is_erc20()
+			&& erc20_token_addr != Some(swap.secondary_currency.erc20_token_address()?)
+		{
+			return Ok(status);
+		}
+		if eth_data.redeem_address != Some(participant) {
+			return Ok(status);
+		}
+		let current_time = swap::get_cur_time();
+		if current_time >= swap.get_time_secondary_lock_script()? {
+			return Ok(status);
+		}
+		let required_refund_height = Self::eth_refund_height(swap, current_time, eth_tip)?;
+		let safe_redeem_height = eth_tip.height.checked_add(100).ok_or_else(|| {
+			Error::DataOverflow(format!(
+				"EthSwapApi::get_eth_initiate_tx_status, ETH redeem safety height overflow, eth_tip={} safety_blocks=100",
+				eth_tip.height
+			))
+		})?;
+		// The negotiated deadline protects the seller while the buyer can still
+		// redeem MWC. Also retain the 100-block margin for immediate ETH redemption.
+		if refund_time < U256::from(required_refund_height)
+			|| refund_time <= U256::from(safe_redeem_height)
+		{
+			return Ok(status);
+		}
+		let public_key = match swap.redeem_public.as_ref() {
+			Some(public_key) => public_key,
+			None => return Ok(status),
+		};
+		// Convert the MWC public key to Ethereum public key format.
+		let serialized = public_key.serialize_vec(secp, false)?;
+		let pub_key_vec = serialized
+			.get(1..)
+			.ok_or_else(|| Error::Generic("Unable to serialize redeem public key".to_string()))?;
+		let wallet = EthereumWallet::from_public_key(to_hex(pub_key_vec).as_str())
+			.map_err(|e| Error::Generic(format!("Eth wallet build public key error, {}", e)))?;
+		let address = to_eth_address(
+			wallet
+				.address
+				.clone()
+				.ok_or(Error::Generic("Eth wallet address is empty".into()))?,
+		)?;
+		status.acceptable = eth_data.address_from_secret == Some(address);
+		if status.acceptable && check_finality {
+			let client = self.eth_node_client.lock();
+			let finalized = client.finalized_block()?;
+			status.finalized =
+				match client.get_swap_details_at(swap.secondary_currency, address, finalized.into()) {
+					Ok(finalized_details) => finalized_details == details,
+					Err(Error::InvalidEthSwapTradeIndex) => false,
+					Err(error) => return Err(error),
+				};
+		}
+		Ok(status)
 	}
 }
 
@@ -423,11 +572,12 @@ where
 
 	fn create_context(
 		&mut self,
+		secp: &mut Secp256k1,
 		keychain: &K,
 		ethereum_wallet: Option<&EthereumWallet>,
 		secondary_currency: Currency,
 		is_seller: bool,
-		inputs: Option<Vec<(Identifier, Option<u64>, u64)>>,
+		inputs: Option<Vec<SellerInput>>,
 		change_amount: u64,
 		keys: Vec<Identifier>,
 		parent_key_id: Identifier,
@@ -448,7 +598,11 @@ where
 			_ => return Err(Error::UnexpectedCoinType),
 		}
 
-		let secp = keychain.secp();
+		// Buyer admission happens here; seller admission is checked when creating its offer.
+		if !is_seller {
+			self.eth_node_client.lock().finalized_block()?;
+		}
+
 		let mut keys = keys.into_iter();
 		let role_context = if is_seller {
 			let ethereum_wallet = ethereum_wallet.ok_or(Error::Generic(
@@ -484,15 +638,17 @@ where
 				"create_context keys param is too short".into(),
 			))?;
 			let sec_key = keychain
-				.derive_key(0, &redeem, SwitchCommitmentType::None)
+				.derive_key(secp, 0, &redeem, SwitchCommitmentType::None)
 				.map_err(|e| Error::Generic(format!("Unbale to build redeem key, {}", e)))?;
-			let eth_rand_wallet = EthereumWallet::from_private_key(to_hex(&sec_key.0).as_str())
-				.map_err(|e| {
+			let eth_rand_wallet = {
+				let private_key_hex = Zeroizing::new(to_hex(&sec_key.0));
+				EthereumWallet::from_private_key(private_key_hex.as_str()).map_err(|e| {
 					Error::Generic(format!(
 						"Unable to build Eth wallet from private key, {}",
 						e
 					))
-				})?;
+				})?
+			};
 			let eth_address = to_eth_address(eth_rand_wallet.address.clone().ok_or(
 				Error::Generic("create_context Eth wallet address is emoty".into()),
 			)?)?;
@@ -521,8 +677,10 @@ where
 	/// Seller creates a swap offer
 	fn create_swap_offer(
 		&mut self,
+		secp: &mut Secp256k1,
 		keychain: &K,
 		context: &Context,
+		mwc_anchor_height: u64,
 		primary_amount: u64,
 		secondary_amount: u64,
 		secondary_currency: Currency,
@@ -559,16 +717,18 @@ where
 			_ => return Err(Error::UnexpectedCoinType),
 		}
 
-		let height = self.node_client.get_chain_tip()?.0;
+		self.eth_node_client.lock().finalized_block()?;
+
 		let mut swap = SellApi::create_swap_offer(
 			self.context_id,
+			secp,
 			keychain,
 			context,
 			primary_amount,
 			secondary_amount,
 			secondary_currency,
 			secondary_redeem_address,
-			height,
+			mwc_anchor_height,
 			seller_lock_first,
 			mwc_confirmations,
 			secondary_confirmations,
@@ -584,6 +744,7 @@ where
 			eth_redirect_out_wallet,
 			dry_run,
 			tag,
+			self.node_client.as_ref(),
 		)?;
 
 		let eth_data = EthData::new(context.unwrap_seller()?.unwrap_eth()?)?;
@@ -614,85 +775,154 @@ where
 
 	fn publish_secondary_transaction(
 		&self,
+		secp: &Secp256k1,
 		keychain: &K,
 		swap: &mut Swap,
 		_context: &Context,
-		_post_tx: bool,
+		post_tx: bool,
 	) -> Result<(), Error> {
-		assert!(swap.is_seller());
+		if !swap.is_seller() {
+			return Err(Error::UnexpectedAction(
+				"EthSwapApi::publish_secondary_transaction, swap role is not seller".to_string(),
+			));
+		}
+		// Ethereum cannot prepare a historical transaction hash without assigning a
+		// fresh live-account nonce. In particular, trade import passes false and must
+		// remain a read-only recovery operation.
+		if !post_tx {
+			return Ok(());
+		}
 		let eth_data = swap.secondary_data.unwrap_eth()?;
-		if eth_data.redeem_tx.is_some() {
-			let status = self.check_eth_transaction_status(eth_data.redeem_tx)?;
-			if status == 1 {
+		let status = super::recovery::transaction_status(
+			&*self.eth_node_client.lock(),
+			eth_data.redeem_tx,
+			eth_data.redeem_recovery.as_ref(),
+		);
+		match status {
+			Ok((hash, true)) => {
+				swap.secondary_data.unwrap_eth_mut()?.redeem_tx = Some(hash);
 				return Ok(());
 			}
+			Ok((_, false)) => {
+				// A reverted mined transaction consumed its nonce. Only this evidence
+				// permits constructing a fresh redeem with a different nonce.
+				let data = swap.secondary_data.unwrap_eth_mut()?;
+				data.redeem_tx = None;
+				data.redeem_recovery = None;
+			}
+			Err(Error::InvalidTxHash) => (),
+			Err(Error::EthTransactionInPending) => {
+				if eth_data.redeem_recovery.is_none() {
+					return Err(Error::EthereumTransactionRecoveryMissing(
+						eth_data.redeem_tx.ok_or(Error::InvalidTxHash)?,
+					));
+				}
+			}
+			Err(error) => return Err(error),
 		}
 
-		let eth_tx = self.seller_post_redeem_tx(keychain, swap)?;
+		let secondary_fee_gwei = self.secondary_fee_gwei(swap)?;
+		let mut recovery = swap.secondary_data.unwrap_eth()?.redeem_recovery.clone();
+		let submission = self.seller_post_redeem_tx(secp, keychain, swap, &mut recovery);
+		// Preserve signed bytes even when sending failed or a worker panicked.
+		// The owner persists the mutated trade on both successful and error returns.
 		let eth_data = swap.secondary_data.unwrap_eth_mut()?;
-		eth_data.redeem_tx = Some(eth_tx);
-		eth_data.tx_fee = Some(swap.secondary_fee);
-		Ok(())
+		if let Some(record) = &recovery {
+			eth_data.redeem_tx = record.attempted_hashes.last().copied();
+			eth_data.tx_fee_gwei = Some(record.gas_budget_gwei);
+		}
+		eth_data.redeem_recovery = recovery;
+		if let Some(eth_tx) = submitted_or_ambiguous_hash(&submission) {
+			eth_data.redeem_tx = Some(eth_tx);
+			if eth_data.redeem_recovery.is_none() {
+				eth_data.tx_fee_gwei = Some(secondary_fee_gwei);
+			}
+		}
+		submission.map(|_| ())
 	}
 
-	/// Request confirmation numberss for all transactions that are known and in the in the swap
-	fn request_tx_confirmations(
+	/// Verify MWC confirmations independently of the secondary RPC service.
+	fn request_mwc_tx_confirmations(
 		&self,
+		secp: &Secp256k1,
 		_keychain: &K, // keychain is kept for Type. Compiler need to understand all types
 		swap: &Swap,
 	) -> Result<SwapTransactionsConfirmations, Error> {
-		let mwc_tip = self.node_client.get_chain_tip()?.0;
+		let session =
+			NodeReadSession::start(&*self.node_client, "Ethereum swap confirmation poll")?;
 
 		let is_seller = swap.is_seller();
 
-		let mwc_lock_conf =
-			self.get_slate_confirmation_number(&mwc_tip, &swap.lock_slate.slate, !is_seller)?;
-		let mwc_redeem_conf =
-			self.get_slate_confirmation_number(&mwc_tip, &swap.redeem_slate.slate, is_seller)?;
-		let mwc_refund_conf =
-			self.get_slate_confirmation_number(&mwc_tip, &swap.refund_slate.slate, !is_seller)?;
+		let mwc_lock_height = self.get_slate_confirmation_height(
+			secp,
+			&swap.lock_slate.slate,
+			!is_seller,
+			session.anchor.height,
+		)?;
+		session.ensure_connection(&*self.node_client, "Ethereum swap lock confirmation")?;
+		let mwc_redeem_height = self.get_slate_confirmation_height(
+			secp,
+			&swap.redeem_slate.slate,
+			is_seller,
+			session.anchor.height,
+		)?;
+		session.ensure_connection(&*self.node_client, "Ethereum swap redeem confirmation")?;
+		let mwc_refund_height = self.get_slate_confirmation_height(
+			secp,
+			&swap.refund_slate.slate,
+			!is_seller,
+			session.anchor.height,
+		)?;
+		session.ensure_connection(&*self.node_client, "Ethereum swap refund confirmation")?;
+		let final_tip = session.fresh_tip(&*self.node_client, "Ethereum swap confirmation poll")?;
+		let mwc_lock_conf = Self::confirmations_at_tip(final_tip.height, mwc_lock_height)?;
+		let mwc_redeem_conf = Self::confirmations_at_tip(final_tip.height, mwc_redeem_height)?;
+		let mwc_refund_conf = Self::confirmations_at_tip(final_tip.height, mwc_refund_height)?;
 
-		let secondary_tip = self.eth_height()?;
-		// check eth transaction status
-		let secondary_lock_amount = self.get_eth_initiate_tx_status(swap)?;
-		let secondary_lock_conf = match secondary_lock_amount > 0 {
-			true => Some(1),
-			_ => None,
-		};
-
-		let eth_data = swap.secondary_data.unwrap_eth()?;
-		let secondary_redeem_conf = match self.check_eth_transaction_status(eth_data.redeem_tx) {
-			Ok(status) => {
-				if status == 0 {
-					None
-				} else {
-					Some(1)
-				}
-			}
-			_ => None,
-		};
-		let secondary_refund_conf = match self.check_eth_transaction_status(eth_data.refund_tx) {
-			Ok(status) => {
-				if status == 0 {
-					None
-				} else {
-					Some(1)
-				}
-			}
-			_ => None,
-		};
-
-		Ok(SwapTransactionsConfirmations {
-			mwc_tip,
+		Ok(SwapTransactionsConfirmations::mwc_only(
+			final_tip.height,
 			mwc_lock_conf,
 			mwc_redeem_conf,
 			mwc_refund_conf,
-			secondary_tip,
-			secondary_lock_conf,
-			secondary_lock_amount,
-			secondary_redeem_conf,
-			secondary_refund_conf,
-		})
+		))
+	}
+
+	fn request_tx_confirmations(
+		&self,
+		secp: &Secp256k1,
+		keychain: &K,
+		swap: &Swap,
+	) -> Result<SwapTransactionsConfirmations, Error> {
+		let mwc = self.request_mwc_tx_confirmations(secp, keychain, swap)?;
+		// An observed redeem/refund already requires recovery, even before its
+		// exposure or recovered kernel has been persisted in the trade.
+		let check_finality = mwc.mwc_redeem_conf.is_none()
+			&& mwc.mwc_refund_conf.is_none()
+			&& swap.needs_secondary_lock_finality()?;
+		Ok(self
+			.secondary_tx_confirmations(secp, swap, check_finality)?
+			.with_mwc(mwc))
+	}
+
+	fn request_secondary_tx_confirmations(
+		&self,
+		secp: &Secp256k1,
+		_keychain: &K,
+		swap: &Swap,
+	) -> Result<SwapTransactionsConfirmations, Error> {
+		self.secondary_tx_confirmations(secp, swap, swap.needs_secondary_lock_finality()?)
+	}
+
+	fn request_tx_confirmations_for_cancel(
+		&self,
+		secp: &Secp256k1,
+		keychain: &K,
+		swap: &Swap,
+	) -> Result<SwapTransactionsConfirmations, Error> {
+		let mwc = self.request_mwc_tx_confirmations(secp, keychain, swap)?;
+		Ok(self
+			.secondary_tx_confirmations(secp, swap, false)?
+			.with_mwc(mwc))
 	}
 
 	/// Check How much ETH coins are locked on the chain
@@ -702,11 +932,28 @@ where
 		&self,
 		swap: &Swap,
 		_confirmations_needed: u64,
-		_secp: &Secp256k1,
+		secp: &Secp256k1,
 	) -> Result<(u64, u64, u64), Error> {
-		// check eth transaction status
-		let amount = self.get_eth_initiate_tx_status(swap)?;
-		Ok((0, amount, 0))
+		let eth_tip = self.eth_tip()?;
+		let status = self.get_eth_initiate_tx_status(secp, swap, eth_tip, false)?;
+		Ok((0, status.amount, 0))
+	}
+
+	fn prepare_secondary_redeem(&self, swap: &mut Swap, secp: &Secp256k1) -> Result<(), Error> {
+		let eth_tip = self.eth_tip()?;
+		let status = self.get_eth_initiate_tx_status(secp, swap, eth_tip, true)?;
+		if !status.acceptable {
+			return Err(Error::Generic(
+				"Ethereum deposit does not satisfy the negotiated swap terms and redeem safety margin"
+					.into(),
+			));
+		}
+		if !status.finalized {
+			return Err(Error::EthereumFinalityUnavailable(
+				"waiting for the valid swap lock to finalize".into(),
+			));
+		}
+		Ok(())
 	}
 
 	// Build state machine that match the swap data
@@ -727,6 +974,7 @@ where
 				Box::new(seller_swap::SellerWaitingForAcceptanceMessage::new(
 					self.context_id,
 					kc.clone(),
+					nc.clone(),
 				)),
 				Box::new(seller_swap::SellerWaitingForBuyerLock::new(
 					swap_api.clone(),
@@ -739,12 +987,17 @@ where
 					self.context_id,
 					kc.clone(),
 					swap_api.clone(),
+					nc.clone(),
 				)),
 				Box::new(seller_swap::SellerWaitingForInitRedeemMessage::new(
 					self.context_id,
 					kc.clone(),
+					nc.clone(),
 				)),
-				Box::new(seller_swap::SellerSendingInitRedeemMessage::new(nc.clone())),
+				Box::new(seller_swap::SellerSendingInitRedeemMessage::new(
+					nc.clone(),
+					swap_api.clone(),
+				)),
 				Box::new(seller_swap::SellerWaitingForBuyerToRedeemMwc::new(
 					nc.clone(),
 				)),
@@ -784,6 +1037,7 @@ where
 					self.context_id,
 					kc.clone(),
 					swap_api.clone(),
+					nc.clone(),
 				)),
 				Box::new(buyer_swap::BuyerSendingInitRedeemMessage::new(
 					self.context_id,
@@ -791,11 +1045,14 @@ where
 				Box::new(buyer_swap::BuyerWaitingForRespondRedeemMessage::new(
 					self.context_id,
 					kc.clone(),
+					nc.clone(),
 				)),
 				Box::new(buyer_swap::BuyerRedeemMwc::new(self.context_id, nc.clone())),
 				Box::new(buyer_swap::BuyerWaitForRedeemMwcConfirmations::new()),
+				Box::new(buyer_swap::BuyerWaitingForMwcRefundConfirmations::new()),
 				Box::new(buyer_swap::BuyerSwapComplete::new()),
-				Box::new(buyer_swap::BuyerWaitingForRefundTime::new()),
+				Box::new(buyer_swap::BuyerSwapFailed::new()),
+				Box::new(buyer_swap::BuyerWaitingForRefundTime::new(swap_api.clone())),
 				Box::new(buyer_swap::BuyerPostingRefundForSecondary::new(
 					kc.clone(),
 					swap_api.clone(),
@@ -825,91 +1082,310 @@ where
 
 	/// Check if tx fee for the secondary is different from the posted
 	fn is_secondary_tx_fee_changed(&self, swap: &Swap) -> Result<bool, Error> {
-		Ok(swap.secondary_data.unwrap_eth()?.tx_fee != Some(swap.secondary_fee))
+		Ok(swap.secondary_data.unwrap_eth()?.tx_fee_gwei != Some(self.secondary_fee_gwei(swap)?))
 	}
 
 	/// Post ETH refund transaction
 	fn post_secondary_refund_tx(
 		&self,
+		_secp: &Secp256k1,
 		keychain: &K,
 		context: &Context,
 		swap: &mut Swap,
 		_refund_address: Option<String>,
 		post_tx: bool,
 	) -> Result<(), Error> {
-		assert!(!swap.is_seller());
+		if swap.is_seller() {
+			return Err(Error::UnexpectedAction(
+				"EthSwapApi::post_secondary_refund_tx, swap role is not buyer".to_string(),
+			));
+		}
+		if !post_tx {
+			return Ok(());
+		}
 		let eth_data = swap.secondary_data.unwrap_eth()?;
 
-		if eth_data.refund_tx.is_some() {
-			let status = self.check_eth_transaction_status(eth_data.refund_tx)?;
-			if status == 1 {
+		let status = super::recovery::transaction_status(
+			&*self.eth_node_client.lock(),
+			eth_data.refund_tx,
+			eth_data.refund_recovery.as_ref(),
+		);
+		match status {
+			Ok((hash, true)) => {
+				swap.secondary_data.unwrap_eth_mut()?.refund_tx = Some(hash);
 				return Ok(());
+			}
+			Ok((_, false)) => {
+				// A mined revert consumed the nonce, permitting a fresh refund.
+				let data = swap.secondary_data.unwrap_eth_mut()?;
+				data.refund_tx = None;
+				data.refund_recovery = None;
+			}
+			Err(Error::InvalidTxHash) => (),
+			Err(Error::EthTransactionInPending) => {
+				if eth_data.refund_recovery.is_none() {
+					return Err(Error::EthereumTransactionRecoveryMissing(
+						eth_data.refund_tx.ok_or(Error::InvalidTxHash)?,
+					));
+				}
+			}
+			Err(error) => return Err(error),
+		}
+
+		let secondary_fee_gwei = self.secondary_fee_gwei(swap)?;
+		let mut recovery = swap.secondary_data.unwrap_eth()?.refund_recovery.clone();
+		let submission = self.buyer_refund(keychain, context, swap, &mut recovery);
+		// The owner persists the signed refund and every replacement even on errors.
+		let eth_data = swap.secondary_data.unwrap_eth_mut()?;
+		if let Some(record) = &recovery {
+			eth_data.refund_tx = record.attempted_hashes.last().copied();
+			eth_data.tx_fee_gwei = Some(record.gas_budget_gwei);
+		}
+		eth_data.refund_recovery = recovery;
+		if let Some(eth_tx) = submitted_or_ambiguous_hash(&submission) {
+			eth_data.refund_tx = Some(eth_tx);
+			if eth_data.refund_recovery.is_none() {
+				eth_data.tx_fee_gwei = Some(secondary_fee_gwei);
 			}
 		}
 
-		let eth_tx = self.buyer_refund(keychain, context, swap, post_tx)?;
-		let eth_data = swap.secondary_data.unwrap_eth_mut()?;
-		eth_data.refund_tx = Some(eth_tx);
-		eth_data.tx_fee = Some(swap.secondary_fee);
+		submission.map(|_| ())
+	}
 
-		Ok(())
+	/// Recover only the pending approval, including for a finished buyer trade.
+	fn retry_erc20_approval(&self, swap: &mut Swap) -> Result<(), Error> {
+		if swap.is_seller() || !swap.secondary_currency.is_erc20() {
+			return Err(Error::UnexpectedAction(
+				"ERC20 approval recovery requires a buyer trade".into(),
+			));
+		}
+		let gas_gwei = self.secondary_fee_gwei(swap)?;
+		let nc = self.eth_node_client.lock();
+		let result = super::funding::retry_approval(
+			&*nc,
+			swap.secondary_currency,
+			swap.secondary_amount,
+			gas_gwei,
+			swap.secondary_data.unwrap_eth_mut()?,
+		);
+		super::funding::record_swap(swap);
+		result
+	}
+
+	fn recover_secondary_deposit(
+		&self,
+		swap: &mut Swap,
+		mode: super::DepositRecoveryMode,
+	) -> Result<(), Error> {
+		use super::{recovery::DepositOutcome, DepositRecoveryMode};
+		use crate::swap::fsm::state::StateId;
+		if swap.is_seller() || !swap.secondary_currency.is_erc20() {
+			return Err(Error::UnexpectedAction(
+				"Deposit recovery requires an ERC20 buyer trade".into(),
+			));
+		}
+		if mode == DepositRecoveryMode::RetryOriginal && swap.state.is_final_state() {
+			return Err(Error::UnexpectedAction(
+				"Use cancel_erc20_deposit for a finished trade".into(),
+			));
+		}
+		if mode == DepositRecoveryMode::Cancel
+			&& !matches!(
+				swap.state,
+				StateId::BuyerPostingSecondaryToMultisigAccount
+					| StateId::BuyerWaitingForLockConfirmations
+					| StateId::BuyerWaitingForRefundTime
+					| StateId::BuyerCancelled
+			) {
+			return Err(Error::UnexpectedAction("Deposit cancellation requires a funding or cancelled trade before redemption or refund submission".into()));
+		}
+		let gas_gwei = self.secondary_fee_gwei(swap)?;
+		let mut data = swap.secondary_data.unwrap_eth()?.clone();
+		let nc = self.eth_node_client.lock();
+		let recovery = super::funding::recover_deposit(
+			&*nc,
+			swap.id,
+			swap.secondary_currency,
+			gas_gwei,
+			&mut data,
+			mode,
+			swap.state.is_final_state(),
+		);
+		// Once cancellation is signed, automated funding must not continue while
+		// its outcome is uncertain. Explicit recovery reconciles either winner.
+		if mode == DepositRecoveryMode::Cancel
+			&& data.lock_cancel_recovery.is_some()
+			&& matches!(
+				swap.state,
+				StateId::BuyerPostingSecondaryToMultisigAccount
+					| StateId::BuyerWaitingForLockConfirmations
+			) {
+			swap.state = StateId::BuyerCancelled;
+		}
+		*swap.secondary_data.unwrap_eth_mut()? = data;
+		let result = (|| {
+			let outcome = recovery?;
+			if mode == DepositRecoveryMode::Cancel {
+				match outcome {
+					Some(DepositOutcome::Deposited(_)) => {
+						let address = swap
+							.secondary_data
+							.unwrap_eth()?
+							.address_from_secret
+							.ok_or(Error::InvalidEthSwapTradeIndex)?;
+						let key = nc.erc20_allowance_key(swap.secondary_currency)?;
+						let (_, token, initiator, _, value) =
+							nc.get_swap_details(swap.secondary_currency, address)?;
+						if value > 0 && token == Some(key.token) && initiator == key.owner {
+							swap.state = StateId::BuyerWaitingForRefundTime;
+						}
+					}
+					Some(DepositOutcome::Cancelled(_) | DepositOutcome::Reverted(_)) => {
+						swap.state = StateId::BuyerCancelled;
+					}
+					None => (),
+				}
+			}
+			Ok(())
+		})();
+		super::funding::record_swap(swap);
+		result
 	}
 
 	/// deposit secondary currecny to lock account.
 	fn post_secondary_lock_tx(&self, swap: &mut Swap) -> Result<(), Error> {
-		assert!(!swap.is_seller());
+		if swap.is_seller() {
+			return Err(Error::UnexpectedAction(
+				"EthSwapApi::post_secondary_lock_tx, swap role is not buyer".to_string(),
+			));
+		}
+		if swap.secondary_currency.is_erc20() {
+			return self.advance_erc20_funding(swap);
+		}
 		let eth_data = swap.secondary_data.unwrap_eth()?;
 
-		if eth_data.lock_tx.is_some() {
-			let status = self.check_eth_transaction_status(eth_data.lock_tx)?;
-			if status == 1 {
+		let status = super::recovery::transaction_status(
+			&*self.eth_node_client.lock(),
+			eth_data.lock_tx,
+			eth_data.lock_recovery.as_ref(),
+		);
+		match status {
+			Ok((hash, true)) => {
+				swap.secondary_data.unwrap_eth_mut()?.lock_tx = Some(hash);
 				return Ok(());
 			}
-		}
-
-		if swap.secondary_currency.is_erc20() {
-			if eth_data.erc20_approve_tx.is_some() {
-				let approve_status =
-					self.check_eth_transaction_status(eth_data.erc20_approve_tx)?;
-				if approve_status == 1 {
-					let eth_tx = self.buyer_deposit(swap)?;
-					let eth_data = swap.secondary_data.unwrap_eth_mut()?;
-					eth_data.lock_tx = Some(eth_tx);
-				} else {
-					return Err(Error::EthERC20TokenApproveError);
-				}
-			} else {
-				let erc20_approve_tx = self.erc20_approve(swap)?;
-				let eth_data = swap.secondary_data.unwrap_eth_mut()?;
-				eth_data.erc20_approve_tx = Some(erc20_approve_tx);
+			Ok((_, false)) => {
+				// A mined revert consumed the nonce, permitting a fresh deposit.
+				let data = swap.secondary_data.unwrap_eth_mut()?;
+				data.lock_tx = None;
+				data.lock_recovery = None;
 			}
-		} else {
-			let eth_tx = self.buyer_deposit(swap)?;
-			let eth_data = swap.secondary_data.unwrap_eth_mut()?;
-			eth_data.lock_tx = Some(eth_tx);
+			Err(Error::InvalidTxHash) => (),
+			Err(Error::EthTransactionInPending) => {
+				if eth_data.lock_recovery.is_none() {
+					return Err(Error::EthereumTransactionRecoveryMissing(
+						eth_data.lock_tx.ok_or(Error::InvalidTxHash)?,
+					));
+				}
+			}
+			Err(error) => return Err(error),
 		}
 
-		Ok(())
+		let secondary_fee_gwei = self.secondary_fee_gwei(swap)?;
+		let mut recovery = swap.secondary_data.unwrap_eth()?.lock_recovery.clone();
+		let submission = self.buyer_deposit(swap, &mut recovery);
+		// Keep signed bytes and replacement hashes on errors, as for refunds.
+		let eth_data = swap.secondary_data.unwrap_eth_mut()?;
+		if let Some(record) = &recovery {
+			eth_data.lock_tx = record.attempted_hashes.last().copied();
+			eth_data.tx_fee_gwei = Some(record.gas_budget_gwei);
+		}
+		eth_data.lock_recovery = recovery;
+		if let Some(eth_tx) = submitted_or_ambiguous_hash(&submission) {
+			eth_data.lock_tx = Some(eth_tx);
+			if eth_data.lock_recovery.is_none() {
+				eth_data.tx_fee_gwei = Some(secondary_fee_gwei);
+			}
+		}
+
+		submission.map(|_| ())
+	}
+
+	fn secondary_lock_tx_failed(&self, swap: &Swap) -> Result<bool, Error> {
+		let data = swap.secondary_data.unwrap_eth()?;
+		let client = self.eth_node_client.lock();
+		let receipt = match super::recovery::transaction_receipt(
+			&*client,
+			data.lock_tx,
+			data.lock_recovery.as_ref(),
+		) {
+			Ok(receipt) => receipt,
+			Err(Error::EthTransactionInPending) => return Ok(false),
+			Err(error) => return Err(error),
+		};
+		if receipt.status != Some(0.into()) {
+			return Ok(false);
+		}
+		// A reorganization can remove a reverted receipt and allow the deposit
+		// to succeed later. Do not stop monitoring until that failure is final.
+		client.receipt_is_finalized(&receipt)
 	}
 
 	/// transfer amount to dedicated address.
 	fn transfer_scondary(&self, swap: &mut Swap) -> Result<(), Error> {
-		assert!(swap.is_seller());
+		if !swap.is_seller() {
+			return Err(Error::UnexpectedAction(
+				"EthSwapApi::transfer_scondary, swap role is not seller".to_string(),
+			));
+		}
 
-		self.seller_transfer_secondary(swap)?;
-		Ok(())
+		if swap.secondary_data.unwrap_eth()?.redirect_tx.is_some() {
+			// The recorded hash is authoritative until its receipt is reconciled.
+			return Ok(());
+		}
+
+		let submission = self.seller_transfer_secondary(swap);
+		if let Some(eth_tx) = submitted_or_ambiguous_hash(&submission) {
+			let data = swap.secondary_data.unwrap_eth_mut()?;
+			data.redirect_tx = Some(eth_tx);
+			data.redirect_tx_candidates = super::recovery::track_redirect(eth_tx);
+		}
+		submission.map(|_| ())
+	}
+
+	fn transfer_secondary_status(&self, swap: &mut Swap) -> Result<SecondaryTransferStatus, Error> {
+		// A fee retry preserves the payment but changes its hash. Save all known
+		// candidates so later checks also work after cache cleanup or a restart.
+		super::recovery::refresh_redirect_candidates(swap);
+		let data = swap.secondary_data.unwrap_eth()?;
+		if data.redirect_tx.is_none() {
+			return Ok(SecondaryTransferStatus::NotPosted);
+		}
+		match super::recovery::transaction_receipt_for_hashes(
+			&*self.eth_node_client.lock(),
+			&data.redirect_tx_candidates,
+		) {
+			Ok(receipt) if receipt.status == Some(1.into()) => {
+				Ok(SecondaryTransferStatus::Confirmed)
+			}
+			Ok(_) => Ok(SecondaryTransferStatus::Failed),
+			// Pending transactions and lookup failures both require retaining the hash
+			// and refusing to create another transfer until its receipt is reconciled.
+			Err(_) => Ok(SecondaryTransferStatus::Pending),
+		}
+	}
+
+	fn ethereum_gas_balance(&self) -> Result<u64, Error> {
+		Ok(self.eth_node_client.lock().balance(Currency::Ether)?.1)
 	}
 
 	fn test_client_connections(&self) -> Result<(), Error> {
 		{
-			let c = self
-				.eth_node_client
-				.lock()
-				.unwrap_or_else(|e| e.into_inner());
+			let c = self.eth_node_client.lock();
 			let name = c.name();
-			let _ = c.height().map_err(|e| {
+			let _ = c.validate_chain_and_contracts().map_err(|e| {
 				Error::InfuraNodeClient(format!(
-					"Unable to contact Ethereum client {}, {}",
+					"Unable to validate Ethereum client and swap contracts {}, {}",
 					name, e
 				))
 			})?;

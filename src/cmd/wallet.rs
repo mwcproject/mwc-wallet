@@ -14,16 +14,23 @@
 // limitations under the License.
 
 use crate::cmd::wallet_args;
-use crate::config::GlobalWalletConfig;
-use clap::ArgMatches;
+use mwc_wallet_config::GlobalWalletConfig;
 use mwc_wallet_config::parse_node_address_string;
 use mwc_wallet_impls::{DefaultLCProvider, HTTPNodeClient};
 use mwc_wallet_libwallet::WalletInst;
+use mwc_wallet_libwallet::types::bounded_escape_for_display;
+use mwc_wallet_util::mwc_crates::clap::ArgMatches;
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
 pub(crate) const MIN_COMPAT_NODE_VERSION: &str = "6.0.0";
+const MAX_COMMAND_ERROR_BYTES: usize = 4_096;
+
+fn safe_command_error(error: &impl std::fmt::Display) -> String {
+	let rendered = error.to_string();
+	bounded_escape_for_display(&rendered, MAX_COMMAND_ERROR_BYTES)
+}
 
 pub fn wallet_command(
 	context_id: u32,
@@ -56,7 +63,10 @@ pub fn wallet_command(
 	};
 
 	let node_list = parse_node_address_string(check_node_api_http_addr);
-	node_client.set_node_url(node_list);
+	if let Err(e) = node_client.set_node_url(node_list) {
+		println!("Error. Invalid node list. {}", e);
+		return 1;
+	}
 
 	let res = wallet_args::wallet_command(
 		context_id,
@@ -65,9 +75,10 @@ pub fn wallet_command(
 		tor_config,
 		mqs_config,
 		node_client,
+		#[cfg(feature = "test-support")]
 		false,
 		|_: Arc<
-			std::sync::Mutex<
+			mwc_wallet_util::Mutex<
 				Box<
 					dyn WalletInst<
 							'static,
@@ -84,7 +95,7 @@ pub fn wallet_command(
 	thread::sleep(Duration::from_millis(100));
 
 	if let Err(e) = res {
-		println!("Wallet command failed: {}", e);
+		println!("Wallet command failed: {}", safe_command_error(&e));
 		1
 	} else {
 		println!(
@@ -92,5 +103,25 @@ pub fn wallet_command(
 			wallet_args.subcommand().0
 		);
 		0
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn command_error_rendering_is_bounded_and_terminal_safe() {
+		let mut hostile = "before\n\u{1b}]52;c;payload\u{7}\u{2066}".to_owned();
+		hostile.push_str(&"x".repeat(MAX_COMMAND_ERROR_BYTES * 2));
+		let safe = safe_command_error(&hostile);
+
+		assert!(safe.contains("\\u000a"));
+		assert!(safe.contains("\\u001b"));
+		assert!(safe.contains("\\u0007"));
+		assert!(safe.contains("\\u2066"));
+		assert!(safe.ends_with("...[truncated]"));
+		assert!(!safe.chars().any(char::is_control));
+		assert!(!safe.contains('\u{2066}'));
 	}
 }

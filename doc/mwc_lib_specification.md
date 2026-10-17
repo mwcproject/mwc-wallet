@@ -41,6 +41,10 @@ all those methods are supported and will be used for the wallet calls as well.
 Important callback lifetime rule:
 
 - Callback message pointers are temporary and must not be stored on the C side. Copy data during callback execution.
+- Notification callbacks may return null. A `node_client_callback` must synchronously return a valid JSON-RPC response
+  C string; the wallet copies it before returning from the callback call.
+- Scan and wallet-update progress callbacks run inline before the request returns. They must return promptly and must not
+  synchronously re-enter wallet APIs or register/unregister library callbacks.
 
 ## JSON Request/Response Contract
 
@@ -130,7 +134,8 @@ All methods below are dispatched in:
 - Params:
   - `context_id` (required): `u32`
   - `node_client_callback` (required): `string` (registered callback name) - Very critical method. Wallet will use this callback to 
-interract with a node. It is expected that this call will be redirected to embedded or public node.
+    interact with a node and expects the callback to return the node JSON-RPC response synchronously. It is expected that
+    this call will be redirected to embedded or public node.
   - `mnemonic_length` (required): `usize` (in words) : The length of mnemonic phrase. Supported 12, 15, 18, 21, 24 words.
   - `password` (required): `string` : User password for this wallet. Password will be required to open the wallet.
 - Result:
@@ -143,7 +148,8 @@ interract with a node. It is expected that this call will be redirected to embed
 - Params:
   - `context_id` (required): `u32`
   - `node_client_callback` (required): `string` (registered callback name) - Very critical method. Wallet will use this callback to
-    interract with a node. It is expected that this call will be redirected to embedded or public node.
+    interact with a node and expects the callback to return the node JSON-RPC response synchronously. It is expected that
+    this call will be redirected to embedded or public node.
   - `mnemonic` (required): `string` - mnemonic phrase, words should be separate with space
   - `password` (required): `string` - User password for this wallet. Password will be required to open the wallet.
 - Result:
@@ -156,7 +162,8 @@ interract with a node. It is expected that this call will be redirected to embed
 - Params:
   - `context_id` (required): `u32`
   - `node_client_callback` (required): `string` (registered callback name) - Very critical method. Wallet will use this callback to
-    interract with a node. It is expected that this call will be redirected to embedded or public node.
+    interact with a node and expects the callback to return the node JSON-RPC response synchronously. It is expected that
+    this call will be redirected to embedded or public node.
   - `password` (required): `string` - User password assigned to this wallet before.
 - Result:
   - `{}`
@@ -247,10 +254,11 @@ interract with a node. It is expected that this call will be redirected to embed
 - Params:
   - `context_id` (required): `u32`
 - Result:
-  - `{ "running": <bool>, "healthy": <bool> }`
+  - `{ "running": <bool>, "healthy": <bool>, "error": <string|null> }`
 - Notes:
   - Reports MQS listener running and health state.
-  - Use MQS 'healthy' result for monitoring and notifications. Wallet library will restore connection to the tor if possible.
+  - `error` retains a fatal worker error or panic after the failed listener has removed itself from the active broker registry. It is cleared when a new listener starts or the terminated state is explicitly reset.
+  - Use MQS `healthy` for connection monitoring and `error` for terminal listener failure.
 
 ### 18) `stop_mqs_listener`
 
@@ -260,6 +268,7 @@ interract with a node. It is expected that this call will be redirected to embed
   - `{}`
 - Notes:
   - Stops MQS listener.
+  - Returns an API error if the listener worker failed or panicked, including a failure retained after the worker unregistered itself.
 
 ### 19) `set_address_index`
 
@@ -288,22 +297,23 @@ interract with a node. It is expected that this call will be redirected to embed
 - Result:
   - `{ "rewind_hash": "..." }`
 - Notes:
-  - Returns wallet rewind hash.
+  - Returns the wallet's rewind-only viewing credential. Share it only with intended viewers.
+  - The credential reveals values and metadata for matching outputs, but does not grant spending authority.
 
 ### 22) `scan_rewind_hash`
 
 - Params:
   - `context_id` (required): `u32`
-  - `rewind_hash` (required): `string` - Revind hash from another wallet 
-  - `response_callback` (required): `string` (registered callback name) - callback to get updates about the progress. 
-  Scan might take a while, it is expected that the progress should be shown to user.
-  - `response_id` (required): `string` - This id will be a part of the response_callback feed. So single callback can be used for all scan calls.
+  - `rewind_hash` (required): `string` - Rewind hash from another wallet.
+  - `response_callback` (required): `string` (registered callback name) - Callback that receives progress updates.
+  - `response_id` (required): `string` - Identifier included in every callback payload so one callback can serve multiple scans.
 - Result:
   - Serialized `ViewWallet` object
 - Notes:
-  - Performs rewind-hash scan. 
-  - Sends progress updates to callback as JSON:
-  - `{ "response_id": <response_id>, "status": <StatusMessage> }`
+  - Performs a rewind-hash scan. A successful rewind proves only that an output used the supplied rewind credential; it does not prove that the wallet can spend the output.
+  - Anyone who knows the rewind hash can create an unrelated valid output using the same rewind scheme. Such an output is included in the result and can increase the reported total.
+  - Treat the returned outputs and total as a view-only estimate, not an ownership or balance attestation.
+  - Progress callbacks are invoked synchronously during the scan as `{ "response_id": "...", "status": <StatusMessage> }`.
 
 ### 23) `generate_ownership_proof`
 
@@ -317,6 +327,7 @@ interract with a node. It is expected that this call will be redirected to embed
   - Serialized `OwnershipProof` object
 - Notes:
   - Creates ownership proof record. Message 'message' will be signed with all public key that represent proved data.
+  - A signed wallet-root public key authenticates that key. A rewind hash derived from it remains a rewind-only viewing credential and does not turn scan matches into proof of spend ownership.
 
 ### 24) `validate_ownership_proof`
 
@@ -327,6 +338,7 @@ interract with a node. It is expected that this call will be redirected to embed
   - Serialized `OwnershipProofValidation` object
 - Notes:
   - Validates ownership proof content/signature.
+  - If validation returns a viewing key, it is a rewind hash. Output matches found with it are not proof of spend ownership.
 
 ### 25) `create_account`
 
@@ -595,26 +607,25 @@ that was set with 'switch_receive_account'
 - Params:
   - `context_id` (required): `u32`
   - `delete_unconfirmed` (required): `bool` - True is we want automatically cancel not confirmed transacitons. Scan normally used to recover account after some mess.
-  - `response_callback` (required): `string` (registered callback name) - Callback function to receive the progress related messages. 
-  - `response_id` (required): `string` - response_id values for the the callback.
+  - `response_callback` (required): `string` (registered callback name) - Callback that receives progress updates.
+  - `response_id` (required): `string` - Identifier included in every callback payload.
 - Result:
   - `{ "height": <u64> }` - Blockchain height until the scan was done.
 - Notes:
   - Performs full wallet scan.
-  - Sends progress updates to callback as JSON:
-  - `{ "response_id": "...", "status": <StatusMessage> }`
+  - Progress callbacks are invoked synchronously during the scan as `{ "response_id": "...", "status": <StatusMessage> }`.
 
 ### 51) `update_wallet_state`
 
 - Params:
   - `context_id` (required): `u32`
-  - `response_callback` (required): `string` (registered callback name) - Callback function to receive the progress related messages.
-  - `response_id` (required): `string` - response_id values for the the callback.
+  - `response_callback` (required): `string` (registered callback name) - Callback that receives progress updates.
+  - `response_id` (required): `string` - Identifier included in every callback payload.
 - Result:
   - `{ "validated": <bool>, "height": <u64> }`
 - Notes:
   - validation flag if anything was neede to validate and blockchian height until validation was done.
-  - Sends progress updates to callback.
+  - Progress callbacks are invoked synchronously while wallet state is being scanned.
 
 ### 52) `request_receiver_proof_address`
 

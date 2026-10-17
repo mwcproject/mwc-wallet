@@ -13,18 +13,15 @@
 // limitations under the License.
 
 //! tests ttl_cutoff blocks
-#[macro_use]
-extern crate log;
-extern crate mwc_wallet_controller as wallet;
-extern crate mwc_wallet_impls as impls;
+
+#![cfg(feature = "test-support")]
+
 extern crate mwc_wallet_util;
 
-use impls::test_framework::{self, LocalWalletClient};
-use libwallet::{InitTxArgs, Slate, TxLogEntryType};
-use mwc_wallet_libwallet as libwallet;
+use mwc_wallet_impls::test_framework::{self, LocalWalletClient};
+use mwc_wallet_libwallet::{InitTxArgs, Slate, TxLogEntryType};
 use mwc_wallet_util::mwc_core::global;
 use std::ops::DerefMut;
-use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
@@ -32,17 +29,16 @@ use std::time::Duration;
 #[macro_use]
 mod common;
 use common::{clean_output_dir, create_wallet_proxy, setup};
+use mwc_wallet_util::Mutex;
 use mwc_wallet_util::mwc_core::core::Transaction;
-use std::sync::Mutex;
 
 /// Test cutoff block times
-fn ttl_cutoff_test_impl(test_dir: &str) -> Result<(), wallet::Error> {
+fn ttl_cutoff_test_impl(test_dir: &str) -> Result<(), mwc_wallet_controller::Error> {
 	global::set_local_chain_type(global::ChainTypes::AutomatedTesting);
 	// Create a new proxy to simulate server and wallet responses
 	let tx_pool: Arc<Mutex<Vec<Transaction>>> = Arc::new(Mutex::new(Vec::new()));
 	let mut wallet_proxy = create_wallet_proxy(test_dir.into(), tx_pool.clone());
 	let chain = wallet_proxy.chain.clone();
-	let stopper = wallet_proxy.running.clone();
 
 	create_wallet_and_add!(
 		client1,
@@ -71,12 +67,7 @@ fn ttl_cutoff_test_impl(test_dir: &str) -> Result<(), wallet::Error> {
 	let mask2 = (&mask2_i).as_ref();
 
 	// Set the wallet proxy listener running
-	thread::spawn(move || {
-		global::set_local_chain_type(global::ChainTypes::AutomatedTesting);
-		if let Err(e) = wallet_proxy.run() {
-			error!("Wallet Proxy error: {}", e);
-		}
-	});
+	let proxy_handle = wallet_proxy.start();
 
 	// few values to keep things shorter
 
@@ -88,37 +79,39 @@ fn ttl_cutoff_test_impl(test_dir: &str) -> Result<(), wallet::Error> {
 		mask1,
 		bh as usize,
 		false,
-		tx_pool
-			.lock()
-			.unwrap_or_else(|e| e.into_inner())
-			.deref_mut(),
+		tx_pool.lock().deref_mut(),
 	);
 
 	let amount = 2_000_000_000; // mwc had 60_000_000_000
-	let mut slate = Slate::blank(1, false);
-	wallet::controller::owner_single_use(Some(wallet1.clone()), mask1, None, |sender_api, m| {
-		// note this will increment the block count as part of the transaction "Posting"
-		let args = InitTxArgs {
-			src_acct_name: None,
-			amount: amount,
-			minimum_confirmations: 2,
-			max_outputs: 500,
-			num_change_outputs: 1,
-			selection_strategy_is_use_all: true,
-			ttl_blocks: Some(2),
-			..Default::default()
-		};
-		let slate_i = sender_api.init_send_tx(m, None, &args, 1)?;
+	let mut slate = Slate::blank(1, false)?;
+	mwc_wallet_controller::controller::owner_single_use(
+		Some(wallet1.clone()),
+		mask1,
+		None,
+		|sender_api, m| {
+			// note this will increment the block count as part of the transaction "Posting"
+			let args = InitTxArgs {
+				src_acct_name: None,
+				amount: amount,
+				minimum_confirmations: 2,
+				max_outputs: 500,
+				num_change_outputs: 1,
+				selection_strategy_is_use_all: true,
+				ttl_blocks: Some(2),
+				..Default::default()
+			};
+			let slate_i = sender_api.init_send_tx(m, None, &args, 1)?;
 
-		slate = client1.send_tx_slate_direct("wallet2", &slate_i)?;
-		sender_api.tx_lock_outputs(m, None, &slate, None, 0)?;
+			slate = client1.send_tx_slate_direct("wallet2", &slate_i)?;
+			sender_api.tx_lock_outputs(m, None, &slate, None, 0)?;
 
-		let (_, txs) = sender_api.retrieve_txs(m, true, None, Some(slate.id), None, None)?;
-		let tx = txs[0].clone();
+			let (_, _, txs) = sender_api.retrieve_txs(m, true, None, Some(slate.id), None, None)?;
+			let tx = txs[0].clone();
 
-		assert_eq!(tx.ttl_cutoff_height, Some(12));
-		Ok(())
-	})?;
+			assert_eq!(tx.ttl_cutoff_height, Some(12));
+			Ok(())
+		},
+	)?;
 
 	// Now mine past the block, and check again. Transaction should be gone.
 	let _ = test_framework::award_blocks_to_wallet(
@@ -127,57 +120,77 @@ fn ttl_cutoff_test_impl(test_dir: &str) -> Result<(), wallet::Error> {
 		mask1,
 		2,
 		false,
-		tx_pool
-			.lock()
-			.unwrap_or_else(|e| e.into_inner())
-			.deref_mut(),
+		tx_pool.lock().deref_mut(),
 	);
 
-	wallet::controller::owner_single_use(Some(wallet1.clone()), mask1, None, |sender_api, m| {
-		let (_, txs) = sender_api.retrieve_txs(m, true, None, Some(slate.id), None, None)?;
-		let tx = txs[0].clone();
+	mwc_wallet_controller::controller::owner_single_use(
+		Some(wallet1.clone()),
+		mask1,
+		None,
+		|sender_api, m| {
+			// This is the first wallet refresh at the cutoff height. The refresh
+			// performs TTL cancellation before the explicit cancellation path runs;
+			// the owner call must report that durable transition as success.
+			sender_api.cancel_tx(m, None, Some(slate.id))?;
+			let (_, _, txs) =
+				sender_api.retrieve_txs(m, false, None, Some(slate.id), None, None)?;
+			let tx = txs[0].clone();
 
-		assert_eq!(tx.ttl_cutoff_height, Some(12));
-		assert!(tx.tx_type == TxLogEntryType::TxSentCancelled);
-		Ok(())
-	})?;
+			assert_eq!(tx.ttl_cutoff_height, Some(12));
+			assert!(tx.tx_type == TxLogEntryType::TxSentCancelled);
+			// Cancellation is an idempotent postcondition, so retrying after the
+			// transaction is already cancelled also succeeds.
+			sender_api.cancel_tx(m, None, Some(slate.id))?;
+			Ok(())
+		},
+	)?;
 
 	// Should also be gone in wallet 2, and output gone
-	wallet::controller::owner_single_use(Some(wallet2.clone()), mask2, None, |sender_api, m| {
-		let (_, txs) = sender_api.retrieve_txs(m, true, None, Some(slate.id), None, None)?;
-		let tx = txs[0].clone();
-		let outputs = sender_api.retrieve_outputs(m, false, true, None)?.1;
-		assert_eq!(outputs.len(), 0);
+	mwc_wallet_controller::controller::owner_single_use(
+		Some(wallet2.clone()),
+		mask2,
+		None,
+		|sender_api, m| {
+			let (_, _, txs) = sender_api.retrieve_txs(m, true, None, Some(slate.id), None, None)?;
+			let tx = txs[0].clone();
+			let outputs = sender_api.retrieve_outputs(m, false, true, None)?.2;
+			assert_eq!(outputs.len(), 0);
 
-		assert_eq!(tx.ttl_cutoff_height, Some(12));
-		assert!(tx.tx_type == TxLogEntryType::TxReceivedCancelled);
-		Ok(())
-	})?;
+			assert_eq!(tx.ttl_cutoff_height, Some(12));
+			assert!(tx.tx_type == TxLogEntryType::TxReceivedCancelled);
+			Ok(())
+		},
+	)?;
 
 	// try again, except try and send off the transaction for completion beyond the expiry
-	let mut slate = Slate::blank(1, false);
-	wallet::controller::owner_single_use(Some(wallet1.clone()), mask1, None, |sender_api, m| {
-		// note this will increment the block count as part of the transaction "Posting"
-		let args = InitTxArgs {
-			src_acct_name: None,
-			amount: amount,
-			minimum_confirmations: 2,
-			max_outputs: 500,
-			num_change_outputs: 1,
-			selection_strategy_is_use_all: true,
-			ttl_blocks: Some(2),
-			..Default::default()
-		};
-		let slate_i = sender_api.init_send_tx(m, None, &args, 1)?;
-		sender_api.tx_lock_outputs(m, None, &slate_i, None, 0)?;
-		slate = slate_i;
+	let mut slate = Slate::blank(1, false)?;
+	mwc_wallet_controller::controller::owner_single_use(
+		Some(wallet1.clone()),
+		mask1,
+		None,
+		|sender_api, m| {
+			// note this will increment the block count as part of the transaction "Posting"
+			let args = InitTxArgs {
+				src_acct_name: None,
+				amount: amount,
+				minimum_confirmations: 2,
+				max_outputs: 500,
+				num_change_outputs: 1,
+				selection_strategy_is_use_all: true,
+				ttl_blocks: Some(2),
+				..Default::default()
+			};
+			let slate_i = sender_api.init_send_tx(m, None, &args, 1)?;
+			sender_api.tx_lock_outputs(m, None, &slate_i, None, 0)?;
+			slate = slate_i;
 
-		let (_, txs) = sender_api.retrieve_txs(m, true, None, Some(slate.id), None, None)?;
-		let tx = txs[0].clone();
+			let (_, _, txs) = sender_api.retrieve_txs(m, true, None, Some(slate.id), None, None)?;
+			let tx = txs[0].clone();
 
-		assert_eq!(tx.ttl_cutoff_height, Some(14));
-		Ok(())
-	})?;
+			assert_eq!(tx.ttl_cutoff_height, Some(14));
+			Ok(())
+		},
+	)?;
 
 	// Mine past the ttl block and try to send
 	let _ = test_framework::award_blocks_to_wallet(
@@ -186,28 +199,36 @@ fn ttl_cutoff_test_impl(test_dir: &str) -> Result<(), wallet::Error> {
 		mask1,
 		2,
 		false,
-		tx_pool
-			.lock()
-			.unwrap_or_else(|e| e.into_inner())
-			.deref_mut(),
+		tx_pool.lock().deref_mut(),
 	);
 
 	// Wallet 2 will need to have updated past the TTL
-	wallet::controller::owner_single_use(Some(wallet2.clone()), mask2, None, |sender_api, m| {
-		let (_, _) = sender_api.retrieve_txs(m, true, None, Some(slate.id), None, None)?;
-		Ok(())
-	})?;
+	mwc_wallet_controller::controller::owner_single_use(
+		Some(wallet2.clone()),
+		mask2,
+		None,
+		|sender_api, m| {
+			let (_, _, _) = sender_api.retrieve_txs(m, true, None, Some(slate.id), None, None)?;
+			Ok(())
+		},
+	)?;
 
 	// And when wallet 1 sends, should be rejected
-	wallet::controller::owner_single_use(Some(wallet1.clone()), mask1, None, |_sender_api, _m| {
-		let res = client1.send_tx_slate_direct("wallet2", &slate);
-		println!("Send after TTL result is: {:?}", res);
-		assert!(res.is_err());
-		Ok(())
-	})?;
+	mwc_wallet_controller::controller::owner_single_use(
+		Some(wallet1.clone()),
+		mask1,
+		None,
+		|_sender_api, _m| {
+			let res = client1.send_tx_slate_direct("wallet2", &slate);
+			println!("Send after TTL result is: {:?}", res);
+			assert!(res.is_err());
+			Ok(())
+		},
+	)?;
 
 	// let logging finish
-	stopper.store(false, Ordering::Relaxed);
+	proxy_handle.stop()?;
+	drop(chain);
 	thread::sleep(Duration::from_millis(200));
 	Ok(())
 }

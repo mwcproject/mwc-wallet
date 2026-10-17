@@ -49,12 +49,12 @@ subcommands:
             long: create
             takes_value: true
   - rewind_hash:
-      about: Return the hash of the wallet root public key.
+      about: Return the wallet's rewind-only viewing credential. Share it only with intended viewers.
   - scan_rewind_hash:
-      about: Scan the UTXO set and return the outputs and the total of mwc owned by a view wallet rewind hash.
+      about: Scan for outputs matching a view-wallet rewind hash. Matches and totals are not proof of spend ownership.
       args:
         - rewind_hash:
-            help: Rewind hash of the wallet to be scanned in order to retrieve all the outputs and balance.
+            help: Rewind hash used to retrieve matching outputs and an estimated total.
             required: true
             index: 1
         - start_height:
@@ -75,13 +75,8 @@ subcommands:
             short: l
             long: port
             takes_value: true
-        - libp2p_port:
-            help: Port on which to run the libp2p listener
-            short: p
-            long: libp2p_port
-            takes_value: true
         - method:
-            help: Which method to use for communication. Please note, http triggering tor and libp2p listeners if they are configured
+            help: Which method to use for communication. Please note, http triggering tor listeners if it enabled
             short: m
             long: method
             possible_values:
@@ -448,7 +443,7 @@ subcommands:
             long: count
             takes_value: true
         - show_last_four_days:
-            help: Show transactions for last four days. Default is false. Intended for usage with a mining/exchange wallets that have huge number of transactions. This flag limits transaction output data.
+            help: Show recent transactions, including recent cancellations, plus outstanding transactions of any age. Uses approximately four days of block heights, or creation time when no confirmation height exists. Default is false. Intended for mining/exchange wallets with large transaction histories.
             long: show_last_four_days
             takes_value: false
   - post:
@@ -591,10 +586,11 @@ subcommands:
       about: Print wallet internal data (transactions, outputs)
       args:
         - file:
-            help: write dump to the file instead of console
+            help: File to write the wallet dump to
             short: f
             long: file
             takes_value: true
+            required: true
   - swap_create_from_offer:
       about: Create Buyer swap from the Offer message in the specified file
       args:
@@ -658,7 +654,7 @@ subcommands:
             long: secondary_address
             takes_value: true
         - secondary_fee:
-            help: Tx fee for secondary currency (satoshi per byte for btc family, gwei for ethereum)
+            help: "Secondary-chain transaction fee; enter only an unsigned decimal number, without a unit suffix or scientific notation. BTC/BCH: satoshis per virtual byte (sat/vB); LTC: litoshis/vB; DASH: duffs/vB. These rate formats allow up to 3 decimal places (example: 1.4); each named atomic unit is 0.00000001 coin, and the resulting transaction fee is rounded up to a whole atomic unit. ZEC/DOGE: one flat fee expressed in ZEC or DOGE, not a per-byte rate, with up to 8 decimal places (examples: enter 0.0001 for 0.0001 ZEC; enter 3 for 3 DOGE). The smallest units are 1 zatoshi = 0.00000001 ZEC and 1 koinu = 0.00000001 DOGE. Ethereum family: total gas budget as an integer number of gwei, with no decimal places (example: 5500000); 1 gwei is 0.000000001 ETH. The value must be greater than zero."
             long: secondary_fee
             takes_value: true
         - who_lock_first:
@@ -713,11 +709,11 @@ subcommands:
             long: electrum_uri2
             takes_value: true
         - eth_swap_contract_address:
-            help: ethereum swap contract address
+            help: ethereum swap contract address; for an existing trade it must match the address pinned at creation
             long: eth_swap_contract_address
             takes_value: true
         - erc20_swap_contract_address:
-            help: erc20 swap contract address
+            help: erc20 swap contract address; for an existing trade it must match the address pinned at creation
             long: erc20_swap_contract_address
             takes_value: true
         - eth_infura_project_id:
@@ -749,6 +745,10 @@ subcommands:
             short: r
             long: remove
             takes_value: false
+        - discard_pending_marketplace_cancel:
+            help: With --remove, permanently discard an undelivered marketplace cancellation notification
+            long: discard_pending_marketplace_cancel
+            takes_value: false
         - check:
             help: Check the status of the trade
             short: c
@@ -760,7 +760,7 @@ subcommands:
             long: process
             takes_value: false
         - autoswap:
-            help: Enter all required values now and let the swap process be carried out without any more inputs.
+            help: Execute a single step of the swap trade. With --json_format the trade status is printed as a JSON line, otherwise in the regular format.
             short: a
             long: autoswap
             takes_value: false
@@ -785,6 +785,9 @@ subcommands:
             possible_values:
               - tag
               - cancel
+              - retry_erc20_approval
+              - retry_erc20_deposit
+              - cancel_erc20_deposit
               - destination
               - secondary_address
               - secondary_fee
@@ -822,11 +825,6 @@ subcommands:
               - BuyerWaitingForRefundConfirmations
               - BuyerCancelledRefunded
               - BuyerCancelled
-        - stop_auto_swap:
-            help: Stop all the ongoing auto swap processes
-            short: t
-            long: stop_auto_swap
-            takes_value: false
         - swap_id:
             help: Swap trade Id. Required for commands that are specific for single trade
             short: i
@@ -852,7 +850,7 @@ subcommands:
             long: apisecret
             takes_value: true
         - secondary_fee:
-            help: Fee for Secondary Currency transactions. See fee units with 'swap --check' command
+            help: "Secondary-chain transaction fee; enter only an unsigned decimal number, without a unit suffix or scientific notation. BTC/BCH: satoshis per virtual byte (sat/vB); LTC: litoshis/vB; DASH: duffs/vB. These rate formats allow up to 3 decimal places (example: 1.4); each named atomic unit is 0.00000001 coin, and the resulting transaction fee is rounded up to a whole atomic unit. ZEC/DOGE: one flat fee expressed in ZEC or DOGE, not a per-byte rate, with up to 8 decimal places (examples: enter 0.0001 for 0.0001 ZEC; enter 3 for 3 DOGE). The smallest units are 1 zatoshi = 0.00000001 ZEC and 1 koinu = 0.00000001 DOGE. Ethereum family: total gas budget as an integer number of gwei, with no decimal places (example: 5500000); 1 gwei is 0.000000001 ETH. The value must be greater than zero."
             long: secondary_fee
             takes_value: true
         - message_file_name:
@@ -914,108 +912,6 @@ subcommands:
             short: a
             long: amount
             takes_value: true
-  - integrity:
-      about: Manage integrity fees and funds.
-      args:
-        - check:
-            help: View paid integrity fees, view integrity account balance.
-            short: c
-            long: check
-            takes_value: false
-        - reserve:
-            help: In case of low balance, how much coins reserve for integrity fees. Default is 1 MWC
-            short: r
-            long: reserve
-            takes_value: true
-        - account:
-            help: Account name to withdraw funds for integrity fee reservation
-            short: a
-            long: account
-            takes_value: true
-        - fee:
-            help: Create integrity transaction to pay fees. Argument is comma separated fees (MWC). The minimal fee for network is 10X of basic fees. Currently it is 0.01 MWC
-            short: t
-            long: create
-            takes_value: true
-        - withdraw:
-            help: Withdraw the integrity funds back to regular wallet account
-            short: w
-            long: withdraw
-            takes_value: false
-        - json:
-            help: Print response in Json format
-            short: j
-            long: json
-            takes_value: false
-  - messaging:
-      about: Manage libp2p messaging routine.
-      args:
-        - status:
-            help: Show status of messaging - listening topics, minimal fee, broadcasting messages, number of received messages.
-            short: s
-            long: status
-            takes_value: false
-        - add_topic:
-            help: Add topic to listen. Messages must be in json format.
-            short: a
-            long: add_topic
-            takes_value: true
-        - fee:
-            help: Integrity fee. For topic and receive_message it is a minimal accepted fee. For publishing it is integrity fee to pay.
-            short: f
-            long: fee
-            takes_value: true
-        - fee_uuid:
-            help: Integrity fee transaction ID to use.
-            short: u
-            long: fee_uuid
-            takes_value: true
-        - remove_topic:
-            help: Stop listening on the topic.
-            short: r
-            long: remove_topic
-            takes_value: true
-        - publish_message:
-            help: Start broadcasting the message.
-            short: p
-            long: publish_message
-            takes_value: true
-        - publish_topic:
-            help: Topic for the broadcast message.
-            short: t
-            long: publish_topic
-            takes_value: true
-        - publish_interval:
-            help: Time interval for broadcasting (seconds). The minimal interval is 1 minute.
-            short: i
-            long: publish_interval
-            takes_value: true
-        - message_uuid:
-            help: Stop broadcast message.
-            short: w
-            long: withdraw_message
-            takes_value: true
-        - delete_messages:
-            help: Print messages that was received. Optionally messages can be deleted from the buffer. Note, last 1000 messages will be stored.
-            short: v
-            long: receive_messages
-            possible_values:
-              - yes
-              - no
-            takes_value: true
-        - check_integrity:
-            help: Check Integrity context expiration of broadcast messages. Need to be done at least every hour.
-            long: check_integrity
-            takes_value: false
-        - check_integrity_retain:
-            help: Delete messages with expired Integrity context.
-            long: check_integrity_retain
-            takes_value: false
-        - json:
-            help: Print response in Json format
-            short: j
-            long: json
-            takes_value: false
   - send_marketplace_message:
       about: Send marketplace related message to another wallet by tor address
       args:
@@ -1033,6 +929,10 @@ subcommands:
             help: Another wallet tor address
             short: a
             long: tor_address
+            takes_value: true
+        - swap_id:
+            help: Exact swap UUID (required for fail_bidding)
+            long: swap_id
             takes_value: true
   - check_tor_connection:
       about: check this wallet tor connection (for CLI mode)

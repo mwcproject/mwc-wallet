@@ -17,33 +17,34 @@
 
 use built;
 use std::env;
+use std::error::Error;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-fn main() {
+fn main() -> Result<(), Box<dyn Error>> {
 	// Setting up git hooks in the project: rustfmt and so on.
-	let git_hooks = format!(
-		"git config core.hooksPath {}",
-		PathBuf::from("./.hooks").to_str().unwrap()
-	);
-
-	if cfg!(target_os = "windows") {
-		Command::new("cmd")
-			.args(&["/C", &git_hooks])
-			.output()
-			.expect("failed to execute git config for hooks");
-	} else {
-		Command::new("sh")
-			.args(&["-c", &git_hooks])
-			.output()
-			.expect("failed to execute git config for hooks");
+	let hook_config_result = Command::new("git")
+		.args(["config", "core.hooksPath", "./.hooks"])
+		.status();
+	match hook_config_result {
+		Ok(status) if status.success() => {}
+		Ok(status) => println!(
+			"cargo:warning=Unable to configure repository hooks: git exited with status {}",
+			status
+		),
+		Err(e) => println!("cargo:warning=Unable to configure repository hooks: {}", e),
 	}
 
 	// build and versioning information
-	let out_dir_path = format!("{}{}", env::var("OUT_DIR").unwrap(), "/built.rs");
+	let out_dir =
+		env::var_os("OUT_DIR").ok_or("Cargo did not provide OUT_DIR to the build script")?;
+	let out_dir_path = PathBuf::from(out_dir).join("built.rs");
 	// don't fail the build if something's missing, may just be cargo release
-	let _ = built::write_built_file_with_opts(
+	if let Err(e) = built::write_built_file_with_opts(
 		Some(Path::new(env!("CARGO_MANIFEST_DIR"))),
-		Path::new(&out_dir_path),
-	);
+		&out_dir_path,
+	) {
+		println!("cargo:warning=Unable to write build metadata: {}", e);
+	}
+	Ok(())
 }

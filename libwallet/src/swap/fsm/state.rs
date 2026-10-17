@@ -16,7 +16,8 @@ use crate::swap::message::Message;
 use crate::swap::swap::SwapJournalRecord;
 use crate::swap::types::{Action, SwapTransactionsConfirmations};
 use crate::swap::{Context, Error, Swap};
-use mwc_wallet_util::mwc_util::secp::Secp256k1;
+use mwc_wallet_util::mwc_crates::secp::Secp256k1;
+use mwc_wallet_util::mwc_crates::serde::{self, Deserialize, Serialize};
 use std::fmt;
 
 /// We need to reprty post transaction we we don't see it on the blockchain
@@ -31,18 +32,24 @@ pub const JOURNAL_CANCELLED_BY_USER: &str = "Cancelled by user";
 /// Journal messages that are repeatable for State
 pub const JOURNAL_CANCELLED_BY_TIMEOUT: &str = "Cancelled as expired";
 /// Journal messages that are repeatable for State
-pub const JOURNAL_CANCELLED_BYER_LOCK_TOO_MUCH_FUNDS: &str =
-	"Cancelled because the buyer posted funds greater than the agreed upon amount to the lock account";
+pub const JOURNAL_CANCELLED_BYER_LOCK_TOO_MUCH_FUNDS: &str = "Cancelled because the buyer posted funds greater than the agreed upon amount to the lock account";
 /// Journal messages that are repeatable for State
 pub const JOURNAL_NOT_LOCKED: &str = "Funds are not locking any more, switching back to waiting";
-/// Height limit to bump the fees for BTC. If BTC Tx still in memory pool for so many blocks,
-/// we can increase the fees
+/// Block delay before increasing the BTC redeem fee after an unconfirmed or
+/// rejected submission.
 pub const SECONDARY_HEIGHT_TO_INCREASE_FEE: u64 = 5;
-/// Multiplier to increase the fees. 20% per every 5 blocks if it still stale.
-pub const SECONDARY_INCREASE_FEE_K: f32 = 1.2; // In case the Tx is not mined during 5 blocks, fee will be increased by 20%.
+/// Increase stale BTC redeem fees by at least 20%, using exact rational integer
+/// arithmetic together with the minimum incremental relay fee increase below.
+pub const SECONDARY_INCREASE_FEE_NUMERATOR: u64 = 6;
+/// Denominator paired with [`SECONDARY_INCREASE_FEE_NUMERATOR`].
+pub const SECONDARY_INCREASE_FEE_DENOMINATOR: u64 = 5;
+/// Minimum BTC replacement rate increase (1 sat/vB), covering Bitcoin Core's
+/// traditional incremental relay fee as well as its lower default.
+pub const SECONDARY_MIN_FEE_INCREASE_PER_KVB: u64 = 1_000;
 
 /// StateId of the swap finite state machine.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[serde(crate = "serde")]
 pub enum StateId {
 	// ---------------- Seller Happy path -----------------
 	/// Seller created Offer (Initial state for Seller)
@@ -102,8 +109,12 @@ pub enum StateId {
 	BuyerRedeemMwc,
 	/// Buyer waiting for confirmation of the redeem.
 	BuyerWaitForRedeemMwcConfirmations,
+	/// A competing MWC refund is being confirmed; redemption is suspended.
+	BuyerWaitingForMwcRefundConfirmations,
 	/// Buyer is done with a swap sucessfully
 	BuyerSwapComplete,
+	/// The seller's MWC refund and secondary redemption are both confirmed.
+	BuyerSwapFailed,
 
 	// ------------- Buyer calcellation with refund path -----------------
 	/// Waiting until BTC lock time will be expired
@@ -162,7 +173,13 @@ impl fmt::Display for StateId {
 			StateId::BuyerWaitForRedeemMwcConfirmations => {
 				"Waiting for confirmations of Redeem transaction"
 			}
+			StateId::BuyerWaitingForMwcRefundConfirmations => {
+				"Waiting for confirmations of seller's MWC refund"
+			}
 			StateId::BuyerSwapComplete => "Complete",
+			StateId::BuyerSwapFailed => {
+				"Swap failed: seller refunded MWC and redeemed secondary funds"
+			}
 
 			StateId::BuyerWaitingForRefundTime => "Waiting when refund Transaction can be posted",
 			StateId::BuyerPostingRefundForSecondary => "Post Refund Transaction",
@@ -179,11 +196,23 @@ impl fmt::Display for StateId {
 }
 
 impl StateId {
+	/// States whose decisions require only verified MWC observations.
+	pub(crate) fn is_seller_refund(&self) -> bool {
+		matches!(
+			self,
+			Self::SellerWaitingForRefundHeight
+				| Self::SellerPostingRefundSlate
+				| Self::SellerWaitingForRefundConfirmations
+				| Self::SellerCancelledRefunded
+		)
+	}
+
 	/// return true if this state is final and swap trade is done
 	pub fn is_final_state(&self) -> bool {
 		match self {
 			StateId::SellerSwapComplete
 			| StateId::BuyerSwapComplete
+			| StateId::BuyerSwapFailed
 			| StateId::SellerCancelled
 			| StateId::BuyerCancelled
 			| StateId::SellerCancelledRefunded
@@ -246,7 +275,11 @@ impl StateId {
 			StateId::BuyerWaitingForRespondRedeemMessage => "BuyerWaitingForRespondRedeemMessage",
 			StateId::BuyerRedeemMwc => "BuyerRedeemMwc",
 			StateId::BuyerWaitForRedeemMwcConfirmations => "BuyerWaitForRedeemMwcConfirmations",
+			StateId::BuyerWaitingForMwcRefundConfirmations => {
+				"BuyerWaitingForMwcRefundConfirmations"
+			}
 			StateId::BuyerSwapComplete => "BuyerSwapComplete",
+			StateId::BuyerSwapFailed => "BuyerSwapFailed",
 
 			StateId::BuyerWaitingForRefundTime => "BuyerWaitingForRefundTime",
 			StateId::BuyerPostingRefundForSecondary => "BuyerPostingRefundForSecondary",
@@ -294,7 +327,11 @@ impl StateId {
 			}
 			"BuyerRedeemMwc" => Ok(StateId::BuyerRedeemMwc),
 			"BuyerWaitForRedeemMwcConfirmations" => Ok(StateId::BuyerWaitForRedeemMwcConfirmations),
+			"BuyerWaitingForMwcRefundConfirmations" => {
+				Ok(StateId::BuyerWaitingForMwcRefundConfirmations)
+			}
 			"BuyerSwapComplete" => Ok(StateId::BuyerSwapComplete),
+			"BuyerSwapFailed" => Ok(StateId::BuyerSwapFailed),
 			"BuyerWaitingForRefundTime" => Ok(StateId::BuyerWaitingForRefundTime),
 			"BuyerPostingRefundForSecondary" => Ok(StateId::BuyerPostingRefundForSecondary),
 			"BuyerWaitingForRefundConfirmations" => Ok(StateId::BuyerWaitingForRefundConfirmations),
@@ -373,6 +410,7 @@ impl StateProcessRespond {
 
 /// ETA or roadmap info the the state.
 #[derive(Serialize, Deserialize)]
+#[serde(crate = "serde")]
 pub struct StateEtaInfo {
 	/// True if this is current active state
 	pub active: bool,
@@ -431,8 +469,8 @@ pub trait State {
 	/// Get a state eta. Return None for states that are never executed
 	fn get_eta(&self, swap: &Swap, secp: &Secp256k1) -> Option<StateEtaInfo>;
 
-	/// Check if it is cancellable
-	fn is_cancellable(&self) -> bool;
+	/// Check whether this state and the trade's irreversible history allow cancellation.
+	fn is_cancellable(&self, swap: &Swap) -> bool;
 
 	/// Process the state. Result will be the next state
 	fn process(
@@ -441,8 +479,22 @@ pub trait State {
 		swap: &mut Swap,
 		context: &Context,
 		tx_conf: &SwapTransactionsConfirmations,
-		secp: &Secp256k1,
+		secp: &mut Secp256k1,
 	) -> Result<StateProcessRespond, Error>;
+
+	/// Process with a persistence hook. MWC lock and buyer redemption states
+	/// save possible publication before broadcasting; other states use `process`.
+	fn process_with_persist(
+		&mut self,
+		input: Input,
+		swap: &mut Swap,
+		context: &Context,
+		tx_conf: &SwapTransactionsConfirmations,
+		secp: &mut Secp256k1,
+		_persist: &dyn Fn(&Swap) -> Result<(), Error>,
+	) -> Result<StateProcessRespond, Error> {
+		self.process(input, swap, context, tx_conf, secp)
+	}
 
 	/// Get the prev happy path State.
 	fn get_prev_swap_state(&self) -> Option<StateId>;

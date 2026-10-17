@@ -18,8 +18,8 @@ use mwc_wallet_libwallet::internal::updater;
 use mwc_wallet_libwallet::slate_versions::v3::sig_is_blank;
 use mwc_wallet_libwallet::{owner, TxLogEntry, TxLogEntryType};
 use mwc_wallet_util::mwc_core::core::Transaction;
+use mwc_wallet_util::mwc_crates::uuid::Uuid;
 use std::str::FromStr;
-use uuid::Uuid;
 
 pub fn get_finalized_transaction(
 	context_id: u32,
@@ -41,7 +41,7 @@ pub fn get_finalized_transaction(
 		false,
 		None,
 		None,
-		Some(false),
+		None,
 	)
 	.map_err(|e| format!("Unable retrieve outputs, {}", e))?;
 
@@ -51,7 +51,9 @@ pub fn get_finalized_transaction(
 		return Err(format!("Not sound any send transaction {}", tx_id));
 	}
 
-	let tx: &TxLogEntry = &txs[0];
+	let tx: &TxLogEntry = txs
+		.first()
+		.ok_or_else(|| format!("Not found any send transaction {}", tx_id))?;
 	if tx.confirmed {
 		return Err(format!("Transaction {} is already confirmed", tx_id));
 	}
@@ -65,7 +67,12 @@ pub fn get_finalized_transaction(
 		tx_id
 	))?;
 
-	if stored_tx.kernels().is_empty() || sig_is_blank(&stored_tx.kernels()[0].excess_sig) {
+	if stored_tx
+		.kernels()
+		.first()
+		.map(|kernel| sig_is_blank(&kernel.excess_sig))
+		.unwrap_or(true)
+	{
 		return Err(format!("Transaction at {} has not been finalized.", tx_id));
 	}
 
@@ -75,7 +82,7 @@ pub fn get_finalized_transaction(
 pub fn repost(context_id: u32, tx_id: String, fluff: Option<bool>) -> Result<(), String> {
 	let (tx, client) = get_finalized_transaction(context_id, tx_id)?;
 
-	owner::post_tx(&client, &tx, fluff.unwrap_or(false))
+	owner::post_tx(context_id, &client, &tx, fluff.unwrap_or(false))
 		.map_err(|e| format!("Unable to post transaction, {}", e))?;
 	Ok(())
 }

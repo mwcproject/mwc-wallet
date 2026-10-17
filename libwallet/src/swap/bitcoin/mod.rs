@@ -15,10 +15,13 @@
 mod api;
 mod client;
 mod electrum;
+mod recovery;
+mod refund;
 mod rpc;
 mod types;
 
 pub use api::BtcSwapApi;
 pub use client::*;
 pub use electrum::ElectrumNodeClient;
+pub use refund::{BtcRefundBatch, BtcRefundPlan, BtcRefundProgress, BtcUnrefundedOutput};
 pub use types::{BtcBuyerContext, BtcData, BtcSellerContext, BtcUpdate};

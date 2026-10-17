@@ -1,0 +1,12 @@
+{
+  "evmVersion": "byzantium",
+  "libraries": {},
+  "metadata": {
+    "bytecodeHash": "ipfs"
+  },
+  "optimizer": {
+    "enabled": true,
+    "runs": 200
+  },
+  "remappings": []
+}

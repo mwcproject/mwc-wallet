@@ -15,16 +15,21 @@
 
 //! Error types for libwallet
 
-use crate::mwc_core::core::{committed, transaction};
-use crate::mwc_core::libtx;
-use crate::mwc_keychain;
-use crate::mwc_util::secp;
-use crate::util::{self, mwc_store};
+use mwc_wallet_util::mwc_core::core::{committed, transaction};
+use mwc_wallet_util::mwc_core::libtx;
+use mwc_wallet_util::mwc_crates::secp;
+use mwc_wallet_util::mwc_crates::serde::{self, Deserialize, Serialize};
+use mwc_wallet_util::mwc_util::OnionV3Error;
 use std::io;
 
 /// Wallet errors, mostly wrappers around underlying crypto or I/O errors.
-#[derive(Clone, Eq, PartialEq, Debug, thiserror::Error, Serialize, Deserialize)]
+#[derive(Debug, thiserror::Error, Serialize, Deserialize)]
+#[serde(crate = "serde")]
 pub enum Error {
+	/// Integer conversion or arithmetic overflow/underflow.
+	#[error("Wallet data overflow error, {0}")]
+	DataOverflow(String),
+
 	/// Not enough funds
 	#[error("Not enough funds. Required: {needed_disp:?}, Available: {available_disp:?}")]
 	NotEnoughFunds {
@@ -48,15 +53,23 @@ pub enum Error {
 
 	/// LibTX Error
 	#[error("LibTx Error, {0}")]
-	LibTX(#[from] libtx::Error),
+	LibTX(
+		#[from]
+		#[serde(with = "crate::error_serde::libtx_error")]
+		libtx::Error,
+	),
 
 	/// Keychain error
 	#[error("Keychain error, {0}")]
-	Keychain(#[from] mwc_keychain::Error),
+	Keychain(#[from] mwc_wallet_util::mwc_keychain::Error),
 
 	/// Transaction Error
 	#[error("Transaction error, {0}")]
-	Transaction(#[from] transaction::Error),
+	Transaction(
+		#[from]
+		#[serde(with = "crate::error_serde::transaction_error")]
+		transaction::Error,
+	),
 
 	/// API Error
 	#[error("Client Callback Error, {0}")]
@@ -68,7 +81,7 @@ pub enum Error {
 
 	/// Onion V3 Address Error
 	#[error("Onion V3 Address Error, {0}")]
-	OnionV3Address(#[from] util::OnionV3AddressError),
+	OnionV3Address(#[from] OnionV3Error),
 
 	/// Callback implementation error conversion
 	#[error("Trait Implementation error, {0}")]
@@ -77,6 +90,28 @@ pub enum Error {
 	/// Wallet backend error
 	#[error("Wallet store error, {0}")]
 	Backend(String),
+
+	/// A transient swap processing failure caused by a local condition
+	/// (infrastructure, configuration, balances, entropy, in-flight chain
+	/// state) rather than by the peer's message content. Message transports
+	/// should redeliver instead of acknowledging and dropping the message.
+	#[cfg(feature = "swaps")]
+	#[error("Transient swap error, {0}")]
+	SwapTransient(String),
+
+	/// Private transaction context not found in the wallet store.
+	#[error("Private transaction context not found, {0}")]
+	PrivateContextNotFound(String),
+
+	/// Output not found in the wallet store. Kept distinct from `Backend` so
+	/// callers can tell an absent output apart from a real backend failure.
+	#[error("Output not found, {0}")]
+	OutputNotFound(String),
+
+	/// Stored transaction file not found. Kept distinct from `IO` and `Backend`
+	/// so callers can tell an absent transaction apart from a real storage failure.
+	#[error("Stored transaction not found, {0}")]
+	TransactionNotFound(String),
 
 	/// Callback implementation error conversion
 	#[error("Restore Error")]
@@ -88,7 +123,11 @@ pub enum Error {
 
 	/// Other serialization errors
 	#[error("Ser/Deserialization error, {0}")]
-	Deser(#[from] crate::mwc_core::ser::Error),
+	Deser(
+		#[from]
+		#[serde(with = "crate::error_serde::core_ser_error")]
+		mwc_wallet_util::mwc_core::ser::Error,
+	),
 
 	/// IO Error
 	#[error("I/O error, {0}")]
@@ -161,6 +200,33 @@ pub enum Error {
 	/// Transaction has already been received
 	#[error("Transaction {0} has already been received")]
 	TransactionAlreadyReceived(String),
+
+	/// The same Slate UUID is already being handled by this wallet process.
+	#[error("Transaction {0} is already being processed; retry shortly")]
+	TransactionInProgress(String),
+
+	/// A selected input changed state before the transaction's serialized commit.
+	#[error("Transaction {0} selected an input that is no longer spendable")]
+	TransactionInputConflict(String),
+
+	/// Transaction receive state is durable, but its short-lived reply is unavailable.
+	///
+	/// Replies intentionally do not survive cache expiry or a wallet restart.
+	#[error("Transaction {0} has already been received, but its reply is no longer available")]
+	ReceiveResponseUnavailable(String),
+
+	/// A cached reply exists, but this request is not authorized to receive it.
+	///
+	/// This covers transaction-field changes and attempts to change the
+	/// authenticated sender or transport.
+	#[error(
+		"Transaction {0} has already been received, but the current request does not match the cached reply binding"
+	)]
+	ReceiveResponseMismatch(String),
+
+	/// The matching request is still being processed in this wallet process.
+	#[error("Transaction {0} is already being received; retry shortly")]
+	ReceiveReplyInProgress(String),
 
 	/// Transaction with same offset has already been received
 	#[error("Transaction  with offset hex string {0} has already been received")]
@@ -327,6 +393,10 @@ pub enum Error {
 	#[error("transaction doesn't have a proof, file {0}")]
 	TransactionHasNoProof(String),
 
+	/// A requested TxProof artifact could not be obtained before finalization.
+	#[error("requested transaction proof is unavailable: {0}")]
+	TxProofUnavailable(String),
+
 	/// Base58 generic error
 	#[error("Base58 error, {0}")]
 	Base58Error(String),
@@ -378,6 +448,10 @@ pub enum Error {
 
 impl From<io::Error> for Error {
 	fn from(error: io::Error) -> Error {
+		// Keep the wallet's I/O error representation message-only. `Error` is part of
+		// serialized wallet interfaces, while `io::Error` is not serializable; retaining
+		// it here would change both the public enum and its wire representation. Callers
+		// that need to branch on `io::ErrorKind` must inspect it before this conversion.
 		Error::IO(format!("{}", error))
 	}
 }
@@ -388,8 +462,8 @@ impl From<secp::Error> for Error {
 	}
 }
 
-impl From<mwc_store::Error> for Error {
-	fn from(error: mwc_store::Error) -> Error {
+impl From<mwc_wallet_util::mwc_store::Error> for Error {
+	fn from(error: mwc_wallet_util::mwc_store::Error) -> Error {
 		Error::Backend(format!("{}", error))
 	}
 }
@@ -397,6 +471,13 @@ impl From<mwc_store::Error> for Error {
 #[cfg(feature = "swaps")]
 impl From<crate::swap::error::Error> for Error {
 	fn from(error: crate::swap::error::Error) -> Error {
-		Error::Backend(format!("{}", error))
+		// Preserve the transient/local versus deterministic/peer-data
+		// distinction through this boundary so message transports can decide
+		// between redelivery and acknowledgement.
+		if error.is_transient() {
+			Error::SwapTransient(format!("{}", error))
+		} else {
+			Error::Backend(format!("{}", error))
+		}
 	}
 }

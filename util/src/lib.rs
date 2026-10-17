@@ -21,20 +21,28 @@
 #![deny(unused_mut)]
 #![warn(missing_docs)]
 
-#[macro_use]
-extern crate serde_derive;
-
-mod ov3;
-
-pub use ov3::OnionV3Address;
-pub use ov3::OnionV3Error as OnionV3AddressError;
+pub mod file;
+/// Helpers for serializing sensitive representations into zeroizing storage.
+pub mod sensitive;
 
 pub use mwc_api;
 pub use mwc_chain;
+pub use mwc_config;
 pub use mwc_core;
+pub use mwc_crates;
 pub use mwc_keychain;
 pub use mwc_node_lib;
 pub use mwc_node_workflow;
 pub use mwc_p2p;
 pub use mwc_store;
 pub use mwc_util;
+
+pub use mwc_bch;
+pub use mwc_bitcoin;
+pub use mwc_wagyu_ethereum;
+pub use mwc_wagyu_model;
+pub use mwc_web3;
+//pub use mwc_zcash_primitives;
+pub use bitcoin_hashes;
+
+pub use mwc_crates::parking_lot::{Mutex, RwLock};

@@ -13,30 +13,32 @@
 // limitations under the License.
 
 //! common functions for tests (instantiating wallet and proxy, mostly)
-extern crate mwc_wallet_controller as wallet;
-extern crate mwc_wallet_impls as impls;
-extern crate mwc_wallet_libwallet as libwallet;
 
-use mwc_wallet_util::mwc_core as core;
-use mwc_wallet_util::mwc_keychain as keychain;
-use mwc_wallet_util::mwc_util as util;
+/// Shared replay-attack scenario builder for the replay mitigation tests
+#[cfg(feature = "test-support")]
+#[allow(dead_code)] // only the replay-attack test binaries use this module
+pub mod replay;
 
-use self::core::global;
-use self::keychain::ExtKeychain;
-use self::libwallet::WalletInst;
-use impls::test_framework::{LocalWalletClient, WalletProxy};
-use impls::{DefaultLCProvider, DefaultWalletImpl};
+use mwc_wallet_impls::test_framework::{LocalWalletClient, WalletProxy};
+use mwc_wallet_impls::{DefaultLCProvider, DefaultWalletImpl};
+use mwc_wallet_libwallet::WalletInst;
+use mwc_wallet_util::Mutex;
+#[cfg(feature = "test-support")]
 use mwc_wallet_util::mwc_core::consensus;
 use mwc_wallet_util::mwc_core::core::Transaction;
+#[cfg(feature = "test-support")]
+use mwc_wallet_util::mwc_core::global;
+use mwc_wallet_util::mwc_crates::remove_dir_all;
+use mwc_wallet_util::mwc_crates::secp::key::SecretKey;
+use mwc_wallet_util::mwc_crates::secp::{ContextFlag, Secp256k1};
+use mwc_wallet_util::mwc_keychain::ExtKeychain;
+use mwc_wallet_util::mwc_util::ZeroingString;
 use std::sync::Arc;
-use std::sync::Mutex;
-use util::secp::key::SecretKey;
-use util::ZeroingString;
 
 #[macro_export]
 macro_rules! wallet_inst {
 	($wallet:ident, $w: ident) => {
-		let mut w_lock = $wallet.lock().unwrap_or_else(|e| e.into_inner());
+		let mut w_lock = $wallet.lock();
 		let lc = w_lock.lc_provider()?;
 		let $w = lc.wallet_inst()?;
 	};
@@ -45,7 +47,7 @@ macro_rules! wallet_inst {
 #[macro_export]
 macro_rules! wallet_inst_test {
 	($wallet:ident, $w: ident) => {
-		let mut w_lock = $wallet.lock().unwrap_or_else(|e| e.into_inner());
+		let mut w_lock = $wallet.lock();
 		let lc = w_lock.lc_provider().unwrap();
 		let $w = lc.wallet_inst().unwrap();
 	};
@@ -101,11 +103,18 @@ pub fn clean_output_dir(test_dir: &str) {
 }
 
 #[allow(dead_code)]
+#[cfg(not(feature = "test-support"))]
+pub fn setup(_test_dir: &str) {
+	panic!("test-support feature is required to run the tests");
+}
+
+#[allow(dead_code)]
+#[cfg(feature = "test-support")]
 pub fn setup(test_dir: &str) {
-	util::init_test_logger();
+	mwc_wallet_util::mwc_util::init_test_logger().unwrap();
 	clean_output_dir(test_dir);
 	global::set_local_chain_type(global::ChainTypes::AutomatedTesting);
-	global::set_local_accept_fee_base(consensus::MILLI_MWC / 100);
+	global::set_local_accept_fee_base(consensus::MILLI_MWC / 100).unwrap();
 	global::set_local_nrd_enabled(true);
 }
 
@@ -113,10 +122,17 @@ pub fn setup(test_dir: &str) {
 /// It is recommended to avoid relying on this if at all possible as global chain_type
 /// leaks across multiple tests and will likely have unintended consequences.
 #[allow(dead_code)]
+#[cfg(not(feature = "test-support"))]
 pub fn setup_global_chain_type() {
-	global::init_global_chain_type(0, global::ChainTypes::AutomatedTesting);
-	global::init_global_nrd_enabled(0, true);
-	global::init_global_accept_fee_base(0, global::DEFAULT_ACCEPT_FEE_BASE);
+	panic!("test-support feature is required to run the tests");
+}
+
+#[allow(dead_code)]
+#[cfg(feature = "test-support")]
+pub fn setup_global_chain_type() {
+	global::init_global_chain_type(0, global::ChainTypes::AutomatedTesting).unwrap();
+	global::init_global_nrd_enabled(0, true).unwrap();
+	global::init_global_accept_fee_base(0, global::DEFAULT_ACCEPT_FEE_BASE).unwrap();
 }
 
 #[allow(dead_code)]
@@ -144,11 +160,11 @@ pub fn create_local_wallet(
 		Mutex<
 			Box<
 				dyn WalletInst<
-					'static,
-					DefaultLCProvider<'static, LocalWalletClient, ExtKeychain>,
-					LocalWalletClient,
-					ExtKeychain,
-				>,
+						'static,
+						DefaultLCProvider<'static, LocalWalletClient, ExtKeychain>,
+						LocalWalletClient,
+						ExtKeychain,
+					>,
 			>,
 		>,
 	>,
@@ -157,25 +173,35 @@ pub fn create_local_wallet(
 	let mut wallet = Box::new(DefaultWalletImpl::<LocalWalletClient>::new(0, client))
 		as Box<
 			dyn WalletInst<
-				DefaultLCProvider<'static, LocalWalletClient, ExtKeychain>,
-				LocalWalletClient,
-				ExtKeychain,
-			>,
+					DefaultLCProvider<'static, LocalWalletClient, ExtKeychain>,
+					LocalWalletClient,
+					ExtKeychain,
+				>,
 		>;
 	let lc = wallet.lc_provider().unwrap();
+	let secp = Secp256k1::with_caps(ContextFlag::Commit).unwrap();
 	let _ = lc.set_top_level_directory(&format!("{}/{}", test_dir, name));
 	lc.create_wallet(
 		None,
 		mnemonic,
 		32,
 		ZeroingString::from(""),
+		#[cfg(feature = "test-support")]
 		false,
 		None,
 		true,
 	)
 	.unwrap();
 	let mask = lc
-		.open_wallet(None, ZeroingString::from(""), create_mask, false, None)
+		.open_wallet(
+			&secp,
+			None,
+			ZeroingString::from(""),
+			create_mask,
+			#[cfg(feature = "test-support")]
+			false,
+			None,
+		)
 		.unwrap();
 	(Arc::new(Mutex::new(wallet)), mask)
 }
@@ -191,11 +217,11 @@ pub fn open_local_wallet(
 		Mutex<
 			Box<
 				dyn WalletInst<
-					'static,
-					DefaultLCProvider<'static, LocalWalletClient, ExtKeychain>,
-					LocalWalletClient,
-					ExtKeychain,
-				>,
+						'static,
+						DefaultLCProvider<'static, LocalWalletClient, ExtKeychain>,
+						LocalWalletClient,
+						ExtKeychain,
+					>,
 			>,
 		>,
 	>,
@@ -204,15 +230,24 @@ pub fn open_local_wallet(
 	let mut wallet = Box::new(DefaultWalletImpl::<LocalWalletClient>::new(0, client))
 		as Box<
 			dyn WalletInst<
-				DefaultLCProvider<'static, LocalWalletClient, ExtKeychain>,
-				LocalWalletClient,
-				ExtKeychain,
-			>,
+					DefaultLCProvider<'static, LocalWalletClient, ExtKeychain>,
+					LocalWalletClient,
+					ExtKeychain,
+				>,
 		>;
 	let lc = wallet.lc_provider().unwrap();
+	let secp = Secp256k1::with_caps(ContextFlag::Commit).unwrap();
 	let _ = lc.set_top_level_directory(&format!("{}/{}", test_dir, name));
 	let mask = lc
-		.open_wallet(None, ZeroingString::from(""), create_mask, false, None)
+		.open_wallet(
+			&secp,
+			None,
+			ZeroingString::from(""),
+			create_mask,
+			#[cfg(feature = "test-support")]
+			false,
+			None,
+		)
 		.unwrap();
 	(Arc::new(Mutex::new(wallet)), mask)
 }

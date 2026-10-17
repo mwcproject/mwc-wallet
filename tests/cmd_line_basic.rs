@@ -13,19 +13,15 @@
 // limitations under the License.
 
 //! Test wallet command line works as expected
-#[macro_use]
-extern crate clap;
 
-#[macro_use]
-extern crate log;
+#![cfg(feature = "test-support")]
 
 extern crate mwc_wallet;
 
 use mwc_wallet_impls::test_framework::{self, LocalWalletClient, WalletProxy};
+use mwc_wallet_util::mwc_crates::clap::{App, YamlLoader};
 use std::ops::DerefMut;
 use std::sync::Arc;
-
-use clap::App;
 use std::thread;
 use std::time::Duration;
 
@@ -36,9 +32,9 @@ mod common;
 use common::{clean_output_dir, execute_command, initial_setup_wallet, instantiate_wallet, setup};
 use mwc_wallet_controller::controller;
 use mwc_wallet_libwallet::proof::proofaddress::ProvableAddress;
+use mwc_wallet_util::Mutex;
 use mwc_wallet_util::mwc_core::consensus::calc_mwc_block_reward;
 use mwc_wallet_util::mwc_core::core::Transaction;
-use std::sync::Mutex;
 
 /// command line tests
 fn command_line_test_impl(test_dir: &str) -> Result<(), mwc_wallet_controller::Error> {
@@ -53,8 +49,8 @@ fn command_line_test_impl(test_dir: &str) -> Result<(), mwc_wallet_controller::E
 	let chain = wallet_proxy.chain.clone();
 
 	// load app yaml. If it don't exist, just say so and exit
-	let yml = load_yaml!("../src/bin/mwc-wallet.yml");
-	let app = App::from_yaml(yml);
+	let yml = YamlLoader::load_from_str(include_str!("../src/bin/mwc-wallet.yml")).unwrap();
+	let app = App::from_yaml(&yml[0]);
 
 	// wallet init
 	let arg_vec = vec!["mwc-wallet", "-p", "password1", "init", "-h"];
@@ -104,11 +100,7 @@ fn command_line_test_impl(test_dir: &str) -> Result<(), mwc_wallet_controller::E
 	);
 
 	// Set the wallet proxy listener running
-	thread::spawn(move || {
-		if let Err(e) = wallet_proxy.run() {
-			error!("Wallet Proxy error: {}", e);
-		}
-	});
+	let proxy_handle = wallet_proxy.start();
 
 	// Create some accounts in wallet 1
 	let arg_vec = vec!["mwc-wallet", "-p", "password1", "account", "-c", "mining"];
@@ -178,10 +170,7 @@ fn command_line_test_impl(test_dir: &str) -> Result<(), mwc_wallet_controller::E
 		mask1,
 		bh as usize,
 		false,
-		tx_pool
-			.lock()
-			.unwrap_or_else(|e| e.into_inner())
-			.deref_mut(),
+		tx_pool.lock().deref_mut(),
 	);
 
 	let very_long_message = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef\
@@ -234,9 +223,20 @@ fn command_line_test_impl(test_dir: &str) -> Result<(), mwc_wallet_controller::E
 	];
 	execute_command(&app, test_dir, "wallet2", &client2, arg_vec.clone())?;
 
-	// shouldn't be allowed to receive twice
-	assert!(execute_command(&app, test_dir, "wallet2", &client2, arg_vec).is_err());
 	let out_file_name = format!("{}.response", out_file_name);
+	let first_response = std::fs::read(&out_file_name).unwrap();
+	// Plain file requests have no authenticated session to which a cached
+	// response could safely be replayed.
+	let duplicate_error =
+		execute_command(&app, test_dir, "wallet2", &client2, arg_vec).unwrap_err();
+	assert!(
+		duplicate_error
+			.to_string()
+			.contains("has already been received"),
+		"unexpected duplicate receive error: {}",
+		duplicate_error
+	);
+	assert_eq!(std::fs::read(&out_file_name).unwrap(), first_response);
 	let arg_vec = vec![
 		"mwc-wallet",
 		"-a",
@@ -255,10 +255,7 @@ fn command_line_test_impl(test_dir: &str) -> Result<(), mwc_wallet_controller::E
 		mask1,
 		1,
 		false,
-		tx_pool
-			.lock()
-			.unwrap_or_else(|e| e.into_inner())
-			.deref_mut(),
+		tx_pool.lock().deref_mut(),
 	);
 	bh += 1;
 
@@ -278,7 +275,7 @@ fn command_line_test_impl(test_dir: &str) -> Result<(), mwc_wallet_controller::E
 		None,
 		|api, m| {
 			api.set_active_account(m, "mining")?;
-			let (refreshed, txs) = api.retrieve_txs(m, true, None, None, None, None)?;
+			let (refreshed, _, txs) = api.retrieve_txs(m, true, None, None, None, None)?;
 			assert!(refreshed);
 			assert_eq!(txs.len(), (bh + 1) as usize); // Txs are from coinbase + 1 send transaction
 			for t in txs {
@@ -294,10 +291,7 @@ fn command_line_test_impl(test_dir: &str) -> Result<(), mwc_wallet_controller::E
 		mask1,
 		10,
 		false,
-		tx_pool
-			.lock()
-			.unwrap_or_else(|e| e.into_inner())
-			.deref_mut(),
+		tx_pool.lock().deref_mut(),
 	);
 	bh += 10;
 
@@ -323,7 +317,7 @@ fn command_line_test_impl(test_dir: &str) -> Result<(), mwc_wallet_controller::E
 	controller::owner_single_use(Some(wallet1.clone()), mask1, None, |api, m| {
 		// Just address at derivation index 0 for now
 		let tor_pub_key = api.get_wallet_public_address(m)?;
-		tor_addr1 = ProvableAddress::from_tor_pub_key(&tor_pub_key).to_string();
+		tor_addr1 = ProvableAddress::from_tor_pub_key(&tor_pub_key)?.to_string();
 		Ok(())
 	})?;
 
@@ -331,7 +325,7 @@ fn command_line_test_impl(test_dir: &str) -> Result<(), mwc_wallet_controller::E
 	controller::owner_single_use(Some(wallet2.clone()), mask2, None, |api, m| {
 		// Just address at derivation index 0 for now
 		let tor_pub_key = api.get_wallet_public_address(m)?;
-		tor_addr2 = ProvableAddress::from_tor_pub_key(&tor_pub_key).to_string();
+		tor_addr2 = ProvableAddress::from_tor_pub_key(&tor_pub_key)?.to_string();
 		Ok(())
 	})?;
 
@@ -406,10 +400,7 @@ fn command_line_test_impl(test_dir: &str) -> Result<(), mwc_wallet_controller::E
 		mask1,
 		10,
 		false,
-		tx_pool
-			.lock()
-			.unwrap_or_else(|e| e.into_inner())
-			.deref_mut(),
+		tx_pool.lock().deref_mut(),
 	);
 	bh += 10;
 
@@ -489,8 +480,15 @@ fn command_line_test_impl(test_dir: &str) -> Result<(), mwc_wallet_controller::E
 		&file_name,
 	];
 	if let Err(err) = execute_command(&app, test_dir, "wallet2", &client2, arg_vec) {
-		assert_eq!( String::from("Impls Error, LibWallet Error, Unable to deserialize slatepack, Slatepack decode error, Unable to decrypt, ring::error::Unspecified"),
-					err.to_string() );
+		let err_msg: String = err.to_string();
+		assert!(
+			err_msg.contains("Unable to deserialize slatepack")
+				&& err_msg.contains(
+					"Slatepack is neither addressed to nor sent by the supplied wallet key"
+				),
+			"unexpected error while rejecting a Slatepack for another recipient: {}",
+			err_msg,
+		);
 	} else {
 		panic!("Expected to fail because of another recipient")
 	}
@@ -553,10 +551,7 @@ fn command_line_test_impl(test_dir: &str) -> Result<(), mwc_wallet_controller::E
 		mask1,
 		1,
 		false,
-		tx_pool
-			.lock()
-			.unwrap_or_else(|e| e.into_inner())
-			.deref_mut(),
+		tx_pool.lock().deref_mut(),
 	);
 
 	// Check our transaction log, should have bh entries
@@ -575,7 +570,7 @@ fn command_line_test_impl(test_dir: &str) -> Result<(), mwc_wallet_controller::E
 		None,
 		|api, m| {
 			api.set_active_account(m, "mining")?;
-			let (refreshed, txs) = api.retrieve_txs(m, true, None, None, None, None)?;
+			let (refreshed, _, txs) = api.retrieve_txs(m, true, None, None, None, None)?;
 			assert!(refreshed);
 			assert_eq!(txs.len(), bh as usize + 1 + 3);
 			Ok(())
@@ -609,10 +604,7 @@ fn command_line_test_impl(test_dir: &str) -> Result<(), mwc_wallet_controller::E
 		mask1,
 		1,
 		false,
-		tx_pool
-			.lock()
-			.unwrap_or_else(|e| e.into_inner())
-			.deref_mut(),
+		tx_pool.lock().deref_mut(),
 	);
 
 	// Check our transaction log, should have bh entries + 1 for self-seld
@@ -631,7 +623,7 @@ fn command_line_test_impl(test_dir: &str) -> Result<(), mwc_wallet_controller::E
 		None,
 		|api, m| {
 			api.set_active_account(m, "mining")?;
-			let (refreshed, txs) = api.retrieve_txs(m, true, None, None, None, None)?;
+			let (refreshed, _, txs) = api.retrieve_txs(m, true, None, None, None, None)?;
 			assert!(refreshed);
 			assert_eq!(txs.len(), bh as usize + 1 + 4); // +4 coinbase transactions adjustments
 			Ok(())
@@ -723,7 +715,15 @@ fn command_line_test_impl(test_dir: &str) -> Result<(), mwc_wallet_controller::E
 		out_file_name.as_str(),
 	];
 	if let Err(err) = execute_command(&app, test_dir, "wallet1", &client1, arg_vec) {
-		assert_eq!( String::from("Invalid argument: Parsing IO error: Unable to read slate data from file target/test_output/command_line/wallet2/slatepack/0436430c-2b02-624c-2032-570501212b07.invoice_init.slatepack, LibWallet Error, Unable to deserialize slatepack, Slatepack decode error, Unable to decrypt, ring::error::Unspecified"), err.to_string() );
+		let err_msg: String = err.to_string();
+		assert!(
+			err_msg.contains("Unable to deserialize slatepack")
+				&& err_msg.contains(
+					"Slatepack is neither addressed to nor sent by the supplied wallet key"
+				),
+			"unexpected error while rejecting an invoice Slatepack for another recipient: {}",
+			err_msg,
+		);
 	} else {
 		panic!("Expected to fail because of another recipient")
 	}
@@ -790,10 +790,7 @@ fn command_line_test_impl(test_dir: &str) -> Result<(), mwc_wallet_controller::E
 		mask1,
 		5,
 		false,
-		tx_pool
-			.lock()
-			.unwrap_or_else(|e| e.into_inner())
-			.deref_mut(),
+		tx_pool.lock().deref_mut(),
 	);
 	bh += 5;
 	let _ = bh;
@@ -840,10 +837,10 @@ fn command_line_test_impl(test_dir: &str) -> Result<(), mwc_wallet_controller::E
 		None,
 		|api, m| {
 			api.set_active_account(m, "account_1")?;
-			let (_, txs) = api.retrieve_txs(m, true, None, None, None, None)?;
+			let (_, _, txs) = api.retrieve_txs(m, true, None, None, None, None)?;
 			let some_tx_id = txs[0].tx_slate_id.clone();
 			assert!(some_tx_id.is_some());
-			tx_id = some_tx_id.unwrap().to_hyphenated().to_string().clone();
+			tx_id = some_tx_id.unwrap().hyphenated().to_string().clone();
 			Ok(())
 		},
 	)?;
@@ -866,10 +863,7 @@ fn command_line_test_impl(test_dir: &str) -> Result<(), mwc_wallet_controller::E
 		mask1,
 		10,
 		false,
-		tx_pool
-			.lock()
-			.unwrap_or_else(|e| e.into_inner())
-			.deref_mut(),
+		tx_pool.lock().deref_mut(),
 	);
 
 	// Now let's check a balance at wallet2
@@ -936,10 +930,7 @@ fn command_line_test_impl(test_dir: &str) -> Result<(), mwc_wallet_controller::E
 		mask1,
 		10,
 		false,
-		tx_pool
-			.lock()
-			.unwrap_or_else(|e| e.into_inner())
-			.deref_mut(),
+		tx_pool.lock().deref_mut(),
 	);
 
 	// Check wallet 1 is now empty, except for immature coinbase outputs from recent mining),
@@ -963,8 +954,30 @@ fn command_line_test_impl(test_dir: &str) -> Result<(), mwc_wallet_controller::E
 
 	// let logging finish
 	thread::sleep(Duration::from_millis(200));
+	proxy_handle.stop()?;
+	drop(chain);
 	clean_output_dir(test_dir);
 	Ok(())
+}
+
+#[test]
+fn dump_wallet_data_requires_file_argument() {
+	let yml = YamlLoader::load_from_str(include_str!("../src/bin/mwc-wallet.yml")).unwrap();
+	let mut app = App::from_yaml(&yml[0]);
+
+	assert!(
+		app.get_matches_from_safe_borrow(vec!["mwc-wallet", "dump-wallet-data"])
+			.is_err()
+	);
+	assert!(
+		app.get_matches_from_safe_borrow(vec![
+			"mwc-wallet",
+			"dump-wallet-data",
+			"--file",
+			"wallet-dump.txt",
+		])
+		.is_ok()
+	);
 }
 
 #[test]

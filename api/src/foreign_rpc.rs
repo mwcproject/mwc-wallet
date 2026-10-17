@@ -15,21 +15,35 @@
 
 //! JSON-RPC Stub generation for the Foreign API
 
-use crate::keychain::Keychain;
-use crate::libwallet::{
-	self, BlockFees, CbData, Error, InitTxArgs, IssueInvoiceTxArgs, NodeClient, NodeVersionInfo,
-	Slate, SlateVersion, VersionInfo, VersionedCoinbase, VersionedSlate, WalletLCProvider,
+use crate::Foreign;
+#[cfg(feature = "test-support")]
+use crate::ForeignCheckMiddlewareFn;
+#[cfg(feature = "test-support")]
+use mwc_wallet_libwallet::proof::proofaddress;
+use mwc_wallet_libwallet::proof::proofaddress::ProvableAddress;
+use mwc_wallet_libwallet::reply_cache::ReplyBinding;
+use mwc_wallet_libwallet::slatepack::SlatePurpose;
+use mwc_wallet_libwallet::types::TxSession;
+use mwc_wallet_libwallet::{
+	BlockFees, CbData, Error, NodeClient, VersionInfo, VersionedSlate, WalletLCProvider,
 };
-use crate::{Foreign, ForeignCheckMiddlewareFn};
-use easy_jsonrpc_mwc;
-use ed25519_dalek::PublicKey as DalekPublicKey;
-use libwallet::slatepack::SlatePurpose;
-use libwallet::types::TxSession;
-use libwallet::{wallet_lock, wallet_lock_test, SlateCtx};
-use mwc_wallet_libwallet::proof::proofaddress::{self, ProvableAddress};
+#[cfg(feature = "test-support")]
+use mwc_wallet_libwallet::{
+	self, InitTxArgs, IssueInvoiceTxArgs, NodeVersionInfo, Slate, SlateCtx, SlateVersion, wallet_lock_test,
+};
+use mwc_wallet_libwallet::wallet_lock;
+#[cfg(feature = "test-support")]
 use mwc_wallet_util::mwc_core::consensus;
+#[cfg(feature = "test-support")]
 use mwc_wallet_util::mwc_core::core::Transaction;
-use mwc_wallet_util::mwc_util::secp::Secp256k1;
+use mwc_wallet_util::mwc_crates::easy_jsonrpc_mwc;
+#[cfg(feature = "test-support")]
+use mwc_wallet_util::mwc_crates::ed25519_dalek;
+use mwc_wallet_util::mwc_crates::secp::{ContextFlag, Secp256k1};
+#[cfg(feature = "test-support")]
+use mwc_wallet_util::mwc_crates::serde_json;
+use mwc_wallet_util::mwc_keychain::Keychain;
+#[cfg(feature = "test-support")]
 use std::ops::DerefMut;
 
 /// Public definition used to generate Foreign jsonrpc api.
@@ -107,7 +121,14 @@ pub trait ForeignRpc {
 	fn get_proof_address(&self) -> Result<String, Error>;
 
 	/**
-	Networked Legacy (non-secure token) version of [Foreign::build_coinbase](struct.Foreign.html#method.build_coinbase).
+	Networked version of [Foreign::build_coinbase](struct.Foreign.html#method.build_coinbase).
+
+	Build an S2C-bound Coinbase at every height. The request requires a
+	hexadecimal `binding_digest`; the response requires `coinbase_opening`.
+	Nodes and wallets must both support this contract before mining.
+
+	The digest below is a fixed example. A mining node calculates the actual
+	digest from its block template and parent chain state.
 
 	# Json rpc example
 
@@ -118,13 +139,14 @@ pub trait ForeignRpc {
 		"jsonrpc": "2.0",
 		"method": "build_coinbase",
 		"id": 1,
-		"params": [
-			{
+		"params": {
+			"block_fees": {
 				"fees": 0,
-				"height": 0,
-				"key_id": null
+				"height": 5,
+				"key_id": null,
+				"binding_digest": "0101010101010101010101010101010101010101010101010101010101010101"
 			}
-		]
+		}
 	}
 	# "#
 	# ,
@@ -134,18 +156,17 @@ pub trait ForeignRpc {
 	  "jsonrpc": "2.0",
 	  "result": {
 		"Ok": {
+		  "coinbase_opening": "02626f1ca3f9546933a070e8a1dcb81c6ec541e7c11a3f49abe1714c530ba65bcd",
 		  "kernel": {
-			"excess": "095987fa1274901ab624386e9f76b39c6c27a6f5d11782bb06e3a55361d925e418",
-			"excess_sig": "8f07ddd5e9f5179cff19486034181ed76505baaad53e5d994064127b56c5841b49e2040e02da3d79a3bd694d522754f118a064d62f076e87a161059222141c2c",
-			"features": "Coinbase",
-			"fee": "0",
-			"lock_height": "0"
+			"excess": "089a8a18ed18efe07dbd33538579c16b688277bb3ba499324bffe45567ebe791eb",
+			"excess_sig": "3e7db784a18ac94b118df352c3c4301c1e1095883bf35729e66e92896d2da877472fee28cce087b1ad3f73a7c0ae84c9e2b03cd18c12cfd349cd2625816fc1cb",
+			"features": "Coinbase"
 		  },
 		  "key_id": "0300000000000000000000000400000000",
 		  "output": {
-			"commit": "08f9451ff0b17a7d3b905efacc1b51ded6a77dc17aedd4959d46f6509c3298b8c7",
+			"commit": "08e0404fe044830d8f5be9953be5c70b5b7d525e4ecd3973437d9d6005ea5cd2bc",
 			"features": "Coinbase",
-			"proof": "d00084fe7929cd897b3b6cc28b7e8c9bee8ccccae3189ea0713f90a10e2a8011f5cb0fd1d5ea057c126485a66002a0a283238dd2157bb6747f77202701a1350104e35c2aed5f79ab73e0195d39a320d95dd5fb2294eb2093f4495377d51a74e94b9972431d5159e7c5ac90ed2278deae16c485dba52356e7ee08e08574b37a2e1c1e276ea5d0b8ec07408b1cae285c5c3bbdd123c5a17ee971979f86a0b70b9e404292b97f75fd336b7f510deeed9b6465a48a346f48f9529a1b38b46b99976ed96c0e92ac35ab75bff2afda5ff0f7ad865dd20c17ed7940c4a162e7d83d04becc4075dde76d791ccf9a09b924e7edcf01355260c3e26e23cb88cb49e5b2a38a008eb584dac92635bcc6d6bfaa6bda233d965f8cb8d688cfb7f2c9bd4f2a298b95ac906ef4878ad4bc6a1a71c18e60bac79566031bbba89f62b8890f393787bd9197924d21e14e21936da721fbf0c50c4eef71c3f9fe6041ab07159770ca322afaf903397097bb4054b54069006799847db18415736cd931aced1f2320769c32ed2e1bce06ed3b3ccc002b026abf9e1771cf10f7759922ce4a2cfae3ce8d83ee3fcb8e065a80db6f465562034aac2ce91defe82a3c9e4104c00c565403deab54256f5d01cc63518fba667e23d1c417a82310264724315890fe0455134ed00a702dcf06832edc6b81dab03f611e95486f2cf4139b0ea777081f19b037c356902d44afcd06f5bf5a86ec5b09b138b384c4119e101c0d6f7d2119691ce8b15642bb90fc13a617731d55022d5749baa19283c638b25c451070c21a7adeff73f4710d59f2422869c3bcc01e981483c57c2092f2b5ae014f6737a51ab90c770623a7154d619342ccda0d888fd7721231c6d1bbd56fbd5053d93c15e7cc0758b82edf343ff874e69e2dc6af6c4b16321f6ce9fb386ff042c62af965e8c37e65fd619e7d74c3a4"
+			"proof": "a03e6000ebe145adc2407db184c9ade875353391b2dea245d2ca23b3b92a5e667a25a7602490052990dc871e62f7f9b838420ba1881bf1efee03d3ff8209a29c04278a12c44b0f08be5df70d61bff84849bca6d778a3ff6abc4e7a24753ac613427f4a0574165fb63b914591492ed4ff7b72d683207b5602d61b0e2f840a2bb906a7249fc15e1b40ae078fe53a601dd6913f32bfcfea79222faaef58a0ca00107a30f878e28655c71a30ef7ec6c69cca8eca6d80b3200e571624358745a283b3d2c7bb37f072542260312c50d283d89687a374e2609172b7353591df920a9ddc6a5474de763992d5f4d9d5e9b8cf84000ee8362bffb3830a2235f0b4a380a88e2d0ddcd9059f3fe7da666199589826bdb7da0c5edc7fcc3fcd579b8367c06724e872fa5c146e3e0b783e6b03c9da1167b478119c4b55964d8222e786096978fe3ef9b5c536783cc2f51fb0438ae877c4248201377b745f5f1f7c9b43542307f0092b0262fb751643d4d2a583a578d74c499fb70c72084493d4b9ec7407b34d60bb388dee19a1a82e98836db98e7e1752a3c47b64b24787a0c8bfce83ac76acbfd271c1396845d104d97b6058f3c24c378a33fb175a13cb088c55ea50862332db212671be3f85e1d1dde2570d299f9b8d5a2116847eb0ffa195bef02ca53106527d173ecf6086f3c040a2f72e208b7730e214f835309a7ad4b1b2b0d67b84827dec2dff7aad2abfcbfb25acb4559e8744165297cfc0d34a2cdb1eb8a7e854a7b1f5751243928b6ac91da7f5262f1612099e8ed58bfe2dbfc8cc459df676d0e9fe73f4923b794b2665cbe5cdcf903489f90cd9e97d9b2d78ae9ae1261f4caaadcdcf879eafa983b7beefdf2b11284a90679f664d7f00cad0f605f3e430cd16ac14ace95d14b30a6af0500f02cd726bed19aa2d8db37f2283d39d39fd7ecf0d660be6563a"
 		  }
 		}
 	  }
@@ -155,7 +176,7 @@ pub trait ForeignRpc {
 	```
 	*/
 
-	fn build_coinbase(&self, block_fees: &BlockFees) -> Result<VersionedCoinbase, Error>;
+	fn build_coinbase(&self, block_fees: &BlockFees) -> Result<CbData, Error>;
 
 	/**
 	Networked version of [Foreign::verify_slate_messages](struct.Foreign.html#method.verify_slate_messages).
@@ -174,7 +195,7 @@ pub trait ForeignRpc {
 				"fee": "8000000",
 				"height": "4",
 				"id": "0436430c-2b02-624c-2032-570501212b00",
-				"lock_height": "4",
+				"lock_height": "5",
 				"ttl_cutoff_height": null,
 				"payment_proof": null,
 				"num_participants": 2,
@@ -202,7 +223,7 @@ pub trait ForeignRpc {
 							"excess_sig": "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
 							"features": "HeightLocked",
 							"fee": "8000000",
-							"lock_height": "4"
+							"lock_height": "5"
 						}
 						],
 						"outputs": [
@@ -371,7 +392,7 @@ pub trait ForeignRpc {
 				{
 				  "commit": "09b07b9c83da767a3ad7d052705258c2697970a403e53101e63eb9c3d11e9a0e9a",
 				  "features": "Plain",
-				  "proof": "dd695dd3a1000fd7805d5e3ee1df3b3221bb749b60685758cfbc33259e3cf861792dcb02a7b340d29ccb5bb4ddc99d1686874960b02856b882fc3e336226194a0cd15b5760f04172ff268e438d6e29507f23bd1f3180de974cd63b957d654ae08fbc804964d58fe0a71c2f31ecba86bd6c8eef37cddc9382471015114ac1d91132d2e78712e740682b2c7140c6a3b97fc1b93b38d90ebd0e74760f84dc6d9e44e36e9806189c65a2ce4c8257983ca255952f1ba66e24312d4b34498f91b4218adf6e43c25ff9eec1fa7ce457004f1e7df12d28a2d8d6395cdcb97387c2fd51e133953e73e2124cdec100abfa25d0210bdf2bbd6d389ababfe2a930c8973cd1f3ba767b25aec4586540fa73081e385247af8834cf8172a3e2a5de55eb1afa363cf5abd26f1a7317600fb80f742a7e8e87a93bcc5c59e1c106cb7af5cb76d9d00a9b4d77aff325db73c87594d970e7654fd8b95b0dcf9c09c314608b3f8719634e6705013560e2478facbc35478d26a109eaecafd478c934dbdb3663c094126c4b4da77e1ab509bc160253e30175774b501aba223cda549f3d4680ab047320687638e17399901da27932b198eb96c8756446f295f1d625ac63c03119ad9261f492a5ebdbece1d9c15fd769778cd71c3cc99574ad9e903c4cd312c8af6830d624b524d7f398e301ade464e42e5facc1d628c65829b826cf461578cf890d4e3f68e3f3fcbae74794b44f9b2e9491dcc6ea6626107d3e8629c73657f606d8776150798d028849c66a91c4a3ce5fbe43fcf75d2a381ebd5ad9a7b9c8662ba46e8a27c1fcba89c8fa6beecdb7b918772db69c241c54c7ba70b92a919ba90d8318266b246fd1d5432367b1d5085b4e7419c814300a9dd7ccc7dfe6d5e6262d11f18ef0ae7b328a0ab1c8e02392e3a1d905bb069621a6ecf81950d16a9cb3b04ff6ee8b5546caa8"
+				  "proof": "90e28b550da2fb2f4b934889067b4350695be9edb19fdd0342083a83cedc3d36cdd1796fd1ad89d1d4d5f38c2f975f4903dcebcc6ebe7c0186a6696c8d8aa71a05e1d31a0cd7be333ea82d950b362d7cf13a5e4278e8e04814b9fe571c942d9289bc804964d58fe0a71c2f31ecba86bd6c8eef37cddc9382471015114ac1d91132a40a9172be439b6ba1250b302db37dea134812d058e13a8f82f6e54b1ce320e3b5819743eba2c507404420557372f754c1103ad943b250473a4c6494af1c6d0664be3a873076a1ee93ab8971e6d7362d2b8d66b8eedb031955427b6223e8a2845f3e0369b522ffe28d622bfcdcc94e2ac6038ee51a827246c351404b128d5ee621ab21554a8d0dd861a86390b98fd4212e3e5ccd688cae12b2bb7d1c172d7bacccdb4fd00745a246e5e640b8b0a02d87400c0959bcb0e600f09619fdc479d830caeb5e401dd7a5a3f8b4271e14f615d46f62fd19f7cd2048016836219b4ae20f7b02e9e2fff0b6004ef81dc158303b275e229295e9107098044b8ab732b92b5797f080e92fa3e289dcb542b2e75d2a69336b2ac64a5cf75973e7b3bcf01ff34d434bc54fde58be6f15bf3db217c2744e53d5feeb39603af0be60e82d4068dcf2ffe7b050ae08789a3a0df732fbdbe14da55262fb15c57ee3d264628e06685c025ff0b90957ca7c266143ca5b216e397fee59e5c4922bc89876eca14963d131065a3e15473aa30484050f0afd59c3c9d82065a5633d0b2e413dbfdd136554842f70e4d62392fc865731824a6dce071a216a9bc0daadcf25cc3050faa82dc2219eb0ffa250939d8ebace5c88beb21e86243f0a1defb2048298077872517abd6e124045ad03b77b9a79c86cf054cdfdb5014b5a7461d072de72775d985efb4a15b04c1cfaaaf0c28651b0a6bab35de9bf11669d0108134e2ac61364808618e3792ac2d7"
 				},
 				{
 				  "commit": "096e1669267c22ecb38c466d73b8578261d8e91c14dd66702dd5bf34f4232e10db",
@@ -423,9 +444,9 @@ pub trait ForeignRpc {
 				}
 			  ],
 			  "payment_proof": {
-				"receiver_address": "xmgceW7Z2phenRwaBeKvTRZkPMJarwLFa8h5LW5bdHKucaKTeuE2",
+				"receiver_address": "xmgwbyjMEMBojnVadEkwVi1GyL1WPiVE5dziQf3TLedHdrVBPGw5",
 				"receiver_signature": null,
-				"sender_address": "xmgwbyjMEMBojnVadEkwVi1GyL1WPiVE5dziQf3TLedHdrVBPGw5"
+				"sender_address": "xmgceW7Z2phenRwaBeKvTRZkPMJarwLFa8h5LW5bdHKucaKTeuE2"
 			  },
 			  "ttl_cutoff_height": null,
 			  "tx": {
@@ -482,9 +503,9 @@ pub trait ForeignRpc {
 			}
 		  ],
 		  "payment_proof": {
-			"receiver_address": "xmgceW7Z2phenRwaBeKvTRZkPMJarwLFa8h5LW5bdHKucaKTeuE2",
-			"receiver_signature": "3045022100ce8823c1824ffb8cc4f600541f6d043c11ce3558bb53bab86a01f75702c36a4602207c4fb147c1683a5148f2bb84074bb8f2ff980aa88089bde0e29150f528086bfa",
-			"sender_address": "xmgwbyjMEMBojnVadEkwVi1GyL1WPiVE5dziQf3TLedHdrVBPGw5"
+			"receiver_address": "xmgwbyjMEMBojnVadEkwVi1GyL1WPiVE5dziQf3TLedHdrVBPGw5",
+			"receiver_signature": "304402202ab74d4cb3cac5620390167461c8cba1e1132e356a051873271accbe16f3f7c0022032d66e50bec99dff0e0934cb3fcfce4a5da9753c9c807bf02983280d29fe7b97",
+			"sender_address": "xmgceW7Z2phenRwaBeKvTRZkPMJarwLFa8h5LW5bdHKucaKTeuE2"
 		  },
 		  "ttl_cutoff_height": null,
 		  "tx": {
@@ -503,7 +524,7 @@ pub trait ForeignRpc {
 				{
 				  "commit": "08f722ae0f34741fe91c65f5afc20c75f68df2d54fb1706b2be64b8e04c2827a7b",
 				  "features": "Plain",
-				  "proof": "ef998812683edb4f1a0db39374cf22da6f9163f39eca5765ffd20857044df8b0681701581dce5146ee3e36c663c330e3095ee9461c1684b5268772385ff78b84090f54b0d5d2b312ce08e03c5694b6556020c26bf9d82cc48f1192051046c6d1cf4166f75ca0f561672befe8b5d0ca4be6b9a3fab1177ef003fa20f9a53df2ae635d0241cccb5c7d366a0dc75f0cacad2bcfd057161320fbf4c95de2e3238b730c55d5ec31bac85e5ede7c8caddb1db8cb73e2d3f275508e141b9f4413015305198e8d7483fed3be1f692d41c70aab7537822ecbc25aff17ad40c2301ca7a272d427ac0e8d237ff73c3226c1b4d2b7c287c3850683af0d519dd5da7c9fc23dea940ef48e185fbf65eb9ee5b4295de493f741fabf36c447de5551b791664c15688d64048ddb081d391e181e7b6377f3c7349fb9dea631f54d9ad0fdd4844bc3b1a1e5b4582ac4d802ee043989020e1e62b2b698a42ade36cb023bb0dd05936f2f41bc010cb5633c9856e1136a6f60f6ac2205b0e549a061d6c56c17d012ebb8fea7062e01b10931b1c250b8c3a4984ee8f9b3ca732250a5419b6a830519d0583fb5511495c6a64e5e2a6e3fa0aeb91094d8beb76ac78f9ab9059ab79c8aa96ff88249ba6a63f351bfe3458038c1979e4cab7b971ce510f410770f17904fbb20de7ca9a7f719680945476b47eefbb9057e8209866f1c60e0dbc190a4449f0b4f19fd096636e1ad9370b4e49867396c0a2e8cb17c5cf103895d0a60b843680fedf4be083e05e838245191db0965a0ab3a621c0708bb1300562c5695e39607deb28ea7cf6ff62ee381e586c58ce1dfabec5fa14a6df8ef5b6de324d01b530ff10e746ef8cae9687f6eb480e735a2c7c568c94b5b9dbe80220dd5ccf164287a957a777b65006c14e17f908deff9565dec15249e2097c02e49e20cdfaeb3d47f00f8838c6180"
+				  "proof": "59da9c60424cec0d4ea52a548f7aa5cfd9a65619f54198c99ae58d41be4022aea1761a0c7a2d262f62850a1daafbf9ac76480fb9f8f3ceb68c7ec306335332b00ca4c6b4bd926152f969f3059da44eb4840d21fe5cb0c5c316f6bf76ce17eae8644166f75ca0f561672befe8b5d0ca4be6b9a3fab1177ef003fa20f9a53df2ae63253b315054a693965b0a74afe266026ffab3e0b16e354fe0c20a9abb1f5023572f4641b508bd112024a9fd51dea686a8aad32a73feb51b22dd6d08fec102db429ba341ec1fc3464d354939512624eca7f1bfa2d7a0fd711efaa07388a76d6ee700c04483793779f66b5201f0d824c600d4e091460a59b39ec5c9d1908400c08e6fb944465d3b296967681459adc13c64b18a16186ebdfac04dad0ef26f2935b8be68680ad3043d39b220fd383a66f402fc9f6f5205a2d5930293d8a0097cfd12038e228618131205de1f3babbdadbf535f18410207fdf6ca211da630f2c86e4dbe017103713e3137f94f5ad08b3f4a4e60f972fefce23410dba9a19ad9311ebb5cd5a0d964ab60344a793339ffa1058bb876729ff2a5f1c2933abf7dd4d4a04003e68ceaac1a92273ddfe2e77b37d045640105fa0a8af30ce1c3c6b61abb792f68a9e4e9449f61c278245789420738bce75b8ae8328a986bfe19a1e85b1e545ad276702849119a2c458c99c8673e2029079cb54226edfb7bfe64cc69d629ecd5ae073c6655e8c9e16357ac1ec137cc2b3a4a8716ea09c0008cd2ef8b120e9db19e0de52789c97ac134e416c3069db9d4279cca4605320bd2c37ef367aa845e8d74db5dbcd93a243cc24779fd650300cce6871ed73ce4fa67ac36ee5dd10bafaee81add88763ec6e946293bb8b1d00d85a30ea0512bf0cf353aa515b0143106b3b5a5c8b115c97f30225d81b7071677ce25e4b1aab3bd79527f3c58490e246482c778"
 				}
 			  ]
 			},
@@ -541,7 +562,7 @@ pub trait ForeignRpc {
 	  "id": 1,
 	  "jsonrpc": "2.0",
 	  "result": {
-		"Ok": "BEGINSLATEPACK. 8aGE2J78VABJ3Pq ct4SvrqjjLSiNVv uCyzW51GAwQKCjN 4zufsY9VK63rjsy qr89amJHmVVmQh6 eKihPoAYiEbojc2 WXr8dAA519JFdQP WNqBzcHN3xnBcPa wsgqYnmxyvRXyaf FGQeV8ekqVKYDGh YH21bGQY3mVAsBw M9cQgLVu1Dqt5Ry Kbdqk9jB6euHPgr fC8aENHKaCQFG8z a2ntSBMHhe1r4vf CBgJSYvbATaJUUY q9gPq5bJyfNC6mU qxb4F2To1ZTJhLa p89tSxcPHtX8z2g uuG7WsGKNLh44w7 qCRMRe8cHgmYjxj ZPD8m6i9hJrJRn6 1C4jBqFnJx8FmPy u2W5Zs4F1kepk9c SFwX9UFkNSTYwn2 R64RejC2Eobogs7 CH2Dq3SZXC2kG43 Ri3hTLVYJzATHSV td9bz8rE92gteLA joxoUVGe1T2rVq6 6CJCbMyS9NJdGBx iNGbg7h5mmV1fUT aH6nXDHjznMFmZo PwES2Htv7RALrVS v4ndYjboZMVZ76F Yu9usuEt2FbpXpq rm3JELYBWjLHzgP mAKsWAsfFnApdMh FoKfo9ppM4rjnpq uZqeoDpwjB6kcBU vYN2GZvjUZdzUZ6 BMaBa6yCPngch77 FuH4yuidd3paaEM eUrnk55DgwMuerp 3iqbDfENqm1aKjr wkbg1tyFqgWykpA BzpgckaseAMqDr5 mdNETY45gKPDkni E41UvPp9J52BBEm ZGMRtt78gYhWNBL vp45NDNzzXirV7f f5kQeyTLNhV4oqn cDqemVsdyP3sRpT oWD18EGyLn4Wg5P V2hXpt3NLqfzozs gT9WMC3hw2Xb6pU Faxufmstx7bEKFD sH5ridXjfmof8oc H7pdedtzYSYeVKN UyLUMhhEbw9GVZN JNjzCbQV586Q968 ro91AeCWS5zDACR B4971ynhb6zUQQp mZRKDRuRsRurgbB AFXqwz3JSAK6TP4 7GhLsBSB4QW3az9 HrYsdcw72nXhUvo ndAQw6qb2yB9o5L MBy18qrwYMm9xWo Bhj9i2tZMNtCkXP CpHiTSeVkVTuApN oscmgyraWhbDhoj Sw4s4A3EWzQJ2dB VMPhZsRPVYZFcpH tE56dSnxQghzBMC soxJeqn3o6JnZX7 ABeVqSCUZEJ34Nx F88DrCgmGSGCfiR mK9GfwSbHyCW9Gd Ljm58xgVKRrRSfa ei7VbS2kqnLCihQ bwZ7xJQyVzVYcKX E2EAtap7uV5YqhN fzFtZi1hVne5KqG rhiSgooMeuSDBVK QxDEzTdonj2pex3 3DXzC54j8ndfAh8 TK8L59j4PeMHmvb DWK8PEvWmQgKmFV pebK7G19z5nnbym NQeoUTfLTA53bKM kpRbqe9UhRMcSDQ wKfj4D64epNxqv1 48BckGU6gi1eKyb 7U9dinqNhtgSe4v GWtcT3ntevCcgU1 Mfxxg6p3mzTEZAF KKHdtSZ7BeDaU5T LZNXsY588UkwfG2 uY94ZLEgYgwHb6r LwWReKDFnwSwhrs xxepjEnpUX2fiPb hoad1aMokXTGtGR UFcmigyraMUM4xW 2wFmeCxpSGmdz7X ESuErLmgH2YSZEX WBNMzhHLoXWoP5E s. ENDSLATEPACK."
+		"Ok": "BEGINSLATEPACK. MTu4Q1paWJHENZL ZK9Q9UXsHgsKqof inVSjN62C1yfBkm BLenmeN5tcAuEEH HhsJJiz7KgMcsck JcA9GAoyYkcQZLC VuwpGU3WgNxHgZC U8ee6NjWvUVqxad N6UgruiiEwzdicn Et6jTxtMN29doKw bJW6aCQb62TsDr7 sFeMSg9FxZFWasE 4B4Ros2HUvPjomY 1awVqGnUCPUCDLZ e63brbqkpEiUvhZ z3bvUisBDkRmV2r 3LCQ987WBUzpxML K72o9RfMH9BVrYQ wQEEGn7wugzwmk3 R6Ef3ktNjKBm7W5 Fzp8PW4nJxvubwr 1U8BWcmkqdAVm8a bmiLNpMw63YEuB1 mfazkFHcdCPsjab AYAgsnG2jubi3cY NPtBh3XNfmNrbdr 2NoRjgek7VL4qM3 WMKL6brBtCHuQqr o151NMSPux4c84F KE2YX2mJmU1SPv5 XDRrL8d3CdUSDvA 1Uikx69SNPBjcxm hStkAoLV7YudQjv vHWk6RjCYSwBb5Z W8WgpPXR9xQexCp MN3jAXfkmWpXSpp aassVZqZkJBigHk 4ZfLHQoV9PR3pFz yUdEbrpiGmd4Ymc hPnj3FPPhhUX7X9 hBSEe8iyA3srCay MFFDVYp8M8hRQeT ZHAYCYmfbR499BR n2HTLEPbRAVss6F czxDxv8VHGPcpJV fsUvfSyEdwckDdb SKAqD2HQ3spiQi5 Ee1ByHyNPCDAFZP TRb8N7hB8hutmTi QqfFpHQHR4cbw6S srVosjDDded1S4k aUxyMp4QsNmVXRZ imhngis6XFH2Hze v8Q9k7qWJdjzzBQ iHeaJEUmMe1iuEy CuAbTwNCntrXqk9 tPKCoa6pMuPXes1 kfAqvKsVmwGxnbD M5wBug1ztiQ44FX azWczcrUHsEP6DW vbWLvCp7t3sqfVn 7Fyarr5g3nVdBch R2vHSqk734x8uSs zwkT8EMyyziFVKe KCUS1FLD8ANBRRZ XfH3amuzxVCGtBm dNt6J298oLgHaWG J1QBGbGBNKeis7s UA77ZNrgbZRCrTw Ni7Mqn8hZmhQLim 2qqMMMNXz4r4iTi jdZrEU6xCj54Xe8 Qkn3FrSWSMuuoJR WnX32XH4kA84HfJ Eu18kqUkp4CTvbs 9VpHgbJpJL8tBGG aXkf6wk64tyACfP eN2MHkrhKkubnGD m86dXunXPF6kYwE V2a9snugHwfX3mF WjoZqyt5fgyKo8g m1cBjCzr14ggPDJ UGGU7xsjwxZxdBW 7je5Dk7cCwNnG8b 7rXwWFKsRqyFhvH MCDS3t6ikKuGqYY x4TZKKUS7kKBRx9 kBmn54EQVKPEMTx ucReSESBTtfVEUE 6ohHFTDLQCZZnaU 8mwDevokBvMMKZF JBHDn9QXaCB2N3e EAanLxSYXanWyrP nN8BgRKwFjCJQ8S EyzPM6VAC6y8tVK 2G6wf7ikrkCuVZY tdQnekzqbfXhgxd LQh3FdBajXmVAVd zzibEKqef63pgzJ uyyd6aTpmFfPAWR R2X75dYYR1HJstR oUf7wLWC87Jjco2 hauvPRrW7dHtu4h sU4qFzWHMxHH6x2 BusQrdGLQE66DCq y1CFFc8V8aXjTv8 xrSeYLKbtdM67AQ U. ENDSLATEPACK."
 	  }
 	}
 	# "#
@@ -941,9 +962,8 @@ where
 		Foreign::get_proof_address(self)
 	}
 
-	fn build_coinbase(&self, block_fees: &BlockFees) -> Result<VersionedCoinbase, Error> {
-		let cb: CbData = Foreign::build_coinbase(self, block_fees)?;
-		Ok(VersionedCoinbase::into_version(cb, SlateVersion::V2))
+	fn build_coinbase(&self, block_fees: &BlockFees) -> Result<CbData, Error> {
+		Foreign::build_coinbase(self, block_fees)
 	}
 
 	// verify_slate_messages doesn't make sense for the slate pack. That is why supporting only plain slates
@@ -981,15 +1001,28 @@ where
 			let slate_from = in_slate.into_slate_plain(context_id, false)?;
 			(slate_from, None)
 		};
-		let out_slate = Foreign::receive_tx(
+		let sender_public_key = sender
+			.as_ref()
+			.map(ProvableAddress::from_tor_pub_key)
+			.transpose()?
+			.map(|p| p.public_key);
+		let mut tx_session = TxSession::new();
+		let reply_binding = sender.as_ref().map(ReplyBinding::foreign_rpc);
+		let receive_result = Foreign::receive_tx(
 			self,
-			None,
+			&mut tx_session,
 			&slate_from,
-			sender.map(|p| ProvableAddress::from_tor_pub_key(&p).public_key), // We don't want to change RPC. New fields required new version
+			reply_binding,
+			sender_public_key,
+			None,
 			&dest_acct_name,
 			message,
+			true,
 		)?;
-
+		let out_slate = receive_result.slate;
+		let _processing_guard = receive_result.processing_guard;
+		let reply_reservation = receive_result.reply_reservation;
+		let receive_data = receive_result.receive_data;
 		let res_slate = Foreign::encrypt_slate(
 			self,
 			&out_slate,
@@ -997,8 +1030,31 @@ where
 			SlatePurpose::SendResponse,
 			sender, // sending back to the sender
 			None,
+			#[cfg(feature = "test-support")]
 			self.doctest_mode,
 		)?;
+
+		// Persist only after every fallible response-construction step succeeds.
+		// Saving last is intentional: a reported error must mean no transaction
+		// was created (see TxSession::save_tx_data).
+		if !tx_session.is_empty() {
+			let secp = Secp256k1::with_caps(ContextFlag::Commit)?;
+			{
+				wallet_lock!(self.wallet_inst, w);
+				tx_session.save_tx_data(
+					&secp,
+					&mut **w,
+					self.keychain_mask.as_ref(),
+					&out_slate.id,
+				)?;
+			}
+		}
+		if let Some(reservation) = reply_reservation {
+			reservation.complete(&out_slate);
+		}
+		if let Some(receive_data) = receive_data {
+			mwc_wallet_libwallet::foreign::dispatch_receive_callback(receive_data);
+		}
 
 		Ok(res_slate)
 	}
@@ -1025,24 +1081,49 @@ where
 			(slate_from, None)
 		};
 
-		let out_slate = Foreign::finalize_invoice_tx(self, None, &in_slate)?;
+		let reply_binding = sender.as_ref().map(ReplyBinding::foreign_rpc);
+		// Check the known response format's size before finalization commits state.
+		// Keep finalization before response encoding. Finalization durably binds the
+		// one-time signing nonce, stores the finalized transaction, and removes the
+		// private context; encoding first would leave a crash window in which signing
+		// material could be reused after restart. If encoding the FullSlate fails, the
+		// wallet owner can recover the saved transaction by slate ID with `get_stored_tx`
+		// and submit it with `post_tx`. An exact authenticated retry may also recover
+		// the finalized Slate from the in-memory reply cache. Therefore an encoding
+		// error after this call is an intentional, recoverable outcome, not evidence
+		// that finalization was rolled back. See `tx::complete_tx` for the
+		// persist-before-sign invariant.
+		let finalize_result = Foreign::finalize_invoice_tx_with_output_version(
+			self,
+			None,
+			&in_slate,
+			reply_binding,
+			Some(version.clone()),
+		)?;
 
 		let res_slate = Foreign::encrypt_slate(
 			self,
-			&out_slate,
+			&finalize_result.slate,
 			Some(version),
 			SlatePurpose::FullSlate,
 			sender, // sending back to the sender
 			None,
+			#[cfg(feature = "test-support")]
 			self.doctest_mode,
 		)?;
 		Ok(res_slate)
 	}
 
-	fn receive_swap_message(&self, _message: String) -> Result<(), Error> {
+	fn receive_swap_message(&self, message: String) -> Result<(), Error> {
 		#[cfg(feature = "swaps")]
-		Foreign::receive_swap_message(&self, &_message)?;
-		Ok(())
+		{
+			Foreign::receive_swap_message(self, &message)
+		}
+		#[cfg(not(feature = "swaps"))]
+		{
+			let _ = message;
+			Err(Error::GenericError("Swaps are disabled".into()))
+		}
 	}
 
 	fn marketplace_message(&self, message: &String) -> Result<String, Error> {
@@ -1059,17 +1140,80 @@ where
 	}
 }
 
+#[cfg(all(test, feature = "test-support"))]
+#[test]
+fn build_coinbase_rpc_requires_digest_and_returns_bound_opening() {
+	use mwc_wallet_util::mwc_core::{
+		core::hash::Hash, libtx::coinbase_binding::verify_coinbase_binding_digest,
+	};
+	use mwc_wallet_util::mwc_crates::tempfile::tempdir;
+	use mwc_wallet_util::mwc_util::ToHex;
+
+	let directory = tempdir().unwrap();
+	let mut requests = vec![serde_json::json!({
+		"jsonrpc": "2.0", "method": "build_coinbase", "id": 1,
+		"params": { "block_fees": { "fees": "13", "height": "3", "key_id": null } }
+	})];
+	// The wallet signs the supplied digest before and after activation. This
+	// test exercises the actual RPC dispatch and response serialization.
+	for height in [3u8, 4] {
+		requests.push(serde_json::json!({
+			"jsonrpc": "2.0", "method": "build_coinbase", "id": height,
+			"params": { "block_fees": {
+				"fees": "13", "height": height.to_string(), "key_id": null,
+				"binding_digest": Hash::from_vec(&[height; 32]).to_hex()
+			} }
+		}));
+	}
+	let response = run_doctest_foreign(
+		serde_json::Value::Array(requests),
+		directory.path().to_str().unwrap(),
+		false,
+		0,
+		false,
+		false,
+		true,
+	)
+	.unwrap()
+	.unwrap();
+	let responses = response.as_array().unwrap();
+	assert_eq!(responses.len(), 3);
+	let legacy = responses.iter().find(|item| item["id"] == 1).unwrap();
+	assert_eq!(legacy["error"]["code"], -32602);
+	let secp = Secp256k1::with_caps(ContextFlag::Commit).unwrap();
+	for height in [3u8, 4] {
+		let response = responses.iter().find(|item| item["id"] == height).unwrap();
+		let coinbase: CbData = serde_json::from_value(response["result"]["Ok"].clone()).unwrap();
+		assert!(coinbase.key_id.is_some());
+		coinbase.kernel.verify(0, &secp).unwrap();
+		verify_coinbase_binding_digest(
+			0,
+			&secp,
+			&coinbase.kernel,
+			&coinbase.coinbase_opening,
+			Hash::from_vec(&[height; 32]),
+		)
+		.unwrap();
+	}
+}
+
+#[cfg(feature = "test-support")]
 fn test_check_middleware(
 	_name: ForeignCheckMiddlewareFn,
 	_node_version_info: Option<NodeVersionInfo>,
 	_slate: Option<&Slate>,
-) -> Result<(), libwallet::Error> {
+) -> Result<(), Error> {
 	// TODO: Implement checks
 	// return Err(Error::GenericError("Test Rejection".into()))?
 	Ok(())
 }
 
-/// helper to set up a real environment to run integrated doctests
+/// Helper to set up a real environment to run integrated doctests.
+#[cfg(feature = "test-support")]
+#[allow(
+	clippy::unwrap_used,
+	reason = "this function is an integration-doctest harness whose unwraps turn fixture setup failures into test failures"
+)]
 pub fn run_doctest_foreign(
 	request: serde_json::Value,
 	test_dir: &str,
@@ -1083,22 +1227,28 @@ pub fn run_doctest_foreign(
 	use mwc_wallet_impls::test_framework::{self, LocalWalletClient, WalletProxy};
 	use mwc_wallet_impls::{DefaultLCProvider, DefaultWalletImpl};
 	use mwc_wallet_libwallet::{api_impl, WalletInst};
+	use mwc_wallet_util::mwc_core::global;
+	use mwc_wallet_util::mwc_core::global::ChainTypes;
 	use mwc_wallet_util::mwc_keychain::ExtKeychain;
+	use mwc_wallet_util::mwc_util;
 
-	use crate::core::global;
-	use crate::core::global::ChainTypes;
-	use mwc_wallet_util::mwc_util as util;
-
+	use mwc_wallet_util::Mutex;
 	use std::sync::Arc;
-	use std::sync::Mutex;
 
 	use std::fs;
-	use std::thread;
 
-	util::init_test_logger();
-	let _ = fs::remove_dir_all(test_dir);
+	mwc_util::init_test_logger().map_err(|e| e.to_string())?;
+	let mut secp = Secp256k1::with_caps(ContextFlag::Commit).map_err(|e| e.to_string())?;
+	if let Err(e) = fs::remove_dir_all(test_dir) {
+		if e.kind() != std::io::ErrorKind::NotFound {
+			return Err(format!(
+				"Unable to clean doctest directory {}: {}",
+				test_dir, e
+			));
+		}
+	}
 	global::set_local_chain_type(ChainTypes::AutomatedTesting);
-	global::set_local_accept_fee_base(consensus::MILLI_MWC / 100);
+	global::set_local_accept_fee_base(consensus::MILLI_MWC / 100).map_err(|e| e.to_string())?;
 	global::set_local_nrd_enabled(true);
 
 	let tx_pool: Arc<Mutex<Vec<Transaction>>> = Arc::new(Mutex::new(Vec::new()));
@@ -1109,11 +1259,11 @@ pub fn run_doctest_foreign(
 	> = WalletProxy::new(test_dir.into(), tx_pool.clone());
 	let chain = wallet_proxy.chain.clone();
 
-	let rec_phrase_1 = util::ZeroingString::from(
+	let rec_phrase_1 = mwc_util::ZeroingString::from(
 		"fat twenty mean degree forget shell check candy immense awful \
      flame next during february bulb bike sun wink theory day kiwi embrace peace lunch",
 	);
-	let empty_string = util::ZeroingString::from("");
+	let empty_string = mwc_util::ZeroingString::from("");
 	let client1 = LocalWalletClient::new("wallet1", wallet_proxy.tx.clone());
 	let mut wallet1 = Box::new(DefaultWalletImpl::<LocalWalletClient>::new(
 		0,
@@ -1128,9 +1278,10 @@ pub fn run_doctest_foreign(
 			>,
 		>;
 	let lc = wallet1.lc_provider().unwrap();
-	let _ = lc.set_top_level_directory(&format!("{}/wallet1", test_dir));
-	let _ = lc
-		.create_wallet(
+	lc.set_top_level_directory(&format!("{}/wallet1", test_dir))
+		.map_err(|e| e.to_string())?;
+	drop(
+		lc.create_wallet(
 			None,
 			Some(rec_phrase_1),
 			32,
@@ -1139,9 +1290,10 @@ pub fn run_doctest_foreign(
 			None,
 			true,
 		)
-		.unwrap();
+		.map_err(|e| e.to_string())?,
+	);
 	let mask1 = lc
-		.open_wallet(None, empty_string.clone(), use_token, true, None)
+		.open_wallet(&secp, None, empty_string.clone(), use_token, true, None)
 		.unwrap();
 	let wallet1 = Arc::new(Mutex::new(wallet1));
 
@@ -1156,7 +1308,7 @@ pub fn run_doctest_foreign(
 		mask1.clone(),
 	);
 
-	let rec_phrase_2 = util::ZeroingString::from(
+	let rec_phrase_2 = mwc_util::ZeroingString::from(
 		"hour kingdom ripple lunch razor inquiry coyote clay stamp mean \
      sell finish magic kid tiny wage stand panther inside settle feed song hole exile",
 	);
@@ -1174,9 +1326,10 @@ pub fn run_doctest_foreign(
 			>,
 		>;
 	let lc = wallet2.lc_provider().unwrap();
-	let _ = lc.set_top_level_directory(&format!("{}/wallet2", test_dir));
-	let _ = lc
-		.create_wallet(
+	lc.set_top_level_directory(&format!("{}/wallet2", test_dir))
+		.map_err(|e| e.to_string())?;
+	drop(
+		lc.create_wallet(
 			None,
 			Some(rec_phrase_2),
 			32,
@@ -1185,9 +1338,10 @@ pub fn run_doctest_foreign(
 			None,
 			true,
 		)
-		.unwrap();
+		.map_err(|e| e.to_string())?,
+	);
 	let mask2 = lc
-		.open_wallet(None, empty_string, use_token, true, None)
+		.open_wallet(&secp, None, empty_string, use_token, true, None)
 		.unwrap();
 	let wallet2 = Arc::new(Mutex::new(wallet2));
 
@@ -1199,31 +1353,24 @@ pub fn run_doctest_foreign(
 	);
 
 	// Set the wallet proxy listener running
-	thread::spawn(move || {
-		global::set_local_chain_type(global::ChainTypes::AutomatedTesting);
-		if let Err(e) = wallet_proxy.run() {
-			error!("Wallet Proxy error: {}", e);
-		}
-	});
+	let proxy_handle = wallet_proxy.start();
 
 	// Mine a few blocks to wallet 1 so there's something to send
 	for _ in 0..blocks_to_mine {
-		let _ = test_framework::award_blocks_to_wallet(
+		test_framework::award_blocks_to_wallet(
 			&chain,
 			wallet1.clone(),
 			(&mask1).as_ref(),
 			1 as usize,
 			false,
-			tx_pool
-				.lock()
-				.unwrap_or_else(|e| e.into_inner())
-				.deref_mut(),
-		);
+			tx_pool.lock().deref_mut(),
+		)
+		.map_err(|e| e.to_string())?;
 		//update local outputs after each block, so transaction IDs stay consistent
 		let (wallet_refreshed, _) = api_impl::owner::retrieve_summary_info(
 			wallet1.clone(),
+			&mut secp,
 			(&mask1).as_ref(),
-			&None,
 			true,
 			1,
 		)
@@ -1232,33 +1379,33 @@ pub fn run_doctest_foreign(
 	}
 
 	let (w1_tor_secret, w1_tor_pubkey) = {
-		let mut w_lock = wallet1.lock().unwrap_or_else(|e| e.into_inner());
+		let mut w_lock = wallet1.lock();
 		let w = w_lock.lc_provider().unwrap().wallet_inst().unwrap();
-		let k = w.keychain((&mask1).as_ref()).unwrap();
-		let secret = proofaddress::payment_proof_address_dalek_secret(0, &k, 0).unwrap();
-		let tor_pk = DalekPublicKey::from(&secret);
+		let k = w.keychain(&secp, (&mask1).as_ref()).unwrap();
+		let secret = proofaddress::payment_proof_address_dalek_secret(&secp, 0, &k, 0).unwrap();
+		let tor_pk = ed25519_dalek::VerifyingKey::from(&secret);
 		(secret, tor_pk)
 	};
-	let w1_slatepack_address = ProvableAddress::from_tor_pub_key(&w1_tor_pubkey);
+	let w1_slatepack_address =
+		ProvableAddress::from_tor_pub_key(&w1_tor_pubkey).map_err(|e| e.to_string())?;
 
 	let (w2_tor_secret, w2_tor_pubkey) = {
-		let mut w_lock = wallet2.lock().unwrap_or_else(|e| e.into_inner());
+		let mut w_lock = wallet2.lock();
 		let w = w_lock.lc_provider().unwrap().wallet_inst().unwrap();
-		let k = w.keychain((&mask2).as_ref()).unwrap();
-		let secret = proofaddress::payment_proof_address_dalek_secret(0, &k, 0).unwrap();
-		let tor_pk = DalekPublicKey::from(&secret);
+		let k = w.keychain(&secp, (&mask2).as_ref()).unwrap();
+		let secret = proofaddress::payment_proof_address_dalek_secret(&secp, 0, &k, 0).unwrap();
+		let tor_pk = ed25519_dalek::VerifyingKey::from(&secret);
 		(secret, tor_pk)
 	};
-	let w2_slatepack_address = ProvableAddress::from_tor_pub_key(&w2_tor_pubkey);
-
-	let secp = Secp256k1::new();
+	let w2_slatepack_address =
+		ProvableAddress::from_tor_pub_key(&w2_tor_pubkey).map_err(|e| e.to_string())?;
 
 	if init_invoice_tx {
 		let amount = 2_000_000_000;
 		let mut tx_session1 = TxSession::new();
 		let mut tx_session2 = TxSession::new();
 		let mut slate = {
-			let mut w_lock = wallet2.lock().unwrap_or_else(|e| e.into_inner());
+			let mut w_lock = wallet2.lock();
 			let w = w_lock.lc_provider().unwrap().wallet_inst().unwrap();
 			let mut args = IssueInvoiceTxArgs {
 				amount,
@@ -1272,6 +1419,7 @@ pub fn run_doctest_foreign(
 
 			let slate = api_impl::owner::issue_invoice_tx(
 				&mut **w,
+				&mut secp,
 				(&mask2).as_ref(),
 				Some(&mut tx_session1),
 				&args,
@@ -1281,16 +1429,42 @@ pub fn run_doctest_foreign(
 			.unwrap();
 
 			tx_session1
-				.save_tx_data(&mut **w, (&mask1).as_ref(), &slate.id)
+				.save_tx_data(&secp, &mut **w, (&mask1).as_ref(), &slate.id)
 				.unwrap();
 			slate
 		};
+		if compact_slate {
+			// Exercise the same InvoiceInitial transport as the real exchange.
+			// It omits the issuer output until finalization, when the issuer
+			// restores it and contributes its share of the transaction offset.
+			slate = VersionedSlate::into_version(
+				0,
+				slate,
+				SlateVersion::SP,
+				SlatePurpose::InvoiceInitial,
+				w2_tor_pubkey.clone(),
+				Some(w1_tor_pubkey.clone()),
+				&w2_tor_secret,
+				true,
+				&secp,
+			)
+			.unwrap()
+			.into_slatepack(0, &w1_tor_secret, &secp)
+			.unwrap()
+			.to_result_slate();
+		}
 		{
 			wallet_lock_test!(wallet1.clone(), w1);
-			api_impl::owner::update_wallet_state(&mut **w1, (&mask1).as_ref(), &None).unwrap();
+			api_impl::owner::update_wallet_state(
+				&mut **w1,
+				&mut secp,
+				(&mask1).as_ref(),
+				None,
+			)
+			.unwrap();
 		}
 		slate = {
-			let mut w_lock = wallet1.lock().unwrap_or_else(|e| e.into_inner());
+			let mut w_lock = wallet1.lock();
 			let w = w_lock.lc_provider().unwrap().wallet_inst().unwrap();
 			let args = InitTxArgs {
 				src_acct_name: None,
@@ -1303,6 +1477,7 @@ pub fn run_doctest_foreign(
 			};
 			let slate = api_impl::owner::process_invoice_tx(
 				&mut **w,
+				&mut secp,
 				(&mask1).as_ref(),
 				&mut Some(&mut tx_session2),
 				&slate,
@@ -1313,7 +1488,7 @@ pub fn run_doctest_foreign(
 			.unwrap();
 			// participants ids are expected to be different
 			tx_session2
-				.save_tx_data(&mut **w, (&mask1).as_ref(), &slate.id)
+				.save_tx_data(&secp, &mut **w, (&mask1).as_ref(), &slate.id)
 				.unwrap();
 			slate
 		};
@@ -1327,7 +1502,6 @@ pub fn run_doctest_foreign(
 			})
 			.unwrap()
 		);
-
 		if compact_slate {
 			let vslate = VersionedSlate::into_version(
 				0,
@@ -1350,11 +1524,17 @@ pub fn run_doctest_foreign(
 
 	{
 		wallet_lock_test!(wallet1.clone(), w1);
-		api_impl::owner::update_wallet_state(&mut **w1, (&mask1).as_ref(), &None).unwrap();
+		api_impl::owner::update_wallet_state(
+			&mut **w1,
+			&mut secp,
+			(&mask1).as_ref(),
+			None,
+		)
+		.unwrap();
 	}
 	if init_tx {
 		let amount = 2_000_000_000;
-		let mut w_lock = wallet1.lock().unwrap_or_else(|e| e.into_inner());
+		let mut w_lock = wallet1.lock();
 		let w = w_lock.lc_provider().unwrap().wallet_inst().unwrap();
 		let mut args = InitTxArgs {
 			src_acct_name: None,
@@ -1371,9 +1551,16 @@ pub fn run_doctest_foreign(
 			args.slatepack_recipient = Some(w2_slatepack_address.clone());
 		}
 
-		let slate =
-			api_impl::owner::init_send_tx(&mut **w, (&mask1).as_ref(), &mut None, &args, true, 1)
-				.unwrap();
+		let slate = api_impl::owner::init_send_tx(
+			&mut **w,
+			&mut secp,
+			(&mask1).as_ref(),
+			&mut None,
+			&args,
+			true,
+			1,
+		)
+		.unwrap();
 		println!("INIT SLATE");
 		// Spit out slate for input to finalize_tx
 		println!(
@@ -1412,21 +1599,28 @@ pub fn run_doctest_foreign(
 	api_foreign.doctest_mode = true;
 	let foreign_api = &api_foreign as &dyn ForeignRpc;
 	let res = foreign_api.handle_request(request).as_option();
-	let _ = fs::remove_dir_all(test_dir);
+	proxy_handle.stop().map_err(|e| e.to_string())?;
+	drop(api_foreign);
+	drop(chain);
+	fs::remove_dir_all(test_dir)
+		.map_err(|e| format!("Unable to remove doctest directory {}: {}", test_dir, e))?;
 	Ok(res)
 }
-
 #[doc(hidden)]
 #[macro_export]
 macro_rules! doctest_helper_json_rpc_foreign_assert_response {
 	($request:expr, $expected_response:expr, $use_token:expr, $blocks_to_mine:expr, $init_tx:expr, $init_invoice_tx:expr, $compact_slate:expr) => {
+		#[cfg(not(feature = "test-support"))]
+		panic!("test-support feature is required to run the tests");
+
+		#[cfg(feature = "test-support")]
+		{
 		// create temporary wallet, run jsonrpc request on owner api of wallet, delete wallet, return
 		// json response.
 		// In order to prevent leaking tempdirs, This function should not panic.
-		use mwc_wallet_api::run_doctest_foreign;
-		use serde_json;
-		use serde_json::Value;
-		use tempfile::tempdir;
+		use mwc_wallet_util::mwc_crates::serde_json::Value;
+		use mwc_wallet_util::mwc_crates::tempfile::tempdir;
+		use $crate::run_doctest_foreign;
 
 		let dir = tempdir().map_err(|e| format!("{:#?}", e)).unwrap();
 		let dir = dir
@@ -1435,8 +1629,10 @@ macro_rules! doctest_helper_json_rpc_foreign_assert_response {
 			.ok_or("Failed to convert tmpdir path to string.".to_owned())
 			.unwrap();
 
-		let request_val: Value = serde_json::from_str($request).unwrap();
-		let expected_response: Value = serde_json::from_str($expected_response).unwrap();
+		let request_val: Value =
+			mwc_wallet_util::mwc_crates::serde_json::from_str($request).unwrap();
+		let expected_response: Value =
+			mwc_wallet_util::mwc_crates::serde_json::from_str($expected_response).unwrap();
 
 		let response = run_doctest_foreign(
 			request_val,
@@ -1453,9 +1649,11 @@ macro_rules! doctest_helper_json_rpc_foreign_assert_response {
 		if response != expected_response {
 			panic!(
 				"(left != right) \nleft: {}\nright: {}",
-				serde_json::to_string_pretty(&response).unwrap(),
-				serde_json::to_string_pretty(&expected_response).unwrap()
+				mwc_wallet_util::mwc_crates::serde_json::to_string_pretty(&response).unwrap(),
+				mwc_wallet_util::mwc_crates::serde_json::to_string_pretty(&expected_response)
+					.unwrap()
 			);
+		}
 		}
 	};
 }

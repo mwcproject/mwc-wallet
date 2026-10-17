@@ -15,8 +15,9 @@
 use crate::swap::fsm::state::{Input, State, StateEtaInfo, StateId, StateProcessRespond};
 use crate::swap::types::SwapTransactionsConfirmations;
 use crate::swap::{Context, Error, Swap};
-use mwc_wallet_util::mwc_util::secp::Secp256k1;
-use std::collections::HashMap;
+use mwc_wallet_util::mwc_crates::log::debug;
+use mwc_wallet_util::mwc_crates::secp::Secp256k1;
+use std::collections::{HashMap, HashSet};
 
 /// Swap State machine
 pub struct StateMachine<'a> {
@@ -34,6 +35,9 @@ impl<'a> StateMachine<'a> {
 
 		#[cfg(debug_assertions)]
 		for st in state_map.values() {
+			// These assertions validate the state graph assembled immediately above from
+			// locally defined state objects. No serialized swap or other external input
+			// can add a state or transition to this map.
 			assert!(state_map.contains_key(&st.get_state_id()));
 			if let Some(state) = st.get_prev_swap_state() {
 				assert!(state_map.contains_key(&state));
@@ -55,7 +59,7 @@ impl<'a> StateMachine<'a> {
 				"Unknown state {:?}",
 				swap.state
 			)))?;
-		Ok(state.is_cancellable())
+		Ok(state.is_cancellable(swap))
 	}
 
 	/// Verify if the state is valid for this machine
@@ -70,12 +74,51 @@ impl<'a> StateMachine<'a> {
 		swap: &mut Swap,
 		context: &Context,
 		tx_conf: &SwapTransactionsConfirmations,
-		secp: &Secp256k1,
+		secp: &mut Secp256k1,
+	) -> Result<StateProcessRespond, Error> {
+		self.process_with_persist(input, swap, context, tx_conf, secp, &|_| Ok(()))
+	}
+
+	/// Run a step with durable storage before an MWC lock or buyer redemption is sent.
+	pub(crate) fn process_with_persist(
+		&mut self,
+		input: Input,
+		swap: &mut Swap,
+		context: &Context,
+		tx_conf: &SwapTransactionsConfirmations,
+		secp: &mut Secp256k1,
+		persist: &dyn Fn(&Swap) -> Result<(), Error>,
 	) -> Result<StateProcessRespond, Error> {
 		debug!(
 			"Swap {} processing state {:?} for Input {:?}",
 			swap.id, swap.state, input
 		);
+		if !tx_conf.supports_state(swap) {
+			return Err(Error::SwapStateMachineError(
+				"Missing chain observations required for this swap state".into(),
+			));
+		}
+
+		// A caller may submit Cancel directly without first querying eligibility.
+		// Chain observations also count as exposure even if a local broadcast
+		// timestamp has not yet been recorded.
+		if matches!(input, Input::Cancel)
+			&& (!self.is_cancellable(swap)?
+				|| (!swap.is_seller() && tx_conf.mwc_redeem_conf.is_some()))
+		{
+			return Err(Error::InvalidSwapStateInput(
+				"Swap trade is not cancellable at the current stage".to_string(),
+			));
+		}
+
+		// Each Check uses the same confirmation snapshot. Revisiting a state can
+		// otherwise loop indefinitely when a fresh node lookup disagrees after a
+		// reorg. Other inputs may mutate the trade before its first Check, so do
+		// not count those as a visit to the state's Check branch.
+		let mut checked_states = HashSet::new();
+		if matches!(input, Input::Check) {
+			checked_states.insert(swap.state.clone());
+		}
 
 		let state = self
 			.state_map
@@ -84,11 +127,25 @@ impl<'a> StateMachine<'a> {
 				"Unknown state {:?}",
 				swap.state
 			)))?;
-		let mut respond = state.process(input, swap, context, tx_conf, secp)?;
+		let mut respond =
+			state.process_with_persist(input, swap, context, tx_conf, secp, persist)?;
 
 		while respond.next_state_id != swap.state {
-			debug!("New state: {:?}", swap.state);
+			if !checked_states.insert(respond.next_state_id.clone()) {
+				return Err(Error::SwapStateMachineError(format!(
+					"State transition cycle at {:?}; retry with fresh transaction confirmations",
+					respond.next_state_id
+				)));
+			}
+			debug!("New state: {:?}", respond.next_state_id);
 			swap.state = respond.next_state_id.clone();
+			if !tx_conf.supports_state(swap) {
+				// Recovery can leave the branch supported by this snapshot. Save
+				// that transition, then obtain the missing chain before processing it.
+				respond.action = None;
+				respond.time_limit = None;
+				break;
+			}
 			let state = self
 				.state_map
 				.get_mut(&swap.state)

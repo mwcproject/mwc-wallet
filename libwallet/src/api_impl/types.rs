@@ -15,21 +15,25 @@
 
 //! Types specific to the wallet api, mostly argument serialization
 
-use crate::mwc_core::core::Output;
-use crate::mwc_core::libtx::secp_ser;
-use crate::mwc_keychain::{BlindingFactor, Identifier};
-use crate::mwc_util::secp::pedersen;
 use crate::proof::proofaddress::ProvableAddress;
 use crate::slate_versions::SlateVersion;
 use crate::types::OutputData;
+use mwc_wallet_util::mwc_core::core::Output;
+use mwc_wallet_util::mwc_core::libtx::secp_ser;
+use mwc_wallet_util::mwc_crates::secp::pedersen;
+use mwc_wallet_util::mwc_crates::serde::{self, Deserialize, Serialize};
+use mwc_wallet_util::mwc_crates::zeroize::Zeroizing;
+use mwc_wallet_util::mwc_keychain::{BlindingFactor, Identifier};
 use std::collections::HashSet;
+use std::fmt;
 
-use chrono::prelude::*;
+use mwc_wallet_util::mwc_crates::chrono::prelude::*;
 
 /// Send TX API Args
 // TODO: This is here to ensure the legacy V1 API remains intact
 // remove this when v1 api is removed
 #[derive(Clone, Serialize, Deserialize)]
+#[serde(crate = "serde")]
 pub struct SendTXArgs {
 	/// amount to send
 	pub amount: u64,
@@ -54,10 +58,12 @@ pub struct SendTXArgs {
 /// Type for storing amounts (in nanomwcs).
 /// Serializes as a string but can deserialize from a string or u64.
 #[derive(Serialize, Deserialize)]
+#[serde(crate = "serde")]
 pub struct Amount(#[serde(with = "secp_ser::string_or_u64")] pub u64);
 
 /// V2 Init / Send TX API Args
 #[derive(Clone, Serialize, Deserialize, Debug)]
+#[serde(crate = "serde")]
 pub struct InitTxArgs {
 	/// The human readable account name from which to draw outputs
 	/// for the transaction, overriding whatever the active account is as set via the
@@ -81,11 +87,11 @@ pub struct InitTxArgs {
 	/// the whole amount, the wallet will include more outputs. This parameter should be considered
 	/// a soft limit.
 	#[serde(default = "InitTxArgs::default_max_outputs")]
-	pub max_outputs: u32,
+	pub max_outputs: usize,
 	/// The target number of change outputs to create in the transaction.
 	/// The actual number created will be `num_change_outputs` + whatever remainder is needed.
 	#[serde(default = "InitTxArgs::default_num_change_outputs")]
-	pub num_change_outputs: u32,
+	pub num_change_outputs: usize,
 	/// If `true`, attempt to use up as many outputs as
 	/// possible to create the transaction, up the 'soft limit' of `max_outputs`. This helps
 	/// to reduce the size of the UTXO set and the amount of data stored in the wallet, and
@@ -112,7 +118,8 @@ pub struct InitTxArgs {
 	#[serde(with = "secp_ser::opt_string_or_u64")]
 	#[serde(default)]
 	pub ttl_blocks: Option<u64>,
-	/// If set, require a payment proof for the particular recipient
+	/// If set, require a payment proof for the particular recipient.
+	/// Invoice processing rejects this option because invoice payment proofs are unsupported.
 	#[serde(serialize_with = "ProvableAddress::serialize_option_as_string")]
 	#[serde(default)]
 	pub payment_proof_recipient_address: Option<ProvableAddress>,
@@ -122,7 +129,8 @@ pub struct InitTxArgs {
 	/// If true, just return an estimate of the resulting slate, containing fees and amounts
 	/// locked without actually locking outputs or creating the transaction. Note if this is set to
 	/// 'true', the amount field in the slate will contain the total amount locked, not the provided
-	/// transaction amount
+	/// transaction amount. Invoice processing rejects `Some(true)`; use `init_send_tx`
+	/// with the invoice amount for estimates.
 	#[serde(default)]
 	pub estimate_only: Option<bool>,
 	/// If true, exclude change outputs from minimum_confirmation settings. Instead --min_conf_change_outputs
@@ -142,7 +150,7 @@ pub struct InitTxArgs {
 	/// Selected outputs. If none, will use all outputs
 	pub outputs: Option<HashSet<String>>, // outputs to include into the transaction
 	/// Slatepack recipient. If defined will send as a slatepack. Otherwise as not encrypted. Will be ignored for MQS
-	/// ProvableAddress has to be tor (DalekPublicKey) address
+	/// ProvableAddress has to be tor (ed25519_dalek::PublicKey) address
 	#[serde(serialize_with = "ProvableAddress::serialize_option_as_string")]
 	pub slatepack_recipient: Option<ProvableAddress>,
 	/// if flagged, create the transaction as late-locked, i.e. don't select actual
@@ -154,24 +162,92 @@ pub struct InitTxArgs {
 	pub min_fee: Option<u64>,
 }
 
+/// The transaction-construction preferences that must survive between a
+/// late-lock send and its eventual finalization.
+///
+/// This is intentionally a projection of [`InitTxArgs`], rather than a copy of
+/// the complete API request. Transport-only data such as `send_args` can
+/// contain receiver credentials and must never become part of a durable private
+/// transaction context.
+#[derive(Clone, Serialize, Deserialize, Debug)]
+#[serde(crate = "serde")]
+pub struct LateLockArgs {
+	/// Minimum confirmations required for selected inputs.
+	#[serde(with = "secp_ser::string_or_u64")]
+	#[serde(default = "InitTxArgs::default_minimum_confirmations")]
+	pub minimum_confirmations: u64,
+	/// Soft limit for the number of selected outputs.
+	#[serde(default = "InitTxArgs::default_max_outputs")]
+	pub max_outputs: usize,
+	/// Target number of change outputs.
+	#[serde(default = "InitTxArgs::default_num_change_outputs")]
+	pub num_change_outputs: usize,
+	/// Whether selection should consume as many eligible outputs as possible.
+	#[serde(default = "InitTxArgs::default_selection_strategy_is_use_all")]
+	pub selection_strategy_is_use_all: bool,
+	/// Participant message retained for transaction construction.
+	#[serde(default)]
+	pub message: Option<String>,
+	/// Number of blocks after which the transaction expires.
+	#[serde(with = "secp_ser::opt_string_or_u64")]
+	#[serde(default)]
+	pub ttl_blocks: Option<u64>,
+	/// Counterparty address recorded in the transaction log.
+	#[serde(default)]
+	pub address: Option<String>,
+	/// Whether change outputs use their own confirmation threshold.
+	#[serde(default)]
+	pub exclude_change_outputs: Option<bool>,
+	/// Confirmation threshold for change outputs.
+	#[serde(default = "InitTxArgs::default_change_output_minimum_confirmations")]
+	pub minimum_confirmations_change_outputs: u64,
+	/// Explicit output identifiers to select, when supplied.
+	#[serde(default)]
+	pub outputs: Option<HashSet<String>>,
+	/// Optional fee floor selected by the caller.
+	#[serde(default)]
+	pub min_fee: Option<u64>,
+}
+
+impl From<&InitTxArgs> for LateLockArgs {
+	fn from(args: &InitTxArgs) -> Self {
+		Self {
+			minimum_confirmations: args.minimum_confirmations,
+			max_outputs: args.max_outputs,
+			num_change_outputs: args.num_change_outputs,
+			selection_strategy_is_use_all: args.selection_strategy_is_use_all,
+			message: args.message.clone(),
+			ttl_blocks: args.ttl_blocks,
+			address: args.address.clone(),
+			exclude_change_outputs: args.exclude_change_outputs,
+			minimum_confirmations_change_outputs: args.minimum_confirmations_change_outputs,
+			outputs: args.outputs.clone(),
+			min_fee: args.min_fee,
+		}
+	}
+}
+
 /// Send TX API Args, for convenience functionality that inits the transaction and sends
 /// in one go
 #[derive(Clone, Serialize, Deserialize, Debug)]
+#[serde(crate = "serde")]
 pub struct InitTxSendArgs {
 	/// The transaction method. Can currently be 'http' .
 	pub method: String,
 	/// The destination, contents will depend on the particular method
 	pub dest: String,
-	/// receiver wallet apisecret. Applicable to http/https address only
+	/// receiver wallet apisecret. Applicable to http/https address only.
+	/// Zeroized on drop.
 	#[serde(default)]
-	pub apisecret: Option<String>,
+	pub apisecret: Option<Zeroizing<String>>,
 	/// Whether to finalize the result immediately if the send was successful
 	#[serde(default = "InitTxSendArgs::default_finalize")]
 	pub finalize: bool,
 	/// Whether to post the transasction if the send and finalize were successful
 	#[serde(default = "InitTxSendArgs::default_post_tx")]
 	pub post_tx: bool,
-	/// Whether to use dandelion when posting. If false, skip the dandelion relay
+	/// Whether to bypass Dandelion and broadcast the transaction in the fluff phase.
+	/// If false, submit the transaction through the Dandelion stem phase.
 	#[serde(default = "InitTxSendArgs::default_fluff")]
 	pub fluff: bool,
 }
@@ -204,16 +280,24 @@ impl Default for InitTxArgs {
 }
 
 impl InitTxArgs {
+	/// A recipient explicitly requests SP, except over MQS, which exchanges
+	/// JSON. Version 4 alone selects compact construction and can still be used
+	/// as V3 JSON; defer its size check until an SP encoder is actually selected.
+	pub(crate) fn slatepack_requested(&self) -> bool {
+		self.send_args.as_ref().map(|args| args.method.as_str()) != Some("mwcmqs")
+			&& self.slatepack_recipient.is_some()
+	}
+
 	fn default_change_output_minimum_confirmations() -> u64 {
 		1
 	}
 	fn default_minimum_confirmations() -> u64 {
 		10
 	}
-	fn default_max_outputs() -> u32 {
+	fn default_max_outputs() -> usize {
 		500
 	}
-	fn default_num_change_outputs() -> u32 {
+	fn default_num_change_outputs() -> usize {
 		1
 	}
 	fn default_selection_strategy_is_use_all() -> bool {
@@ -229,12 +313,16 @@ impl InitTxSendArgs {
 		true
 	}
 	fn default_fluff() -> bool {
+		// Preserve the legacy API behavior for requests that omit `fluff`. Although
+		// `true` bypasses the Dandelion stem phase, changing this default would alter
+		// transaction propagation for existing clients.
 		true
 	}
 }
 
 /// V2 Issue Invoice Tx Args
 #[derive(Clone, Serialize, Deserialize)]
+#[serde(crate = "serde")]
 pub struct IssueInvoiceTxArgs {
 	/// The human readable account name to which the received funds should be added
 	/// overriding whatever the active account is as set via the
@@ -256,7 +344,7 @@ pub struct IssueInvoiceTxArgs {
 	#[serde(default)]
 	pub address: Option<String>,
 	/// Slatepack recipient. If defined will send as a slatepack. Otherwise as not encrypted. Will be ignored for MQS
-	/// ProvableAddress has to be tor (DalekPublicKey) address
+	/// ProvableAddress has to be tor (ed25519_dalek::PublicKey) address
 	#[serde(default)]
 	pub slatepack_recipient: Option<ProvableAddress>,
 }
@@ -274,26 +362,42 @@ impl Default for IssueInvoiceTxArgs {
 	}
 }
 
-/// Reply mitigation configuration, put it here because it is used in the impl layer.
+/// Replay-attack mitigation configuration.
+///
+/// # Node trust model
+///
+/// Height-based detection compares the build height authenticated inside an
+/// owned output's rangeproof with the inclusion height reported by the
+/// configured node. The inclusion height is not authenticated by the
+/// rangeproof. By design, the wallet treats its node as the authoritative chain
+/// source and may automatically sign and broadcast a fee-bearing defensive
+/// self-spend based on that comparison. Users should therefore connect the
+/// wallet to their own trusted private node; an untrusted node is outside this
+/// mitigation's threat model and can provoke unnecessary self-spends.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(crate = "serde")]
 pub struct ReplayMitigationConfig {
-	/// turn it on or off
+	/// Enable automatic defensive self-spends for detected replay candidates.
 	pub replay_mitigation_flag: bool,
-	///minimum amount to do self-spend
+	/// Minimum output amount eligible for an automatic defensive self-spend.
 	pub replay_mitigation_min_amount: u64,
 }
 
 impl Default for ReplayMitigationConfig {
 	fn default() -> ReplayMitigationConfig {
 		ReplayMitigationConfig {
-			replay_mitigation_flag: false,
-			replay_mitigation_min_amount: 50000000000,
+			// Enabled by default under the trusted-private-node model documented
+			// above. Only outputs above 1 MWC are consolidated, so dust replays
+			// cannot force fee-burning transactions.
+			replay_mitigation_flag: true,
+			replay_mitigation_min_amount: 1_000_000_000,
 		}
 	}
 }
 
 /// Sort tx retrieval order
 #[derive(Clone, Serialize, Deserialize)]
+#[serde(crate = "serde")]
 pub enum RetrieveTxQuerySortOrder {
 	/// Ascending
 	Asc,
@@ -303,6 +407,7 @@ pub enum RetrieveTxQuerySortOrder {
 
 /// Valid sort fields for a transaction list retrieval query
 #[derive(Clone, Serialize, Deserialize)]
+#[serde(crate = "serde")]
 pub enum RetrieveTxQuerySortField {
 	/// Transaction Id
 	Id,
@@ -320,6 +425,7 @@ pub enum RetrieveTxQuerySortField {
 
 /// Retrieve Transaction List Pagination Arguments
 #[derive(Clone, Serialize, Deserialize)]
+#[serde(crate = "serde")]
 pub struct RetrieveTxQueryArgs {
 	/// Retrieve transactions with an id higher than or equal to the given
 	/// If None, consider items from the first transaction and later
@@ -393,8 +499,9 @@ impl Default for RetrieveTxQueryArgs {
 	}
 }
 
-/// Fees in block to use for coinbase amount calculation
+/// Coinbase request containing the candidate reward parameters and binding digest.
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(crate = "serde", deny_unknown_fields)]
 pub struct BlockFees {
 	/// fees
 	#[serde(with = "secp_ser::string_or_u64")]
@@ -402,8 +509,12 @@ pub struct BlockFees {
 	/// height
 	#[serde(with = "secp_ser::string_or_u64")]
 	pub height: u64,
-	/// key id
+	/// Optional coinbase key reuse request. The wallet may replace an ineligible
+	/// requested key with the next available key in its response.
 	pub key_id: Option<Identifier>,
+	/// Consensus digest of the candidate's complete input binding context,
+	/// encoded as a hexadecimal hash like other node/wallet RPC hash fields.
+	pub binding_digest: String,
 }
 
 impl BlockFees {
@@ -415,6 +526,7 @@ impl BlockFees {
 
 /// Map Outputdata to commits
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(crate = "serde")]
 pub struct OutputCommitMapping {
 	/// Output Data
 	pub output: OutputData,
@@ -428,6 +540,7 @@ pub struct OutputCommitMapping {
 
 /// Node height result
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(crate = "serde")]
 pub struct NodeHeightResult {
 	/// Last known height
 	#[serde(with = "secp_ser::string_or_u64")]
@@ -440,6 +553,7 @@ pub struct NodeHeightResult {
 
 /// Version request result
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(crate = "serde")]
 pub struct VersionInfo {
 	/// API version
 	pub foreign_api_version: u16,
@@ -447,31 +561,9 @@ pub struct VersionInfo {
 	pub supported_slate_versions: Vec<SlateVersion>,
 }
 
-/// Packaged Payment Proof
-#[cfg(feature = "grin_proof")]
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct PaymentProof {
-	/// Amount
-	#[serde(with = "secp_ser::string_or_u64")]
-	pub amount: u64,
-	/// Kernel Excess
-	#[serde(
-		serialize_with = "secp_ser::as_hex",
-		deserialize_with = "secp_ser::commitment_from_hex"
-	)]
-	pub excess: pedersen::Commitment,
-	/// Recipient Wallet Address
-	pub recipient_address: ProvableAddress,
-	/// Recipient Signature
-	pub recipient_sig: String,
-	/// Sender Wallet Address
-	pub sender_address: ProvableAddress,
-	/// Sender Signature
-	pub sender_sig: String,
-}
-
 /// Ownership proof for addresses & root public keys
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(crate = "serde")]
 pub struct PubKeySignature {
 	/// Public key
 	pub public_key: String,
@@ -481,13 +573,16 @@ pub struct PubKeySignature {
 
 /// Ownership proof for addresses & root public keys
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(crate = "serde")]
 pub struct OwnershipProof {
 	/// Name of the network
 	pub network: String,
 	/// Message to sign
 	pub message: String,
 
-	/// Proof for the root public key (viewing key)
+	/// Proof for the root public key. Validation can derive a rewind-only viewing
+	/// credential from it, but that credential does not prove spend ownership of
+	/// outputs returned by a rewind scan.
 	pub wallet_root: Option<PubKeySignature>,
 	/// Proof for the tor address
 	pub tor_address: Option<PubKeySignature>,
@@ -497,13 +592,15 @@ pub struct OwnershipProof {
 
 /// Ownership validation results
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(crate = "serde")]
 pub struct OwnershipProofValidation {
 	/// Network name
 	pub network: String,
 	/// Message that was signed
 	pub message: String,
 
-	/// Viewing key
+	/// Rewind hash derived from the authenticated wallet-root public key. Scan
+	/// matches made with it are view-only and are not proof of spend ownership.
 	pub viewing_key: Option<String>,
 	/// Tor address
 	pub tor_address: Option<String>,
@@ -524,8 +621,53 @@ impl OwnershipProofValidation {
 	}
 }
 
+/// Canonical integer fee units stored in new swap records.
+///
+/// The tagged representation makes the unit part of the persisted value and
+/// prevents a rate from being accidentally interpreted as a flat fee or gwei.
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[serde(crate = "serde", rename_all = "snake_case")]
+pub enum SecondaryFeeUnits {
+	/// Satoshis/litoshis/duffs per 1,000 virtual bytes. This is the exact
+	/// integer representation of the user-facing per-vbyte rate with up to
+	/// three decimal places: 1.4 atomic units/vB is stored as 1,400 here.
+	RatePerKvb(u64),
+	/// Flat fee in the currency's smallest atomic unit.
+	FlatAtomic(u64),
+	/// Ethereum-family gas budget in whole gwei.
+	EthereumGwei(u64),
+}
+
+fn display_scaled(f: &mut fmt::Formatter<'_>, value: u64, decimal_places: u32) -> fmt::Result {
+	if decimal_places == 0 {
+		return write!(f, "{}", value);
+	}
+	let scale = 10_u64.pow(decimal_places);
+	let characteristic = value / scale;
+	let mantissa = value % scale;
+	if mantissa == 0 {
+		return write!(f, "{}", characteristic);
+	}
+	let mut mantissa = format!("{:0width$}", mantissa, width = decimal_places as usize);
+	while mantissa.ends_with('0') {
+		mantissa.pop();
+	}
+	write!(f, "{}.{}", characteristic, mantissa)
+}
+
+impl fmt::Display for SecondaryFeeUnits {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		match self {
+			Self::RatePerKvb(value) => display_scaled(f, *value, 3),
+			Self::FlatAtomic(value) => display_scaled(f, *value, 8),
+			Self::EthereumGwei(value) => write!(f, "{}", value),
+		}
+	}
+}
+
 /// Init swap operation
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(crate = "serde")]
 pub struct SwapStartArgs {
 	/// MWC to send
 	pub mwc_amount: u64,
@@ -537,8 +679,10 @@ pub struct SwapStartArgs {
 	pub secondary_amount: String,
 	/// Secondary currency redeem address
 	pub secondary_redeem_address: String,
-	/// Tx fee for the secondary currency
-	pub secondary_fee: Option<f32>,
+	/// Transaction fee as an exact decimal string in the currency-specific
+	/// human-readable unit. JSON callers must quote this value. It is converted
+	/// to checked integer units before a swap is created.
+	pub secondary_fee: Option<String>,
 	/// Locking order (True, seller does locking first)
 	pub seller_lock_first: bool,
 	/// Minimum confirmation number for the inputs to spend
@@ -573,12 +717,26 @@ pub struct SwapStartArgs {
 	pub tag: Option<String>,
 }
 
+/// Serialize a blinding factor without leaving its temporary hex form in memory.
+fn serialize_blinding_factor<S>(blind: &BlindingFactor, serializer: S) -> Result<S::Ok, S::Error>
+where
+	S: serde::Serializer,
+{
+	use mwc_wallet_util::mwc_util::ToHex;
+
+	// The JSON response intentionally contains the blind, but its temporary hex
+	// allocation must not remain in process memory after serialization.
+	let blind_hex = Zeroizing::new(blind.as_ref().to_hex());
+	serializer.serialize_str(&blind_hex)
+}
+
 /// Build output result
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(crate = "serde")]
 pub struct BuiltOutput {
 	/// Blinding Factor
 	#[serde(
-		serialize_with = "secp_ser::as_hex",
+		serialize_with = "serialize_blinding_factor",
 		deserialize_with = "secp_ser::blind_from_hex"
 	)]
 	pub blind: BlindingFactor,
@@ -586,4 +744,44 @@ pub struct BuiltOutput {
 	pub key_id: Identifier,
 	/// Output
 	pub output: Output,
+}
+
+#[cfg(test)]
+mod built_output_tests {
+	use super::*;
+	use mwc_wallet_util::mwc_crates::serde_json;
+
+	#[test]
+	fn blinding_factor_serializer_preserves_hex_wire_format() {
+		let blind = BlindingFactor::from_slice(&[0xabu8; 32]).unwrap();
+		let mut serialized = Vec::new();
+		let mut serializer = serde_json::Serializer::new(&mut serialized);
+
+		serialize_blinding_factor(&blind, &mut serializer).unwrap();
+
+		assert_eq!(serialized, format!("\"{}\"", "ab".repeat(32)).into_bytes());
+	}
+}
+
+#[cfg(test)]
+mod secondary_fee_tests {
+	use super::*;
+	use mwc_wallet_util::mwc_crates::serde_json;
+
+	#[test]
+	fn secondary_fee_json_input_must_be_a_string() {
+		assert_eq!(serde_json::from_str::<String>(r#""1.400""#).unwrap(), "1.400");
+		assert!(serde_json::from_str::<String>("1.4").is_err());
+	}
+
+	#[test]
+	fn persisted_fee_units_include_their_unit() {
+		let fee = SecondaryFeeUnits::RatePerKvb(1_400);
+		assert_eq!(
+			serde_json::to_string(&fee).unwrap(),
+			r#"{"rate_per_kvb":1400}"#
+		);
+		assert_eq!(fee.to_string(), "1.4");
+		assert_eq!(SecondaryFeeUnits::FlatAtomic(10_000).to_string(), "0.0001");
+	}
 }

@@ -14,27 +14,34 @@
 // limitations under the License.
 
 use crate::cmd::wallet_args;
-use crate::util::secp::key::SecretKey;
-use clap::{App, AppSettings};
-use std::sync::Mutex;
-//use colored::Colorize;
+use mwc_wallet_util::Mutex;
+use mwc_wallet_util::mwc_crates::clap::{App, AppSettings, YamlLoader};
+use mwc_wallet_util::mwc_crates::lazy_static::lazy_static;
+use mwc_wallet_util::mwc_crates::secp::key::SecretKey;
+use mwc_wallet_util::mwc_crates::secp::{ContextFlag, Secp256k1};
+use mwc_wallet_util::mwc_crates::shlex;
+//use mwc_wallet_util::mwc_crates::colored::Colorize;
 use mwc_wallet_api::Owner;
 use mwc_wallet_config::{MQSConfig, WalletConfig};
-use mwc_wallet_controller::command::GlobalArgs;
 use mwc_wallet_controller::Error;
+use mwc_wallet_controller::command::GlobalArgs;
 use mwc_wallet_impls::DefaultWalletImpl;
 use mwc_wallet_libwallet::{NodeClient, WalletInst, WalletLCProvider};
-use mwc_wallet_util::mwc_keychain as keychain;
+use mwc_wallet_util::mwc_crates::rustyline::completion::{Completer, FilenameCompleter, Pair};
+use mwc_wallet_util::mwc_crates::rustyline::error::ReadlineError;
+use mwc_wallet_util::mwc_crates::rustyline::highlight::{
+	CmdKind, Highlighter, MatchingBracketHighlighter,
+};
+use mwc_wallet_util::mwc_crates::rustyline::hint::Hinter;
+use mwc_wallet_util::mwc_crates::rustyline::history::DefaultHistory;
+use mwc_wallet_util::mwc_crates::rustyline::validate::Validator;
+use mwc_wallet_util::mwc_crates::rustyline::{
+	CompletionType, Config, Context, EditMode, Editor, Helper,
+};
+use mwc_wallet_util::mwc_keychain::Keychain;
 use mwc_wallet_util::mwc_p2p::TorConfig;
-use rustyline::completion::{Completer, FilenameCompleter, Pair};
-use rustyline::error::ReadlineError;
-use rustyline::highlight::{Highlighter, MatchingBracketHighlighter};
-use rustyline::hint::Hinter;
-use rustyline::validate::Validator;
-use rustyline::{CompletionType, Config, Context, EditMode, Editor, Helper, OutputStreamType};
 use std::borrow::Cow::{self, Borrowed, Owned};
 use std::sync::Arc;
-use std::time::Duration;
 
 const COLORED_PROMPT: &'static str = "\x1b[36mmwc-wallet>\x1b[0m ";
 const PROMPT: &'static str = "mwc-wallet> ";
@@ -58,7 +65,13 @@ macro_rules! cli_message_inline {
 							print!(" {}", COLORED_PROMPT);
 							print!("\x1B[J");
 							print!("{}", *contents);
-							let _ = std::io::stdout().flush();
+							if let Err(e) = std::io::stdout().flush() {
+								let _ = writeln!(
+									std::io::stdout(),
+									"Unable to flush command output: {}",
+									e
+								);
+							}
 					/*} else {
 							info!($fmt_string, $( $arg ),*);
 					}*/
@@ -76,7 +89,13 @@ macro_rules! cli_message {
 							//print!("\r");
 							print!($fmt_string, $( $arg ),*);
 							println!();
-							let _ = std::io::stdout().flush();
+							if let Err(e) = std::io::stdout().flush() {
+								let _ = writeln!(
+									std::io::stdout(),
+									"Unable to flush command output: {}",
+									e
+								);
+							}
 					/*} else {
 							info!($fmt_string, $( $arg ),*);
 					}*/
@@ -92,22 +111,22 @@ pub fn command_loop<L, C, K>(
 	tor_config: &TorConfig,
 	mqs_config: &MQSConfig,
 	global_wallet_args: &mut GlobalArgs,
-	test_mode: bool,
+	#[cfg(feature = "test-support")] test_mode: bool,
 ) -> Result<(), Error>
 where
 	DefaultWalletImpl<'static, C>: WalletInst<'static, L, C, K>,
 	L: WalletLCProvider<'static, C, K> + 'static,
 	C: NodeClient + 'static,
-	K: keychain::Keychain + 'static,
+	K: Keychain + 'static,
 {
 	let editor = Config::builder()
 		.history_ignore_space(true)
 		.completion_type(CompletionType::List)
 		.edit_mode(EditMode::Emacs)
-		.output_stream(OutputStreamType::Stdout)
 		.build();
 
-	let mut reader = Editor::with_config(editor);
+	let mut reader = Editor::<EditorHelper, DefaultHistory>::with_config(editor)
+		.map_err(|e| Error::IO(format!("Unable to initialize CLI editor, {}", e)))?;
 	reader.set_helper(Some(EditorHelper(
 		FilenameCompleter::new(),
 		MatchingBracketHighlighter::new(),
@@ -125,18 +144,21 @@ where
 		let _ = reader.load_history(&history_file);
 	}*/
 
-	let yml = load_yaml!("../bin/mwc-wallet.yml");
-	let mut app = App::from_yaml(yml)
-		.version(crate_version!())
+	let yml = YamlLoader::load_from_str(include_str!("../bin/mwc-wallet.yml"))
+		.map_err(|e| Error::GenericError(format!("Unable to parse embedded CLI schema: {e}")))?;
+	let schema = yml.first().ok_or_else(|| {
+		Error::GenericError("Embedded CLI schema contains no document".to_owned())
+	})?;
+	let mut app = App::from_yaml(schema)
+		.version(env!("CARGO_PKG_VERSION"))
 		.setting(AppSettings::VersionlessSubcommands);
 	let mut keychain_mask = keychain_mask;
 
-	// catch updater messages
-	// mwc updater thread is better, it will be created for None
-	let mut owner_api = Owner::new(context_id, wallet_inst, None, None);
+	// No Tor configuration is supplied here; the embedded CLI runs
+	// without Tor.
+	let mut owner_api = Owner::new(context_id, wallet_inst, None)?;
+	let secp = Secp256k1::with_caps(ContextFlag::Commit)?;
 
-	// start the automatic updater
-	owner_api.start_updater((&keychain_mask).as_ref(), Duration::from_secs(60))?;
 	let mut wallet_opened = false;
 	loop {
 		match reader.readline(PROMPT) {
@@ -152,7 +174,7 @@ where
 
 				// reset buffer
 				{
-					let mut contents = STDIN_CONTENTS.lock().unwrap_or_else(|e| e.into_inner());
+					let mut contents = STDIN_CONTENTS.lock();
 					*contents = String::from("");
 				}
 
@@ -170,19 +192,18 @@ where
 						// handle opening /closing separately
 						keychain_mask = match args.subcommand() {
 							("open", Some(args)) => {
-								let mut wallet_lock = owner_api
-									.wallet_inst
-									.lock()
-									.unwrap_or_else(|e| e.into_inner());
+								let mut wallet_lock = owner_api.wallet_inst.lock();
 								let lc = wallet_lock.lc_provider()?;
 
 								let mask = match lc.open_wallet(
+									&secp,
 									None,
 									wallet_args::prompt_password(&global_wallet_args.password)
 										.map_err(|e| {
 											Error::IO(format!("Password prompt error, {}", e))
 										})?,
 									false,
+									#[cfg(feature = "test-support")]
 									false,
 									None,
 								) {
@@ -225,10 +246,7 @@ where
 								mask
 							}
 							("close", Some(_)) => {
-								let mut wallet_lock = owner_api
-									.wallet_inst
-									.lock()
-									.unwrap_or_else(|e| e.into_inner());
+								let mut wallet_lock = owner_api.wallet_inst.lock();
 								let lc = wallet_lock.lc_provider()?;
 								lc.close_wallet(None)?;
 								None
@@ -243,6 +261,7 @@ where
 							&mqs_config,
 							&global_wallet_args,
 							&args,
+							#[cfg(feature = "test-support")]
 							test_mode,
 							true,
 						) {
@@ -261,7 +280,9 @@ where
 						false
 					}
 				};
-				reader.add_history_entry(command);
+				if let Err(e) = reader.add_history_entry(command) {
+					cli_message!("Unable to add command to history: {}", e);
+				}
 				if done {
 					println!();
 					break;
@@ -294,8 +315,10 @@ impl Completer for EditorHelper {
 }
 
 impl Hinter for EditorHelper {
+	type Hint = String;
+
 	fn hint(&self, line: &str, _pos: usize, _ctx: &Context<'_>) -> Option<String> {
-		let mut contents = STDIN_CONTENTS.lock().unwrap_or_else(|e| e.into_inner());
+		let mut contents = STDIN_CONTENTS.lock();
 		*contents = line.into();
 		None
 	}
@@ -322,8 +345,8 @@ impl Highlighter for EditorHelper {
 		Owned("\x1b[1m".to_owned() + hint + "\x1b[m")
 	}
 
-	fn highlight_char(&self, line: &str, pos: usize) -> bool {
-		self.1.highlight_char(line, pos)
+	fn highlight_char(&self, line: &str, pos: usize, kind: CmdKind) -> bool {
+		self.1.highlight_char(line, pos, kind)
 	}
 }
 impl Validator for EditorHelper {}

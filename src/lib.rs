@@ -12,17 +12,5 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#[macro_use]
-extern crate lazy_static;
-#[macro_use]
-extern crate clap;
-
-//#[macro_use]
-//extern crate log;
-
-use mwc_wallet_config as config;
-use mwc_wallet_util::mwc_api as api;
-use mwc_wallet_util::mwc_util as util;
-
 mod cli;
 pub mod cmd;

@@ -16,7 +16,10 @@
 
 //! JSON RPC Types for V2 node client
 
+use mwc_wallet_util::mwc_crates::serde::{self, Deserialize};
+
 #[derive(Debug, Deserialize)]
+#[serde(crate = "serde")]
 pub struct GetTipResp {
 	pub height: u64,
 	pub last_block_pushed: String,
@@ -26,6 +29,7 @@ pub struct GetTipResp {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(crate = "serde")]
 pub struct GetVersionResp {
 	pub node_version: String,
 	pub block_header_version: u16,

@@ -13,20 +13,22 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::api::TLSConfig;
 use crate::cli::command_loop;
-use crate::config::MWC_WALLET_DIR;
-use crate::util::file::get_first_line;
-use crate::util::secp::key::SecretKey;
-use crate::util::ZeroingString;
-use std::sync::Mutex;
+use mwc_wallet_config::MWC_WALLET_DIR;
+use mwc_wallet_util::mwc_api::TLSConfig;
+use mwc_wallet_util::mwc_core;
+use mwc_wallet_util::mwc_crates::ed25519_dalek;
+use mwc_wallet_util::mwc_crates::rpassword;
+use mwc_wallet_util::mwc_crates::secp::key::SecretKey;
+use mwc_wallet_util::mwc_crates::secp::{ContextFlag, Secp256k1};
+use mwc_wallet_util::mwc_crates::zeroize::Zeroizing;
+use mwc_wallet_util::mwc_keychain;
+use mwc_wallet_util::mwc_util::file::get_owner_only_first_line_zeroizing;
+use mwc_wallet_util::mwc_util::init_global_runtime;
+use mwc_wallet_util::mwc_util::ZeroingString;
+use mwc_wallet_util::Mutex;
 
 use crate::cmd::wallet::MIN_COMPAT_NODE_VERSION;
-/// Argument parsing and error handling for wallet commands
-use clap::ArgMatches;
-use ed25519_dalek::SecretKey as DalekSecretKey;
-use linefeed::terminal::Signal;
-use linefeed::{Interface, ReadResult};
 use mwc_wallet_api::Owner;
 use mwc_wallet_config::{MQSConfig, WalletConfig};
 use mwc_wallet_controller::controller::stop_foreign_api_running;
@@ -46,21 +48,21 @@ use mwc_wallet_libwallet::{
 };
 use mwc_wallet_libwallet::{Slate, SlatePurpose};
 use mwc_wallet_util::mwc_core::core::amount_to_hr_string;
-use mwc_wallet_util::mwc_keychain as keychain;
-use mwc_wallet_util::mwc_p2p::TorConfig;
-use mwc_wallet_util::mwc_util::secp::Secp256k1;
-use mwc_wallet_util::{mwc_core as core, OnionV3Address};
-use rpassword;
-use semver::Version;
-use std::collections::HashSet;
+/// Argument parsing and error handling for wallet commands
+use mwc_wallet_util::mwc_crates::clap::ArgMatches;
+use mwc_wallet_util::mwc_crates::linefeed::terminal::Signal;
+use mwc_wallet_util::mwc_crates::linefeed::{Interface, ReadResult};
+use mwc_wallet_util::mwc_crates::semver::Version;
 #[cfg(feature = "swaps")]
+use mwc_wallet_util::mwc_crates::uuid::Uuid;
+use mwc_wallet_util::mwc_p2p::TorConfig;
+use mwc_wallet_util::mwc_util::OnionV3Address;
+use std::collections::HashSet;
 use std::convert::TryFrom;
 use std::fmt::Display;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::Arc;
-#[cfg(feature = "swaps")]
-use uuid::Uuid;
 
 // define what to do on argument error
 macro_rules! arg_parse {
@@ -75,9 +77,11 @@ macro_rules! arg_parse {
 }
 /// Simple error definition, just so we can return errors from all commands
 /// and let the caller figure out what to do
-#[derive(Clone, Eq, PartialEq, Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error)]
 
 pub enum ParseError {
+	#[error("Wallet argument data overflow error: {0}")]
+	DataOverflow(String),
 	#[error("Invalid Arguments: {0}")]
 	ArgumentError(String),
 	#[error("Parsing IO error: {0}")]
@@ -97,9 +101,7 @@ impl From<std::io::Error> for ParseError {
 }
 
 fn prompt_password_stdout(prompt: &str) -> Result<ZeroingString, ParseError> {
-	Ok(ZeroingString::from(rpassword::prompt_password_stdout(
-		prompt,
-	)?))
+	Ok(ZeroingString::from(rpassword::prompt_password(prompt)?))
 }
 
 pub fn prompt_password(password: &Option<ZeroingString>) -> Result<ZeroingString, ParseError> {
@@ -126,7 +128,7 @@ where
 	DefaultWalletImpl<'static, C>: WalletInst<'static, L, C, K>,
 	L: WalletLCProvider<'static, C, K>,
 	C: NodeClient + 'static,
-	K: keychain::Keychain + 'static,
+	K: mwc_keychain::Keychain + 'static,
 {
 	let interface = Arc::new(Interface::new("recover")?);
 	let mut phrase = ZeroingString::from("");
@@ -144,7 +146,7 @@ where
 				}
 			}
 			ReadResult::Input(line) => {
-				let mut w_lock = wallet.lock().unwrap_or_else(|e| e.into_inner());
+				let mut w_lock = wallet.lock();
 				let p = w_lock.lc_provider()?;
 				if p.validate_mnemonic(ZeroingString::from(line.clone()))
 					.is_ok()
@@ -202,8 +204,7 @@ fn prompt_pay_invoice(slate: &Slate, method: &str, dest: &str) -> Result<bool, P
 					return Err(ParseError::CancelledError);
 				}
 			}
-			ReadResult::Input(line) => {
-				match line.trim() {
+			ReadResult::Input(line) => match line.trim() {
 					"Q" | "q" => return Err(ParseError::CancelledError),
 					result => {
 						if result == amount {
@@ -213,8 +214,7 @@ fn prompt_pay_invoice(slate: &Slate, method: &str, dest: &str) -> Result<bool, P
 							println!();
 						}
 					}
-				}
-			}
+			},
 		}
 	}
 }
@@ -230,14 +230,14 @@ where
 	DefaultWalletImpl<'static, C>: WalletInst<'static, L, C, K>,
 	L: WalletLCProvider<'static, C, K>,
 	C: NodeClient + 'static,
-	K: keychain::Keychain + 'static,
+	K: mwc_keychain::Keychain + 'static,
 {
 	let mut wallet = Box::new(DefaultWalletImpl::<'static, C>::new(
 		context_id,
 		node_client.clone(),
 	)) as Box<dyn WalletInst<'static, L, C, K>>;
 	let lc = wallet.lc_provider()?;
-	let _ = lc.set_top_level_directory(&config.data_file_dir);
+	lc.set_top_level_directory(&config.data_file_dir)?;
 	Ok(Arc::new(Mutex::new(wallet)))
 }
 
@@ -284,19 +284,22 @@ where
 	}
 }
 
-// As above, but optional
-fn parse_number_or_none<T>(arg: Option<&str>) -> Option<T>
+// As above, but optional. A supplied value must still parse successfully.
+fn parse_number_or_none<T>(arg: Option<&str>, name: &str) -> Result<Option<T>, ParseError>
 where
 	T: FromStr,
+	T::Err: Display,
 {
-	let val = match arg {
-		Some(a) => a.parse::<T>(),
-		None => return None,
-	};
-	match val {
-		Ok(v) => Some(v),
-		Err(_) => None,
+	match arg {
+		Some(value) => parse_number(value, name).map(Some),
+		None => Ok(None),
 	}
+}
+
+fn read_optional_secret_line(
+	path: Option<String>,
+) -> Result<Option<Zeroizing<String>>, ParseError> {
+	get_owner_only_first_line_zeroizing(path).map_err(ParseError::from)
 }
 
 pub fn parse_global_args(
@@ -304,8 +307,8 @@ pub fn parse_global_args(
 	args: &ArgMatches,
 ) -> Result<command::GlobalArgs, ParseError> {
 	let account = args.value_of("account").map(|s| s.to_string());
-	let api_secret = get_first_line(config.api_secret_path.clone());
-	let node_api_secret = get_first_line(config.node_api_secret_path.clone());
+	let api_secret = read_optional_secret_line(config.api_secret_path.clone())?;
+	let node_api_secret = read_optional_secret_line(config.node_api_secret_path.clone())?;
 	let password = match args.value_of("pass") {
 		None => None,
 		Some(p) => Some(ZeroingString::from(p)),
@@ -339,13 +342,13 @@ pub fn parse_init_args<L, C, K>(
 	config: &WalletConfig,
 	g_args: &command::GlobalArgs,
 	args: &ArgMatches,
-	test_mode: bool,
+	#[cfg(feature = "test-support")] test_mode: bool,
 ) -> Result<command::InitArgs, ParseError>
 where
 	DefaultWalletImpl<'static, C>: WalletInst<'static, L, C, K>,
 	L: WalletLCProvider<'static, C, K>,
 	C: NodeClient + 'static,
-	K: keychain::Keychain + 'static,
+	K: mwc_keychain::Keychain + 'static,
 {
 	// Checking is wallet data
 	let mut wallet_data_path = PathBuf::from(&config.data_file_dir);
@@ -355,7 +358,11 @@ where
 			.clone()
 			.unwrap_or(MWC_WALLET_DIR.to_string()),
 	);
-	if wallet_data_path.exists() && !test_mode {
+	#[cfg(feature = "test-support")]
+	let reject_existing_wallet = !test_mode;
+	#[cfg(not(feature = "test-support"))]
+	let reject_existing_wallet = true;
+	if wallet_data_path.exists() && reject_existing_wallet {
 		return Err(ParseError::WalletExists(
 			wallet_data_path.to_str().unwrap_or("unknown").to_string(),
 		));
@@ -414,11 +421,6 @@ pub fn parse_listen_args(
 			config.api_listen_interface = Some("127.0.0.1".to_string());
 		}
 	}
-	if let Some(port) = args.value_of("libp2p_port") {
-		config.libp2p_listen_port = Some(port.parse().map_err(|_| {
-			ParseError::ArgumentError(format!("libp2p_port, unable to parse value {}", port))
-		})?);
-	}
 
 	let method = parse_required(args, "method")?;
 	if args.is_present("no_tor") {
@@ -429,7 +431,7 @@ pub fn parse_listen_args(
 	}
 	Ok(command::ListenArgs {
 		method: method.to_owned(),
-		listen_on_socket_with_tor: args.is_present("listen_on_socket_with_tor"),
+		enable_secondary_socket_listener: args.is_present("listen_on_socket_with_tor"),
 	})
 }
 
@@ -452,14 +454,14 @@ pub fn parse_scan_rewind_hash_args(
 	args: &ArgMatches,
 ) -> Result<command::ViewWalletScanArgs, ParseError> {
 	let rewind_hash = parse_required(args, "rewind_hash")?;
-	let start_height: Option<u64> = parse_number_or_none(args.value_of("start_height"));
-	let backwards_from_tip: Option<u64> = parse_number_or_none(args.value_of("backwards_from_tip"));
+	let start_height: Option<u64> = parse_number_or_none(args.value_of("start_height"), "start_height")?;
+	let backwards_from_tip: Option<u64> = parse_number_or_none( args.value_of("backwards_from_tip"), "backwards_from_tip")?;
 	if backwards_from_tip.is_some() && start_height.is_some() {
 		let msg = format!("backwards_from tip and start_height cannot both be present");
 		return Err(ParseError::ArgumentError(msg));
 	}
 	Ok(command::ViewWalletScanArgs {
-		rewind_hash: rewind_hash.into(),
+		rewind_hash: Zeroizing::new(String::from(rewind_hash)),
 		start_height,
 		backwards_from_tip,
 	})
@@ -474,6 +476,7 @@ pub fn parse_account_args(account_args: &ArgMatches) -> Result<command::AccountA
 }
 
 pub fn parse_send_args(
+	secp: &Secp256k1,
 	context_id: u32,
 	args: &ArgMatches,
 ) -> Result<command::SendArgs, ParseError> {
@@ -482,7 +485,7 @@ pub fn parse_send_args(
 	let (amount, spend_max) = if amount.eq_ignore_ascii_case("max") {
 		(Ok(0), true)
 	} else {
-		(core::core::amount_from_hr_string(amount), false)
+		(mwc_core::core::amount_from_hr_string(amount), false)
 	};
 	let amount = match amount {
 		Ok(a) => a,
@@ -542,7 +545,9 @@ pub fn parse_send_args(
 		}
 	};
 
-	let apisecret = args.value_of("apisecret").map(|s| String::from(s));
+	let apisecret = args
+		.value_of("apisecret")
+		.map(|s| Zeroizing::new(String::from(s)));
 
 	if !estimate_selection_strategies
 		&& method == "http"
@@ -565,7 +570,7 @@ pub fn parse_send_args(
 	let fluff = args.is_present("fluff");
 
 	// ttl_blocks
-	let ttl_blocks: Option<u64> = parse_number_or_none(args.value_of("ttl_blocks"));
+	let ttl_blocks: Option<u64> = parse_number_or_none(args.value_of("ttl_blocks"), "ttl_blocks")?;
 
 	// max_outputs
 	let max_outputs = 500;
@@ -593,11 +598,12 @@ pub fn parse_send_args(
 				// if the destination address is a TOR address, we don't need the address
 				// separately
 				let proof_dest = proofaddress::address_to_pubkey(dest.to_string());
-				match ProvableAddress::from_str(context_id, &proof_dest) {
+				match ProvableAddress::from_str(secp, context_id, &proof_dest) {
 					Ok(a) => Some(a),
 					Err(_) => {
 						let addr = parse_required(args, "proof_address")?;
 						match ProvableAddress::from_str(
+							secp,
 							context_id,
 							&proofaddress::address_to_pubkey(addr.to_string()),
 						) {
@@ -639,7 +645,7 @@ pub fn parse_send_args(
 
 	let slatepack_recipient: Option<ProvableAddress> = match args.value_of("slatepack_recipient") {
 		Some(s) => {
-			let addr = ProvableAddress::from_str(context_id, s).map_err(|e| {
+			let addr = ProvableAddress::from_str(secp, context_id, s).map_err(|e| {
 				ParseError::ArgumentError(format!("Unable to parse slatepack_recipient, {}", e))
 			})?;
 
@@ -654,13 +660,13 @@ pub fn parse_send_args(
 	};
 
 	let min_fee = match args.value_of("min_fee") {
-		Some(min_fee) => match core::core::amount_from_hr_string(min_fee) {
+		Some(min_fee) => match mwc_core::core::amount_from_hr_string(min_fee) {
 			Ok(min_fee) => Some(min_fee),
 			Err(e) => {
 				return Err(ParseError::ArgumentError(format!(
 					"Could not parse minimal fee as a number, {}",
 					e
-				)))
+				)));
 			}
 		},
 		None => None,
@@ -702,7 +708,7 @@ pub fn parse_send_args(
 
 pub fn parse_faucet_request_args(args: &ArgMatches) -> Result<u64, ParseError> {
 	let amount = parse_optional(args, "amount")?.unwrap_or("3.0".into());
-	let amount = core::core::amount_from_hr_string(&amount);
+	let amount = mwc_core::core::amount_from_hr_string(&amount);
 	let amount = match amount {
 		Ok(a) => {
 			if a > 5000000000 {
@@ -773,11 +779,12 @@ pub fn parse_finalize_args(args: &ArgMatches) -> Result<command::FinalizeArgs, P
 }
 
 pub fn parse_issue_invoice_args(
+	secp: &Secp256k1,
 	context_id: u32,
 	args: &ArgMatches,
 ) -> Result<command::IssueInvoiceArgs, ParseError> {
 	let amount = parse_required(args, "amount")?;
-	let amount = core::core::amount_from_hr_string(amount);
+	let amount = mwc_core::core::amount_from_hr_string(amount);
 	let amount = match amount {
 		Ok(a) => a,
 		Err(e) => {
@@ -803,7 +810,7 @@ pub fn parse_issue_invoice_args(
 
 	let slatepack_recipient: Option<ProvableAddress> = match args.value_of("slatepack_recipient") {
 		Some(s) => {
-			let addr = ProvableAddress::from_str(context_id, s).map_err(|e| {
+			let addr = ProvableAddress::from_str(secp, context_id, s).map_err(|e| {
 				ParseError::ArgumentError(format!("Unable to parse slatepack_recipient, {}", e))
 			})?;
 
@@ -839,7 +846,7 @@ pub fn parse_process_invoice_args(
 	context_id: u32,
 	args: &ArgMatches,
 	prompt: bool,
-	slatepack_secret: &DalekSecretKey,
+	slatepack_secret: &ed25519_dalek::SigningKey,
 	secp: &Secp256k1,
 ) -> Result<command::ProcessInvoiceArgs, ParseError> {
 	// TODO: display and prompt for confirmation of what we're doing
@@ -876,7 +883,7 @@ pub fn parse_process_invoice_args(
 	};
 
 	// ttl_blocks
-	let ttl_blocks: Option<u64> = parse_number_or_none(args.value_of("ttl_blocks"));
+	let ttl_blocks: Option<u64> = parse_number_or_none(args.value_of("ttl_blocks"), "ttl_blocks")?;
 
 	// max_outputs
 	let max_outputs = 500;
@@ -906,7 +913,7 @@ pub fn parse_process_invoice_args(
 			None => {
 				return Err(ParseError::ArgumentError(
 					"Please specify 'file' or 'content' argument".to_string(),
-				))
+				));
 			}
 		},
 	};
@@ -925,7 +932,12 @@ pub fn parse_process_invoice_args(
 		dest = match &sender {
 			Some(sender) => Some(format!(
 				"http://{}",
-				OnionV3Address::from_bytes(*sender.as_bytes()).to_ov3_str()
+				OnionV3Address::from_bytes(*sender.as_bytes())
+					.map_err(|e| ParseError::ArgumentError(format!(
+						"Invalid sender address, {}",
+						e
+					)))?
+					.to_ov3_str()
 			)),
 			None => {
 				if !estimate_selection_strategies {
@@ -989,9 +1001,9 @@ pub fn parse_info_args(args: &ArgMatches) -> Result<command::InfoArgs, ParseErro
 
 pub fn parse_check_args(args: &ArgMatches) -> Result<command::CheckArgs, ParseError> {
 	let delete_unconfirmed = args.is_present("delete_unconfirmed");
-	let start_height: Option<u64> = parse_number_or_none(args.value_of("start_height"));
+	let start_height: Option<u64> = parse_number_or_none(args.value_of("start_height"), "start_height")?;
 
-	let backwards_from_tip: Option<u64> = parse_number_or_none(args.value_of("backwards_from_tip"));
+	let backwards_from_tip: Option<u64> = parse_number_or_none( args.value_of("backwards_from_tip"), "backwards_from_tip")?;
 	if backwards_from_tip.is_some() && start_height.is_some() {
 		let msg = format!("backwards_from tip and start_height cannot both be present");
 		return Err(ParseError::ArgumentError(msg));
@@ -1160,7 +1172,7 @@ pub fn parse_verify_proof_args(args: &ArgMatches) -> Result<command::ProofVerify
 
 pub fn parse_swap_start_args(args: &ArgMatches) -> Result<SwapStartArgs, ParseError> {
 	let mwc_amount = parse_required(args, "mwc_amount")?;
-	let mwc_amount = core::core::amount_from_hr_string(mwc_amount);
+	let mwc_amount = mwc_core::core::amount_from_hr_string(mwc_amount);
 	let mwc_amount = match mwc_amount {
 		Ok(a) => a,
 		Err(e) => {
@@ -1184,7 +1196,7 @@ pub fn parse_swap_start_args(args: &ArgMatches) -> Result<SwapStartArgs, ParseEr
 			return Err(ParseError::ArgumentError(format!(
 				"{} is not on the supported currency list.",
 				secondary_currency
-			)))
+			)));
 		}
 	}
 
@@ -1211,6 +1223,18 @@ pub fn parse_swap_start_args(args: &ArgMatches) -> Result<SwapStartArgs, ParseEr
 
 	let redeem_time = parse_required(args, "redeem_time")?;
 	let redeem_time: u64 = parse_number(redeem_time, "redeem_time")?;
+	let message_exchange_time_sec = message_exchange_time.checked_mul(60).ok_or_else(|| {
+		ParseError::DataOverflow(format!(
+			"wallet_args::parse_swap_start_args, message exchange interval overflow, message_exchange_time_minutes={} seconds_per_minute=60",
+			message_exchange_time
+		))
+	})?;
+	let redeem_time_sec = redeem_time.checked_mul(60).ok_or_else(|| {
+		ParseError::DataOverflow(format!(
+			"wallet_args::parse_swap_start_args, redeem interval overflow, redeem_time_minutes={} seconds_per_minute=60",
+			redeem_time
+		))
+	})?;
 
 	let method = parse_required(args, "method")?;
 	let destination = parse_required(args, "dest")?;
@@ -1238,12 +1262,7 @@ pub fn parse_swap_start_args(args: &ArgMatches) -> Result<SwapStartArgs, ParseEr
 		.filter(|s| !s.is_empty());
 	let eth_redirect_to_private_wallet = Some(args.is_present("eth_redirect_to_private_wallet"));
 
-	let secondary_fee = match args.value_of("secondary_fee") {
-		Some(fee_str) => Some(fee_str.parse::<f32>().map_err(|e| {
-			ParseError::ArgumentError(format!("Invalid secondary_fee value, {}", e))
-		})?),
-		None => None,
-	};
+	let secondary_fee = args.value_of("secondary_fee").map(str::to_owned);
 
 	let dry_run = args.is_present("dry_run");
 
@@ -1260,8 +1279,8 @@ pub fn parse_swap_start_args(args: &ArgMatches) -> Result<SwapStartArgs, ParseEr
 		minimum_confirmations: Some(min_c),
 		mwc_confirmations: mwc_lock,
 		secondary_confirmations: btc_lock,
-		message_exchange_time_sec: message_exchange_time * 60,
-		redeem_time_sec: redeem_time * 60,
+		message_exchange_time_sec,
+		redeem_time_sec,
 		buyer_communication_method: method.to_string(),
 		buyer_communication_address: destination.to_string(),
 		electrum_node_uri1,
@@ -1284,11 +1303,10 @@ pub fn parse_swap_args(args: &ArgMatches) -> Result<command::SwapArgs, ParseErro
 		.unwrap_or(vec![]);
 	let method = args.value_of("method").map(|s| String::from(s));
 	let mut destination = args.value_of("dest").map(|s| String::from(s));
-	let apisecret = args.value_of("apisecret").map(|s| String::from(s));
-	let secondary_fee = match args.value_of("secondary_fee") {
-		Some(s) => Some(parse_number::<f32>(s, "secondary_fee")?),
-		None => None,
-	};
+	let apisecret = args
+		.value_of("apisecret")
+		.map(|s| Zeroizing::new(String::from(s)));
+	let secondary_fee = args.value_of("secondary_fee").map(str::to_owned);
 	let message_file_name = args.value_of("message_file_name").map(|s| String::from(s));
 	let buyer_refund_address = args
 		.value_of("buyer_refund_address")
@@ -1320,8 +1338,6 @@ pub fn parse_swap_args(args: &ArgMatches) -> Result<command::SwapArgs, ParseErro
 		command::SwapSubcommand::Adjust
 	} else if args.is_present("autoswap") {
 		command::SwapSubcommand::Autoswap
-	} else if args.is_present("stop_auto_swap") {
-		command::SwapSubcommand::StopAllAutoSwap
 	} else {
 		return Err(ParseError::ArgumentError(format!(
 			"Please define some action to do"
@@ -1340,6 +1356,13 @@ pub fn parse_swap_args(args: &ArgMatches) -> Result<command::SwapArgs, ParseErro
 		.value_of("eth_infura_project_id")
 		.map(|s| String::from(s));
 	let eth_redirect_to_private_wallet = Some(args.is_present("eth_redirect_to_private_wallet"));
+	let discard_pending_marketplace_cancel =
+		args.is_present("discard_pending_marketplace_cancel");
+	if discard_pending_marketplace_cancel && subcommand != command::SwapSubcommand::Delete {
+		return Err(ParseError::ArgumentError(
+			"--discard_pending_marketplace_cancel can only be used with --remove".to_string(),
+		));
+	}
 
 	Ok(command::SwapArgs {
 		subcommand,
@@ -1362,6 +1385,7 @@ pub fn parse_swap_args(args: &ArgMatches) -> Result<command::SwapArgs, ParseErro
 		eth_redirect_to_private_wallet,
 		wait_for_backup1: false, // waiting is a primary usage for qt wallet. We are not documented that properly to make available for all users.
 		tag: args.value_of("tag").map(|s| String::from(s)),
+		discard_pending_marketplace_cancel,
 	})
 }
 
@@ -1373,7 +1397,7 @@ pub fn parse_integrity_args(args: &ArgMatches) -> Result<command::IntegrityArgs,
 	} else if args.is_present("fee") {
 		let fee_str = parse_required(args, "fee")?.split(",");
 		for fs in fee_str {
-			let fee_amount = core::core::amount_from_hr_string(fs).map_err(|e| {
+			let fee_amount = mwc_core::core::amount_from_hr_string(fs).map_err(|e| {
 				ParseError::ArgumentError(format!("Unable to parse create fee amount, {}", e))
 			})?;
 			fee.push(fee_amount);
@@ -1388,7 +1412,7 @@ pub fn parse_integrity_args(args: &ArgMatches) -> Result<command::IntegrityArgs,
 	};
 
 	let reserve = match args.value_of("reserve") {
-		Some(str) => Some(core::core::amount_from_hr_string(str).map_err(|e| {
+		Some(str) => Some(mwc_core::core::amount_from_hr_string(str).map_err(|e| {
 			ParseError::ArgumentError(format!("Unable to parse reserve MWC value, {}", e))
 		})?),
 		None => None,
@@ -1407,7 +1431,7 @@ pub fn parse_integrity_args(args: &ArgMatches) -> Result<command::IntegrityArgs,
 #[cfg(feature = "swaps")]
 pub fn parse_messaging_args(args: &ArgMatches) -> Result<command::MessagingArgs, ParseError> {
 	let fee = match args.value_of("fee") {
-		Some(s) => Some(core::core::amount_from_hr_string(s).map_err(|e| {
+		Some(s) => Some(mwc_core::core::amount_from_hr_string(s).map_err(|e| {
 			ParseError::ArgumentError(format!("Unable to parse create fee amount, {}", e))
 		})?),
 		None => None,
@@ -1452,6 +1476,15 @@ pub fn parse_send_marketplace_message(
 		command: parse_required(args, "command")?.to_string(),
 		offer_id: parse_required(args, "offer_id")?.to_string(),
 		tor_address: parse_required(args, "tor_address")?.to_string(),
+		swap_id: args
+			.value_of("swap_id")
+			.map(Uuid::parse_str)
+			.transpose()
+			.map_err(|e| {
+				ParseError::ArgumentError(format!("Unable to parse swap_id value, {}", e))
+			})?,
+		nonce: None,
+		signing_address_index: None,
 	})
 }
 
@@ -1503,7 +1536,7 @@ pub fn wallet_command<C, F>(
 	tor_config: Option<TorConfig>,
 	mqs_config: Option<MQSConfig>,
 	mut node_client: C,
-	test_mode: bool,
+	#[cfg(feature = "test-support")] test_mode: bool,
 	wallet_inst_cb: F,
 ) -> Result<String, Error>
 where
@@ -1514,15 +1547,19 @@ where
 				Box<
 					dyn WalletInst<
 						'static,
-						DefaultLCProvider<'static, C, keychain::ExtKeychain>,
+						DefaultLCProvider<'static, C, mwc_keychain::ExtKeychain>,
 						C,
-						keychain::ExtKeychain,
+						mwc_keychain::ExtKeychain,
 					>,
 				>,
 			>,
 		>,
 	),
 {
+	let secp = Secp256k1::with_caps(ContextFlag::Commit)?;
+	init_global_runtime()
+		.map_err(|e| Error::GenericError(format!("Unable to initialize async runtime, {}", e)))?;
+
 	if wallet_args.is_present("external") {
 		wallet_config.api_listen_interface = Some("0.0.0.0".to_string());
 	}
@@ -1564,29 +1601,43 @@ where
 	};
 
 	// This will also cache the node version info for calls to foreign API check middleware
-	if let Some(v) = node_client.clone().get_version_info() {
-		if Version::parse(&v.node_version) < Version::parse(MIN_COMPAT_NODE_VERSION) {
+	if let Some(v) = node_client.get_version_info() {
+		let node_version = Version::parse(&v.node_version).map_err(|e| {
+			Error::GenericError(format!(
+				"Unable to parse node version {}, {}",
+				v.node_version, e
+			))
+		})?;
+		let min_version = Version::parse(MIN_COMPAT_NODE_VERSION).map_err(|e| {
+			Error::GenericError(format!(
+				"Unable to parse minimum compatible node version {}, {}",
+				MIN_COMPAT_NODE_VERSION, e
+			))
+		})?;
+		if node_version < min_version {
 			println!("The MWC Node in use (version {}) is outdated and incompatible with this wallet version.", v.node_version);
 			println!(
 				"Please update the node to version {} or later and try again.",
 				MIN_COMPAT_NODE_VERSION
 			);
-			return Err(Error::GenericError(format!("The MWC Node in use (version {}) is outdated and incompatible with this wallet version. Please update the node to version {} or later and try again.", v.node_version, MIN_COMPAT_NODE_VERSION)));
+			return Err(Error::GenericError(format!(
+				"The MWC Node in use (version {}) is outdated and incompatible with this wallet version. Please update the node to version {} or later and try again.",
+				v.node_version, MIN_COMPAT_NODE_VERSION
+			)));
 		}
 	}
 	// ... if node isn't available, allow offline functions
 
 	// Instantiate wallet (doesn't open the wallet)
-	let wallet =
-		inst_wallet::<DefaultLCProvider<C, keychain::ExtKeychain>, C, keychain::ExtKeychain>(
-			context_id,
-			&wallet_config,
-			node_client.clone(),
-		)
-		.unwrap_or_else(|e| {
-			println!("{}", e);
-			std::process::exit(1);
-		});
+	let wallet = inst_wallet::<
+		DefaultLCProvider<C, mwc_keychain::ExtKeychain>,
+		C,
+		mwc_keychain::ExtKeychain,
+	>(context_id, &wallet_config, node_client.clone())
+	.unwrap_or_else(|e| {
+		println!("{}", e);
+		std::process::exit(1);
+	});
 
 	// provide wallet instance back to the caller (handy for testing with
 	// local wallet proxy, etc)
@@ -1600,7 +1651,7 @@ where
 		("cli", _) => open_wallet = false,
 		("owner_api", _) => {
 			// If wallet exists and password is present then open it. Otherwise, that's fine too.
-			let mut wallet_lock = wallet.lock().unwrap_or_else(|e| e.into_inner());
+			let mut wallet_lock = wallet.lock();
 			let lc = wallet_lock.lc_provider()?;
 			open_wallet = (wallet_args.is_present("pass")
 				&& lc.wallet_exists(None, wallet_config.wallet_data_dir.as_deref())?)
@@ -1614,13 +1665,15 @@ where
 
 	let keychain_mask = match open_wallet {
 		true => {
-			let mut wallet_lock = wallet.lock().unwrap_or_else(|e| e.into_inner());
+			let mut wallet_lock = wallet.lock();
 			let lc = wallet_lock.lc_provider()?;
 			let mask = lc.open_wallet(
+				&secp,
 				None,
 				prompt_password(&global_wallet_args.password)
 					.map_err(|e| Error::IO(format!("Prompt password error, {}", e)))?,
 				false,
+				#[cfg(feature = "test-support")]
 				false,
 				wallet_config.wallet_data_dir.as_deref(),
 			)?;
@@ -1639,10 +1692,21 @@ where
 
 			//read or save the node index(the good node)
 			{
-				let mut batch = wallet_inst.batch(mask.as_ref())?;
-				let index = batch.load_u64(U64_DATA_IDX_LAST_WORKING_NODE_INDEX, 0)? as u8;
+				let mut batch = wallet_inst.batch(&secp, mask.as_ref())?;
+				let stored_index = batch.load_u64(U64_DATA_IDX_LAST_WORKING_NODE_INDEX, 0)?;
+				let index = u8::try_from(stored_index).map_err(|e| {
+					Error::DataOverflow(format!(
+						"wallet_args::wallet_command, stored node index does not fit u8, stored_index={} error={}",
+						stored_index, e
+					))
+				})?;
 				if index > 0 {
-					node_client.set_node_index(index - 1); //index stored in db start from 1. need to offset by -1
+					// The branch proves index is at least one.
+					#[allow(
+						clippy::arithmetic_side_effects,
+						reason = "index > 0 proves subtracting one cannot underflow"
+					)]
+					node_client.set_node_index(index - 1); // index stored in db starts from 1
 				}
 				batch.commit()?;
 			}
@@ -1664,10 +1728,11 @@ where
 			&tor_config,
 			&mqs_config,
 			&mut global_wallet_args,
+			#[cfg(feature = "test-support")]
 			test_mode,
 		),
 		_ => {
-			let mut owner_api = Owner::new(context_id, wallet, None, Some(tor_config.clone()));
+			let mut owner_api = Owner::new(context_id, wallet, Some(tor_config.clone()))?;
 			parse_and_execute(
 				&mut owner_api,
 				keychain_mask,
@@ -1676,6 +1741,7 @@ where
 				&mqs_config,
 				&global_wallet_args,
 				&wallet_args,
+				#[cfg(feature = "test-support")]
 				test_mode,
 				false,
 			)
@@ -1697,17 +1763,19 @@ pub fn parse_and_execute<L, C, K>(
 	mqs_config: &MQSConfig,
 	global_wallet_args: &command::GlobalArgs,
 	wallet_args: &ArgMatches,
-	test_mode: bool,
+	#[cfg(feature = "test-support")] test_mode: bool,
 	cli_mode: bool,
 ) -> Result<(), Error>
 where
 	DefaultWalletImpl<'static, C>: WalletInst<'static, L, C, K>,
 	L: WalletLCProvider<'static, C, K> + 'static,
 	C: NodeClient + 'static,
-	K: keychain::Keychain + 'static,
+	K: mwc_keychain::Keychain + 'static,
 {
+	let secp = Secp256k1::with_caps(ContextFlag::Commit)?;
 	let km = (&keychain_mask).as_ref();
 
+	#[cfg(feature = "test-support")]
 	if test_mode {
 		owner_api.doctest_mode = true;
 		owner_api.doctest_retain_tld = true;
@@ -1720,6 +1788,7 @@ where
 				wallet_config,
 				global_wallet_args,
 				&args,
+				#[cfg(feature = "test-support")]
 				test_mode,
 			));
 			command::init(
@@ -1759,9 +1828,14 @@ where
 		("get_address_index", _) => {
 			wallet_lock!(owner_api.wallet_inst, w);
 			let address_index: u32 = {
-				let mut batch = w.batch(None)?;
+				let mut batch = w.batch(&secp, None)?;
 				let index = batch.load_u64(U64_DATA_IDX_ADDRESS_INDEX, 0u64)?;
-				index as u32
+				u32::try_from(index).map_err(|e| {
+					Error::DataOverflow(format!(
+						"wallet_args::wallet_command, stored wallet address index does not fit u32, index={} error={}",
+						index, e
+					))
+				})?
 			};
 			println!(
 				"Slatepack, MQS, tor addresses derivative index: {}",
@@ -1780,7 +1854,7 @@ where
 			}
 
 			wallet_lock!(owner_api.wallet_inst, w);
-			let mut batch = w.batch(None)?;
+			let mut batch = w.batch(&secp, None)?;
 			batch.save_u64(U64_DATA_IDX_ADDRESS_INDEX, address_index)?;
 			batch.commit()?;
 			Ok(())
@@ -1819,7 +1893,7 @@ where
 				wallet_lock!(owner_api.wallet_inst, w);
 				w.get_context_id()
 			};
-			let a = arg_parse!(parse_send_args(context_id, &args));
+			let a = arg_parse!(parse_send_args(&secp, context_id, &args));
 			let _ = command::send(
 				owner_api,
 				km,
@@ -1851,31 +1925,40 @@ where
 				wallet_lock!(owner_api.wallet_inst, w);
 				w.get_context_id()
 			};
-			let a = arg_parse!(parse_issue_invoice_args(context_id, &args));
+			let a = arg_parse!(parse_issue_invoice_args(&secp, context_id, &args));
 			command::issue_invoice_tx(owner_api, km, a)
 		}
 		("pay", Some(args)) => {
 			let (slatepack_secret, secp, context_id) = {
 				wallet_lock!(owner_api.wallet_inst, w);
-				let keychain = w.keychain(km)?;
+				let keychain = w.keychain(&secp, km)?;
 				let context_id = w.get_context_id();
 				let address_index: u32 = {
-					let mut batch = w.batch(None)?;
+					let mut batch = w.batch(&secp, None)?;
 					let index = batch.load_u64(U64_DATA_IDX_ADDRESS_INDEX, 0u64)?;
-					index as u32
+					u32::try_from(index).map_err(|e| {
+						Error::DataOverflow(format!(
+							"wallet_args::wallet_command, payment address index does not fit u32, index={} error={}",
+							index, e
+						))
+					})?
 				};
 				let slatepack_secret = proofaddress::payment_proof_address_dalek_secret(
+					&secp,
 					context_id,
 					&keychain,
 					address_index,
 				)?;
-				(slatepack_secret, keychain.secp().clone(), context_id)
+				(slatepack_secret, secp, context_id)
 			};
 
 			let a = arg_parse!(parse_process_invoice_args(
 				context_id,
 				&args,
+				#[cfg(feature = "test-support")]
 				!test_mode,
+				#[cfg(not(feature = "test-support"))]
+				true,
 				&slatepack_secret,
 				&secp,
 			));
@@ -1950,7 +2033,7 @@ where
 		("dump-wallet-data", Some(args)) => command::dump_wallet_data(
 			owner_api,
 			km,
-			args.value_of("file").map(|s| String::from(s)),
+			arg_parse!(parse_required(args, "file")).to_owned(),
 		),
 		("open", Some(_)) => {
 			// for CLI mode only, should be handled externally
@@ -1981,33 +2064,13 @@ where
 				mqs_config.clone(),
 				tor_config.clone(),
 				a,
-				cli_mode,
 			)
-		}
-		#[cfg(feature = "swaps")]
-		("integrity", Some(args)) => {
-			#[allow(unused_variables)]
-			let a = arg_parse!(parse_integrity_args(&args));
-			#[cfg(feature = "libp2p")]
-			return command::integrity(owner_api.wallet_inst.clone(), km, a);
-			#[cfg(not(feature = "libp2p"))]
-			println!("integrity feature is not included in this release");
-			Ok(())
-		}
-		#[cfg(feature = "swaps")]
-		("messaging", Some(args)) => {
-			#[allow(unused_variables)]
-			let a = arg_parse!(parse_messaging_args(&args));
-			#[cfg(feature = "libp2p")]
-			return command::messaging(owner_api.wallet_inst.clone(), km, a);
-			#[cfg(not(feature = "libp2p"))]
-			println!("messaging feature is not included in this release");
-			Ok(())
 		}
 		#[cfg(feature = "swaps")]
 		("send_marketplace_message", Some(args)) => {
 			let a = arg_parse!(parse_send_marketplace_message(&args));
 			command::send_marketplace_message(owner_api.wallet_inst.clone(), km, tor_config, a)
+				.map(|_| ())
 		}
 		("check_tor_connection", _) => {
 			command::check_tor_connection(owner_api.wallet_inst.clone(), km, tor_config)
@@ -2015,7 +2078,7 @@ where
 		#[cfg(feature = "swaps")]
 		("eth", Some(args)) => {
 			let a = arg_parse!(parse_eth_args(&args));
-			command::eth(owner_api.wallet_inst.clone(), a)
+			command::eth(owner_api.wallet_inst.clone(), km, a)
 		}
 		("generate_ownership_proof", Some(args)) => {
 			let a = arg_parse!(parse_retrieve_ownership_proof(&args));

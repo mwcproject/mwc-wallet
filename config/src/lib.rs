@@ -21,19 +21,13 @@
 #![deny(unused_mut)]
 #![warn(missing_docs)]
 
-#[macro_use]
-extern crate serde_derive;
-
-use mwc_wallet_util::mwc_core as core;
-use mwc_wallet_util::mwc_util as util;
-
 mod comments;
 pub mod config;
 #[allow(missing_docs)]
 pub mod types;
 
 pub use crate::config::{
-	config_file_exists, initial_setup_wallet, MWC_WALLET_DIR, WALLET_CONFIG_FILE_NAME,
+	initial_setup_wallet, validate_wallet_data_dir, MWC_WALLET_DIR, WALLET_CONFIG_FILE_NAME,
 };
 pub use crate::types::{
 	parse_node_address_string, ConfigError, GlobalWalletConfig, GlobalWalletConfigMembers,

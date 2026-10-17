@@ -16,33 +16,37 @@
 mod file;
 pub mod http;
 
-#[cfg(feature = "libp2p")]
-pub mod libp2p_messaging;
 mod mwcmq;
 mod types;
 
 pub use self::file::{PathToSlateGetter, PathToSlatePutter};
 pub use self::http::HttpDataSender;
 use std::path::Path;
+use std::sync::Arc;
 
-use crate::config::WalletConfig;
+use crate::client_utils::{safe_http_error, safe_http_text};
 use crate::error::Error;
-#[cfg(feature = "swaps")]
-use crate::libwallet::swap::message::Message;
-use crate::libwallet::Slate;
-use crate::tor::config::complete_tor_address;
-use crate::util::ZeroingString;
-use ed25519_dalek::{PublicKey as DalekPublicKey, SecretKey as DalekSecretKey};
+use crate::tor::config::{TorAddressClassification, classify_tor_address, complete_tor_address};
+use mwc_wallet_config::WalletConfig;
+use mwc_wallet_libwallet::Slate;
 use mwc_wallet_libwallet::slatepack::SlatePurpose;
+#[cfg(feature = "swaps")]
+use mwc_wallet_libwallet::swap::message::Message;
 use mwc_wallet_libwallet::{SlateVersion, Slatepacker};
+use mwc_wallet_util::mwc_crates::ed25519_dalek;
+use mwc_wallet_util::mwc_crates::secp::Secp256k1;
+use mwc_wallet_util::mwc_crates::zeroize::Zeroizing;
 use mwc_wallet_util::mwc_p2p::TorConfig;
-use mwc_wallet_util::mwc_util::secp::Secp256k1;
+use mwc_wallet_util::mwc_util::ZeroingString;
 pub use mwcmq::{
-	get_mwcmqs_brocker, init_mwcmqs_access_data, reset_mwcmqs_brocker, MWCMQPublisher,
-	MWCMQSubscriber, MwcMqsChannel,
+	MWCMQPublisher, MWCMQSubscriber, MqsLifecycleGuard, MqsListenerWait, MqsTermination,
+	MwcMqsChannel, get_mwcmqs_brocker, get_mwcmqs_listener_termination, init_mwcmqs_access_data,
+	lock_mwcmqs_lifecycle, reset_mwcmqs_brocker, reset_mwcmqs_brocker_if_current,
+	stop_mwcmqs_brocker_if_current,
 };
 pub use types::{
-	Address, AddressType, CloseReason, HttpsAddress, MWCMQSAddress, Publisher, Subscriber,
+	Address, AddressType, CloseReason, HttpsAddress, MWCMQSAddress, MqsMessageDisposition,
+	MqsMessageResult, MqsResponseWaiterToken, MqsRetryableError, Publisher, Subscriber,
 	SubscriptionHandler,
 };
 
@@ -63,8 +67,8 @@ pub trait SlateSender {
 		send_tx: bool, // false if invoice, true if send operation
 		slate: &Slate,
 		slate_content: SlatePurpose,
-		slatepack_secret: &DalekSecretKey,
-		recipient: Option<DalekPublicKey>,
+		slatepack_secret: &ed25519_dalek::SigningKey,
+		recipient: Option<ed25519_dalek::VerifyingKey>,
 		other_wallet_version: Option<(SlateVersion, Option<String>)>,
 		secp: &Secp256k1,
 	) -> Result<Slate, Error>;
@@ -89,8 +93,8 @@ pub trait SlatePutter {
 	fn put_tx(
 		&self,
 		slate: &Slate,
-		slatepack_secret: Option<&DalekSecretKey>,
-		use_test_rng: bool,
+		slatepack_secret: Option<&ed25519_dalek::SigningKey>,
+		#[cfg(feature = "test-support")] use_test_rng: bool,
 		secp: &Secp256k1,
 	) -> Result<String, Error>;
 }
@@ -108,7 +112,7 @@ pub trait SlateGetter {
 	/// Receive a transaction sync. Just read it from wherever and return the slate.
 	fn get_tx(
 		&self,
-		slatepack_secret: Option<&DalekSecretKey>,
+		slatepack_secret: Option<&ed25519_dalek::SigningKey>,
 		secp: &Secp256k1,
 	) -> Result<SlateGetData, Error>;
 }
@@ -127,14 +131,6 @@ pub trait MarketplaceMessageSender {
 }
 
 impl SlateGetData {
-	/// Check if the slate is encrypted
-	pub fn is_encrypted(&self) -> bool {
-		match &self {
-			SlateGetData::PlainSlate(_) => false,
-			SlateGetData::Slatepack(_) => true,
-		}
-	}
-
 	/// Convert to the slate
 	/// Return: Slate, sender and recipient
 	pub fn to_slate(
@@ -142,8 +138,8 @@ impl SlateGetData {
 	) -> Result<
 		(
 			Slate,
-			Option<DalekPublicKey>,
-			Option<DalekPublicKey>,
+			Option<ed25519_dalek::VerifyingKey>,
+			Option<ed25519_dalek::VerifyingKey>,
 			SlatePurpose,
 			bool,
 		),
@@ -173,24 +169,33 @@ pub fn create_sender(
 	context_id: u32,
 	method: &str,
 	dest: &str,
-	apisecret: &Option<String>,
+	apisecret: &Option<Arc<Zeroizing<String>>>,
 	tor_config: Option<&TorConfig>,
 	base_dir: &Path,
 ) -> Result<Box<dyn SlateSender>, Error> {
-	let invalid = |e| {
+	let invalid = |e: Error| {
 		Error::WalletComms(format!(
 			"Invalid wallet comm type and destination. method: {}, dest: {}, error: {}",
-			method, dest, e
+			safe_http_text(method),
+			safe_http_text(dest),
+			safe_http_error(&e)
 		))
 	};
 
-	let method = if method == "http" {
-		// Url might be onion. In this case we can update method to tor
-		if validate_tor_address(dest).is_ok() {
-			"tor"
-		} else {
-			method
+	let auto_tor_destination = if method == "http" {
+		// A valid Onion destination is automatically routed through Tor. If the
+		// host is Onion-like but validation fails, return that error instead of
+		// leaking the destination to DNS through the direct HTTP sender.
+		match classify_tor_address(dest) {
+			TorAddressClassification::Valid(destination) => Some(destination),
+			TorAddressClassification::InvalidOnion(error) => return Err(invalid(error)),
+			TorAddressClassification::NotOnion => None,
 		}
+	} else {
+		None
+	};
+	let method = if auto_tor_destination.is_some() {
+		"tor"
 	} else {
 		method
 	};
@@ -205,7 +210,10 @@ pub fn create_sender(
 				return Err(Error::WalletComms("Tor Configuration required".to_string()));
 			}
 			Some(tc) => {
-				let dest = validate_tor_address(dest)?;
+				let dest = match auto_tor_destination {
+					Some(destination) => destination,
+					None => validate_tor_address(dest)?,
+				};
 				Box::new(HttpDataSender::tor_connection(
 					context_id,
 					&dest,
@@ -223,12 +231,14 @@ pub fn create_sender(
 }
 
 /// create a Swap Message Sender
+/// apisecret is shared by reference counted pointer, so no plaintext copies of the
+/// secret are made for each sender; it is zeroized when the last sender is dropped.
 #[cfg(feature = "swaps")]
 pub fn create_swap_message_sender(
 	context_id: u32,
 	method: &str,
 	dest: &str,
-	apisecret: &Option<String>,
+	apisecret: &Option<Arc<Zeroizing<String>>>,
 	tor_config: &TorConfig,
 	base_dir: &Path,
 ) -> Result<Box<dyn SwapMessageSender>, Error> {
@@ -272,8 +282,71 @@ pub fn handle_unsupported_types(method: &str) -> Error {
 		_ => {
 			return Error::WalletComms(format!(
 				"Wallet communication method \"{}\" does not exist.",
-				method
+				safe_http_text(method)
 			));
 		}
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn invalid_onion_http_destination_is_not_downgraded() {
+		let onion = "2a6at2obto3uvkpkitqp4wxcg6u36qf534eucbskqciturczzc5suyid";
+		let invalid_destinations = [
+			"http://2a6at2obto3uvkpkitqp4wxcg6u36qf534eucbskqciturczzc5suyia.onion".to_string(),
+			"d03c09e9c19bb74aa9ea44e0fe5ae237a9bf40bddf0941064a80913a4459c8bb".to_string(),
+			format!("http://{}aaaaaaaa", onion),
+			format!("http://{}aaaaaaaa.onion", onion),
+		];
+
+		for invalid_destination in invalid_destinations {
+			assert!(validate_tor_address(&invalid_destination).is_err());
+			let result =
+				create_sender(0, "http", &invalid_destination, &None, None, Path::new("."));
+			assert!(
+				matches!(result, Err(Error::WalletComms(_))),
+				"{invalid_destination}"
+			);
+		}
+	}
+
+	fn assert_terminal_safe(message: &str) {
+		assert!(message.contains("\\u000a"));
+		assert!(message.contains("\\u001b"));
+		assert!(message.contains("\\u0007"));
+		assert!(message.contains("\\u202e"));
+		assert!(!message.chars().any(char::is_control));
+		assert!(!message.contains('\u{202e}'));
+	}
+
+	#[test]
+	fn invalid_sender_error_escapes_destination_controls() {
+		let onion = "2a6at2obto3uvkpkitqp4wxcg6u36qf534eucbskqciturczzc5suyid";
+		let invalid_onion = format!(
+			"http://{}.onion/rejected\n\u{1b}]52;c;payload\u{7}\u{202e}",
+			onion
+		);
+		let error = create_sender(0, "http", &invalid_onion, &None, None, Path::new("."))
+			.err()
+			.expect("invalid Onion destination must be rejected")
+			.to_string();
+
+		assert_terminal_safe(&error);
+	}
+
+	#[test]
+	fn unsupported_method_error_escapes_and_bounds_input() {
+		let method = format!(
+			"unsupported\n\u{1b}]52;c;payload\u{7}\u{202e}{}",
+			"x".repeat(crate::client_utils::MAX_HTTP_DIAGNOSTIC_BYTES * 2)
+		);
+		let error = handle_unsupported_types(&method).to_string();
+
+		assert_terminal_safe(&error);
+		assert!(error.contains("...[truncated]"));
+		assert!(error.len() < crate::client_utils::MAX_HTTP_DIAGNOSTIC_BYTES + 128);
 	}
 }

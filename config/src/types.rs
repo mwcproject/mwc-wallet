@@ -15,18 +15,21 @@
 
 //! Public types for config modules
 
+use mwc_wallet_util::mwc_crates::serde::{self, Deserialize, Serialize};
 use std::io;
+use std::net::IpAddr;
 use std::path::PathBuf;
 
-use crate::config::MWC_WALLET_DIR;
-use crate::core::global::ChainTypes;
-use crate::util::logger::LoggingConfig;
+use crate::config::{MWC_WALLET_DIR, NODE_API_SECRET_FILE_NAME};
 use mwc_wallet_util::mwc_core::global;
+use mwc_wallet_util::mwc_core::global::ChainTypes;
 use mwc_wallet_util::mwc_p2p::TorConfig;
+use mwc_wallet_util::mwc_util::logger::LoggingConfig;
 use std::collections::BTreeMap;
 
 /// Command-line wallet configuration
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(crate = "serde")]
 pub struct WalletConfig {
 	/// Chain parameters (default to Mainnet if none at the moment)
 	pub chain_type: Option<ChainTypes>,
@@ -35,12 +38,19 @@ pub struct WalletConfig {
 	pub api_listen_interface: Option<String>,
 	/// The port this wallet will run on
 	pub api_listen_port: Option<u16>,
-	/// The port for libp2p socks listener to run. If None, libp2p will not be enabled.
-	/// libp2p works only with TOR. If tor is not activated, libp2p will not work
-	pub libp2p_listen_port: Option<u16>,
+	/// Additional source IP allowed to call the mining-only build_coinbase RPC.
+	/// IPv4 and IPv6 loopback are always allowed without authentication for
+	/// compatibility with local miners. This trusts local processes even though
+	/// repeated fresh coinbase requests can advance the wallet derivation index
+	/// and persist unconfirmed candidate outputs. IPv4 and IPv6 link-local
+	/// addresses are rejected because this setting cannot identify their
+	/// network-interface scope.
+	pub mining_node_ip: Option<IpAddr>,
 	/// The port this wallet's owner API will run on
 	pub owner_api_listen_port: Option<u16>,
-	/// Location of the secret for basic auth on the Owner API
+	/// Location of the secret for basic auth on the Owner API. `None`
+	/// deliberately disables authentication; the deployment must then provide
+	/// any desired access control outside the wallet.
 	pub api_secret_path: Option<String>,
 	/// Location of the node api secret for basic auth on the Mwc API
 	pub node_api_secret_path: Option<String>,
@@ -83,10 +93,10 @@ impl Default for WalletConfig {
 			chain_type: Some(ChainTypes::Mainnet),
 			api_listen_interface: None, // Some("127.0.0.1".to_string()),
 			api_listen_port: None,      // Some(3415),
-			libp2p_listen_port: None,   //Some(3418),
+			mining_node_ip: None,
 			owner_api_listen_port: Some(WalletConfig::default_owner_api_listen_port()),
 			api_secret_path: Some(".owner_api_secret".to_string()),
-			node_api_secret_path: Some(".api_secret".to_string()),
+			node_api_secret_path: Some(NODE_API_SECRET_FILE_NAME.to_string()),
 			check_node_api_http_addr: Some("http://127.0.0.1:3413".to_string()),
 			owner_api_include_foreign: Some(false),
 			owner_api_include_mqs_listener: Some(false),
@@ -109,23 +119,23 @@ impl Default for WalletConfig {
 					("bch_main_1", "bch.main1.swap.mwc.mw:18333"),
 					("bch_main_2", "bch.main2.swap.mwc.mw:18333"),
 					("bch_test_1", "bch.test1.swap.mwc.mw:18335"),
-					("bch_test_2", "bch.test1.swap.mwc.mw:18335"),
+					("bch_test_2", "bch.test2.swap.mwc.mw:18335"),
 					("dash_main_1", "dash.main1.swap.mwc.mw:18351"),
 					("dash_main_2", "dash.main2.swap.mwc.mw:18351"),
 					("dash_test_1", "dash.test1.swap.mwc.mw:18349"),
-					("dash_test_2", "dash.test1.swap.mwc.mw:18349"),
+					("dash_test_2", "dash.test2.swap.mwc.mw:18349"),
 					("doge_main_1", "doge.main1.swap.mwc.mw:18359"),
 					("doge_main_2", "doge.main2.swap.mwc.mw:18359"),
 					("doge_test_1", "doge.test1.swap.mwc.mw:18357"),
-					("doge_test_2", "doge.test1.swap.mwc.mw:18357"),
+					("doge_test_2", "doge.test2.swap.mwc.mw:18357"),
 					("ltc_main_1", "ltc.main1.swap.mwc.mw:18343"),
 					("ltc_main_2", "ltc.main2.swap.mwc.mw:18343"),
 					("ltc_test_1", "ltc.test1.swap.mwc.mw:18341"),
-					("ltc_test_2", "ltc.test1.swap.mwc.mw:18341"),
+					("ltc_test_2", "ltc.test2.swap.mwc.mw:18341"),
 					("zcash_main_1", "zcash.main1.swap.mwc.mw:18355"),
 					("zcash_main_2", "zcash.main2.swap.mwc.mw:18355"),
 					("zcash_test_1", "zcash.test1.swap.mwc.mw:18353"),
-					("zcash_test_2", "zcash.test1.swap.mwc.mw:18353"),
+					("zcash_test_2", "zcash.test2.swap.mwc.mw:18353"),
 				]
 				.iter()
 				.cloned()
@@ -140,14 +150,9 @@ impl Default for WalletConfig {
 impl WalletConfig {
 	/// API Listen address
 	pub fn api_listen_addr(&self) -> Option<String> {
-		if self.api_listen_interface.is_some() && self.api_listen_port.is_some() {
-			Some(format!(
-				"{}:{}",
-				self.api_listen_interface.clone().unwrap(),
-				self.api_listen_port.clone().unwrap()
-			))
-		} else {
-			None
+		match (&self.api_listen_interface, self.api_listen_port) {
+			(Some(interface), Some(port)) => Some(format!("{}:{}", interface, port)),
+			_ => None,
 		}
 	}
 
@@ -184,6 +189,10 @@ impl WalletConfig {
 /// Error type wrapping config errors.
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigError {
+	/// Integer conversion or arithmetic overflow/underflow.
+	#[error("Configuration data overflow error, {0}")]
+	DataOverflow(String),
+
 	/// Error with parsing of config file (file_name, message)
 	#[error("Error parsing configuration file at {0}, {1}")]
 	ParseError(String, String),
@@ -201,6 +210,15 @@ pub enum ConfigError {
 	#[error("Error serializing configuration, {0}")]
 	SerializationError(String),
 
+	/// Config file was written for a version this wallet does not support
+	#[error("Unsupported configuration file version {found}; supported version is {supported}")]
+	UnsupportedConfigVersion {
+		/// Version found in the configuration file
+		found: u32,
+		/// Version supported by this wallet
+		supported: u32,
+	},
+
 	/// Path doesn't exist
 	#[error("Not found expected path {0}")]
 	PathNotFoundError(String),
@@ -212,6 +230,7 @@ pub enum ConfigError {
 
 /// MQS configuration
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(crate = "serde")]
 pub struct MQSConfig {
 	/// mwcmqs domain
 	pub mwcmqs_domain: String,
@@ -230,6 +249,7 @@ impl Default for MQSConfig {
 
 /// Wallet should be split into a separate configuration file
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(crate = "serde")]
 pub struct GlobalWalletConfig {
 	/// Keep track of the file we've read
 	pub config_file_path: Option<PathBuf>,
@@ -239,6 +259,7 @@ pub struct GlobalWalletConfig {
 
 /// Wallet internal members
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(crate = "serde")]
 pub struct GlobalWalletConfigMembers {
 	/// Config file version (None == version 1)
 	#[serde(default)]

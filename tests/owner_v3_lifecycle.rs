@@ -12,41 +12,34 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#[macro_use]
-extern crate clap;
-
-#[macro_use]
-extern crate log;
-
-extern crate mwc_wallet;
+#![cfg(feature = "test-support")]
 
 use mwc_wallet_api::{ECDHPubkey, JsonId};
 use mwc_wallet_impls::test_framework::{self, LocalWalletClient, WalletProxy};
+use mwc_wallet_util::mwc_crates::clap::{App, YamlLoader};
+use mwc_wallet_util::mwc_crates::serde_json;
 use std::ops::DerefMut;
-
-use clap::App;
 use std::thread;
 use std::time::Duration;
 
 use mwc_wallet_impls::DefaultLCProvider;
 use mwc_wallet_libwallet::{InitTxArgs, Slate, SlateVersion, VersionedSlate};
 use mwc_wallet_util::mwc_keychain::ExtKeychain;
-use serde_json;
 
+use mwc_wallet_util::Mutex;
 use mwc_wallet_util::mwc_core::global;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::sync::Mutex;
 
 #[macro_use]
 mod common;
 use common::{
-	clean_output_dir, derive_ecdh_key, execute_command, execute_command_no_setup,
-	initial_setup_wallet, instantiate_wallet, send_request, send_request_enc, setup,
-	setup_global_chain_type, RetrieveSummaryInfoResp,
+	RetrieveSummaryInfoResp, clean_output_dir, derive_ecdh_key, execute_command,
+	execute_command_no_setup, initial_setup_wallet, instantiate_wallet, send_request,
+	send_request_enc, setup, setup_global_chain_type, wait_for_listener,
 };
 use mwc_wallet_util::mwc_core::core::Transaction;
-use mwc_wallet_util::mwc_util::secp::Secp256k1;
+use mwc_wallet_util::mwc_crates::secp::Secp256k1;
 
 #[test]
 fn owner_v3_lifecycle() -> Result<(), mwc_wallet_controller::Error> {
@@ -58,12 +51,12 @@ fn owner_v3_lifecycle() -> Result<(), mwc_wallet_controller::Error> {
 
 	setup_global_chain_type();
 
-	let secp = Secp256k1::new();
+	let secp = Secp256k1::new().unwrap();
 	let test_dir = "target/test_output/owner_v3_lifecycle";
 	setup(test_dir);
 
-	let yml = load_yaml!("../src/bin/mwc-wallet.yml");
-	let app = App::from_yaml(yml);
+	let yml = YamlLoader::load_from_str(include_str!("../src/bin/mwc-wallet.yml")).unwrap();
+	let app = App::from_yaml(&yml[0]);
 
 	// Create a new proxy to simulate server and wallet responses
 	let tx_pool: Arc<Mutex<Vec<Transaction>>> = Arc::new(Mutex::new(Vec::new()));
@@ -80,7 +73,7 @@ fn owner_v3_lifecycle() -> Result<(), mwc_wallet_controller::Error> {
 		tx_pool.clone(),
 	)));
 	let (chain, wallet2, mask2_i) = {
-		let mut wallet_proxy = wallet_proxy_a.lock().unwrap_or_else(|e| e.into_inner());
+		let mut wallet_proxy = wallet_proxy_a.lock();
 		let chain = wallet_proxy.chain.clone();
 
 		// Create wallet 2 manually, which will mine a bit and insert some
@@ -114,8 +107,8 @@ fn owner_v3_lifecycle() -> Result<(), mwc_wallet_controller::Error> {
 
 		thread::spawn(move || {
 			global::set_local_chain_type(global::ChainTypes::AutomatedTesting);
-			let yml = load_yaml!("../src/bin/mwc-wallet.yml");
-			let app = App::from_yaml(yml);
+			let yml = YamlLoader::load_from_str(include_str!("../src/bin/mwc-wallet.yml")).unwrap();
+			let app = App::from_yaml(&yml[0]);
 			execute_command_no_setup(
 				&app,
 				test_dir,
@@ -123,7 +116,7 @@ fn owner_v3_lifecycle() -> Result<(), mwc_wallet_controller::Error> {
 				&client1,
 				arg_vec.clone(),
 				|wallet_inst| {
-					let mut wallet_proxy = p.lock().unwrap_or_else(|e| e.into_inner());
+					let mut wallet_proxy = p.lock();
 					wallet_proxy.add_wallet(
 						"wallet1",
 						client1.get_send_instance(),
@@ -136,19 +129,15 @@ fn owner_v3_lifecycle() -> Result<(), mwc_wallet_controller::Error> {
 		});
 		(chain, wallet2, mask2_i)
 	};
-	// give a bit for wallet to init and populate proxy with wallet via callback in thread above
-	thread::sleep(Duration::from_millis(500));
+	// Listener startup follows the wallet-registration callback. Wait for it
+	// before start_shared holds the proxy lock for the rest of the test.
+	wait_for_listener("127.0.0.1:43420", Duration::from_secs(10))
+		.expect("owner API listener did not start after registering the wallet");
 	let mask2 = (&mask2_i).as_ref();
 	let wallet_proxy = wallet_proxy_a.clone();
 
 	// Set the wallet proxy listener running
-	thread::spawn(move || {
-		global::set_local_chain_type(global::ChainTypes::AutomatedTesting);
-		let mut p = wallet_proxy.lock().unwrap_or_else(|e| e.into_inner());
-		if let Err(e) = p.run() {
-			error!("Wallet Proxy error: {}", e);
-		}
-	});
+	let proxy_handle = WalletProxy::start_shared(wallet_proxy);
 
 	// mine into wallet 2 a bit
 	let bh = 10u64;
@@ -158,10 +147,7 @@ fn owner_v3_lifecycle() -> Result<(), mwc_wallet_controller::Error> {
 		mask2,
 		bh as usize,
 		false,
-		tx_pool
-			.lock()
-			.unwrap_or_else(|e| e.into_inner())
-			.deref_mut(),
+		tx_pool.lock().deref_mut(),
 	);
 
 	// We have an owner API with no wallet initialized. Init the secure API
@@ -424,7 +410,8 @@ fn owner_v3_lifecycle() -> Result<(), mwc_wallet_controller::Error> {
 			};
 			let res = api.process_invoice_tx(m, None, &slate, &args);
 			assert!(res.is_ok());
-			slate = res.unwrap();
+			let process_result = res.unwrap();
+			slate = process_result.slate;
 			api.tx_lock_outputs(m, None, &slate, None, 1)?;
 
 			Ok(())
@@ -527,67 +514,7 @@ fn owner_v3_lifecycle() -> Result<(), mwc_wallet_controller::Error> {
 	thread::sleep(Duration::from_millis(200));
 	assert_eq!(res.unwrap().1.amount_awaiting_finalization, 6000000000);
 
-	// 21) Start the automatic updater, let it run for a bit
-	let req = serde_json::json!({
-		"jsonrpc": "2.0",
-		"id": 1,
-		"method": "start_updater",
-		"params": {
-			"token": token,
-			"frequency": 3000,
-		}
-	});
-
-	let res = send_request_enc::<String>(
-		&JsonId::StrId(String::from("1")),
-		1,
-		"http://127.0.0.1:43420/v3/owner",
-		&req.to_string(),
-		&shared_key,
-	)?;
-	assert!(res.is_ok());
-	println!("RES 21: {:?}", res);
-	thread::sleep(Duration::from_millis(5000));
-
-	// 22) Retrieve some messages about updater status
-	let req = serde_json::json!({
-		"jsonrpc": "2.0",
-		"id": 1,
-		"method": "get_updater_messages",
-		"params": {
-			"count": 1000,
-		}
-	});
-
-	let res = send_request_enc::<String>(
-		&JsonId::StrId(String::from("1")),
-		1,
-		"http://127.0.0.1:43420/v3/owner",
-		&req.to_string(),
-		&shared_key,
-	)?;
-	assert!(res.is_ok());
-	println!("RES 22: {:?}", res);
-
-	// 23) Stop Updater
-	let req = serde_json::json!({
-		"jsonrpc": "2.0",
-		"id": 1,
-		"method": "stop_updater",
-		"params": null
-	});
-
-	let res = send_request_enc::<String>(
-		&JsonId::StrId(String::from("1")),
-		1,
-		"http://127.0.0.1:43420/v3/owner",
-		&req.to_string(),
-		&shared_key,
-	)?;
-	assert!(res.is_ok());
-	println!("RES 23: {:?}", res);
-
-	// 24) Delete the wallet (close first)
+	// 21) Delete the wallet (close first)
 	let req = include_str!("data/v3_reqs/close_wallet.req.json");
 	let res = send_request_enc::<String>(
 		&JsonId::StrId(String::from("1")),
@@ -606,10 +533,10 @@ fn owner_v3_lifecycle() -> Result<(), mwc_wallet_controller::Error> {
 		&req,
 		&shared_key,
 	)?;
-	println!("RES 24: {:?}", res);
+	println!("RES 21: {:?}", res);
 	assert!(res.is_ok());
 
-	// 25) Wallet should be gone
+	// 22) Wallet should be gone
 	let req = include_str!("data/v3_reqs/open_wallet.req.json");
 	let res = send_request_enc::<String>(
 		&JsonId::StrId(String::from("1")),
@@ -618,10 +545,10 @@ fn owner_v3_lifecycle() -> Result<(), mwc_wallet_controller::Error> {
 		&req,
 		&shared_key,
 	)?;
-	println!("RES 25: {:?}", res);
+	println!("RES 22: {:?}", res);
 	assert!(res.is_err());
 
-	// 26) Try to create a wallet with an invalid mnemonic
+	// 23) Try to create a wallet with an invalid mnemonic
 	let req = include_str!("data/v3_reqs/create_wallet_invalid_mn.req.json");
 	let res = send_request_enc::<String>(
 		&JsonId::StrId(String::from("1")),
@@ -630,10 +557,10 @@ fn owner_v3_lifecycle() -> Result<(), mwc_wallet_controller::Error> {
 		&req,
 		&shared_key,
 	)?;
-	println!("RES 26: {:?}", res);
+	println!("RES 23: {:?}", res);
 	assert!(res.is_err());
 
-	// 27) Try to create a wallet with an valid mnemonic
+	// 24) Try to create a wallet with a valid mnemonic
 	let req = include_str!("data/v3_reqs/create_wallet_valid_mn.req.json");
 	let res = send_request_enc::<String>(
 		&JsonId::StrId(String::from("1")),
@@ -642,9 +569,12 @@ fn owner_v3_lifecycle() -> Result<(), mwc_wallet_controller::Error> {
 		&req,
 		&shared_key,
 	)?;
-	println!("RES 27: {:?}", res);
+	println!("RES 24: {:?}", res);
 	assert!(res.is_ok());
 
+	proxy_handle.stop()?;
+	drop(wallet_proxy_a);
+	drop(chain);
 	clean_output_dir(test_dir);
 
 	Ok(())

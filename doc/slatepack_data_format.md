@@ -96,7 +96,14 @@ Encrypted Data Size | 2 bytes   | Length of the encrypted data in bytes
 
 ### Slate package encrypted data.
 
-Data | Size | Descryption 
+In version 0, input, output, and kernel sections use a continuation bit after
+each element. If a section is included for the message's purpose, it must contain
+at least one element; an empty list has no representation and is rejected during
+encoding. Omitted sections, such as outputs in `InvoiceInitial`, may be empty.
+Consequently, an exact-payment compact invoice response with no change outputs
+cannot be encoded in version 0.
+
+Data | Size | Descryption
 ---- | ---- | ----------- |
 content             | 3 bit     |  The content of the salte. Currently support: SendInitial, SendResponse, InvoiceInitial, InvoiceResponse, FullSlate values
 Slate UUID          | 16 bytes  |  UUID of the slate. Need to identify transaction

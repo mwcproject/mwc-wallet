@@ -12,7 +12,15 @@ jobs:
       - uses: actions/checkout@v3
       - name: Test ${{ matrix.job_args }}
         working-directory: ${{ matrix.job_args }}
-        run: cargo test --release
+        run: |
+          case "${{ matrix.job_args }}" in
+            config)
+              cargo test --release
+              ;;
+            *)
+              cargo test --release --features "swaps test-support"
+              ;;
+          esac
 
   macos-tests:
     name: macOS Tests
@@ -21,7 +29,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v3
       - name: Tests
-        run: cargo test --release --all
+        run: cargo test --release --all --features "swaps test-support"
 
   windows-tests:
     name: Windows Tests
@@ -30,4 +38,18 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v3
       - name: Tests
-        run: cargo test --release --all
+        run: cargo test --release --all --features "swaps test-support"
+
+  feature-checks:
+    name: Production and Swap Feature Checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Check production defaults
+        run: cargo check --workspace --lib --bins
+      - name: Check production swaps
+        run: cargo check --workspace --lib --bins --features swaps
+      - name: Test swap output creation and recovery
+        run: cargo test -p mwc_wallet_libwallet --lib --features swaps internal::output_proof::tests
+      - name: Check swap test targets
+        run: cargo check --workspace --all-targets --features "swaps test-support"

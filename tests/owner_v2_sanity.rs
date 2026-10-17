@@ -12,19 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#[macro_use]
-extern crate clap;
-
-#[macro_use]
-extern crate log;
-
-extern crate mwc_wallet;
+#![cfg(feature = "test-support")]
 
 use mwc_wallet_impls::test_framework::{self, LocalWalletClient, WalletProxy};
+use mwc_wallet_util::mwc_crates::clap::{App, YamlLoader};
 use std::ops::DerefMut;
 use std::sync::Arc;
-
-use clap::App;
 use std::thread;
 use std::time::Duration;
 
@@ -37,10 +30,11 @@ mod common;
 use common::RetrieveSummaryInfoResp;
 use common::{
 	clean_output_dir, execute_command, initial_setup_wallet, instantiate_wallet, send_request,
-	setup,
+	setup, setup_global_chain_type, wait_for_listener,
 };
+use mwc_wallet_util::Mutex;
 use mwc_wallet_util::mwc_core::core::Transaction;
-use std::sync::Mutex;
+use mwc_wallet_util::mwc_crates;
 
 #[test]
 fn owner_v2_sanity() -> Result<(), mwc_wallet_controller::Error> {
@@ -53,11 +47,15 @@ fn owner_v2_sanity() -> Result<(), mwc_wallet_controller::Error> {
 	let test_dir = "target/test_output/owner_v2_sanity";
 	setup(test_dir);
 	global::set_local_chain_type(global::ChainTypes::AutomatedTesting);
-	// Running update thread, we can't set local to it...
-	global::init_global_chain_type(0, global::ChainTypes::AutomatedTesting);
+	// Running update thread, we can't set local to it, so the global
+	// context (chain type, nrd, accept fee base) must be initialized.
+	setup_global_chain_type();
 
 	let tx_pool: Arc<Mutex<Vec<Transaction>>> = Arc::new(Mutex::new(Vec::new()));
-	setup_proxy!(test_dir, tx_pool, chain, wallet1, client1, mask1, wallet2, client2, _mask2);
+	setup_proxy!(
+		test_dir, tx_pool, chain, proxy_handle, wallet1, client1, mask1, wallet2, client2,
+		_mask2
+	);
 
 	// add some blocks manually
 	let bh = 10u64;
@@ -67,10 +65,7 @@ fn owner_v2_sanity() -> Result<(), mwc_wallet_controller::Error> {
 		mask1,
 		bh as usize,
 		false,
-		tx_pool
-			.lock()
-			.unwrap_or_else(|e| e.into_inner())
-			.deref_mut(),
+		tx_pool.lock().deref_mut(),
 	);
 	let client1_2 = client1.clone();
 
@@ -79,8 +74,8 @@ fn owner_v2_sanity() -> Result<(), mwc_wallet_controller::Error> {
 	// Set running
 	thread::spawn(move || {
 		global::set_local_chain_type(global::ChainTypes::AutomatedTesting);
-		let yml = load_yaml!("../src/bin/mwc-wallet.yml");
-		let app = App::from_yaml(yml);
+		let yml = YamlLoader::load_from_str(include_str!("../src/bin/mwc-wallet.yml")).unwrap();
+		let app = App::from_yaml(&yml[0]);
 		execute_command(&app, test_dir, "wallet1", &client1, arg_vec.clone()).unwrap();
 	});
 
@@ -97,12 +92,15 @@ fn owner_v2_sanity() -> Result<(), mwc_wallet_controller::Error> {
 	// Set owner listener running
 	thread::spawn(move || {
 		global::set_local_chain_type(global::ChainTypes::AutomatedTesting);
-		let yml = load_yaml!("../src/bin/mwc-wallet.yml");
-		let app = App::from_yaml(yml);
+		let yml = YamlLoader::load_from_str(include_str!("../src/bin/mwc-wallet.yml")).unwrap();
+		let app = App::from_yaml(&yml[0]);
 		execute_command(&app, test_dir, "wallet2", &client2, arg_vec.clone()).unwrap();
 	});
 
-	thread::sleep(Duration::from_millis(1000));
+	wait_for_listener("127.0.0.1:3420", Duration::from_secs(10))
+		.expect("owner API listener did not start");
+	wait_for_listener("127.0.0.1:23415", Duration::from_secs(10))
+		.expect("foreign API listener did not start");
 
 	// 1) Send simple retrieve_info request to owner listener
 	let req = include_str!("data/v2_reqs/retrieve_info.req.json");
@@ -122,12 +120,14 @@ fn owner_v2_sanity() -> Result<(), mwc_wallet_controller::Error> {
 		"http://127.0.0.1:23415",
 		"2", // mwc: 10    Only one block reward is spendable
 	];
-	let yml = load_yaml!("../src/bin/mwc-wallet.yml");
-	let app = App::from_yaml(yml);
+	let yml = YamlLoader::load_from_str(include_str!("../src/bin/mwc-wallet.yml")).unwrap();
+	let app = App::from_yaml(&yml[0]);
 	let res = execute_command(&app, test_dir, "wallet1", &client1_2, arg_vec.clone());
 	println!("Response 2: {:?}", res);
 	assert!(res.is_ok());
 
+	proxy_handle.stop()?;
+	drop(chain);
 	clean_output_dir(test_dir);
 	Ok(())
 }
