@@ -1593,14 +1593,16 @@ pub fn run_doctest_foreign(
 	}
 
 	let mut api_foreign = match init_invoice_tx {
-		false => Foreign::new(wallet1, mask1, Some(test_check_middleware)),
-		true => Foreign::new(wallet2, mask2, Some(test_check_middleware)),
+		false => Foreign::new(wallet1.clone(), mask1, Some(test_check_middleware)),
+		true => Foreign::new(wallet2.clone(), mask2, Some(test_check_middleware)),
 	};
 	api_foreign.doctest_mode = true;
 	let foreign_api = &api_foreign as &dyn ForeignRpc;
 	let res = foreign_api.handle_request(request).as_option();
 	proxy_handle.stop().map_err(|e| e.to_string())?;
 	drop(api_foreign);
+	drop(wallet1);
+	drop(wallet2);
 	drop(chain);
 	fs::remove_dir_all(test_dir)
 		.map_err(|e| format!("Unable to remove doctest directory {}: {}", test_dir, e))?;

@@ -428,6 +428,10 @@ impl WalletSeed {
 				e
 			))
 		})?;
+		// Windows does not permit the migration's atomic rename while the
+		// destination is still open. Release the read handle as soon as its
+		// contents have been loaded.
+		drop(file);
 		let enc_seed: EncryptedWalletSeed = serde_json::from_str(&buffer).map_err(|e| {
 			Error::Format(format!(
 				"Json to EncryptedWalletSeed conversion error, {}",

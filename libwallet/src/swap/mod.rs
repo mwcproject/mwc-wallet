@@ -4680,6 +4680,19 @@ mod tests {
 	#[serial]
 	// The primary goal for this test is to cover all code path for edge cases
 	fn test_swap_fsm() {
+		// This test has a large debug-build stack frame. In particular, the
+		// default Windows test-thread stack is too small before the first
+		// assertion can run.
+		std::thread::Builder::new()
+			.name("swap-fsm-test".to_string())
+			.stack_size(8 * 1024 * 1024)
+			.spawn(test_swap_fsm_inner)
+			.expect("failed to spawn swap FSM test thread")
+			.join()
+			.expect("swap FSM test thread panicked");
+	}
+
+	fn test_swap_fsm_inner() {
 		activate_test_response(true);
 		set_test_mode(true);
 		let mut secp = Secp256k1::with_caps(ContextFlag::Commit).expect("test secp context");

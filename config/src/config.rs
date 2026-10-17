@@ -1327,14 +1327,14 @@ fn update_paths_builds_data_dir_inside_wallet_root() {
 	let mut config = GlobalWalletConfig::for_chain(&global::ChainTypes::Mainnet);
 	config.update_paths(&home, Some("wallet1")).unwrap();
 	assert_eq!(
-		config.members.wallet.data_file_dir,
-		"/home/user/.mwc/main/wallet1"
+		PathBuf::from(&config.members.wallet.data_file_dir),
+		home.join("wallet1")
 	);
 
 	let mut config = GlobalWalletConfig::for_chain(&global::ChainTypes::Mainnet);
 	config.update_paths(&home, None).unwrap();
 	assert_eq!(
-		config.members.wallet.data_file_dir,
-		"/home/user/.mwc/main/wallet_data"
+		PathBuf::from(&config.members.wallet.data_file_dir),
+		home.join(MWC_WALLET_DIR)
 	);
 }
