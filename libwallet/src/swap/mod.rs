@@ -155,6 +155,7 @@ mod tests {
 	use mwc_wallet_util::mwc_crates::secp::key::{PublicKey, SecretKey};
 	use mwc_wallet_util::mwc_crates::secp::pedersen::{Commitment, RangeProof};
 	use mwc_wallet_util::mwc_crates::secp::Secp256k1;
+	#[cfg(not(target_os = "windows"))]
 	use mwc_wallet_util::mwc_crates::serde::{de::DeserializeOwned, Serialize};
 	use mwc_wallet_util::mwc_crates::uuid::Uuid;
 	#[cfg(not(target_os = "windows"))]
