@@ -547,6 +547,10 @@ fn owner_v3_lifecycle() -> Result<(), mwc_wallet_controller::Error> {
 	)?;
 	println!("RES 22: {:?}", res);
 	assert!(res.is_err());
+	assert!(
+		!PathBuf::from(format!("{}/wallet1/wallet_data/db", test_dir)).exists(),
+		"opening a deleted wallet must not initialize its database"
+	);
 
 	// 23) Try to create a wallet with an invalid mnemonic
 	let req = include_str!("data/v3_reqs/create_wallet_invalid_mn.req.json");
@@ -570,7 +574,11 @@ fn owner_v3_lifecycle() -> Result<(), mwc_wallet_controller::Error> {
 		&shared_key,
 	)?;
 	println!("RES 24: {:?}", res);
-	assert!(res.is_ok());
+	assert!(
+		res.is_ok(),
+		"creating wallet from mnemonic failed: {:?}",
+		res
+	);
 
 	proxy_handle.stop()?;
 	drop(wallet_proxy_a);

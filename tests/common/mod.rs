@@ -25,12 +25,12 @@ use mwc_wallet_util::mwc_crates::serde_json::{Value, json};
 use mwc_wallet_util::mwc_crates::url::Url;
 use mwc_wallet_util::mwc_crates::zeroize::Zeroizing;
 use mwc_wallet_util::mwc_crates::{easy_jsonrpc_mwc, remove_dir_all};
-use mwc_wallet_util::mwc_util::ZeroingString;
+use mwc_wallet_util::mwc_util::{ZeroingString, file};
+use std::env;
 use std::io;
 use std::net::{SocketAddr, TcpStream};
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::{env, fs};
 
 use mwc_wallet_api::{EncryptedRequest, EncryptedResponse, JsonId};
 use mwc_wallet_config::{GlobalWalletConfig, MWC_WALLET_DIR, WalletConfig};
@@ -198,7 +198,9 @@ pub fn config_command_wallet(
 	});
 	current_dir.push(dir_name);
 	current_dir.push(wallet_name);
-	let _ = fs::create_dir_all(current_dir.clone());
+	// Create the wallet root securely even with a group-writable Unix umask.
+	// The shared helper also handles platforms without Unix permission bits.
+	file::ensure_owner_only_dir_all(&current_dir).expect("Error creating wallet directory");
 	let mut config_file_name = current_dir.clone();
 	config_file_name.push("mwc-wallet.toml");
 	if config_file_name.exists() {

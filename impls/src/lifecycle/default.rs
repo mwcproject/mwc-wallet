@@ -311,6 +311,15 @@ where
 		let data_dir_name = data_dir_name.to_str().ok_or(Error::GenericError(
 			"Unable convert data_dir_name into string".into(),
 		))?;
+		// Validate the seed and secure its directory before the backend can create
+		// directories using the process umask. A failed open must not leave a
+		// group-writable wallet directory that prevents subsequent creation.
+		let wallet_seed = WalletSeed::from_file(&data_dir_name, password).map_err(|e| {
+			Error::Lifecycle(format!(
+				"Error opening wallet (is password correct?), {}",
+				e
+			))
+		})?;
 		let mut wallet: LMDBBackend<'a, C, K> =
 			match LMDBBackend::new(self.context_id, &data_dir_name, self.node_client.clone()) {
 				Err(e) => {
@@ -319,12 +328,6 @@ where
 				}
 				Ok(d) => d,
 			};
-		let wallet_seed = WalletSeed::from_file(&data_dir_name, password).map_err(|e| {
-			Error::Lifecycle(format!(
-				"Error opening wallet (is password correct?), {}",
-				e
-			))
-		})?;
 
 		#[cfg(feature = "swaps")]
 		let ethereum_wallet = {
