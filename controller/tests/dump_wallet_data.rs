@@ -21,6 +21,7 @@ use mwc_wallet_libwallet::Error;
 use mwc_wallet_util::mwc_core::core::Transaction;
 use mwc_wallet_util::mwc_crates::secp::key::SecretKey;
 use mwc_wallet_util::mwc_crates::secp::{ContextFlag, Secp256k1};
+use mwc_wallet_util::mwc_util::file;
 use mwc_wallet_util::Mutex;
 use std::fs;
 use std::sync::Arc;
@@ -52,7 +53,8 @@ fn dump_wallet_data_mask_test_impl(test_dir: &str) -> Result<(), Error> {
 	let dump_path = format!("{}/wallet-dump.txt", test_dir);
 	let new_dump_path = format!("{}/new-wallet-dump.txt", test_dir);
 	let sentinel = b"existing file contents";
-	fs::write(&dump_path, sentinel)?;
+	// The authenticated dump requires a private destination regardless of umask.
+	file::write_new_owner_only_file(&dump_path, sentinel)?;
 
 	let mut owner_api = mwc_wallet_api::Owner::new(0, wallet, None)?;
 

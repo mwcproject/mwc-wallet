@@ -391,9 +391,16 @@ where
 {
 	let args = app.clone().get_matches_from(arg_vec);
 	let _ = get_wallet_subcommand(test_dir, wallet_name, args.clone());
-	let config =
-		mwc_wallet_config::initial_setup_wallet(&ChainTypes::AutomatedTesting, None, None, true)
-			.unwrap();
+	// Keep the unopened wallet's initial configuration inside the test tree.
+	// Using the default home directory makes this test depend on the user's
+	// configuration and permissions, and can create API secrets outside it.
+	let config = mwc_wallet_config::initial_setup_wallet(
+		&ChainTypes::AutomatedTesting,
+		Some(env::current_dir().unwrap().join(test_dir).join("auto")),
+		None,
+		true,
+	)
+	.unwrap();
 	let mut wallet_config = config.clone().members.wallet;
 	wallet_config.chain_type = None;
 	wallet_config.api_secret_path = None;

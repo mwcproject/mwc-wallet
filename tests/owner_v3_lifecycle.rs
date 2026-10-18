@@ -160,7 +160,7 @@ fn owner_v3_lifecycle() -> Result<(), mwc_wallet_controller::Error> {
 	let value: ECDHPubkey = res.unwrap();
 	let shared_key = derive_ecdh_key(sec_key_str, &value.ecdh_pubkey, &secp);
 
-	// 2) get the top level directory, should default to ~/.mwc/auto
+	// 2) get the initial top level directory, isolated under the test tree
 	let req = include_str!("data/v3_reqs/get_top_level.req.json");
 	let res = send_request_enc::<String>(
 		&JsonId::StrId(String::from("1")),
@@ -171,7 +171,10 @@ fn owner_v3_lifecycle() -> Result<(), mwc_wallet_controller::Error> {
 	)?;
 	println!("RES 2: {:?}", res);
 	assert!(res.is_ok());
-	assert!(res.unwrap().contains("auto"));
+	assert_eq!(
+		PathBuf::from(res.unwrap()),
+		std::env::current_dir().unwrap().join(test_dir).join("auto")
+	);
 
 	// 3) now set the top level directory to our test wallet dir
 	let req = serde_json::json!({
