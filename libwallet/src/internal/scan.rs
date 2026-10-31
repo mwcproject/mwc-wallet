@@ -1575,6 +1575,38 @@ where
 	C: NodeClient + 'a,
 	K: Keychain + 'a,
 {
+	let chain_outputs_by_index: HashMap<_, _> = chain_outs
+		.iter()
+		.map(|output| {
+			(
+				output.mmr_index,
+				(&output.key_id, util::to_hex(&output.commit.0)),
+			)
+		})
+		.collect();
+
+	// Output records are keyed by (key_id, MMR index). A stale fee variant can
+	// occupy the exact slot that restore_missing_output is about to repair.
+	// Remove it from this scan's snapshot, or the final save/cleanup pass can
+	// overwrite/delete the recovered output again. The chain proof supplies
+	// the replacement; pending records and other positions remain independent.
+	outputs.retain(|commit, wallet_output| {
+		let output = &wallet_output.output;
+		if let Some((key_id, chain_commit)) = output
+			.mmr_index
+			.and_then(|index| chain_outputs_by_index.get(&index))
+		{
+			if &output.key_id == *key_id && commit != chain_commit {
+				warn!(
+					"Replacing stale output {} with chain output {} at key {} and MMR index {:?}",
+					commit, chain_commit, output.key_id, output.mmr_index
+				);
+				return false;
+			}
+		}
+		true
+	});
+
 	let mut commit2transactionuuid: HashMap<String, TxUuidPlus> = HashMap::new();
 	for tx in transaction.values() {
 		for out in &tx.output_commit {
