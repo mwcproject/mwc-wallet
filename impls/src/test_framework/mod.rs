@@ -44,13 +44,12 @@ pub use self::{testclient::LocalWalletClient, testclient::WalletProxy};
 
 /// Get an output from the chain locally and present it back as an API output
 fn get_output_local(chain: &chain::Chain, commit: pedersen::Commitment) -> Option<api::Output> {
-	if chain.get_unspent(commit).unwrap().is_some() {
-		let block_height = chain.get_header_for_output(commit).unwrap().height;
-		let output_pos = chain.get_output_pos(&commit).unwrap_or(0);
-		Some(api::Output::new(&commit, block_height, output_pos))
-	} else {
-		None
-	}
+	// Match OutputPrintable: the API uses one-based positions. get_output_pos()
+	// returns the internal zero-based offset and cannot be used as an API index.
+	chain
+		.get_unspent(commit)
+		.unwrap()
+		.map(|(_, pos)| api::Output::new(&commit, pos.height, pos.pos))
 }
 
 /// Get a kernel from the chain locally

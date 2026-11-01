@@ -553,9 +553,11 @@ where
 
 #[derive(Debug)]
 struct WalletOutputInfo {
-	updated: bool,  // true if data was updated, we need push it into DB
-	at_chain: bool, // true if this Output was founf at the Chain
+	updated: bool,          // true if data was updated, we need push it into DB
+	at_chain: Option<bool>, // None until the chain has been checked for this commitment
 	output: OutputData,
+	// Keep every original DB key, including records hidden by a duplicate commitment.
+	stored_outputs: Vec<OutputData>,
 	commit: String,                      // commit as a string. output.output value
 	tx_input_uuid: HashSet<TxUuidPlus>,  // transactions where this commit is input
 	tx_output_uuid: HashSet<TxUuidPlus>, // transactions where this commit is output
@@ -566,7 +568,8 @@ impl WalletOutputInfo {
 		let commit = output.commit.clone().unwrap_or_else(|| String::new());
 		WalletOutputInfo {
 			updated: false,
-			at_chain: false,
+			at_chain: None,
+			stored_outputs: vec![output.clone()],
 			output,
 			commit,
 			tx_input_uuid: HashSet::new(),
@@ -689,7 +692,6 @@ fn get_wallet_and_chain_data<'a, T: ?Sized, C, K>(
 		HashMap<String, WalletOutputInfo>, // Outputs. Key: Commit
 		Vec<OutputResult>,                 // Chain outputs
 		HashMap<TxUuidPlus, WalletTxInfo>, // Slate based Transaction. Key: tx uuid
-		String,                            // Commit of the last output in the sequence
 	),
 	Error,
 >
@@ -710,7 +712,6 @@ where
 	// Collecting Outputs with known commits only.
 	// Really hard to say why Output can be without commit. Probably same non complete or failed data.
 	// In any case we can't use it for recovering.
-	let mut last_output = String::new();
 
 	let context_id = wallet.get_context_id();
 
@@ -721,10 +722,18 @@ where
 	{
 		// First, reading data from the wallet
 		for w_out in wallet.iter()?.filter(|w| w.commit.is_some()) {
-			last_output = w_out.commit.clone().ok_or(Error::GenericError(
+			let commit = w_out.commit.clone().ok_or(Error::GenericError(
 				"get_wallet_and_chain_data internal error, w_out.commit is empty".into(),
 			))?;
-			outputs.insert(last_output.clone(), WalletOutputInfo::new(w_out.clone()));
+			if let Some(existing) = outputs.get_mut(&commit) {
+				existing.stored_outputs.push(w_out.clone());
+				// Prefer the indexed copy until chain data identifies the live position.
+				if existing.output.mmr_index.is_none() && w_out.mmr_index.is_some() {
+					existing.output = w_out.clone();
+				}
+			} else {
+				outputs.insert(commit, WalletOutputInfo::new(w_out.clone()));
+			}
 
 			if w_out.is_spendable() {
 				spendable_outputs += 1;
@@ -1173,21 +1182,24 @@ where
 
 			// Updating commits data with that
 			// Key: commt, Value Heihgt
-			let node_commits: HashMap<String, u64> = commits
+			let node_commits: HashMap<String, (u64, u64)> = commits
 				.values()
-				.map(|(commit, height, _mmr)| (commit.clone(), height.clone()))
+				.map(|(commit, height, mmr)| (commit.clone(), (*height, *mmr)))
 				.collect();
 
 			for out in outputs
 				.values_mut()
 				.filter(|out| out.output.is_spendable() && out.output.commit.is_some())
 			{
-				if let Some(height) = node_commits.get(&out.commit) {
-					if out.output.height != *height {
+				if let Some((height, mmr_index)) = node_commits.get(&out.commit) {
+					out.at_chain = Some(true);
+					if out.output.height != *height || out.output.mmr_index != Some(*mmr_index) {
 						out.output.height = *height;
+						out.output.mmr_index = Some(*mmr_index);
 						out.updated = true;
 					}
 				} else {
+					out.at_chain = Some(false);
 					// Commit is gone. Probably it is spent
 					// Initial state 'Unspent' is possible if user playing with cancellations. So just ignore it
 					// Next workflow will take case about the transaction state as well as Spent/Unconfirmed uncertainty
@@ -1233,16 +1245,65 @@ where
 			let active_commits: HashMap<pedersen::Commitment, (String, u64, u64)> =
 				client.get_outputs_from_node(&wallet_outputs_to_check)?;
 
-			for (active_commit, _, _) in active_commits.values() {
+			for (active_commit, height, mmr_index) in active_commits.values() {
 				let output = outputs.get_mut(active_commit).ok_or(Error::GenericError(
 					"Node return unknown commit value".to_string(),
 				))?;
-				if output.output.status != OutputStatus::Locked {
+				output.at_chain = Some(true);
+				if output.output.status != OutputStatus::Locked
+					|| output.output.height != *height
+					|| output.output.mmr_index != Some(*mmr_index)
+				{
+					output.output.height = *height;
+					output.output.mmr_index = Some(*mmr_index);
 					output.output.status = OutputStatus::Locked;
 					output.updated = true;
 				}
 			}
 		}
+		// Null-index candidates and duplicates outside the scan range still need
+		// a definitive lookup before cleanup. Node errors abort the scan.
+		let scanned_commits: HashSet<_> = chain_outs
+			.iter()
+			.chain(self_spend_candidate_list.iter())
+			.map(|out| util::to_hex(&out.commit.0))
+			.collect();
+		let to_check: Vec<_> = outputs
+			.values()
+			.filter(|out| !scanned_commits.contains(&out.commit) && out.at_chain.is_none())
+			.filter(|out| {
+				out.stored_outputs.len() > 1
+					|| (out.output.mmr_index.is_none()
+						&& (out.output.is_spendable()
+							|| (out.output.is_coinbase && out.output.height <= end_height)))
+			})
+			.map(|out| {
+				util::from_hex(&out.commit)
+					.map(pedersen::Commitment::from_vec)
+					.map_err(|e| Error::GenericError(format!("Invalid output commitment: {}", e)))
+			})
+			.collect::<Result<_, _>>()?;
+		let client = wallet.w2n_client().clone();
+		for chunk in to_check.chunks(100) {
+			let live = client.get_outputs_from_node(&chunk.to_vec())?;
+			for commit in chunk {
+				if let Some(out) = outputs.get_mut(&util::to_hex(&commit.0)) {
+					out.at_chain = Some(live.contains_key(commit));
+					if let Some((_, height, index)) = live.get(commit) {
+						out.output.height = *height;
+						out.output.mmr_index = Some(*index);
+						if matches!(
+							out.output.status,
+							OutputStatus::Unconfirmed | OutputStatus::Reverted
+						) {
+							out.output.status = OutputStatus::Unspent;
+						}
+						out.updated = true;
+					}
+				}
+			}
+		}
+
 		//convert the commitment to string in self_spend list
 
 		for output in self_spend_candidate_list {
@@ -1272,7 +1333,7 @@ where
 		)?;
 	}
 
-	Ok((outputs, chain_outs, transactions, last_output))
+	Ok((outputs, chain_outs, transactions))
 }
 
 /// Scan outputs with a given rewind hash view wallet.
@@ -1360,7 +1421,7 @@ where
 
 	// Collect the data form the chain and from the wallet
 	let replay_config = get_replay_config(wallet.get_context_id());
-	let (mut outputs, chain_outs, mut transactions, last_output) = get_wallet_and_chain_data(
+	let (mut outputs, chain_outs, mut transactions) = get_wallet_and_chain_data(
 		wallet,
 		keychain_mask.clone(),
 		start_height,
@@ -1396,7 +1457,7 @@ where
 
 	// Validated outputs states against the chain
 	let mut found_parents: HashMap<Identifier, u32> = HashMap::new();
-	let outputs2del = validate_outputs(
+	validate_outputs(
 		wallet,
 		keychain_mask.clone(),
 		start_height,
@@ -1446,10 +1507,9 @@ where
 		store_transactions_outputs(
 			wallet,
 			keychain_mask.clone(),
-			&outputs2del,
+			&chain_outs,
 			&mut outputs,
 			tip_height,
-			&last_output,
 			&transactions,
 			status_send_channel,
 			archive_height,
@@ -1556,10 +1616,7 @@ where
 	Ok(())
 }
 
-// Validated outputs states against the chain
-// Returns Output that need to be deleted. It is possible because
-// We might find that Key Id is broken and Outputs are stored by this key_id.
-// That is why we need to delete prev copy.
+// Validate output states and metadata against the chain.
 fn validate_outputs<'a, T: ?Sized, C, K>(
 	wallet: &mut T,
 	keychain_mask: Option<&SecretKey>,
@@ -1569,52 +1626,18 @@ fn validate_outputs<'a, T: ?Sized, C, K>(
 	transaction: &HashMap<TxUuidPlus, WalletTxInfo>,
 	status_send_channel: &Option<Sender<StatusMessage>>,
 	found_parents: &mut HashMap<Identifier, u32>,
-) -> Result<Vec<OutputData>, Error>
+) -> Result<(), Error>
 where
 	T: WalletBackend<'a, C, K>,
 	C: NodeClient + 'a,
 	K: Keychain + 'a,
 {
-	let chain_outputs_by_index: HashMap<_, _> = chain_outs
-		.iter()
-		.map(|output| {
-			(
-				output.mmr_index,
-				(&output.key_id, util::to_hex(&output.commit.0)),
-			)
-		})
-		.collect();
-
-	// Output records are keyed by (key_id, MMR index). A stale fee variant can
-	// occupy the exact slot that restore_missing_output is about to repair.
-	// Remove it from this scan's snapshot, or the final save/cleanup pass can
-	// overwrite/delete the recovered output again. The chain proof supplies
-	// the replacement; pending records and other positions remain independent.
-	outputs.retain(|commit, wallet_output| {
-		let output = &wallet_output.output;
-		if let Some((key_id, chain_commit)) = output
-			.mmr_index
-			.and_then(|index| chain_outputs_by_index.get(&index))
-		{
-			if &output.key_id == *key_id && commit != chain_commit {
-				warn!(
-					"Replacing stale output {} with chain output {} at key {} and MMR index {:?}",
-					commit, chain_commit, output.key_id, output.mmr_index
-				);
-				return false;
-			}
-		}
-		true
-	});
-
 	let mut commit2transactionuuid: HashMap<String, TxUuidPlus> = HashMap::new();
 	for tx in transaction.values() {
 		for out in &tx.output_commit {
 			commit2transactionuuid.insert(out.clone(), tx.tx_uuid.clone());
 		}
 	}
-
-	let mut outputs2del: Vec<OutputData> = Vec::new();
 
 	// Update wallet outputs with found at the chain outputs
 	// Check how sync they are
@@ -1625,12 +1648,11 @@ where
 			Some(w_out) => {
 				// w_out - is wallet outputs that match chain output ch_out.
 				// It is mean that w_out does exist at the chain (confirmed) and doing well
-				w_out.at_chain = true;
+				w_out.at_chain = Some(true);
 
 				// Sync up the data. ch_out is source of truth
 				if !ch_out.params_equal_to(&w_out.output) {
 					// Some parameters can be updated. ch_out is source if truth
-					outputs2del.push(w_out.output.clone());
 					ch_out.params_push_to(&mut w_out.output);
 					w_out.updated = true;
 				}
@@ -1689,7 +1711,10 @@ where
 	// Process not found at the chain but expected outputs.
 	// It is a normal case when send transaction was finalized
 	for w_out in outputs.values_mut() {
-		if w_out.output.height >= start_height && !w_out.at_chain {
+		if w_out.at_chain != Some(true)
+			&& (w_out.output.height >= start_height || w_out.at_chain == Some(false))
+		{
+			w_out.at_chain = Some(false);
 			match w_out.output.status {
 				OutputStatus::Spent => (), // Spent not expected to be found at the chain
 				OutputStatus::Unconfirmed | OutputStatus::Reverted => (), // Unconfirmed/Reverted are not expected as well
@@ -1719,7 +1744,7 @@ where
 		}
 	}
 
-	Ok(outputs2del)
+	Ok(())
 }
 
 // Processing slate based transactions. Just need to update 'confirmed flag' and height
@@ -1951,19 +1976,24 @@ fn validate_outputs_ownership<'a, T: ?Sized, C, K>(
 			OutputStatus::Locked => {
 				if in_active == 0 {
 					// it is not Locked, it must be active output
+					let unlocked = if w_out.output.mmr_index.is_some() {
+						OutputStatus::Unspent
+					} else {
+						OutputStatus::Unconfirmed
+					};
 					if let Some(ref s) = status_send_channel {
 						let _ = match &w_out.output.commit {
 							Some(commit) => s.send(StatusMessage::Warning(format!(
-								"Changing status for output {} from Locked to Unspent",
-								commit
+								"Changing status for output {} from Locked to {:?}",
+								commit, unlocked
 							))),
 							None => s.send(StatusMessage::Warning(format!(
-								"Changing status for output at height {} from Locked to Unspent",
-								w_out.output.height
+								"Changing status for output at height {} from Locked to {:?}",
+								w_out.output.height, unlocked
 							))),
 						};
 					}
-					w_out.output.status = OutputStatus::Unspent;
+					w_out.output.status = unlocked;
 					w_out.updated = true;
 				}
 				if out_active == 0 && out_cancelled_uuid.len() > 0 {
@@ -2040,13 +2070,24 @@ fn delete_unconfirmed(
 	for w_out in outputs.values_mut() {
 		match w_out.output.status {
 			OutputStatus::Locked => {
+				let unlocked = if w_out.output.mmr_index.is_some() {
+					OutputStatus::Unspent
+				} else {
+					OutputStatus::Unconfirmed
+				};
 				if let Some(ref s) = status_send_channel {
 					let _ = match &w_out.output.commit {
-						Some(commit) => s.send(StatusMessage::Warning(format!("Changing status for output {} from Locked to Unspent", commit))),
-						None => s.send(StatusMessage::Warning(format!("Changing status for coin base output at height {} from Locked to Unspent", w_out.output.height))),
+						Some(commit) => s.send(StatusMessage::Warning(format!(
+							"Changing status for output {} from Locked to {:?}",
+							commit, unlocked
+						))),
+						None => s.send(StatusMessage::Warning(format!(
+							"Changing status for coin base output at height {} from Locked to {:?}",
+							w_out.output.height, unlocked
+						))),
 					};
 				}
-				w_out.output.status = OutputStatus::Unspent;
+				w_out.output.status = unlocked;
 				w_out.updated = true;
 				for uuid in &w_out.tx_input_uuid {
 					transaction2cancel.insert(uuid.clone());
@@ -2157,10 +2198,9 @@ fn validate_consistancy(
 fn store_transactions_outputs<'a, T: ?Sized, C, K>(
 	wallet: &mut T,
 	keychain_mask: Option<&SecretKey>,
-	outputs2del: &Vec<OutputData>,
+	chain_outs: &[OutputResult],
 	outputs: &mut HashMap<String, WalletOutputInfo>,
 	tip_height: u64, // tip
-	last_output: &String,
 	transactions: &HashMap<TxUuidPlus, WalletTxInfo>,
 	status_send_channel: &Option<Sender<StatusMessage>>,
 	archive_height: u64,
@@ -2206,19 +2246,99 @@ where
 		}
 	}
 
-	// Need delete first and save after. Delete happens on data update, the DB key be the same
-	for o2d in outputs2del {
-		batch.delete(&o2d.key_id, &o2d.mmr_index)?;
+	// Restored outputs have already been saved. A stale record at the same
+	// physical key must never overwrite or delete that proof-derived replacement.
+	let mut chain_slots: HashMap<_, _> = outputs
+		.values()
+		.filter(|out| out.at_chain == Some(true))
+		.map(|out| {
+			(
+				(out.output.key_id.clone(), out.output.mmr_index),
+				out.commit.clone(),
+			)
+		})
+		.collect();
+	chain_slots.extend(chain_outs.iter().map(|out| {
+		(
+			(out.key_id.clone(), Some(out.mmr_index)),
+			util::to_hex(&out.commit.0),
+		)
+	}));
+	for out in outputs.values() {
+		let current_key = (&out.output.key_id, out.output.mmr_index);
+		for stored in &out.stored_outputs {
+			let key = (stored.key_id.clone(), stored.mmr_index);
+			if chain_slots
+				.get(&key)
+				.is_some_and(|commit| commit != &out.commit)
+				|| (&stored.key_id, stored.mmr_index) == current_key
+			{
+				continue;
+			}
+			if stored.mmr_index.is_none() {
+				// The same commitment now has an indexed record. Drop its old key.
+				batch.delete(&stored.key_id, &stored.mmr_index)?;
+			} else {
+				// Other indexed positions are history, not additional spendable coins.
+				let mut history = stored.clone();
+				history.status = match history.status {
+					OutputStatus::Unspent => OutputStatus::Reverted,
+					OutputStatus::Locked => OutputStatus::Spent,
+					other => other,
+				};
+				if out.at_chain == Some(true) && out.output.mmr_index.is_some() {
+					// A confirmed current position supersedes this copy. Keep its
+					// history outside the active table so it cannot inflate balances.
+					batch.archive_output(&history)?;
+				} else {
+					batch.save(history)?;
+				}
+			}
+		}
+	}
+	// Choose deletions before saving updates: changing an absent coinbase's
+	// status during this scan must not postpone its removal until the next scan.
+	let mut remove = Vec::new();
+	for (commit, out) in outputs.iter() {
+		let key = (out.output.key_id.clone(), out.output.mmr_index);
+		if chain_slots
+			.get(&key)
+			.is_some_and(|chain_commit| chain_commit != commit)
+		{
+			remove.push(commit.clone());
+			continue;
+		}
+		let confirmed_spend = out
+			.tx_input_uuid
+			.iter()
+			.any(|uuid| transactions.get(uuid).is_some_and(|tx| tx.tx_log.confirmed));
+		let expired_coinbase = out.output.is_coinbase
+			&& out.at_chain == Some(false)
+			&& out.output.height <= tip_height
+			&& !confirmed_spend
+			&& (out.output.mmr_index.is_none()
+				|| matches!(
+					out.output.status,
+					OutputStatus::Unconfirmed | OutputStatus::Reverted
+				));
+		if expired_coinbase {
+			warn!(
+				"Deleting expired coinbase {} at height {}",
+				commit, out.output.height
+			);
+			batch.delete(&out.output.key_id, &out.output.mmr_index)?;
+			remove.push(commit.clone());
+		}
+	}
+	for commit in remove {
+		outputs.remove(&commit);
 	}
 
 	// Save Slate Outputs to DB
 	for output in outputs.values() {
 		if output.updated {
 			batch.save(output.output.clone())?;
-		} else if (output.is_orphan_output() && !output.output.is_coinbase) ||
-			// Delete expired mining outputs
-			( output.output.is_coinbase && (output.output.status == OutputStatus::Unconfirmed || output.output.status == OutputStatus::Reverted) && ((output.output.height < tip_height) || (output.commit != *last_output)) )
-		{
+		} else if output.is_orphan_output() && !output.output.is_coinbase {
 			// Unconfirmed without any transactions must be deleted as well
 			if let Some(ref s) = status_send_channel {
 				let _ = s.send(StatusMessage::Warning(format!(

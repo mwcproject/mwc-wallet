@@ -304,6 +304,18 @@ fn revert_reconfirm_impl(test_dir: &'static str) -> Result<(), Error> {
 	let mask1 = mask1_i.as_ref();
 	let mask2 = mask2_i.as_ref();
 
+	// A genuine reorg keeps the missing output active as Reverted. Capture its
+	// original position so reconfirmation can verify the old key is archived.
+	let reverted_output = {
+		wallet_inst!(wallet2, w);
+		let mut outputs = w.iter()?.collect::<Vec<_>>();
+		assert_eq!(outputs.len(), 1);
+		let output = outputs.pop().unwrap();
+		assert_eq!(output.status, mwc_wallet_libwallet::OutputStatus::Reverted);
+		assert!(output.mmr_index.is_some());
+		output
+	};
+
 	// Include the tx into the chain again, the tx should no longer be reverted
 	award_block_to_wallet(&chain, &[tx], wallet1.clone(), mask1)?;
 
@@ -326,6 +338,27 @@ fn revert_reconfirm_impl(test_dir: &'static str) -> Result<(), Error> {
 		assert!(tx.reverted_after.is_none());
 		Ok(())
 	})?;
+
+	// Reconfirmation moves this commitment to a new position. Only that copy
+	// remains active; its old Reverted record is retained exclusively as history.
+	{
+		wallet_inst!(wallet2, w);
+		let outputs = w.iter()?.collect::<Vec<_>>();
+		assert_eq!(outputs.len(), 1);
+		assert_eq!(outputs[0].commit, reverted_output.commit);
+		assert_eq!(outputs[0].value, reverted_output.value);
+		assert_eq!(outputs[0].height, bh);
+		assert_eq!(
+			outputs[0].status,
+			mwc_wallet_libwallet::OutputStatus::Unspent
+		);
+		assert_ne!(outputs[0].mmr_index, reverted_output.mmr_index);
+		assert!(w
+			.get(&reverted_output.key_id, &reverted_output.mmr_index)
+			.is_err());
+		let archived = w.archive_iter()?.collect::<Vec<_>>();
+		assert_eq!(archived, vec![reverted_output]);
+	}
 
 	// let logging finish
 	stopper.store(false, Ordering::Relaxed);
