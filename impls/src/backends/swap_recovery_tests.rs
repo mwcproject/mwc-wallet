@@ -11,7 +11,7 @@ use mwc_wallet_libwallet::swap::fsm::{
 	state::{Input, State, StateId},
 };
 use mwc_wallet_libwallet::swap::owner_swap::process_seller_lock_for_test;
-use mwc_wallet_libwallet::swap::types::SwapTransactionsConfirmations;
+use mwc_wallet_libwallet::swap::types::{RoleContext, SwapTransactionsConfirmations};
 use mwc_wallet_libwallet::swap::{Context, Error, Swap, swap};
 use mwc_wallet_libwallet::transaction_preflight::{MempoolAcceptRequest, MempoolAcceptResponse};
 use mwc_wallet_libwallet::{OutputData, OutputStatus, TxLogEntryType, WalletBackend};
@@ -37,7 +37,9 @@ struct Fixture {
 }
 
 impl Fixture {
-	fn new() -> Self {
+	// Note, normally with_mmr_indices value is true.
+	//  false is used only for testing of edge cases that affect commit status on cancellation or revert.
+	fn new(with_mmr_indices: bool) -> Self {
 		let directory = TestWalletDir::new().unwrap();
 		let mut wallet = test_wallet(&directory).unwrap();
 		global::set_local_chain_type(global::ChainTypes::Floonet);
@@ -49,7 +51,7 @@ impl Fixture {
 		wallet
 			.set_keychain(&secp, Box::new(keychain), false, false)
 			.unwrap();
-		let context: Context = serde_json::from_str(include_str!(
+		let mut context: Context = serde_json::from_str(include_str!(
 			"../../../libwallet/swap_test/context_sell.json"
 		))
 		.unwrap();
@@ -60,8 +62,13 @@ impl Fixture {
 		swap.state = StateId::SellerPostingLockMwcSlate;
 		swap.posted_lock = None;
 		swap::set_testing_cur_time(swap.get_time_start_lock().unwrap() - 1);
-		let seller = context.unwrap_seller().unwrap();
-		for input in &seller.inputs {
+		let RoleContext::Seller(seller) = &mut context.role_context else {
+			panic!("seller test context changed role");
+		};
+		// Confirmed inputs need the same PMMR indices in the swap context and DB.
+		// Leave them absent only when testing legacy null-index records.
+		for (mmr_index, input) in (1..).zip(&mut seller.inputs) {
+			input.mmr_index = with_mmr_indices.then_some(mmr_index);
 			let commit = wallet
 				.calc_commit(&secp, None, input.amount, &input.key_id)
 				.unwrap();
@@ -131,7 +138,7 @@ impl Drop for Fixture {
 #[test]
 #[serial]
 fn swap_lock_deadline_after_reservation_releases_wallet_inputs() {
-	let mut f = Fixture::new();
+	let mut f = Fixture::new(true);
 	let mut state = SellerPostingLockMwcSlate::new(0, Arc::new(f.wallet.w2n_client().clone()));
 	let response = state
 		.process(
@@ -182,7 +189,7 @@ fn swap_lock_deadline_after_reservation_releases_wallet_inputs() {
 #[test]
 #[serial]
 fn swap_lock_persistence_failure_releases_inputs_and_allows_retry() {
-	let mut f = Fixture::new();
+	let mut f = Fixture::new(true);
 	// Let node validation succeed so each attempt reaches the injected save
 	// failure. The backend fixture's HTTP client has no running node.
 	let (requests_tx, requests_rx) = mpsc::channel();
@@ -250,9 +257,38 @@ fn swap_lock_persistence_failure_releases_inputs_and_allows_retry() {
 
 #[test]
 #[serial]
+fn swap_lock_failure_does_not_confirm_inputs_without_mmr_indices() {
+	// Model legacy records marked Unspent without a known chain position.
+	// Reserving and then cancelling them must release the locks without
+	// treating the cancellation itself as proof that the outputs are confirmed.
+	let mut f = Fixture::new(false);
+	let result = process_seller_lock_for_test(
+		&mut f.wallet,
+		&mut f.secp,
+		None,
+		&mut f.swap,
+		&f.context,
+		&f.confirmations,
+		|_, _| Err(Error::Generic("injected failure before publication".into())),
+	);
+	assert!(
+		result
+			.unwrap_err()
+			.to_string()
+			.contains("injected failure before publication")
+	);
+	assert!(f.swap.posted_lock.is_none());
+	f.assert_inputs(OutputStatus::Unconfirmed);
+	let logs: Vec<_> = f.wallet.tx_log_iter().unwrap().collect();
+	assert_eq!(logs.len(), 1);
+	assert_eq!(logs[0].tx_type, TxLogEntryType::TxSentCancelled);
+}
+
+#[test]
+#[serial]
 fn swap_lock_exposure_retains_wallet_inputs_on_failure() {
 	for observed in [false, true] {
-		let mut f = Fixture::new();
+		let mut f = Fixture::new(true);
 		if observed {
 			f.confirmations.mwc_lock_conf = Some(1);
 		} else {

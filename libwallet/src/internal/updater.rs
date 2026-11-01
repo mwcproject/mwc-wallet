@@ -156,11 +156,32 @@ where
 	outputs.sort_by_key(|out| out.n_child);
 
 	// Key: tx_log id;  Value: true if active, false if cancelled
-	let tx_log_is_active: HashMap<u32, bool> = wallet
+	let mut tx_log_is_active: HashMap<u32, bool> = wallet
 		.tx_log_iter()?
 		.filter(|tx_log| tx_log.parent_key_id == *parent_key_id)
 		.map(|tx_log| (tx_log.id, !tx_log.is_cancelled()))
 		.collect();
+
+	// A cancelled transaction can move to the archive after its outputs. Resolve
+	// missing cancellation status there, while keeping live records authoritative.
+	let archived_tx_ids: HashSet<u32> = outputs
+		.iter()
+		.filter(|out| {
+			out.status == OutputStatus::Unconfirmed || out.status == OutputStatus::Reverted
+		})
+		.filter_map(|out| out.tx_log_entry)
+		.filter(|id| !tx_log_is_active.contains_key(id))
+		.collect();
+	if !archived_tx_ids.is_empty() {
+		tx_log_is_active.extend(
+			wallet
+				.tx_log_archive_iter()?
+				.filter(|tx_log| {
+					tx_log.parent_key_id == *parent_key_id && archived_tx_ids.contains(&tx_log.id)
+				})
+				.map(|tx_log| (tx_log.id, !tx_log.is_cancelled())),
+		);
+	}
 
 	let mut res: Vec<OutputCommitMapping> = Vec::new();
 
@@ -713,7 +734,12 @@ where
 			if !owned_by_cancelled_tx {
 				continue;
 			}
-			o.status = OutputStatus::Unspent;
+			// Releasing a lock does not confirm an output that has no chain position.
+			o.status = if o.mmr_index.is_some() {
+				OutputStatus::Unspent
+			} else {
+				OutputStatus::Unconfirmed
+			};
 			batch.save(o)?;
 		} else if o.status == OutputStatus::Reverted {
 			// Commitment history can also match a reverted output currently owned by

@@ -2032,6 +2032,10 @@ where
 mod swap_recovery_tests;
 
 #[cfg(test)]
+#[path = "retrieve_outputs_tests.rs"]
+mod retrieve_outputs_tests;
+
+#[cfg(test)]
 mod tests {
 	use super::*;
 	use crate::node_clients::HTTPNodeClient;
