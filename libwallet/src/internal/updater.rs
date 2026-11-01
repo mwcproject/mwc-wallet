@@ -523,7 +523,12 @@ where
 		//	batch.delete(&o.key_id, &o.mmr_index)?;
 		//}
 		if o.status == OutputStatus::Locked {
-			o.status = OutputStatus::Unspent;
+			// A zero-confirmation input has no chain position to return to.
+			o.status = if o.mmr_index.is_some() {
+				OutputStatus::Unspent
+			} else {
+				OutputStatus::Unconfirmed
+			};
 			batch.save(o)?;
 		} else if o.status == OutputStatus::Reverted {
 			o.status = OutputStatus::Unconfirmed;
