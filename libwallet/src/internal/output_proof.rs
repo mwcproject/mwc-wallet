@@ -60,81 +60,126 @@ where
 	})
 }
 
-/// Rewind a current output proof, accepting the historical depth-3 proof
-/// message whose unused fourth path component contains an anti-replay height.
-/// The returned identifier is always canonical and safe for key derivation.
-pub(crate) fn rewind_with_height<K, B>(
+/// Proof bytes and commitment verified together. Private fields ensure scan
+/// rewind helpers cannot accidentally bypass rangeproof validation.
+pub(crate) struct VerifiedOutputProof {
+	commit: Commitment,
+	proof: RangeProof,
+}
+
+impl VerifiedOutputProof {
+	/// Verify one bounded group before attempting ownership recovery.
+	pub(crate) fn verify_batch(
+		secp: &mut Secp256k1,
+		outputs: Vec<(Commitment, RangeProof)>,
+	) -> Result<Vec<Self>, Error> {
+		if let Some((_, first)) = outputs.first() {
+			let proof_len = first.len()?;
+			if outputs
+				.iter()
+				.all(|(_, proof)| proof.len() == Ok(proof_len))
+			{
+				secp.verify_bullet_proof_multi(
+					outputs.iter().map(|(commit, _)| *commit).collect(),
+					outputs.iter().map(|(_, proof)| *proof).collect(),
+					None,
+				)?;
+			} else {
+				// Preserve the single-proof decoder's accepted formats when a
+				// page contains different proof lengths.
+				for (commit, proof) in &outputs {
+					proof::verify(secp, *commit, *proof, None)
+						.map_err(mwc_wallet_util::mwc_core::libtx::Error::from)?;
+				}
+			}
+		}
+		Ok(outputs
+			.into_iter()
+			.map(|(commit, proof)| Self { commit, proof })
+			.collect())
+	}
+
+	/// Recover the current format, including historical anti-replay height tags.
+	pub(crate) fn rewind_with_height<K: Keychain, B: proof::ProofBuild>(
+		&self,
+		secp: &mut Secp256k1,
+		keychain: &K,
+		builder: &B,
+	) -> Result<Option<(u64, Identifier, SwitchCommitmentType, u32)>, Error> {
+		let (commit, proof) = (self.commit, self.proof);
+		let nonce = builder.rewind_nonce(secp, &commit).map_err(|e| {
+			mwc_wallet_util::mwc_core::libtx::Error::RangeProof(format!(
+				"Unable rewind for commit {:?}, {}",
+				commit, e
+			))
+		})?;
+		let info = match secp.rewind_bullet_proof(commit, nonce, None, None, proof) {
+			Ok(info) => info,
+			Err(secp::Error::InvalidRangeProof) => return Ok(None),
+			Err(e) => return Err(mwc_wallet_util::mwc_core::libtx::Error::from(e).into()),
+		};
+
+		// The rewind nonce is a shareable viewing credential, so a successful
+		// rewind alone does not establish wallet ownership. Treat all decoded
+		// metadata failures as an unowned output rather than aborting the scan.
+		let message = info.message;
+		if message.len() != PROOF_MESSAGE_SIZE {
+			return Ok(None);
+		}
+		let message = message.as_bytes();
+		if message[..2] != [0, 0] {
+			return Ok(None);
+		}
+		let switch = match SwitchCommitmentType::try_from(message[2]) {
+			Ok(switch) => switch,
+			Err(_) => return Ok(None),
+		};
+		let depth = message[PROOF_MESSAGE_IDENTIFIER_START];
+		if depth > 4 {
+			return Ok(None);
+		}
+
+		let encoded_key_id =
+			match Identifier::from_bytes(&message[PROOF_MESSAGE_IDENTIFIER_START..]) {
+				Ok(key_id) => key_id,
+				Err(_) => return Ok(None),
+			};
+		let (key_id, built_height) = if depth == 3 {
+			let (canonical, legacy_height) =
+				match keys::canonicalize_stored_identifier(&encoded_key_id) {
+					Ok(metadata) => metadata,
+					Err(_) => return Ok(None),
+				};
+			(canonical, legacy_height.unwrap_or(0))
+		} else {
+			// Only the historical depth-three format may carry data below its
+			// declared path. All other proof identifiers must already be canonical.
+			if encoded_key_id.to_path().is_err() {
+				return Ok(None);
+			}
+			(encoded_key_id, 0)
+		};
+		// Matching the decoded metadata back to the commitment is the ownership
+		// check. A mismatch is an ordinary unowned output, not a wallet failure.
+		let expected_commit = keychain.commit(secp, info.value, &key_id, switch)?;
+		if commit != expected_commit {
+			return Ok(None);
+		}
+
+		Ok(Some((info.value, key_id, switch, built_height)))
+	}
+}
+
+#[cfg(test)]
+fn rewind_with_height<K: Keychain, B: proof::ProofBuild>(
 	secp: &mut Secp256k1,
 	keychain: &K,
 	builder: &B,
 	commit: Commitment,
 	proof: RangeProof,
-) -> Result<Option<(u64, Identifier, SwitchCommitmentType, u32)>, Error>
-where
-	K: Keychain,
-	B: proof::ProofBuild,
-{
-	proof::verify(secp, commit, proof, None)
-		.map_err(mwc_wallet_util::mwc_core::libtx::Error::from)?;
-	let nonce = builder.rewind_nonce(secp, &commit).map_err(|e| {
-		mwc_wallet_util::mwc_core::libtx::Error::RangeProof(format!(
-			"Unable rewind for commit {:?}, {}",
-			commit, e
-		))
-	})?;
-	let info = match secp.rewind_bullet_proof(commit, nonce, None, None, proof) {
-		Ok(info) => info,
-		Err(secp::Error::InvalidRangeProof) => return Ok(None),
-		Err(e) => return Err(mwc_wallet_util::mwc_core::libtx::Error::from(e).into()),
-	};
-
-	// The rewind nonce is a shareable viewing credential, so a successful
-	// rewind alone does not establish wallet ownership. Treat all decoded
-	// metadata failures as an unowned output rather than aborting the scan.
-	let message = info.message;
-	if message.len() != PROOF_MESSAGE_SIZE {
-		return Ok(None);
-	}
-	let message = message.as_bytes();
-	if message[..2] != [0, 0] {
-		return Ok(None);
-	}
-	let switch = match SwitchCommitmentType::try_from(message[2]) {
-		Ok(switch) => switch,
-		Err(_) => return Ok(None),
-	};
-	let depth = message[PROOF_MESSAGE_IDENTIFIER_START];
-	if depth > 4 {
-		return Ok(None);
-	}
-
-	let encoded_key_id = match Identifier::from_bytes(&message[PROOF_MESSAGE_IDENTIFIER_START..]) {
-		Ok(key_id) => key_id,
-		Err(_) => return Ok(None),
-	};
-	let (key_id, built_height) = if depth == 3 {
-		let (canonical, legacy_height) = match keys::canonicalize_stored_identifier(&encoded_key_id)
-		{
-			Ok(metadata) => metadata,
-			Err(_) => return Ok(None),
-		};
-		(canonical, legacy_height.unwrap_or(0))
-	} else {
-		// Only the historical depth-three format may carry data below its
-		// declared path. All other proof identifiers must already be canonical.
-		if encoded_key_id.to_path().is_err() {
-			return Ok(None);
-		}
-		(encoded_key_id, 0)
-	};
-	// Matching the decoded metadata back to the commitment is the ownership
-	// check. A mismatch is an ordinary unowned output, not a wallet failure.
-	let expected_commit = keychain.commit(secp, info.value, &key_id, switch)?;
-	if commit != expected_commit {
-		return Ok(None);
-	}
-
-	Ok(Some((info.value, key_id, switch, built_height)))
+) -> Result<Option<(u64, Identifier, SwitchCommitmentType, u32)>, Error> {
+	let verified = VerifiedOutputProof::verify_batch(secp, vec![(commit, proof)])?;
+	verified[0].rewind_with_height(secp, keychain, builder)
 }
 
 #[cfg(test)]

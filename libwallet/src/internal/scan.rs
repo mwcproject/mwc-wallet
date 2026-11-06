@@ -28,9 +28,8 @@ use crate::ReplayMitigationConfig;
 use mwc_wallet_util::mwc_api;
 use mwc_wallet_util::mwc_chain::Chain;
 use mwc_wallet_util::mwc_core::consensus::DAY_HEIGHT;
-use mwc_wallet_util::mwc_core::consensus::{valid_header_version, WEEK_HEIGHT};
+use mwc_wallet_util::mwc_core::consensus::WEEK_HEIGHT;
 use mwc_wallet_util::mwc_core::core::Committed;
-use mwc_wallet_util::mwc_core::core::HeaderVersion;
 use mwc_wallet_util::mwc_core::core::Transaction;
 use mwc_wallet_util::mwc_core::global;
 use mwc_wallet_util::mwc_core::libtx::proof;
@@ -346,11 +345,96 @@ fn replay_height_gap() -> u64 {
 	REPLAY_HEIGHT_GAP
 }
 
-fn identify_utxo_outputs<'a, K>(
+// Each worker owns its mutable secp context. Use the available CPU parallelism;
+// small pages reduce this count further to keep enough work in each batch.
+fn scan_worker_count() -> usize {
+	std::thread::available_parallelism()
+		.map(|n| n.get())
+		.unwrap_or(1)
+}
+
+fn identify_utxo_outputs<'a, K: Keychain + 'a>(
 	secp: &mut Secp256k1,
 	context_id: u32,
 	keychain: &K,
 	outputs: Vec<NodeOutput>,
+	end_height: Option<u64>,
+	should_self_spend: bool,
+	self_spend_amount: u64,
+) -> Result<(Vec<OutputResult>, Vec<OutputResult>), Error> {
+	let workers = scan_worker_count().min((outputs.len() / 64).max(1));
+	if workers <= 1 {
+		return identify_utxo_outputs_serial(
+			secp,
+			context_id,
+			keychain,
+			&outputs,
+			end_height,
+			should_self_spend,
+			self_spend_amount,
+		);
+	}
+	let chain_type = global::get_chain_type(context_id);
+	std::thread::scope(|scope| {
+		let mut handles = Vec::new();
+		let mut spawn_error = None;
+		for (i, chunk) in outputs.chunks(outputs.len().div_ceil(workers)).enumerate() {
+			let handle = std::thread::Builder::new()
+				.name(format!("wallet-scan-{}", i))
+				.spawn_scoped(scope, move || {
+					// Unit-test chain overrides are thread-local; carry the effective
+					// network into workers rather than relying on context zero.
+					global::set_local_chain_type(chain_type);
+					let mut secp = Secp256k1::with_caps(secp::ContextFlag::Commit)?;
+					identify_utxo_outputs_serial(
+						&mut secp,
+						context_id,
+						keychain,
+						chunk,
+						end_height,
+						should_self_spend,
+						self_spend_amount,
+					)
+				});
+			match handle {
+				Ok(handle) => handles.push(handle),
+				Err(e) => {
+					spawn_error = Some(Error::from(e));
+					break;
+				}
+			}
+		}
+		// Join every worker before propagating failures. Ordered collection also
+		// preserves PMMR order regardless of which worker finishes first.
+		let results: Vec<_> = handles
+			.into_iter()
+			.map(|handle| {
+				handle.join().unwrap_or_else(|_| {
+					Err(Error::GenericError(
+						"Output scan worker panicked".to_owned(),
+					))
+				})
+			})
+			.collect();
+		if let Some(error) = spawn_error {
+			return Err(error);
+		}
+		let mut owned = Vec::new();
+		let mut replay = Vec::new();
+		for result in results {
+			let (mut found, mut candidates) = result?;
+			owned.append(&mut found);
+			replay.append(&mut candidates);
+		}
+		Ok((owned, replay))
+	})
+}
+
+fn identify_utxo_outputs_serial<'a, K>(
+	secp: &mut Secp256k1,
+	context_id: u32,
+	keychain: &K,
+	outputs: &[NodeOutput],
 	end_height: Option<u64>,
 	should_self_spend: bool,
 	self_spend_amount: u64,
@@ -361,67 +445,44 @@ where
 	let mut wallet_outputs: Vec<OutputResult> = Vec::new();
 	let mut self_spend_outputs: Vec<OutputResult> = Vec::new();
 
-	let legacy_builder = proof::LegacyProofBuilder::new(secp, keychain)?;
 	let builder = proof::ProofBuilder::new(secp, keychain)?;
-	let legacy_version = HeaderVersion(1);
 
-	for output in outputs.iter() {
+	for chunk in outputs.chunks(64) {
 		if is_scan_interrupted(context_id) {
 			return Err(Error::Interrupted);
 		}
+		let verified = output_proof::VerifiedOutputProof::verify_batch(
+			secp,
+			chunk.iter().map(|out| (out.0, out.1)).collect(),
+		)?;
+		for (output, verified) in chunk.iter().zip(verified) {
+			if is_scan_interrupted(context_id) {
+				return Err(Error::Interrupted);
+			}
 
-		let (commit, proof, is_coinbase, height, mmr_index) = output;
-		// attempt to unwind message from the RP and get a value
-		// will fail if it's not ours
-		let (info, built_height) = {
-			// Before HF+2wk, try legacy rewind first
-			// Heights before the two-week lookback intentionally clamp to genesis.
-			let info_legacy = if valid_header_version(
-				context_id,
-				height.saturating_sub(2 * WEEK_HEIGHT),
-				legacy_version,
-			) {
-				proof::rewind(secp, &legacy_builder, *commit, None, *proof)?
-			} else {
-				None
+			let (commit, _, is_coinbase, height, mmr_index) = output;
+			let Some((amount, key_id, switch, built_height)) =
+				verified.rewind_with_height(secp, keychain, &builder)?
+			else {
+				continue;
 			};
 
-			// If legacy didn't work, try new rewind
-			if let Some(info) = info_legacy {
-				(Some(info), 0)
-			} else {
-				match output_proof::rewind_with_height(secp, keychain, &builder, *commit, *proof)? {
-					Some((amount, key_id, switch, built_height)) => {
-						(Some((amount, key_id, switch)), built_height)
-					}
-					None => (None, 0),
-				}
-			}
-		};
-
-		let (amount, key_id, switch) = match info {
-			Some(i) => i,
-			None => {
+			// OutputResult and the persisted wallet output format do not retain the
+			// switch commitment type, while restoration and spending deliberately
+			// reconstruct every wallet UTXO as Regular. Letting an owned None output
+			// proceed would therefore discard cryptographic metadata and later derive a
+			// different commitment. Scanning is best-effort, so skip only this unsupported
+			// output instead of aborting recovery of the remaining regular outputs.
+			if switch != SwitchCommitmentType::Regular {
+				warn!(
+					"Skipping owned output {:?} with unsupported switch commitment type {:?}",
+					commit, switch
+				);
 				continue;
 			}
-		};
 
-		// OutputResult and the persisted wallet output format do not retain the
-		// switch commitment type, while restoration and spending deliberately
-		// reconstruct every wallet UTXO as Regular. Letting an owned None output
-		// proceed would therefore discard cryptographic metadata and later derive a
-		// different commitment. Scanning is best-effort, so skip only this unsupported
-		// output instead of aborting recovery of the remaining regular outputs.
-		if switch != SwitchCommitmentType::Regular {
-			warn!(
-				"Skipping owned output {:?} with unsupported switch commitment type {:?}",
-				commit, switch
-			);
-			continue;
-		}
-
-		let lock_height = if *is_coinbase {
-			height
+			let lock_height = if *is_coinbase {
+				height
 				.checked_add(global::coinbase_maturity(context_id))
 				.ok_or_else(|| {
 					Error::DataOverflow(format!(
@@ -430,51 +491,66 @@ where
 						global::coinbase_maturity(context_id)
 					))
 				})?
-		} else {
-			*height
-		};
+			} else {
+				*height
+			};
 
-		// Privacy tradeoff: the output and replay diagnostics below can reveal
-		// wallet ownership, amounts, derivation identifiers, and timing metadata to
-		// anyone with access to the logs. These details are intentionally retained
-		// because they are needed to diagnose restore and replay-mitigation failures;
-		// retaining or sharing wallet logs accepts this privacy exposure.
-		debug!(
-			"Output found: {:?}, amount: {:?}, key_id: {:?}, mmr_index: {},",
-			commit, amount, key_id, mmr_index
-		);
-
-		// Replay-mitigation trust model: the build height is authenticated by the
-		// wallet-owned rangeproof, while the inclusion height comes from the
-		// configured node. The wallet deliberately treats that node as its chain
-		// source of truth; users are expected to connect to their own trusted
-		// private node. Under that model a large height gap is sufficient to
-		// authorize the automatic defensive self-spend. Using an untrusted node
-		// can therefore cause unnecessary self-spends and fee expenditure.
-		let on_the_chain_height = *height;
-		let mut spent_candidate = false;
-		if built_height != 0 {
-			let built_height_64 = u64::from(built_height);
-			let inclusion_gap = built_height_64.abs_diff(on_the_chain_height);
-			let suspicious_replay = inclusion_gap > replay_height_gap();
-			let stale_at_tip = end_height
-				.map(|tip_height| tip_height.saturating_sub(built_height_64) > WEEK_HEIGHT)
-				.unwrap_or(false);
+			// Privacy tradeoff: the output and replay diagnostics below can reveal
+			// wallet ownership, amounts, derivation identifiers, and timing metadata to
+			// anyone with access to the logs. These details are intentionally retained
+			// because they are needed to diagnose restore and replay-mitigation failures;
+			// retaining or sharing wallet logs accepts this privacy exposure.
 			debug!(
-				"Output build height {}, inclusion height {}, difference {}",
-				built_height_64, on_the_chain_height, inclusion_gap
+				"Output found: {:?}, amount: {:?}, key_id: {:?}, mmr_index: {},",
+				commit, amount, key_id, mmr_index
 			);
-			if suspicious_replay {
-				warn!(
+
+			// Replay-mitigation trust model: the build height is authenticated by the
+			// wallet-owned rangeproof, while the inclusion height comes from the
+			// configured node. The wallet deliberately treats that node as its chain
+			// source of truth; users are expected to connect to their own trusted
+			// private node. Under that model a large height gap is sufficient to
+			// authorize the automatic defensive self-spend. Using an untrusted node
+			// can therefore cause unnecessary self-spends and fee expenditure.
+			let on_the_chain_height = *height;
+			let mut spent_candidate = false;
+			if built_height != 0 {
+				let built_height_64 = u64::from(built_height);
+				let inclusion_gap = built_height_64.abs_diff(on_the_chain_height);
+				let suspicious_replay = inclusion_gap > replay_height_gap();
+				let stale_at_tip = end_height
+					.map(|tip_height| tip_height.saturating_sub(built_height_64) > WEEK_HEIGHT)
+					.unwrap_or(false);
+				debug!(
+					"Output build height {}, inclusion height {}, difference {}",
+					built_height_64, on_the_chain_height, inclusion_gap
+				);
+				if suspicious_replay {
+					warn!(
 					"Possible replayed output detected: commitment {:?}, build height {}, inclusion height {}, difference {}",
 					commit, built_height_64, on_the_chain_height, inclusion_gap
 				);
+				}
+				if (suspicious_replay || stale_at_tip)
+					&& should_self_spend
+					&& amount > self_spend_amount
+				{
+					self_spend_outputs.push(OutputResult {
+						commit: *commit,
+						key_id: key_id.clone(),
+						n_child: keys::output_child_index(&key_id)?,
+						value: amount,
+						height: *height,
+						lock_height: lock_height,
+						is_coinbase: *is_coinbase,
+						mmr_index: *mmr_index,
+					});
+					spent_candidate = true;
+				}
 			}
-			if (suspicious_replay || stale_at_tip)
-				&& should_self_spend
-				&& amount > self_spend_amount
-			{
-				self_spend_outputs.push(OutputResult {
+
+			if !spent_candidate {
+				wallet_outputs.push(OutputResult {
 					commit: *commit,
 					key_id: key_id.clone(),
 					n_child: keys::output_child_index(&key_id)?,
@@ -484,24 +560,9 @@ where
 					is_coinbase: *is_coinbase,
 					mmr_index: *mmr_index,
 				});
-				spent_candidate = true;
 			}
 		}
-
-		if !spent_candidate {
-			wallet_outputs.push(OutputResult {
-				commit: *commit,
-				key_id: key_id.clone(),
-				n_child: keys::output_child_index(&key_id)?,
-				value: amount,
-				height: *height,
-				lock_height: lock_height,
-				is_coinbase: *is_coinbase,
-				mmr_index: *mmr_index,
-			});
-		}
 	}
-
 	Ok((wallet_outputs, self_spend_outputs))
 }
 
@@ -743,12 +804,15 @@ where
 	C: NodeClient + 'a,
 	K: Keychain + 'a,
 {
+	if show_progress {
+		info!(
+			"Checking output proofs with up to {} workers",
+			scan_worker_count()
+		);
+	}
+
 	let batch_size = 1000;
 	let start_index_stat = start_index;
-	let mut start_index = start_index;
-	let mut result_vec: Vec<OutputResult> = vec![];
-	let mut self_spend_candidate_list: Vec<OutputResult> = vec![];
-	let mut page_validator = PmmrPageValidator::default();
 	let mut should_self_spent = false;
 	let mut self_spent_amount = 0;
 	if let Some(conf) = replay_config {
@@ -757,109 +821,189 @@ where
 			self_spent_amount = conf.replay_mitigation_min_amount;
 		}
 	}
-	loop {
-		if is_scan_interrupted(context_id) {
-			return Err(Error::Interrupted);
-		}
 
-		let (highest_index, last_retrieved_index, outputs) = client.get_outputs_by_pmmr_index(
-			start_index,
-			end_expectation.requested_end(),
-			batch_size,
-		)?;
-		let actual_connection = client.get_node_connection_id();
-		if actual_connection != expected_connection {
-			return Err(Error::Node(format!(
-				"Wallet scan changed node while retrieving output pages; expected {:?}, current {:?}. Partial results were discarded",
-				expected_connection, actual_connection
-			)));
-		}
-		page_validator.validate(
-			"scan::collect_chain_outputs",
-			start_index,
-			end_expectation,
-			batch_size,
-			highest_index,
-			last_retrieved_index,
-			&outputs,
-		)?;
+	let chain_type = global::get_chain_type(context_id);
+	let scan_started = std::time::Instant::now();
+	std::thread::scope(|scope| {
+		// A rendezvous channel lets the reader prepare exactly one page ahead.
+		// It cannot fetch another page until the processor accepts this one.
+		let (page_tx, page_rx) = std::sync::mpsc::sync_channel(0);
+		let reader = std::thread::Builder::new()
+			.name("wallet-scan-reader".to_owned())
+			.spawn_scoped(scope, move || -> Result<(), Error> {
+				global::set_local_chain_type(chain_type);
+				let mut start_index = start_index;
+				let mut page_validator = PmmrPageValidator::default();
+				loop {
+					if is_scan_interrupted(context_id) {
+						return Err(Error::Interrupted);
+					}
+					let fetch_started = std::time::Instant::now();
+					let (highest_index, last_retrieved_index, outputs) =
+						client.get_outputs_by_pmmr_index(
+							start_index,
+							end_expectation.requested_end(),
+							batch_size,
+						)?;
+					let fetch_elapsed = fetch_started.elapsed();
+					let actual_connection = client.get_node_connection_id();
+					if actual_connection != expected_connection {
+						return Err(Error::Node(format!(
+							"Wallet scan changed node while retrieving output pages; expected {:?}, current {:?}. Partial results were discarded",
+							expected_connection, actual_connection
+						)));
+					}
+					page_validator.validate(
+						"scan::collect_chain_outputs",
+						start_index,
+						end_expectation,
+						batch_size,
+						highest_index,
+						last_retrieved_index,
+						&outputs,
+					)?;
+					if is_scan_interrupted(context_id) {
+						return Err(Error::Interrupted);
+					}
+					if page_tx
+						.send((highest_index, last_retrieved_index, outputs, fetch_elapsed))
+						.is_err()
+					{
+						// Processing failed or was interrupted. Its receiver was dropped,
+						// so stop without making any further requests.
+						return Ok(());
+					}
+					if highest_index <= last_retrieved_index {
+						return Ok(());
+					}
+					// highest_index > last_retrieved_index proves this cannot overflow.
+					#[allow(
+						clippy::arithmetic_side_effects,
+						reason = "highest_index is greater than last_retrieved_index in this branch"
+					)]
+					{
+						start_index = last_retrieved_index + 1;
+					}
+				}
+			})?;
 
-		let range = highest_index.checked_sub(start_index_stat).ok_or_else(|| {
-			Error::DataOverflow(format!(
-				"scan::collect_chain_outputs, output scan range underflow, highest_index={} start_index={}",
-				highest_index, start_index_stat
+		// Consume the receiver inside this closure so every error drops it before
+		// joining the reader. Otherwise a blocked send could prevent shutdown.
+		let processed = (move || -> Result<_, Error> {
+			let mut result_vec = Vec::new();
+			let mut self_spend_candidate_list = Vec::new();
+			let mut page_count = 0u64;
+			let mut output_count_total = 0usize;
+			let mut fetch_total = std::time::Duration::ZERO;
+			let mut processing_total = std::time::Duration::ZERO;
+			for (highest_index, last_retrieved_index, outputs, fetch_elapsed) in page_rx {
+				if is_scan_interrupted(context_id) {
+					return Err(Error::Interrupted);
+				}
+				let range = highest_index.checked_sub(start_index_stat).ok_or_else(|| {
+					Error::DataOverflow(format!(
+						"scan::collect_chain_outputs, output scan range underflow, highest_index={} start_index={}",
+						highest_index, start_index_stat
+					))
+				})?;
+				let progress = last_retrieved_index
+					.checked_sub(start_index_stat)
+					.ok_or_else(|| {
+						Error::DataOverflow(format!(
+							"scan::collect_chain_outputs, output scan progress underflow, last_retrieved_index={} start_index={}",
+							last_retrieved_index, start_index_stat
+						))
+					})?;
+				let perc_complete = if range == 0 {
+					0
+				} else {
+					let scaled_progress = progress.checked_mul(100).ok_or_else(|| {
+						Error::DataOverflow(format!(
+							"scan::collect_chain_outputs, output scan progress multiplication overflow, progress={} scale=100",
+							progress
+						))
+					})?;
+					// range is nonzero in this branch.
+					#[allow(
+						clippy::arithmetic_side_effects,
+						reason = "the zero range case is handled by the preceding branch"
+					)]
+					let bounded_percentage = (scaled_progress / range).min(99);
+					u8::try_from(bounded_percentage).map_err(|e| {
+						Error::DataOverflow(format!(
+							"scan::collect_chain_outputs, bounded output scan progress does not fit u8, percentage={} error={}",
+							bounded_percentage, e
+						))
+					})?
+				};
+
+				let msg = format!(
+					"Checking {} outputs, up to index {}. (Highest index: {})",
+					outputs.len(),
+					last_retrieved_index,
+					highest_index,
+				);
+				if show_progress {
+					info!("{} ({}% complete)", msg, perc_complete);
+				}
+				send_status(
+					status_callback,
+					StatusMessage::Scanning(show_progress, msg, perc_complete),
+				);
+				let output_count = outputs.len();
+				let processing_started = std::time::Instant::now();
+				let mut chain_outs_pair = identify_utxo_outputs(
+					secp,
+					context_id,
+					keychain,
+					outputs,
+					None,
+					should_self_spent,
+					self_spent_amount,
+				)?;
+				result_vec.append(&mut chain_outs_pair.0);
+				self_spend_candidate_list.append(&mut chain_outs_pair.1);
+
+				let processing_elapsed = processing_started.elapsed();
+				page_count = page_count.saturating_add(1);
+				output_count_total = output_count_total.saturating_add(output_count);
+				fetch_total = fetch_total.saturating_add(fetch_elapsed);
+				processing_total = processing_total.saturating_add(processing_elapsed);
+				debug!(
+					"Output scan page through index {}: fetch/decode {:.1} ms, proof processing {:.1} ms",
+					last_retrieved_index,
+					fetch_elapsed.as_secs_f64() * 1000.0,
+					processing_elapsed.as_secs_f64() * 1000.0,
+				);
+			}
+			Ok((
+				result_vec,
+				self_spend_candidate_list,
+				page_count,
+				output_count_total,
+				fetch_total,
+				processing_total,
 			))
-		})?;
-		let progress = last_retrieved_index
-			.checked_sub(start_index_stat)
-			.ok_or_else(|| {
-				Error::DataOverflow(format!(
-					"scan::collect_chain_outputs, output scan progress underflow, last_retrieved_index={} start_index={}",
-					last_retrieved_index, start_index_stat
-				))
-			})?;
-		let perc_complete = if range == 0 {
-			0
-		} else {
-			let scaled_progress = progress.checked_mul(100).ok_or_else(|| {
-				Error::DataOverflow(format!(
-					"scan::collect_chain_outputs, output scan progress multiplication overflow, progress={} scale=100",
-					progress
-				))
-			})?;
-			// range is nonzero in this branch.
-			#[allow(
-				clippy::arithmetic_side_effects,
-				reason = "the zero range case is handled by the preceding branch"
-			)]
-			let bounded_percentage = (scaled_progress / range).min(99);
-			u8::try_from(bounded_percentage).map_err(|e| {
-				Error::DataOverflow(format!(
-					"scan::collect_chain_outputs, bounded output scan progress does not fit u8, percentage={} error={}",
-					bounded_percentage, e
-				))
-			})?
-		};
-
-		let msg = format!(
-			"Checking {} outputs, up to index {}. (Highest index: {})",
-			outputs.len(),
-			highest_index,
-			last_retrieved_index,
-		);
+		})();
+		let read_result = reader.join().unwrap_or_else(|_| {
+			Err(Error::GenericError(
+				"Output scan reader panicked".to_owned(),
+			))
+		});
+		let (owned, replay, page_count, output_count, fetch_total, processing_total) = processed?;
+		read_result?;
 		if show_progress {
-			info!("{} ({}% complete)", msg, perc_complete);
+			info!(
+				"Output scan timing: {} pages, {} outputs; wall {:.2} s, fetch/decode {:.2} s, proof processing {:.2} s (stages overlap)",
+				page_count,
+				output_count,
+				scan_started.elapsed().as_secs_f64(),
+				fetch_total.as_secs_f64(),
+				processing_total.as_secs_f64(),
+			);
 		}
-		send_status(
-			status_callback,
-			StatusMessage::Scanning(show_progress, msg, perc_complete),
-		);
-		let mut chain_outs_pair = identify_utxo_outputs(
-			secp,
-			context_id,
-			keychain,
-			outputs,
-			None,
-			should_self_spent,
-			self_spent_amount,
-		)?;
-		result_vec.append(&mut chain_outs_pair.0);
-		self_spend_candidate_list.append(&mut chain_outs_pair.1);
-
-		if highest_index <= last_retrieved_index {
-			break;
-		}
-		// The loop continues only when highest_index > last_retrieved_index, proving
-		// last_retrieved_index is below u64::MAX.
-		#[allow(
-			clippy::arithmetic_side_effects,
-			reason = "highest_index is greater than last_retrieved_index in this branch"
-		)]
-		{
-			start_index = last_retrieved_index + 1;
-		}
-	}
-	Ok((result_vec, self_spend_candidate_list))
+		Ok((owned, replay))
+	})
 }
 
 /// Respore missing outputs. Shared with mwc713
@@ -3882,6 +4026,73 @@ fn can_archive_unchanged_transaction(
 			.all(|commit| !outputs.contains_key(commit))
 }
 
+// Bound copy-on-write pressure so Store::batch_write can grow LMDB between
+// commits. Each item must be one atomic, repeatable repair; closures must only
+// stage database changes, not mutate the in-memory scan or publish transactions.
+// Return whether an item staged writes so unchanged chunks need no commit.
+fn apply_scan_updates<'a, T: ?Sized, C, K, I, F>(
+	wallet: &mut T,
+	secp: &Secp256k1,
+	keychain_mask: Option<&SecretKey>,
+	session: &NodeReadSession,
+	updates: I,
+	mut apply: F,
+) -> Result<(), Error>
+where
+	T: WalletBackend<'a, C, K>,
+	C: NodeClient + 'a,
+	K: Keychain + 'a,
+	I: IntoIterator,
+	F: FnMut(&mut dyn WalletOutputBatch<K>, &I::Item) -> Result<bool, Error>,
+{
+	let client = wallet.w2n_client().clone();
+	let context_id = wallet.get_context_id();
+	let mut updates = updates.into_iter();
+	loop {
+		let chunk: Vec<_> = updates.by_ref().take(64).collect();
+		if chunk.is_empty() {
+			break;
+		}
+		let mut start = 0;
+		let mut batch_size = chunk.len();
+		while start < chunk.len() {
+			if is_scan_interrupted(context_id) {
+				return Err(Error::Interrupted);
+			}
+			let end = start + batch_size.min(chunk.len() - start);
+			let result = (|| {
+				let mut batch = wallet.batch(secp, keychain_mask)?;
+				let mut changed = false;
+				for update in &chunk[start..end] {
+					changed |= apply(&mut *batch, update)?;
+				}
+				if changed {
+					session.verify_anchor(&client, "Wallet scan storage batch")?;
+					batch.commit()?;
+				}
+				Ok(())
+			})();
+			match result {
+				Err(Error::DatabaseMapFull) if end - start > 1 => {
+					// The failed transaction and its archive copies were discarded.
+					// Retry only that uncommitted range; a smaller successful commit
+					// lets the store observe growth and resize the next batch.
+					batch_size = (end - start).div_ceil(2);
+					warn!(
+						"Scan storage batch reached LMDB map limit; retrying with {} records",
+						batch_size
+					);
+				}
+				result => {
+					result?;
+					start = end;
+				}
+			}
+		}
+	}
+	Ok(())
+}
+
 // Apply last data updates and saving the data into DB.
 fn store_transactions_outputs<'a, T: ?Sized, C, K>(
 	wallet: &mut T,
@@ -3901,12 +4112,6 @@ where
 	K: Keychain + 'a,
 {
 	let node_client = wallet.w2n_client().clone();
-	let mut batch = wallet.batch(secp, keychain_mask)?;
-
-	for transaction in duplicated_coinbase_txs {
-		batch.delete_tx_log_entry(transaction.id, &transaction.parent_key_id)?;
-	}
-
 	// This time is secondary, used if TX output_height is not defined
 	let archive_reference_time = Utc::now();
 	let tx_time_to_archive = archive_reference_time
@@ -3919,21 +4124,31 @@ where
 		})?;
 
 	// Slate based Transacitons
-	for tx in transactions.values() {
-		if tx.updated {
-			batch.save_tx_log_entry(tx.tx_log.clone(), &tx.tx_log.parent_key_id)?;
-		} else if can_archive_unchanged_transaction(
-			tx,
-			outputs,
-			&tx_time_to_archive,
-			archive_height,
-		) {
-			// Archive only when no live wallet output remains and no nonterminal
-			// input still reserves funds. Pending no-change sends have no wallet-owned
-			// output, but their locked inputs must continue to reserve the funds.
-			batch.archive_transaction(&tx.tx_log)?;
-		}
-	}
+	apply_scan_updates(
+		wallet,
+		secp,
+		keychain_mask,
+		session,
+		transactions.values(),
+		|batch, tx| {
+			if tx.updated {
+				batch.save_tx_log_entry(tx.tx_log.clone(), &tx.tx_log.parent_key_id)?;
+			} else if can_archive_unchanged_transaction(
+				tx,
+				outputs,
+				&tx_time_to_archive,
+				archive_height,
+			) {
+				// Archive only when no live wallet output remains and no nonterminal
+				// input still reserves funds. Pending no-change sends have no wallet-owned
+				// output, but their locked inputs must continue to reserve the funds.
+				batch.archive_transaction(&tx.tx_log)?;
+			} else {
+				return Ok(false);
+			}
+			Ok(true)
+		},
+	)?;
 
 	// Restored outputs have already been saved. A stale record at the same
 	// physical key must never overwrite or delete that proof-derived replacement.
@@ -3953,48 +4168,17 @@ where
 			mwc_util::to_hex(&out.commit.0),
 		)
 	}));
-	for out in outputs.values() {
-		let current_key = (&out.output.key_id, out.output.mmr_index);
-		for stored in &out.stored_outputs {
-			let key = (stored.key_id.clone(), stored.mmr_index);
-			if chain_slots
-				.get(&key)
-				.is_some_and(|commit| commit != &out.commit)
-				|| (&stored.key_id, stored.mmr_index) == current_key
-			{
-				continue;
-			}
-			if stored.mmr_index.is_none() {
-				// The same commitment now has an indexed record. Drop its old key.
-				batch.delete(&stored.key_id, &stored.mmr_index)?;
-			} else {
-				// Other indexed positions are history, not additional spendable coins.
-				let mut history = stored.clone();
-				history.status = match history.status {
-					OutputStatus::Unspent => OutputStatus::Reverted,
-					OutputStatus::Locked => OutputStatus::Spent,
-					other => other,
-				};
-				if out.at_chain == Some(true) && out.output.mmr_index.is_some() {
-					// A confirmed current position supersedes this copy. Keep its
-					// history outside the active table so it cannot inflate balances.
-					batch.archive_output(&history)?;
-				} else {
-					batch.save(history)?;
-				}
-			}
-		}
-	}
 	// Choose deletions before saving updates: changing an absent coinbase's
 	// status during this scan must not postpone its removal until the next scan.
-	let mut remove = Vec::new();
+	let mut remove = HashSet::new();
+	let mut expired = HashSet::new();
 	for (commit, out) in outputs.iter() {
 		let key = (out.output.key_id.clone(), out.output.mmr_index);
 		if chain_slots
 			.get(&key)
 			.is_some_and(|chain_commit| chain_commit != commit)
 		{
-			remove.push(commit.clone());
+			remove.insert(commit.clone());
 			continue;
 		}
 		let confirmed_spend = out
@@ -4015,73 +4199,124 @@ where
 				"Deleting expired coinbase {} at height {}",
 				commit, out.output.height
 			);
-			batch.delete(&out.output.key_id, &out.output.mmr_index)?;
-			remove.push(commit.clone());
+			expired.insert(commit.clone());
+			remove.insert(commit.clone());
 		}
 	}
+	// Save Slate Outputs to DB
+	apply_scan_updates(
+		wallet,
+		secp,
+		keychain_mask,
+		session,
+		outputs.values(),
+		|batch, output| {
+			let mut changed = false;
+			let out = *output;
+			let current_key = (&out.output.key_id, out.output.mmr_index);
+			for stored in &out.stored_outputs {
+				let key = (stored.key_id.clone(), stored.mmr_index);
+				if chain_slots
+					.get(&key)
+					.is_some_and(|commit| commit != &out.commit)
+					|| (&stored.key_id, stored.mmr_index) == current_key
+				{
+					continue;
+				}
+				if stored.mmr_index.is_none() {
+					// The same commitment now has an indexed record. Drop its old key.
+					batch.delete(&stored.key_id, &stored.mmr_index)?;
+				} else {
+					// Other indexed positions are history, not additional spendable coins.
+					let mut history = stored.clone();
+					history.status = match history.status {
+						OutputStatus::Unspent => OutputStatus::Reverted,
+						OutputStatus::Locked => OutputStatus::Spent,
+						other => other,
+					};
+					if out.at_chain == Some(true) && out.output.mmr_index.is_some() {
+						// A confirmed current position supersedes this copy. Keep its
+						// history outside the active table so it cannot inflate balances.
+						batch.archive_output(&history)?;
+					} else {
+						batch.save(history)?;
+					}
+				}
+				changed = true;
+			}
+			if expired.contains(&output.commit) {
+				batch.delete(&output.output.key_id, &output.output.mmr_index)?;
+				return Ok(true);
+			}
+			if remove.contains(&output.commit) {
+				return Ok(changed);
+			}
+			if output.updated {
+				batch.save(output.output.clone())?;
+				changed = true;
+			} else if output.is_orphan_output() && !output.output.is_coinbase {
+				// Unconfirmed without any transactions must be deleted as well
+				warn!(
+					"Deleting unconfirmed Output not mapped to any transaction. Commit: {}",
+					output
+						.output
+						.commit
+						.clone()
+						.unwrap_or("UNKNOWN_COMMIT".to_string())
+				);
+				batch.delete(&output.output.key_id, &output.output.mmr_index)?;
+				changed = true;
+			} else if !output.updated
+				&& !output.output.is_spendable()
+				&& output.output.height < archive_height
+			{
+				// Archiving very old spent output can go into archive
+				// we can move only not updated outputs...
+				match output.output.status {
+					OutputStatus::Spent => {
+						// Height needs to come from the transactions. That is the only source of truth
+						let mut need_wait = false;
+						for tx_id in &output.tx_input_uuid {
+							if let Some(tx) = transactions.get(tx_id) {
+								if tx.tx_log.output_height != 0
+									&& tx.tx_log.output_height >= archive_height
+								{
+									need_wait = true;
+									break;
+								}
+							}
+						}
+						if !need_wait {
+							batch.archive_output(&output.output)?;
+							changed = true;
+						}
+					}
+					OutputStatus::Reverted | OutputStatus::Unconfirmed => {
+						// check if transactions are not confirmed and not concelled, then we can archive such output
+						let mut need_wait = false;
+						for tx_id in &output.tx_output_uuid {
+							if let Some(tx) = transactions.get(tx_id) {
+								if tx.tx_log.tx_type == TxLogEntryType::TxReceived
+									|| tx.tx_log.tx_type == TxLogEntryType::TxSent
+								{
+									need_wait = true;
+									break;
+								}
+							}
+						}
+						if !need_wait {
+							batch.archive_output(&output.output)?;
+							changed = true;
+						}
+					}
+					_ => {}
+				}
+			}
+			Ok(changed)
+		},
+	)?;
 	for commit in remove {
 		outputs.remove(&commit);
-	}
-
-	// Save Slate Outputs to DB
-	for output in outputs.values() {
-		if output.updated {
-			batch.save(output.output.clone())?;
-		} else if output.is_orphan_output() && !output.output.is_coinbase {
-			// Unconfirmed without any transactions must be deleted as well
-			warn!(
-				"Deleting unconfirmed Output not mapped to any transaction. Commit: {}",
-				output
-					.output
-					.commit
-					.clone()
-					.unwrap_or("UNKNOWN_COMMIT".to_string())
-			);
-			batch.delete(&output.output.key_id, &output.output.mmr_index)?;
-		} else if !output.updated
-			&& !output.output.is_spendable()
-			&& output.output.height < archive_height
-		{
-			// Archiving very old spent output can go into archive
-			// we can move only not updated outputs...
-			match output.output.status {
-				OutputStatus::Spent => {
-					// Height needs to come from the transactions. That is the only source of truth
-					let mut need_wait = false;
-					for tx_id in &output.tx_input_uuid {
-						if let Some(tx) = transactions.get(tx_id) {
-							if tx.tx_log.output_height != 0
-								&& tx.tx_log.output_height >= archive_height
-							{
-								need_wait = true;
-								break;
-							}
-						}
-					}
-					if !need_wait {
-						batch.archive_output(&output.output)?;
-					}
-				}
-				OutputStatus::Reverted | OutputStatus::Unconfirmed => {
-					// check if transactions are not confirmed and not concelled, then we can archive such output
-					let mut need_wait = false;
-					for tx_id in &output.tx_output_uuid {
-						if let Some(tx) = transactions.get(tx_id) {
-							if tx.tx_log.tx_type == TxLogEntryType::TxReceived
-								|| tx.tx_log.tx_type == TxLogEntryType::TxSent
-							{
-								need_wait = true;
-								break;
-							}
-						}
-					}
-					if !need_wait {
-						batch.archive_output(&output.output)?;
-					}
-				}
-				_ => {}
-			}
-		}
 	}
 
 	// It is very normal that Wallet has outputs without Transactions.
@@ -4093,6 +4328,10 @@ where
 			&& w_out.output.is_spendable()
 			&& w_out.tx_output_uuid.is_empty()
 		{
+			if is_scan_interrupted(wallet.get_context_id()) {
+				return Err(Error::Interrupted);
+			}
+			let mut batch = wallet.batch(secp, keychain_mask)?;
 			let parent_key_id = &w_out.output.root_key_id; // it is Account Key ID.
 
 			let log_id = batch.next_tx_log_id(parent_key_id)?;
@@ -4139,11 +4378,25 @@ where
 
 			batch.save_tx_log_entry(t, parent_key_id)?;
 			batch.save(w_out.output.clone())?;
+			session.verify_anchor(&node_client, "Wallet coinbase repair")?;
+			batch.commit()?;
 		}
 	}
 
+	// Relink outputs before deleting duplicate transaction records. A failure
+	// between batches may leave redundant history, never a dangling output ID.
+	apply_scan_updates(
+		wallet,
+		secp,
+		keychain_mask,
+		session,
+		duplicated_coinbase_txs,
+		|batch, transaction| {
+			batch.delete_tx_log_entry(transaction.id, &transaction.parent_key_id)?;
+			Ok(true)
+		},
+	)?;
 	session.verify_anchor(&node_client, "Wallet output storage")?;
-	batch.commit()?;
 
 	Ok(())
 }
@@ -4616,6 +4869,121 @@ mod scan_consistency_tests {
 
 		assert!(interrupt_scan(context_id).is_err());
 		assert!(!is_scan_interrupted(context_id));
+	}
+
+	#[test]
+	fn parallel_output_scan_matches_serial_and_rejects_corruption() -> Result<(), Error> {
+		let context_id = allocate_new_context(ChainTypes::Floonet, None, None)
+			.map_err(|e| Error::GenericError(e.to_string()))?;
+		let result = (|| {
+			let mut secp = Secp256k1::with_caps(ContextFlag::Commit)?;
+			let keychain = ExtKeychain::from_seed(&secp, &[41; 32], true)?;
+			let other = ExtKeychain::from_seed(&secp, &[42; 32], true)?;
+			let builder = proof::ProofBuilder::new(&secp, &keychain)?;
+			let other_builder = proof::ProofBuilder::new(&secp, &other)?;
+			let mut templates = Vec::new();
+			for (i, owner, proof_builder, switch) in [
+				(
+					1,
+					&keychain,
+					&builder as &dyn proof::ProofBuild,
+					SwitchCommitmentType::Regular,
+				),
+				(
+					2,
+					&other,
+					&other_builder as &dyn proof::ProofBuild,
+					SwitchCommitmentType::Regular,
+				),
+				(
+					3,
+					&keychain,
+					&builder as &dyn proof::ProofBuild,
+					SwitchCommitmentType::Regular,
+				),
+				(
+					4,
+					&keychain,
+					&builder as &dyn proof::ProofBuild,
+					SwitchCommitmentType::None,
+				),
+			] {
+				let id = ExtKeychain::derive_key_id(3, 0, 0, i, 0)?;
+				let amount = u64::from(i) * 10;
+				let commit = owner.commit(&secp, amount, &id, switch)?;
+				let blind = owner.derive_key(&secp, amount, &id, switch)?;
+				let rewind_nonce = proof_builder.rewind_nonce(&secp, &commit)?;
+				let private_nonce = proof_builder.private_nonce(&secp, &commit, &id)?;
+				let message = proof_builder.proof_message(&secp, &id, switch)?;
+				let rangeproof = secp.bullet_proof(
+					amount,
+					blind,
+					rewind_nonce,
+					private_nonce,
+					None,
+					Some(message),
+				)?;
+				templates.push((commit, rangeproof, false, 1, 0));
+			}
+			let replay_id = ExtKeychain::derive_key_id(3, 0, 0, 5, 0)?;
+			let (replay_commit, replay_proof) =
+				proof::height_tagged_rangeproof(&mut secp, &keychain, &builder, 50, &replay_id, 1)?;
+			templates.push((replay_commit, replay_proof, false, REPLAY_HEIGHT_GAP + 2, 0));
+			let mut outputs: Vec<_> = (0..320)
+				.map(|i| {
+					let mut output = templates[i % templates.len()];
+					output.4 = i as u64 + 1;
+					output
+				})
+				.collect();
+			let serial = identify_utxo_outputs_serial(
+				&mut secp, context_id, &keychain, &outputs, None, true, 0,
+			)?;
+			let parallel = identify_utxo_outputs(
+				&mut secp, context_id, &keychain, outputs.clone(), None, true, 0,
+			)?;
+			let summarize = |results: &[OutputResult]| {
+				results
+					.iter()
+					.map(|out| {
+						(
+							out.commit,
+							out.key_id.clone(),
+							out.n_child,
+							out.mmr_index,
+							out.value,
+							out.height,
+							out.lock_height,
+							out.is_coinbase,
+						)
+					})
+					.collect::<Vec<_>>()
+			};
+			assert_eq!(serial.0.len(), 128);
+			assert_eq!(serial.1.len(), 64);
+			assert_eq!(summarize(&serial.0), summarize(&parallel.0));
+			assert_eq!(summarize(&serial.1), summarize(&parallel.1));
+
+			// Corrupt an unowned proof in a later worker. Earlier matches must not
+			// escape as partial success, even though that proof would not rewind.
+			outputs[201].1.proof[31] ^= 1;
+			assert!(identify_utxo_outputs(
+				&mut secp, context_id, &keychain, outputs.clone(), None, false, 0
+			)
+			.is_err());
+			interrupt_scan(context_id)?;
+			assert!(matches!(
+				identify_utxo_outputs(
+					&mut secp, context_id, &keychain, outputs, None, false, 0
+				),
+				Err(Error::Interrupted)
+			));
+			release_interrupt_scan(context_id);
+			Ok(())
+		})();
+		release_interrupt_scan(context_id);
+		release_context(context_id).map_err(|e| Error::GenericError(e.to_string()))?;
+		result
 	}
 
 	#[test]
@@ -5765,6 +6133,9 @@ mod scan_consistency_tests {
 		assert!(cancelled_spends.is_empty());
 	}
 
+	type OutputPageHandler =
+		dyn Fn(u64, Option<u64>, u64) -> Result<(u64, u64, Vec<NodeOutput>), Error> + Send + Sync;
+
 	#[derive(Clone)]
 	struct ScanConsistencyNodeClient {
 		connection: Arc<Mutex<NodeConnectionId>>,
@@ -5775,6 +6146,7 @@ mod scan_consistency_tests {
 		refill_after_reset: Option<ChainTip>,
 		cached_tip: Arc<Mutex<Option<ChainTip>>>,
 		change_on_output_page: bool,
+		output_page_handler: Option<Arc<OutputPageHandler>>,
 		change_on_next_header: Arc<Mutex<bool>>,
 	}
 
@@ -5792,6 +6164,7 @@ mod scan_consistency_tests {
 				refill_after_reset: None,
 				cached_tip: Arc::new(Mutex::new(None)),
 				change_on_output_page,
+				output_page_handler: None,
 				change_on_next_header: Arc::new(Mutex::new(false)),
 			};
 			client.set_body_tip(10, header_hash);
@@ -5975,9 +6348,9 @@ mod scan_consistency_tests {
 
 		fn get_outputs_by_pmmr_index(
 			&self,
-			_start_height: u64,
-			_end_height: Option<u64>,
-			_max_outputs: u64,
+			start_index: u64,
+			end_index: Option<u64>,
+			max_outputs: u64,
 		) -> Result<
 			(
 				u64,
@@ -5991,6 +6364,9 @@ mod scan_consistency_tests {
 					node_index: 1,
 					generation: 1,
 				};
+			}
+			if let Some(handler) = &self.output_page_handler {
+				return handler(start_index, end_index, max_outputs);
 			}
 			Ok((0, 0, Vec::new()))
 		}
@@ -6276,7 +6652,180 @@ mod scan_consistency_tests {
 	}
 
 	#[test]
+	fn output_scan_prefetch_overlaps_processing_and_propagates_failures() -> Result<(), Error> {
+		use std::cell::Cell;
+		use std::sync::mpsc;
+		use std::time::Duration;
+
+		#[derive(Clone, Copy, Debug)]
+		enum Case {
+			Success,
+			CorruptProof,
+			NodeError,
+			NodeChange,
+			DuplicateOutput,
+			Interrupted,
+		}
+
+		let context_id = allocate_new_context(ChainTypes::Floonet, None, None)
+			.map_err(|e| Error::GenericError(e.to_string()))?;
+		let result = (|| {
+			let mut secp = Secp256k1::with_caps(ContextFlag::Commit)?;
+			let keychain = ExtKeychain::from_seed(&secp, &[43; 32], true)?;
+			let builder = proof::ProofBuilder::new(&secp, &keychain)?;
+			let mut outputs = Vec::new();
+			for (child, amount, index) in [(1, 10, 5), (2, 20, 49)] {
+				let id = ExtKeychain::derive_key_id(3, 0, 0, child, 0)?;
+				let switch = SwitchCommitmentType::Regular;
+				let commit = keychain.commit(&secp, amount, &id, switch)?;
+				let rangeproof =
+					proof::create(&mut secp, &keychain, &builder, amount, &id, switch, commit)?;
+				outputs.push((commit, rangeproof, false, 1, index));
+			}
+			let caller_thread = std::thread::current().id();
+			for case in [
+				Case::Success,
+				Case::CorruptProof,
+				Case::NodeError,
+				Case::NodeChange,
+				Case::DuplicateOutput,
+				Case::Interrupted,
+			] {
+				let mut first = outputs[0];
+				let mut second = outputs[1];
+				if matches!(case, Case::CorruptProof) {
+					first.1.proof[31] ^= 1;
+					second.4 = 9;
+				}
+				if matches!(case, Case::DuplicateOutput) {
+					second = outputs[0];
+					second.4 = 49;
+				}
+
+				let requests = Arc::new(Mutex::new(Vec::new()));
+				let recorded_requests = requests.clone();
+				let (processing_tx, processing_rx) = mpsc::channel();
+				let processing_rx = Mutex::new(processing_rx);
+				let (fetch_tx, fetch_rx) = mpsc::channel();
+				let mut client = ScanConsistencyNodeClient::new("tip-a", false);
+				let connection = client.connection.clone();
+				let expected_connection = client.get_node_connection_id();
+				client.output_page_handler = Some(Arc::new(move |start, end, max| {
+					assert_ne!(std::thread::current().id(), caller_thread);
+					assert_eq!(global::get_chain_type(context_id), ChainTypes::Floonet);
+					recorded_requests.lock().push((start, end, max));
+					match start {
+						1 => Ok((50, 7, vec![first])),
+						8 => {
+							// The second fetch and first page's processing must overlap.
+							// Either serial ordering times out instead of hanging the test.
+							processing_rx
+								.lock()
+								.recv_timeout(Duration::from_secs(5))
+								.expect("first page processing should start during the next fetch");
+							fetch_tx
+								.send(())
+								.expect("processor should still be running");
+							match case {
+								Case::NodeError => {
+									return Err(Error::Node("prefetch failed".into()));
+								}
+								Case::NodeChange => {
+									*connection.lock() = NodeConnectionId {
+										node_index: 1,
+										generation: 1,
+									};
+								}
+								Case::Interrupted => interrupt_scan(context_id)?,
+								_ => {}
+							}
+							// Leave another page available in the proof-error case. The
+							// reader must stop when its handoff is rejected, without fetching it.
+							let last = if matches!(case, Case::CorruptProof) {
+								17
+							} else {
+								50
+							};
+							Ok((50, last, vec![second]))
+						}
+						_ => panic!("unexpected output page request: {} ({:?})", start, case),
+					}
+				}));
+				let processing_started = Cell::new(false);
+				let status = |message| {
+					assert_eq!(std::thread::current().id(), caller_thread);
+					if let StatusMessage::Scanning(..) = message {
+						if !processing_started.replace(true) {
+							processing_tx
+								.send(())
+								.expect("reader should still be running");
+							fetch_rx.recv_timeout(Duration::from_secs(5)).expect(
+								"next fetch should start before first page processing finishes",
+							);
+						}
+					}
+				};
+				let scanned = collect_chain_outputs_bound(
+					&mut secp,
+					context_id,
+					&keychain,
+					client,
+					expected_connection,
+					1,
+					PmmrEndExpectation::Exact(50),
+					false,
+					None,
+					Some(&status),
+				);
+				release_interrupt_scan(context_id);
+				assert!(processing_started.get());
+				assert_eq!(
+					*requests.lock(),
+					vec![(1, Some(50), 1000), (8, Some(50), 1000)],
+					"pagination must follow the returned cursor: {:?}",
+					case,
+				);
+				match case {
+					Case::Success => {
+						let (owned, replay) = scanned?;
+						assert_eq!(
+							owned
+								.iter()
+								.map(|out| (out.mmr_index, out.value))
+								.collect::<Vec<_>>(),
+							vec![(5, 10), (49, 20)],
+						);
+						assert!(replay.is_empty());
+					}
+					Case::CorruptProof => assert!(matches!(scanned, Err(Error::Secp(_)))),
+					Case::NodeError => assert!(
+						matches!(scanned, Err(Error::Node(msg)) if msg == "prefetch failed")
+					),
+					Case::NodeChange => assert!(
+						scanned
+							.expect_err("changed node must fail")
+							.to_string()
+							.contains("changed node while retrieving output pages")
+					),
+					Case::DuplicateOutput => assert!(
+						scanned
+							.expect_err("duplicate must fail")
+							.to_string()
+							.contains("more than once")
+					),
+					Case::Interrupted => assert!(matches!(scanned, Err(Error::Interrupted))),
+				}
+			}
+			Ok(())
+		})();
+		release_interrupt_scan(context_id);
+		release_context(context_id).map_err(|e| Error::GenericError(e.to_string()))?;
+		result
+	}
+
+	#[test]
 	fn ordinary_wallet_scan_rejects_a_node_change_before_processing_the_page() {
+		global::set_local_chain_type(ChainTypes::AutomatedTesting);
 		let client = ScanConsistencyNodeClient::new("tip-a", true);
 		let mut secp =
 			Secp256k1::with_caps(ContextFlag::Commit).expect("test secp context should initialize");

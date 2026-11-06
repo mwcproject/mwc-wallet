@@ -1008,9 +1008,9 @@ dependencies = [
 
 [[package]]
 name = "cc"
-version = "1.11.0"
+version = "1.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "375989decec1a0fa424442bed520fa12ede43a48475ce8c7417d2c69b32b5f6b"
+checksum = "4ff2a8126fff0f8c839080d619675a585e61720bb12d2baceae45769fd66f155"
 dependencies = [
  "find-msvc-tools",
  "jobserver",
@@ -2590,9 +2590,9 @@ dependencies = [
 
 [[package]]
 name = "flate2"
-version = "1.1.10"
+version = "1.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6e634e2e0ebac1ee034020da1ca582e17ffe4e0f5e985823721e168928136dcb"
+checksum = "626d4928326b646e70f65ed36fc7cf9f206bdb68a0019ee7c6b4709da4e084c4"
 dependencies = [
  "crc32fast",
  "miniz_oxide",
@@ -4357,7 +4357,7 @@ dependencies = [
 [[package]]
 name = "mwc_api"
 version = "7.2.0"
-source = "git+https://github.com/mwcproject/mwc-node.git?branch=audit#f0ce8e9ab4b50d20898396fcb6cf3b63d987d7fa"
+source = "git+https://github.com/mwcproject/mwc-node.git?branch=audit#11a14ec5c5fe51e7734676ac56a96afed32d4ec6"
 dependencies = [
  "mwc_chain",
  "mwc_core",
@@ -4371,7 +4371,7 @@ dependencies = [
 [[package]]
 name = "mwc_chain"
 version = "7.2.0"
-source = "git+https://github.com/mwcproject/mwc-node.git?branch=audit#f0ce8e9ab4b50d20898396fcb6cf3b63d987d7fa"
+source = "git+https://github.com/mwcproject/mwc-node.git?branch=audit#11a14ec5c5fe51e7734676ac56a96afed32d4ec6"
 dependencies = [
  "mwc_core",
  "mwc_crates",
@@ -4384,7 +4384,7 @@ dependencies = [
 [[package]]
 name = "mwc_config"
 version = "7.2.0"
-source = "git+https://github.com/mwcproject/mwc-node.git?branch=audit#f0ce8e9ab4b50d20898396fcb6cf3b63d987d7fa"
+source = "git+https://github.com/mwcproject/mwc-node.git?branch=audit#11a14ec5c5fe51e7734676ac56a96afed32d4ec6"
 dependencies = [
  "mwc_core",
  "mwc_crates",
@@ -4397,7 +4397,7 @@ dependencies = [
 [[package]]
 name = "mwc_core"
 version = "7.2.0"
-source = "git+https://github.com/mwcproject/mwc-node.git?branch=audit#f0ce8e9ab4b50d20898396fcb6cf3b63d987d7fa"
+source = "git+https://github.com/mwcproject/mwc-node.git?branch=audit#11a14ec5c5fe51e7734676ac56a96afed32d4ec6"
 dependencies = [
  "mwc_crates",
  "mwc_keychain",
@@ -4408,7 +4408,7 @@ dependencies = [
 [[package]]
 name = "mwc_crates"
 version = "7.2.0"
-source = "git+https://github.com/mwcproject/mwc-node.git?branch=audit#f0ce8e9ab4b50d20898396fcb6cf3b63d987d7fa"
+source = "git+https://github.com/mwcproject/mwc-node.git?branch=audit#11a14ec5c5fe51e7734676ac56a96afed32d4ec6"
 dependencies = [
  "anyhow",
  "argon2",
@@ -4498,7 +4498,7 @@ dependencies = [
  "tokio-rustls",
  "tokio-socks",
  "tokio-util",
- "toml 1.2.0+spec-1.1.0",
+ "toml 1.2.1+spec-1.1.0",
  "tor-cell",
  "tor-config",
  "tor-error",
@@ -4521,7 +4521,7 @@ dependencies = [
 [[package]]
 name = "mwc_keychain"
 version = "7.2.0"
-source = "git+https://github.com/mwcproject/mwc-node.git?branch=audit#f0ce8e9ab4b50d20898396fcb6cf3b63d987d7fa"
+source = "git+https://github.com/mwcproject/mwc-node.git?branch=audit#11a14ec5c5fe51e7734676ac56a96afed32d4ec6"
 dependencies = [
  "mwc_crates",
  "mwc_util",
@@ -4531,7 +4531,7 @@ dependencies = [
 [[package]]
 name = "mwc_node_lib"
 version = "7.2.0"
-source = "git+https://github.com/mwcproject/mwc-node.git?branch=audit#f0ce8e9ab4b50d20898396fcb6cf3b63d987d7fa"
+source = "git+https://github.com/mwcproject/mwc-node.git?branch=audit#11a14ec5c5fe51e7734676ac56a96afed32d4ec6"
 dependencies = [
  "mwc_core",
  "mwc_crates",
@@ -4546,7 +4546,7 @@ dependencies = [
 [[package]]
 name = "mwc_node_workflow"
 version = "7.2.0"
-source = "git+https://github.com/mwcproject/mwc-node.git?branch=audit#f0ce8e9ab4b50d20898396fcb6cf3b63d987d7fa"
+source = "git+https://github.com/mwcproject/mwc-node.git?branch=audit#11a14ec5c5fe51e7734676ac56a96afed32d4ec6"
 dependencies = [
  "mwc_api",
  "mwc_chain",
@@ -4561,7 +4561,7 @@ dependencies = [
 [[package]]
 name = "mwc_p2p"
 version = "7.2.0"
-source = "git+https://github.com/mwcproject/mwc-node.git?branch=audit#f0ce8e9ab4b50d20898396fcb6cf3b63d987d7fa"
+source = "git+https://github.com/mwcproject/mwc-node.git?branch=audit#11a14ec5c5fe51e7734676ac56a96afed32d4ec6"
 dependencies = [
  "mwc_chain",
  "mwc_core",
@@ -4574,7 +4574,7 @@ dependencies = [
 [[package]]
 name = "mwc_pool"
 version = "7.2.0"
-source = "git+https://github.com/mwcproject/mwc-node.git?branch=audit#f0ce8e9ab4b50d20898396fcb6cf3b63d987d7fa"
+source = "git+https://github.com/mwcproject/mwc-node.git?branch=audit#11a14ec5c5fe51e7734676ac56a96afed32d4ec6"
 dependencies = [
  "mwc_core",
  "mwc_crates",
@@ -4601,7 +4601,7 @@ dependencies = [
 [[package]]
 name = "mwc_servers"
 version = "7.2.0"
-source = "git+https://github.com/mwcproject/mwc-node.git?branch=audit#f0ce8e9ab4b50d20898396fcb6cf3b63d987d7fa"
+source = "git+https://github.com/mwcproject/mwc-node.git?branch=audit#11a14ec5c5fe51e7734676ac56a96afed32d4ec6"
 dependencies = [
  "mwc_api",
  "mwc_chain",
@@ -4618,7 +4618,7 @@ dependencies = [
 [[package]]
 name = "mwc_store"
 version = "7.2.0"
-source = "git+https://github.com/mwcproject/mwc-node.git?branch=audit#f0ce8e9ab4b50d20898396fcb6cf3b63d987d7fa"
+source = "git+https://github.com/mwcproject/mwc-node.git?branch=audit#11a14ec5c5fe51e7734676ac56a96afed32d4ec6"
 dependencies = [
  "mwc_core",
  "mwc_crates",
@@ -4629,7 +4629,7 @@ dependencies = [
 [[package]]
 name = "mwc_util"
 version = "7.2.0"
-source = "git+https://github.com/mwcproject/mwc-node.git?branch=audit#f0ce8e9ab4b50d20898396fcb6cf3b63d987d7fa"
+source = "git+https://github.com/mwcproject/mwc-node.git?branch=audit#11a14ec5c5fe51e7734676ac56a96afed32d4ec6"
 dependencies = [
  "mwc_crates",
  "thiserror 2.0.21",
@@ -5703,7 +5703,7 @@ version = "3.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e67ba7e9b2b56446f1d419b1d807906278ffa1a658a8a5d8a39dcb1f5a78614f"
 dependencies = [
- "toml_edit 0.25.18+spec-1.1.0",
+ "toml_edit 0.25.19+spec-1.1.0",
 ]
 
 [[package]]
@@ -6571,7 +6571,7 @@ dependencies = [
 [[package]]
 name = "saturating-time"
 version = "0.5.0"
-source = "git+https://github.com/mwcproject/mwc-node.git?branch=audit#f0ce8e9ab4b50d20898396fcb6cf3b63d987d7fa"
+source = "git+https://github.com/mwcproject/mwc-node.git?branch=audit#11a14ec5c5fe51e7734676ac56a96afed32d4ec6"
 dependencies = [
  "web-time-compat",
 ]
@@ -6780,9 +6780,9 @@ dependencies = [
 
 [[package]]
 name = "serde_spanned"
-version = "1.1.2"
+version = "1.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4e7523beb55eece201a2356bee0bbca0d1ab466c14c07703b2e0ee6d42cb0c2c"
+checksum = "9c187e0a369471c550af028cba56d4f4fa2a489ad28151ae95a4d340a2a8b782"
 dependencies = [
  "serde_core",
 ]
@@ -7097,9 +7097,9 @@ dependencies = [
 
 [[package]]
 name = "smallvec"
-version = "1.16.4"
+version = "1.16.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d0d5d4b1981b8bbbb7aed204cae5726d683d5d6ac7e74ec54122ea28f315e7c8"
+checksum = "149309498a5f7334b12ddae0cad8aba81ce785fe91755068867e017cf98fee46"
 
 [[package]]
 name = "snowflake"
@@ -7676,14 +7676,14 @@ dependencies = [
 
 [[package]]
 name = "toml"
-version = "1.2.0+spec-1.1.0"
+version = "1.2.1+spec-1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c5ffcdf8f50436dbbfd675c1fe1b8e0854f42b7defea8584bdebe1aee900e561"
+checksum = "d5755c51863cdac711f1956baf8eb9588e060755f7d3c4c979e70ea1e1f32cd7"
 dependencies = [
  "indexmap 2.14.2",
  "serde_core",
- "serde_spanned 1.1.2",
- "toml_datetime 1.1.2+spec-1.1.0",
+ "serde_spanned 1.1.3",
+ "toml_datetime 1.1.3+spec-1.1.0",
  "toml_parser",
  "toml_writer",
  "winnow 1.0.5",
@@ -7700,9 +7700,9 @@ dependencies = [
 
 [[package]]
 name = "toml_datetime"
-version = "1.1.2+spec-1.1.0"
+version = "1.1.3+spec-1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2b86d767906c6c42421dcba507eb9d203e779497710a47782a224bb871653053"
+checksum = "173f25c883cd2176a2d8212155638c0a60d484a9d84546d270866f40f56b6e49"
 dependencies = [
  "serde_core",
 ]
@@ -7723,12 +7723,12 @@ dependencies = [
 
 [[package]]
 name = "toml_edit"
-version = "0.25.18+spec-1.1.0"
+version = "0.25.19+spec-1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1ec6e78bd70db9420d8d212fa9dc97f116448a1ceff5d00eabb991d407e21396"
+checksum = "dd43688c4858d7264ae1cf9a9f874a67c3feb74a883b1cd7bebd6a4ea8307218"
 dependencies = [
  "indexmap 2.14.2",
- "toml_datetime 1.1.2+spec-1.1.0",
+ "toml_datetime 1.1.3+spec-1.1.0",
  "toml_parser",
  "winnow 1.0.5",
 ]
@@ -8007,7 +8007,7 @@ dependencies = [
  "serde_ignored",
  "strum",
  "thiserror 2.0.21",
- "toml 1.2.0+spec-1.1.0",
+ "toml 1.2.1+spec-1.1.0",
  "tor-basic-utils",
  "tor-error",
  "tor-rtcompat",
@@ -8760,7 +8760,7 @@ dependencies = [
 [[package]]
 name = "tor-ptmgr"
 version = "0.47.0"
-source = "git+https://github.com/mwcproject/mwc-node.git?branch=audit#f0ce8e9ab4b50d20898396fcb6cf3b63d987d7fa"
+source = "git+https://github.com/mwcproject/mwc-node.git?branch=audit#11a14ec5c5fe51e7734676ac56a96afed32d4ec6"
 dependencies = [
  "async-trait",
  "cfg-if",

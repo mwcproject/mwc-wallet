@@ -90,6 +90,9 @@ pub enum Error {
 	/// Wallet backend error
 	#[error("Wallet store error, {0}")]
 	Backend(String),
+	/// LMDB exhausted the current map while staging an atomic write batch.
+	#[error("Wallet store error, LMDB error, MDB_MAP_FULL: Environment mapsize limit reached")]
+	DatabaseMapFull,
 
 	/// A transient swap processing failure caused by a local condition
 	/// (infrastructure, configuration, balances, entropy, in-flight chain
@@ -464,6 +467,14 @@ impl From<secp::Error> for Error {
 
 impl From<mwc_wallet_util::mwc_store::Error> for Error {
 	fn from(error: mwc_wallet_util::mwc_store::Error) -> Error {
+		if matches!(
+			&error,
+			mwc_wallet_util::mwc_store::Error::LmdbErr(
+				mwc_wallet_util::mwc_crates::lmdb_zero::error::Error::Code(code)
+			) if *code == mwc_wallet_util::mwc_crates::lmdb_zero::error::MAP_FULL
+		) {
+			return Error::DatabaseMapFull;
+		}
 		Error::Backend(format!("{}", error))
 	}
 }
