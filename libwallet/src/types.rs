@@ -1533,8 +1533,11 @@ pub struct TxLogEntry {
 	#[serde(default)]
 	pub kernel_excess: Option<pedersen::Commitment>,
 	/// Associated kernel offset, for later lookup if necessary
-	#[serde(with = "secp_ser::option_commitment_serde")]
-	#[serde(default)]
+	#[serde(
+		default,
+		serialize_with = "secp_ser::option_commitment_serde::serialize",
+		deserialize_with = "deserialize_tx_log_kernel_offset"
+	)]
 	pub kernel_offset: Option<pedersen::Commitment>,
 	/// Height reported when transaction was created, if lookup
 	/// of kernel is necessary
@@ -1549,6 +1552,31 @@ pub struct TxLogEntry {
 	/// Track the time it took for a transaction to get reverted
 	#[serde(with = "option_duration_as_secs", default)]
 	pub reverted_after: Option<Duration>,
+}
+
+fn deserialize_tx_log_kernel_offset<'de, D>(
+	deserializer: D,
+) -> Result<Option<pedersen::Commitment>, D::Error>
+where
+	D: serde::Deserializer<'de>,
+{
+	let Some(offset) = Option::<String>::deserialize(deserializer)? else {
+		return Ok(None);
+	};
+
+	// Older receive code called commit(0, zero_key) for a zero slate offset.
+	// The old secp wrapper serialized the failed commitment as 08 followed by
+	// 32 zero bytes. Treat that exact legacy offset as absent, matching current
+	// receive code. This exception must not apply to kernel excesses or other
+	// commitments, and all other encodings still undergo normal validation.
+	if offset == "080000000000000000000000000000000000000000000000000000000000000000" {
+		return Ok(None);
+	}
+
+	secp_ser::commitment_from_hex(serde::de::value::StringDeserializer::<D::Error>::new(
+		offset,
+	))
+	.map(Some)
 }
 
 impl From<&TxLogEntry> for StoredTxLocator {
@@ -2483,6 +2511,91 @@ mod tests {
 	struct TestSer {
 		#[serde(with = "option_duration_as_secs", default)]
 		dur: Option<Duration>,
+	}
+
+	const LEGACY_ZERO_KERNEL_OFFSET: &str =
+		"080000000000000000000000000000000000000000000000000000000000000000";
+
+	fn read_stored_tx_log(value: &Value) -> Result<TxLogEntry, ser::Error> {
+		let json = serde_json::to_vec(value).unwrap();
+		let mut bytes = (json.len() as u64).to_be_bytes().to_vec();
+		bytes.extend_from_slice(&json);
+		ser::deserialize_default(0, &mut bytes.as_slice(), true)
+	}
+
+	#[test]
+	fn tx_log_reads_legacy_zero_kernel_offset() {
+		let secp = Secp256k1::with_caps(secp::ContextFlag::Commit).unwrap();
+		let mut entry = TxLogEntry::new(Identifier::zero(), TxLogEntryType::TxReceived, 7);
+		entry.tx_slate_id = Some(Uuid::new_v4());
+		entry.amount_credited = 42;
+		entry.confirmed = true;
+		entry.kernel_excess = Some(secp.commit_value(1).unwrap());
+		entry.output_commits = vec![secp.commit_value(2).unwrap()];
+		let expected = serde_json::to_value(&entry).unwrap();
+		let mut legacy = expected.clone();
+		legacy["kernel_offset"] = Value::String(LEGACY_ZERO_KERNEL_OFFSET.to_owned());
+
+		let restored = read_stored_tx_log(&legacy).unwrap();
+		assert!(restored.kernel_offset.is_none());
+		assert_eq!(serde_json::to_value(&restored).unwrap(), expected);
+
+		// Rewriting the record persists null, preserving all transaction history.
+		let mut rewritten = Vec::new();
+		ser::serialize_default(0, &mut rewritten, &restored, true).unwrap();
+		let reread: TxLogEntry =
+			ser::deserialize_default(0, &mut rewritten.as_slice(), true).unwrap();
+		assert_eq!(serde_json::to_value(&reread).unwrap(), expected);
+	}
+
+	#[test]
+	fn tx_log_preserves_valid_and_absent_kernel_offsets() {
+		let secp = Secp256k1::with_caps(secp::ContextFlag::Commit).unwrap();
+		let mut entry = TxLogEntry::new(Identifier::zero(), TxLogEntryType::TxReceived, 7);
+		for offset in [None, Some(secp.commit_value(1).unwrap())] {
+			entry.kernel_offset = offset;
+			let value = serde_json::to_value(&entry).unwrap();
+			let restored = read_stored_tx_log(&value).unwrap();
+			assert_eq!(serde_json::to_value(&restored).unwrap(), value);
+		}
+
+		let mut value = serde_json::to_value(&entry).unwrap();
+		value.as_object_mut().unwrap().remove("kernel_offset");
+		assert!(read_stored_tx_log(&value).unwrap().kernel_offset.is_none());
+	}
+
+	#[test]
+	fn tx_log_rejects_invalid_kernel_commitments() {
+		let entry = TxLogEntry::new(Identifier::zero(), TxLogEntryType::TxReceived, 7);
+		let original = serde_json::to_value(&entry).unwrap();
+		for offset in [
+			Value::String("00".repeat(33)),
+			Value::String(format!("09{}", "00".repeat(32))),
+			Value::String(format!("08{}", "ff".repeat(32))),
+			Value::String(LEGACY_ZERO_KERNEL_OFFSET[..64].to_owned()),
+			Value::String(format!("{}00", LEGACY_ZERO_KERNEL_OFFSET)),
+			Value::String("not hex".to_owned()),
+			Value::from(0),
+		] {
+			let mut value = original.clone();
+			value["kernel_offset"] = offset;
+			assert!(matches!(
+				read_stored_tx_log(&value),
+				Err(ser::Error::CorruptedData(_))
+			));
+		}
+
+		// The legacy zero offset is not a valid kernel excess or network commitment.
+		let mut value = original;
+		value["kernel_excess"] = Value::String(LEGACY_ZERO_KERNEL_OFFSET.to_owned());
+		assert!(read_stored_tx_log(&value).is_err());
+		let encoded = serde_json::to_string(LEGACY_ZERO_KERNEL_OFFSET).unwrap();
+		assert!(
+			secp_ser::option_commitment_serde::deserialize(
+				&mut serde_json::Deserializer::from_str(&encoded)
+			)
+			.is_err()
+		);
 	}
 
 	#[test]

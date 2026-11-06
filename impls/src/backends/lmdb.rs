@@ -2255,6 +2255,58 @@ mod tests {
 	}
 
 	#[test]
+	fn tx_log_reads_legacy_zero_offsets_in_active_and_archived_records() -> Result<(), Error> {
+		use mwc_wallet_util::mwc_crates::serde_json::{self, Value};
+
+		let directory = TestWalletDir::new()?;
+		let mut wallet = test_wallet(&directory)?;
+		let parent = wallet.parent_key_id();
+		let secp = Secp256k1::with_caps(ContextFlag::Commit)?;
+		let mut expected = Vec::new();
+		{
+			let batch = wallet.db.batch_write()?;
+			for (prefix, id) in [(TX_LOG_ENTRY_PREFIX, 7), (TX_ARCHIVE_LOG_ENTRY_PREFIX, 8)] {
+				let mut entry = TxLogEntry::new(parent.clone(), TxLogEntryType::TxReceived, id);
+				entry.tx_slate_id = Some(Uuid::new_v4());
+				entry.amount_credited = 42;
+				entry.kernel_excess = Some(secp.commit_value(1)?);
+				entry.output_commits = vec![secp.commit_value(2)?];
+				let mut legacy = serde_json::to_value(&entry).unwrap();
+				expected.push(legacy.clone());
+				legacy["kernel_offset"] = Value::String(
+					"080000000000000000000000000000000000000000000000000000000000000000".to_owned(),
+				);
+
+				// Write the old length-prefixed JSON directly, independently of the
+				// current TxLogEntry serializer.
+				let json = serde_json::to_vec(&legacy).unwrap();
+				let mut bytes = (json.len() as u64).to_be_bytes().to_vec();
+				bytes.extend_from_slice(&json);
+				let key = to_key_u64(prefix, parent.to_bytes().to_vec(), u64::from(id))?;
+				batch.put(&key, &bytes)?;
+			}
+			batch.commit()?;
+		}
+
+		// Scans use both backend iterators and batch iterators. Neither may
+		// reject or silently drop a historical record with a zero offset.
+		let entries: Vec<_> = wallet
+			.tx_log_iter()?
+			.chain(wallet.tx_log_archive_iter()?)
+			.map(|entry| serde_json::to_value(entry).unwrap())
+			.collect();
+		assert_eq!(entries, expected);
+		let batch = wallet.batch_no_mask()?;
+		let entries: Vec<_> = batch
+			.tx_log_iter()?
+			.chain(batch.tx_log_archive_iter()?)
+			.map(|entry| serde_json::to_value(entry).unwrap())
+			.collect();
+		assert_eq!(entries, expected);
+		Ok(())
+	}
+
+	#[test]
 	fn delete_tx_log_entry_checks_live_and_archive_namespaces() -> Result<(), Error> {
 		let directory = TestWalletDir::new()?;
 		let mut wallet = test_wallet(&directory)?;
