@@ -372,6 +372,8 @@ impl GlobalWalletConfig {
 		let mut defaults_conf = GlobalWalletConfig::default();
 		let defaults = &mut defaults_conf.members.wallet;
 		defaults.chain_type = Some(chain_type.clone());
+		defaults.owner_api_listen_port =
+			Some(WalletConfig::default_owner_api_listen_port(*chain_type));
 
 		match *chain_type {
 			global::ChainTypes::Mainnet => {}

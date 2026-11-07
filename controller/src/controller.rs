@@ -2247,10 +2247,22 @@ where
 		));
 	}
 
-	warn!("Starting HTTP Foreign listener API server.");
+	let address = ProvableAddress::from_tor_pub_key(&slatepack_pk)?;
+	let mut listen_addresses = Vec::new();
+	if tor_config.is_tor_enabled() {
+		listen_addresses.push(format!("http://{}.onion:80 (Tor)", address.public_key));
+	}
+	if !tor_config.is_tor_enabled() || secondary_required {
+		if let Some(addr) = socket_addr {
+			listen_addresses.push(format!("http://{} (TCP)", addr));
+		}
+	}
+	warn!(
+		"Starting HTTP Foreign listener API server at {}.",
+		listen_addresses.join(", ")
+	);
 
 	if mwc_wallet_util::mwc_util::is_console_output_enabled() {
-		let address = ProvableAddress::from_tor_pub_key(&slatepack_pk)?;
 		let qr_string = match QrCode::new(address.public_key.clone()) {
 			Ok(qr) => qr.to_string(false, 3),
 			Err(_) => "Failed to generate QR code!".to_string(),
@@ -2332,7 +2344,11 @@ where
 		);
 		match onion_address {
 			Some(addr) => info!("Foreign API is started at {}", addr),
-			None => info!("Foreign API is started"),
+			None => {
+				if let Some(addr) = socket_addr {
+					info!("Foreign API is started at {}", addr);
+				}
+			}
 		}
 		if let Err(e) = primary_started.ready() {
 			error!("Unable to report primary foreign listener startup: {}", e);

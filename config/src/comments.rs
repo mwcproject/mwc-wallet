@@ -47,11 +47,13 @@ fn comments() -> HashMap<String, String> {
 #private key for the TLS certificate
 #tls_certificate_key = \"\"
 
-#host IP for wallet listener, change to \"0.0.0.0\" to receive mwc coins through http. Use 127.0.0.1 to listen on external tor service or some other proxy
+#HTTP socket listener settings. Commented values are examples, not defaults.
+#Both settings are required for listen --no_tor or --listen_on_socket_with_tor.
+#host IP for wallet listener: use \"0.0.0.0\" for external HTTP connections or \"127.0.0.1\" for a local Tor service or proxy.
 #api_listen_interface = \"127.0.0.1\"
 
-#port for wallet listener
-#api_listen_port = 13415
+#port for wallet listener, can also be supplied with listen --port
+#api_listen_port = 3415
 
 #Additional source IP allowed to call the mining-only build_coinbase RPC.
 #Loopback IPv4 and IPv6 addresses are always allowed. Built-in Tor connections are never allowed.
@@ -126,6 +128,7 @@ fn comments() -> HashMap<String, String> {
 		.to_string(),
 	);
 
+	#[cfg(feature = "swaps")]
 	retval.insert(
 		"eth_swap_contract_address".to_string(),
 		"
@@ -133,6 +136,7 @@ fn comments() -> HashMap<String, String> {
 "
 		.to_string(),
 	);
+	#[cfg(feature = "swaps")]
 	retval.insert(
 		"erc20_swap_contract_address".to_string(),
 		"
@@ -140,6 +144,7 @@ fn comments() -> HashMap<String, String> {
 "
 		.to_string(),
 	);
+	#[cfg(feature = "swaps")]
 	retval.insert(
 		"eth_infura_project_id".to_string(),
 		"
@@ -156,6 +161,7 @@ fn comments() -> HashMap<String, String> {
 		.to_string(),
 	);
 
+	#[cfg(feature = "swaps")]
 	retval.insert(
 		"[wallet.swap_electrumx_addr]".to_string(),
 		"

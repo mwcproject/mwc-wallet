@@ -37,7 +37,7 @@ use crate::internal::chain_session::NodeReadSession;
 use crate::internal::{keys, scan, selection, tx, updater};
 use crate::slate::{PaymentInfo, Slate};
 use crate::slatepack::validate_slatepack_size;
-use crate::status::{send_status, StatusCallback, StatusMessage};
+use crate::status::{scan_progress_callback, send_status, StatusCallback, StatusMessage};
 use crate::types::{
 	AcctPathMapping, Context, NodeClient, StoredTxLocator, TxLogEntry, TxSession, WalletBackend,
 	WalletInfo, WalletOutputBatch, FLAG_NEW_WALLET, U64_DATA_IDX_ADDRESS_INDEX,
@@ -742,7 +742,7 @@ where
 		None => None,
 	};
 
-	let compact_slate = args.slatepack_recipient.is_some();
+	let compact_slate = args.slatepack_recipient.is_some() || args.target_slate_version == Some(4);
 	let mut slate = tx::new_tx_slate(
 		&mut *w,
 		args.amount,
@@ -753,7 +753,7 @@ where
 		compact_slate,
 	)?;
 	let chain_tip = slate.height; // it is fresh slate, height is a tip
-	if args.slatepack_recipient.is_some() {
+	if compact_slate {
 		validate_slatepack_size(&slate, Some(&SlateVersion::SP), 0, num_outputs)?;
 	}
 	let context = tx::add_output_to_slate(
@@ -2423,6 +2423,7 @@ where
 /// it, and no wallet actions are expected while a scan runs, so the transient
 /// intermediate state of a racing pass is both explainable and self-healing.
 /// Progress is reported synchronously to `status_callback` when supplied.
+/// Without a callback, scans of more than 3,000 blocks use console/log progress output.
 pub fn update_wallet_state<'a, T: ?Sized, C, K>(
 	wallet: &mut T,
 	secp: &mut Secp256k1,
@@ -2477,7 +2478,13 @@ where
 	} else {
 		0
 	};
-	let show_progress = tip_height < 1000 || blocks_since_last_scan > 20;
+	let show_progress = blocks_since_last_scan > 3_000;
+	// Commands such as info and send refresh without a callback. Long updates
+	// use the same progress output as an explicit scan; caller callbacks take precedence.
+	let progress_callback = scan_progress_callback();
+	let use_default_progress = show_progress && status_callback.is_none();
+	let status_callback = status_callback
+		.or_else(|| use_default_progress.then_some(&progress_callback as &StatusCallback<'_>));
 
 	if last_scanned_block.height == 0 {
 		send_status(
@@ -2558,6 +2565,13 @@ where
 	batch.save_last_scanned_blocks(last_scanned_block.height, &blocks)?;
 	clear_new_wallet_flag(&mut *batch)?;
 	batch.commit()?;
+	if use_default_progress {
+		progress_callback(StatusMessage::Scanning(
+			true,
+			"Wallet update complete".to_owned(),
+			100,
+		));
+	}
 	Ok((true, tip_height))
 }
 

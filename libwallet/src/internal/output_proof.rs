@@ -20,7 +20,9 @@ use mwc_wallet_util::mwc_core::core::Output;
 use mwc_wallet_util::mwc_core::libtx::{build, proof};
 use mwc_wallet_util::mwc_crates::secp;
 use mwc_wallet_util::mwc_crates::secp::Secp256k1;
+use mwc_wallet_util::mwc_crates::secp::key::SecretKey;
 use mwc_wallet_util::mwc_crates::secp::pedersen::{Commitment, RangeProof};
+use mwc_wallet_util::mwc_keychain::zeroizing_blake2b::zeroizing_blake2b;
 use mwc_wallet_util::mwc_keychain::{Identifier, Keychain, SwitchCommitmentType};
 use std::convert::TryFrom;
 
@@ -97,6 +99,25 @@ impl VerifiedOutputProof {
 			.into_iter()
 			.map(|(commit, proof)| Self { commit, proof })
 			.collect())
+	}
+
+	/// Recover a view-only amount after validating the proof and commitment.
+	pub(crate) fn rewind_value(
+		&self,
+		secp: &Secp256k1,
+		rewind_hash: &[u8; 32],
+	) -> Result<Option<u64>, Error> {
+		// A successful rewind proves only that this proof used the supplied
+		// viewing credential. Anyone with that credential can create unrelated
+		// valid outputs that match it; this does not prove spend ownership.
+		let rewind_nonce = zeroizing_blake2b(32, &self.commit.0, rewind_hash);
+		let nonce = SecretKey::from_slice(secp, rewind_nonce.as_slice())
+			.map_err(|e| Error::Nonce(format!("Unable to create nonce: {}", e)))?;
+		match secp.rewind_bullet_proof(self.commit, nonce, None, None, self.proof) {
+			Ok(info) => Ok(Some(info.value)),
+			Err(secp::Error::InvalidRangeProof) => Ok(None),
+			Err(e) => Err(mwc_wallet_util::mwc_core::libtx::Error::from(e).into()),
+		}
 	}
 
 	/// Recover the current format, including historical anti-replay height tags.

@@ -28,7 +28,7 @@ args:
       long: top_level_dir
       takes_value: true
   - external:
-      help: Listen on 0.0.0.0 interface to allow external connections (default is 127.0.0.1)
+      help: Use 0.0.0.0 for the HTTP socket listener to allow external connections
       short: e
       long: external
       takes_value: false
@@ -71,7 +71,7 @@ subcommands:
       about: Runs the wallet in listening mode waiting for transactions
       args:
         - port:
-            help: Port on which to run the wallet listener
+            help: Port for the HTTP socket listener (overrides wallet.api_listen_port)
             short: l
             long: port
             takes_value: true
@@ -156,7 +156,7 @@ subcommands:
             short: e
             long: estimate-selection
         - late_lock:
-            help: EXPERIMENTAL - Do not lock the coins immediately, instead only lock them during finalization.
+            help: Do not lock the coins immediately, instead only lock them during finalization.
             short: l
             long: late-lock
         - change_outputs:
@@ -318,7 +318,7 @@ subcommands:
             long: message
             takes_value: true
         - dest:
-            help: Name of destination slate output file
+            help: Optional output file. If omitted, print the invoice as Slatepack
             short: d
             long: dest
             takes_value: true
@@ -327,7 +327,7 @@ subcommands:
             long: slatepack_recipient
             takes_value: true
         - slatepack_qr:
-            help: Show slatepack data as QR code
+            help: Show the invoice as a QR code; omit --dest or specify --slatepack_recipient
             short: q
             long: slatepack_qr
   - finalize_invoice:
@@ -379,7 +379,7 @@ subcommands:
             short: e
             long: estimate-selection
         - method:
-            help: Method for sending the processed invoice back to the invoice creator. Use self if you are processing
+            help: Method for returning the processed invoice to its creator
             short: m
             long: method
             possible_values:
@@ -388,7 +388,7 @@ subcommands:
             default_value: file
             takes_value: true
         - dest:
-            help: Send the transaction to the provided server (start with http://) or save as file. If using tor and slate is encrypted, this option will be filled automatically
+            help: Optional output file for method file, or HTTP(S) address for method http. The response is also printed. Method http can infer the destination from an encrypted invoice's sender Tor address
             short: d
             long: dest
             takes_value: true
@@ -407,13 +407,8 @@ subcommands:
             short: n
             long: content
             takes_value: true
-        - ttl_blocks:
-            help: If present, the number of blocks from the current after which wallets should refuse to process transactions further
-            short: b
-            long: ttl_blocks
-            takes_value: true
         - slatepack_qr:
-            help: Show slatepack data as QR code
+            help: Show the response as a QR code; requires a Slatepack invoice
             short: q
             long: slatepack_qr
   - outputs:

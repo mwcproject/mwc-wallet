@@ -15,7 +15,11 @@
 
 //! Synchronous wallet-operation status notifications.
 
+use mwc_wallet_util::mwc_crates::log::info;
 use mwc_wallet_util::mwc_crates::serde::{self, Deserialize, Serialize};
+use mwc_wallet_util::mwc_util::is_console_output_enabled;
+use std::cell::Cell;
+use std::io::Write;
 
 /// Status messages emitted while a wallet operation is running.
 ///
@@ -42,6 +46,24 @@ pub enum StatusMessage {
 /// Callback invoked synchronously from the wallet operation that emits a
 /// status message.
 pub type StatusCallback<'a> = dyn Fn(StatusMessage) + 'a;
+
+/// Report scan percentages to the console, or to the log when used as a library.
+pub fn scan_progress_callback() -> impl Fn(StatusMessage) {
+	let last_percentage = Cell::new(None);
+	move |status| {
+		if let StatusMessage::Scanning(true, _, percentage) = status {
+			// Report each percentage once, independently of console log filtering.
+			if last_percentage.replace(Some(percentage)) != Some(percentage) {
+				if is_console_output_enabled() {
+					// An unavailable output stream must not abort wallet repair.
+					let _ = writeln!(std::io::stdout(), "Scanning - {}% complete", percentage);
+				} else {
+					info!("Scanning - {}% complete", percentage);
+				}
+			}
+		}
+	}
+}
 
 pub(crate) fn send_status(status_callback: Option<&StatusCallback<'_>>, message: StatusMessage) {
 	if let Some(callback) = status_callback {

@@ -46,7 +46,7 @@ built = { version = "0.8", features = ["git2"]}
 
 [features]
 default = []
-swaps = ["mwc_wallet_impls/swaps", "mwc_wallet_libwallet/swaps", "mwc_wallet_controller/swaps", "mwc_wallet_workflow/swaps"]
+swaps = ["mwc_wallet_config/swaps", "mwc_wallet_impls/swaps", "mwc_wallet_libwallet/swaps", "mwc_wallet_controller/swaps", "mwc_wallet_workflow/swaps"]
 test-support = [
 	"mwc_wallet_api/test-support",
 	"mwc_wallet_controller/test-support",

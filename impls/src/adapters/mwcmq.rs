@@ -2281,27 +2281,26 @@ impl MWCMQSBroker {
 			// `/timenow` response. We intentionally do not change or domain-separate
 			// that signed message because doing so would change the MQS protocol and
 			// require a coordinated broker upgrade. Instead, the wallet signs only
-			// responses that parse as fresh integer timestamps. Ownership proofs also
-			// use a versioned, domain-separated canonical transcript, so an accepted
-			// timestamp signature cannot be reused as an ownership attestation.
-			let time_now_valid = time_now
-				.trim()
-				.parse::<u64>()
-				.map(|ts| {
-					let now = SystemTime::now()
-						.duration_since(UNIX_EPOCH)
-						.map(|d| d.as_secs())
-						.unwrap_or(0);
-					ts.abs_diff(now) <= 300
-				})
-				.unwrap_or(false);
+			// responses that parse as fresh integer timestamps in Unix milliseconds.
+			// Ownership proofs also use a versioned, domain-separated canonical
+			// transcript, so a timestamp signature cannot be reused as an attestation.
+			let time_now_valid = match (
+				time_now.trim().parse::<u64>(),
+				SystemTime::now().duration_since(UNIX_EPOCH),
+			) {
+				(Ok(timestamp), Ok(now)) => {
+					u128::from(timestamp).abs_diff(now.as_millis())
+						<= Duration::from_secs(300).as_millis()
+				}
+				_ => false,
+			};
 			if !time_now_valid {
 				if self.stop_requested() {
 					break 'subscribe;
 				}
 				self.print_error(
 					[].to_vec(),
-					"mwcmqs server returned an invalid or stale time_now value",
+					"mwcmqs server returned an invalid or stale time_now value; expected Unix milliseconds within five minutes of the local clock",
 					-12,
 				);
 				thread::sleep(Duration::from_millis(1000));

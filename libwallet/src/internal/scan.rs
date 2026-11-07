@@ -42,7 +42,6 @@ use mwc_wallet_util::mwc_crates::secp::pedersen;
 use mwc_wallet_util::mwc_crates::secp::{self, Secp256k1};
 use mwc_wallet_util::mwc_crates::uuid::Uuid;
 use mwc_wallet_util::mwc_crates::zeroize::Zeroizing;
-use mwc_wallet_util::mwc_keychain::zeroizing_blake2b::zeroizing_blake2b;
 use mwc_wallet_util::mwc_keychain::{Identifier, Keychain, SwitchCommitmentType};
 use mwc_wallet_util::mwc_util;
 use mwc_wallet_util::{Mutex, RwLock};
@@ -353,31 +352,25 @@ fn scan_worker_count() -> usize {
 		.unwrap_or(1)
 }
 
-fn identify_utxo_outputs<'a, K: Keychain + 'a>(
+fn process_output_chunks<T, F>(
 	secp: &mut Secp256k1,
 	context_id: u32,
-	keychain: &K,
-	outputs: Vec<NodeOutput>,
-	end_height: Option<u64>,
-	should_self_spend: bool,
-	self_spend_amount: u64,
-) -> Result<(Vec<OutputResult>, Vec<OutputResult>), Error> {
+	outputs: &[NodeOutput],
+	process_chunk: F,
+) -> Result<Vec<T>, Error>
+where
+	T: Send,
+	F: Fn(&mut Secp256k1, &[NodeOutput]) -> Result<T, Error> + Sync,
+{
 	let workers = scan_worker_count().min((outputs.len() / 64).max(1));
 	if workers <= 1 {
-		return identify_utxo_outputs_serial(
-			secp,
-			context_id,
-			keychain,
-			&outputs,
-			end_height,
-			should_self_spend,
-			self_spend_amount,
-		);
+		return Ok(vec![process_chunk(secp, outputs)?]);
 	}
 	let chain_type = global::get_chain_type(context_id);
 	std::thread::scope(|scope| {
 		let mut handles = Vec::new();
 		let mut spawn_error = None;
+		let process_chunk = &process_chunk;
 		for (i, chunk) in outputs.chunks(outputs.len().div_ceil(workers)).enumerate() {
 			let handle = std::thread::Builder::new()
 				.name(format!("wallet-scan-{}", i))
@@ -386,15 +379,7 @@ fn identify_utxo_outputs<'a, K: Keychain + 'a>(
 					// network into workers rather than relying on context zero.
 					global::set_local_chain_type(chain_type);
 					let mut secp = Secp256k1::with_caps(secp::ContextFlag::Commit)?;
-					identify_utxo_outputs_serial(
-						&mut secp,
-						context_id,
-						keychain,
-						chunk,
-						end_height,
-						should_self_spend,
-						self_spend_amount,
-					)
+					process_chunk(&mut secp, chunk)
 				});
 			match handle {
 				Ok(handle) => handles.push(handle),
@@ -419,15 +404,37 @@ fn identify_utxo_outputs<'a, K: Keychain + 'a>(
 		if let Some(error) = spawn_error {
 			return Err(error);
 		}
-		let mut owned = Vec::new();
-		let mut replay = Vec::new();
-		for result in results {
-			let (mut found, mut candidates) = result?;
-			owned.append(&mut found);
-			replay.append(&mut candidates);
-		}
-		Ok((owned, replay))
+		results.into_iter().collect()
 	})
+}
+
+fn identify_utxo_outputs<'a, K: Keychain + 'a>(
+	secp: &mut Secp256k1,
+	context_id: u32,
+	keychain: &K,
+	outputs: Vec<NodeOutput>,
+	end_height: Option<u64>,
+	should_self_spend: bool,
+	self_spend_amount: u64,
+) -> Result<(Vec<OutputResult>, Vec<OutputResult>), Error> {
+	let results = process_output_chunks(secp, context_id, &outputs, |secp, chunk| {
+		identify_utxo_outputs_serial(
+			secp,
+			context_id,
+			keychain,
+			chunk,
+			end_height,
+			should_self_spend,
+			self_spend_amount,
+		)
+	})?;
+	let mut owned = Vec::new();
+	let mut replay = Vec::new();
+	for (mut found, mut candidates) in results {
+		owned.append(&mut found);
+		replay.append(&mut candidates);
+	}
+	Ok((owned, replay))
 }
 
 fn identify_utxo_outputs_serial<'a, K>(
@@ -566,6 +573,57 @@ where
 	Ok((wallet_outputs, self_spend_outputs))
 }
 
+fn identify_rewind_hash_outputs_serial(
+	secp: &mut Secp256k1,
+	context_id: u32,
+	rewind_hash: &[u8; 32],
+	outputs: &[NodeOutput],
+) -> Result<Vec<ViewWalletOutputResult>, Error> {
+	let mut found = Vec::new();
+	for chunk in outputs.chunks(64) {
+		if is_scan_interrupted(context_id) {
+			return Err(Error::Interrupted);
+		}
+		// Rewind is a decryption primitive, not proof validation. Verify every
+		// proof first, including proofs that do not match the viewing credential.
+		let verified = output_proof::VerifiedOutputProof::verify_batch(
+			secp,
+			chunk.iter().map(|out| (out.0, out.1)).collect(),
+		)?;
+		for (output, verified) in chunk.iter().zip(verified) {
+			if is_scan_interrupted(context_id) {
+				return Err(Error::Interrupted);
+			}
+			let Some(value) = verified.rewind_value(secp, rewind_hash)? else {
+				continue;
+			};
+			let (commit, _, is_coinbase, height, mmr_index) = output;
+			let lock_height = if *is_coinbase {
+				height
+					.checked_add(global::coinbase_maturity(context_id))
+					.ok_or_else(|| {
+						Error::DataOverflow(format!(
+							"scan::identify_rewind_hash_outputs, coinbase output lock height overflow, height={} coinbase_maturity={}",
+							height,
+							global::coinbase_maturity(context_id)
+						))
+					})?
+			} else {
+				*height
+			};
+			found.push(ViewWalletOutputResult {
+				commit: mwc_util::ToHex::to_hex(commit),
+				value,
+				height: *height,
+				mmr_index: *mmr_index,
+				is_coinbase: *is_coinbase,
+				lock_height,
+			});
+		}
+	}
+	Ok(found)
+}
+
 fn collect_chain_outputs_rewind_hash<'a, C>(
 	secp: &mut Secp256k1,
 	context_id: u32,
@@ -579,7 +637,6 @@ fn collect_chain_outputs_rewind_hash<'a, C>(
 where
 	C: NodeClient + 'a,
 {
-	let batch_size = 1000;
 	// This collector is only used after resolving a height range against a
 	// fixed scan anchor. A supplied end is therefore an exact terminal bound,
 	// not merely a caller-provided cap.
@@ -587,10 +644,8 @@ where
 		Some(end) => PmmrEndExpectation::Exact(end),
 		None => PmmrEndExpectation::Unbounded,
 	};
-	let start_index_stat = start_index;
-	let mut start_index = start_index;
-	// The rewind hash is a viewing credential. Decode it once into a
-	// zeroizing buffer instead of per output into plain heap memory.
+	// Decode the viewing credential once and borrow its zeroizing buffer in
+	// the scoped workers rather than copying it into each worker.
 	let rewind_hash_bytes = mwc_util::decode_secret_key_hex::<32>(rewind_hash.as_str())
 		.map_err(|e| Error::RewindHash(format!("Unable to decode rewind hash: {}", e)))?;
 	let mut vw = ViewWallet {
@@ -599,159 +654,30 @@ where
 		total_balance: 0,
 		last_pmmr_index: 0,
 	};
-	let mut page_validator = PmmrPageValidator::default();
-	loop {
-		if is_scan_interrupted(context_id) {
-			return Err(Error::Interrupted);
-		}
-
-		let (highest_index, last_retrieved_index, outputs) =
-			client.get_outputs_by_pmmr_index(start_index, end_index, batch_size)?;
-		session.ensure_connection(client, "View-wallet scan output pagination")?;
-		page_validator.validate(
-			"scan::collect_chain_outputs_rewind_hash",
-			start_index,
-			end_expectation,
-			batch_size,
-			highest_index,
-			last_retrieved_index,
-			&outputs,
-		)?;
-
-		let range = highest_index.checked_sub(start_index_stat).ok_or_else(|| {
-			Error::DataOverflow(format!(
-				"scan::collect_chain_outputs_rewind_hash, output scan range underflow, highest_index={} start_index={}",
-				highest_index, start_index_stat
-			))
-		})?;
-		let progress = last_retrieved_index
-			.checked_sub(start_index_stat)
-			.ok_or_else(|| {
-				Error::DataOverflow(format!(
-					"scan::collect_chain_outputs_rewind_hash, output scan progress underflow, last_retrieved_index={} start_index={}",
-					last_retrieved_index, start_index_stat
-				))
+	vw.last_pmmr_index = process_output_pages(
+		context_id,
+		client,
+		session.connection,
+		start_index,
+		end_expectation,
+		true,
+		status_callback,
+		|outputs| {
+			let chunks = process_output_chunks(secp, context_id, &outputs, |secp, chunk| {
+				identify_rewind_hash_outputs_serial(secp, context_id, &rewind_hash_bytes, chunk)
 			})?;
-		let percentage_complete = if range == 0 {
-			0
-		} else {
-			let scaled_progress = progress.checked_mul(100).ok_or_else(|| {
-				Error::DataOverflow(format!(
-					"scan::collect_chain_outputs_rewind_hash, output scan progress multiplication overflow, progress={} scale=100",
-					progress
-				))
-			})?;
-			// range is nonzero in this branch.
-			#[allow(
-				clippy::arithmetic_side_effects,
-				reason = "the zero range case is handled by the preceding branch"
-			)]
-			let bounded_percentage = (scaled_progress / range).min(99);
-			u8::try_from(bounded_percentage).map_err(|e| {
-				Error::DataOverflow(format!(
-					"scan::collect_chain_outputs_rewind_hash, bounded output scan progress does not fit u8, percentage={} error={}",
-					bounded_percentage, e
-				))
-			})?
-		};
-
-		let msg = format!(
-			"Checking {} outputs, up to index {}. (Highest index: {})",
-			outputs.len(),
-			highest_index,
-			last_retrieved_index,
-		);
-		info!("{} ({}% complete)", msg, percentage_complete);
-		send_status(
-			status_callback,
-			StatusMessage::Scanning(true, msg, percentage_complete),
-		);
-
-		// Scanning outputs
-		for output in outputs.iter() {
-			let (commit, proof, is_coinbase, height, mmr_index) = output;
-
-			// The node supplies both the proof and the pagination metadata.
-			// Every output included in the chain carried a valid bulletproof,
-			// so an invalid one means the node is serving corrupted data.
-			// Verify before rewind: rewind is a decryption primitive that does
-			// not validate proofs (it can succeed on a tampered proof), and its
-			// InvalidRangeProof error below must mean "not owned by this hash",
-			// never "the node tampered with the proof".
-			secp.verify_bullet_proof(*commit, *proof, None).map_err(|e| {
-				Error::GenericError(format!(
-					"scan::collect_chain_outputs_rewind_hash, node served an output with an invalid bulletproof, commit={} error={}",
-					mwc_util::ToHex::to_hex(&commit),
-					e
-				))
-			})?;
-
-			// SECURITY/SEMANTICS: a successful rewind proves only that this
-			// rangeproof used the nonce derived from `rewind_hash` and `commit`.
-			// It does not prove that the wallet behind the rewind hash knows the
-			// output blinding factor. Anyone who knows the rewind hash can create
-			// an unrelated valid output using the same rewind scheme, so that
-			// output will be returned here and included in the reported total.
-			// Treat this as a view-only match, not an ownership or balance proof.
-			let rewind_nonce = zeroizing_blake2b(32, &commit.0, rewind_hash_bytes.as_slice());
-			let nonce = SecretKey::from_slice(&secp, rewind_nonce.as_slice())
-				.map_err(|e| Error::Nonce(format!("Unable to create nonce: {}", e)))?;
-			let info = secp.rewind_bullet_proof(*commit, nonce.clone(), None, None, *proof);
-
-			match info {
-				Err(secp::Error::InvalidRangeProof) => continue,
-				Err(e) => {
-					return Err(mwc_wallet_util::mwc_core::libtx::Error::from(e).into());
-				}
-				Ok(info) => {
-					vw.total_balance =
-						vw.total_balance.checked_add(info.value).ok_or_else(|| {
-							Error::DataOverflow(format!(
-								"scan::collect_chain_outputs_rewind_hash, view-wallet balance overflow, total_balance={} output_value={}",
-								vw.total_balance, info.value
-							))
-						})?;
-					let lock_height = if *is_coinbase {
-						height
-							.checked_add(global::coinbase_maturity(context_id))
-							.ok_or_else(|| {
-								Error::DataOverflow(format!(
-									"scan::collect_chain_outputs_rewind_hash, coinbase output lock height overflow, height={} coinbase_maturity={}",
-									height,
-									global::coinbase_maturity(context_id)
-								))
-							})?
-					} else {
-						*height
-					};
-
-					let output_info = ViewWalletOutputResult {
-						commit: mwc_util::ToHex::to_hex(&commit),
-						value: info.value,
-						height: *height,
-						mmr_index: *mmr_index,
-						is_coinbase: *is_coinbase,
-						lock_height: lock_height,
-					};
-
-					vw.output_result.push(output_info);
-				}
+			for output in chunks.into_iter().flatten() {
+				vw.total_balance = vw.total_balance.checked_add(output.value).ok_or_else(|| {
+					Error::DataOverflow(format!(
+						"scan::collect_chain_outputs_rewind_hash, view-wallet balance overflow, total_balance={} output_value={}",
+						vw.total_balance, output.value
+					))
+				})?;
+				vw.output_result.push(output);
 			}
-		}
-		if highest_index <= last_retrieved_index {
-			vw.last_pmmr_index = last_retrieved_index;
-			break;
-		}
-		// The loop continues only when highest_index > last_retrieved_index, proving
-		// last_retrieved_index is below u64::MAX.
-		#[allow(
-			clippy::arithmetic_side_effects,
-			reason = "highest_index is greater than last_retrieved_index in this branch"
-		)]
-		{
-			start_index = last_retrieved_index + 1;
-		}
-	}
+			Ok(())
+		},
+	)?;
 	Ok(vw)
 }
 
@@ -804,6 +730,58 @@ where
 	C: NodeClient + 'a,
 	K: Keychain + 'a,
 {
+	let (should_self_spend, self_spend_amount) = replay_config
+		.map(|config| {
+			(
+				config.replay_mitigation_flag,
+				config.replay_mitigation_min_amount,
+			)
+		})
+		.unwrap_or((false, 0));
+	let mut owned = Vec::new();
+	let mut replay = Vec::new();
+	process_output_pages(
+		context_id,
+		&client,
+		expected_connection,
+		start_index,
+		end_expectation,
+		show_progress,
+		status_callback,
+		|outputs| {
+			let (mut found, mut candidates) = identify_utxo_outputs(
+				secp,
+				context_id,
+				keychain,
+				outputs,
+				None,
+				should_self_spend,
+				self_spend_amount,
+			)?;
+			owned.append(&mut found);
+			replay.append(&mut candidates);
+			Ok(())
+		},
+	)?;
+	Ok((owned, replay))
+}
+
+// Fetch and validate one page ahead while the caller processes the previous
+// page. The callback stays on the caller's thread, and errors discard all results.
+fn process_output_pages<C, F>(
+	context_id: u32,
+	client: &C,
+	expected_connection: NodeConnectionId,
+	start_index: u64,
+	end_expectation: PmmrEndExpectation,
+	show_progress: bool,
+	status_callback: Option<&StatusCallback<'_>>,
+	mut process_page: F,
+) -> Result<u64, Error>
+where
+	C: NodeClient,
+	F: FnMut(Vec<NodeOutput>) -> Result<(), Error>,
+{
 	if show_progress {
 		info!(
 			"Checking output proofs with up to {} workers",
@@ -813,14 +791,6 @@ where
 
 	let batch_size = 1000;
 	let start_index_stat = start_index;
-	let mut should_self_spent = false;
-	let mut self_spent_amount = 0;
-	if let Some(conf) = replay_config {
-		if conf.replay_mitigation_flag {
-			should_self_spent = true;
-			self_spent_amount = conf.replay_mitigation_min_amount;
-		}
-	}
 
 	let chain_type = global::get_chain_type(context_id);
 	let scan_started = std::time::Instant::now();
@@ -849,12 +819,12 @@ where
 					let actual_connection = client.get_node_connection_id();
 					if actual_connection != expected_connection {
 						return Err(Error::Node(format!(
-							"Wallet scan changed node while retrieving output pages; expected {:?}, current {:?}. Partial results were discarded",
+							"Output scan changed node while retrieving output pages; expected {:?}, current {:?}. Partial results were discarded",
 							expected_connection, actual_connection
 						)));
 					}
 					page_validator.validate(
-						"scan::collect_chain_outputs",
+						"scan::process_output_pages",
 						start_index,
 						end_expectation,
 						batch_size,
@@ -890,8 +860,7 @@ where
 		// Consume the receiver inside this closure so every error drops it before
 		// joining the reader. Otherwise a blocked send could prevent shutdown.
 		let processed = (move || -> Result<_, Error> {
-			let mut result_vec = Vec::new();
-			let mut self_spend_candidate_list = Vec::new();
+			let mut last_pmmr_index = 0;
 			let mut page_count = 0u64;
 			let mut output_count_total = 0usize;
 			let mut fetch_total = std::time::Duration::ZERO;
@@ -902,7 +871,7 @@ where
 				}
 				let range = highest_index.checked_sub(start_index_stat).ok_or_else(|| {
 					Error::DataOverflow(format!(
-						"scan::collect_chain_outputs, output scan range underflow, highest_index={} start_index={}",
+						"scan::process_output_pages, output scan range underflow, highest_index={} start_index={}",
 						highest_index, start_index_stat
 					))
 				})?;
@@ -910,7 +879,7 @@ where
 					.checked_sub(start_index_stat)
 					.ok_or_else(|| {
 						Error::DataOverflow(format!(
-							"scan::collect_chain_outputs, output scan progress underflow, last_retrieved_index={} start_index={}",
+							"scan::process_output_pages, output scan progress underflow, last_retrieved_index={} start_index={}",
 							last_retrieved_index, start_index_stat
 						))
 					})?;
@@ -919,7 +888,7 @@ where
 				} else {
 					let scaled_progress = progress.checked_mul(100).ok_or_else(|| {
 						Error::DataOverflow(format!(
-							"scan::collect_chain_outputs, output scan progress multiplication overflow, progress={} scale=100",
+							"scan::process_output_pages, output scan progress multiplication overflow, progress={} scale=100",
 							progress
 						))
 					})?;
@@ -931,7 +900,7 @@ where
 					let bounded_percentage = (scaled_progress / range).min(99);
 					u8::try_from(bounded_percentage).map_err(|e| {
 						Error::DataOverflow(format!(
-							"scan::collect_chain_outputs, bounded output scan progress does not fit u8, percentage={} error={}",
+							"scan::process_output_pages, bounded output scan progress does not fit u8, percentage={} error={}",
 							bounded_percentage, e
 						))
 					})?
@@ -952,17 +921,8 @@ where
 				);
 				let output_count = outputs.len();
 				let processing_started = std::time::Instant::now();
-				let mut chain_outs_pair = identify_utxo_outputs(
-					secp,
-					context_id,
-					keychain,
-					outputs,
-					None,
-					should_self_spent,
-					self_spent_amount,
-				)?;
-				result_vec.append(&mut chain_outs_pair.0);
-				self_spend_candidate_list.append(&mut chain_outs_pair.1);
+				process_page(outputs)?;
+				last_pmmr_index = last_retrieved_index;
 
 				let processing_elapsed = processing_started.elapsed();
 				page_count = page_count.saturating_add(1);
@@ -977,8 +937,7 @@ where
 				);
 			}
 			Ok((
-				result_vec,
-				self_spend_candidate_list,
+				last_pmmr_index,
 				page_count,
 				output_count_total,
 				fetch_total,
@@ -990,7 +949,7 @@ where
 				"Output scan reader panicked".to_owned(),
 			))
 		});
-		let (owned, replay, page_count, output_count, fetch_total, processing_total) = processed?;
+		let (last_pmmr_index, page_count, output_count, fetch_total, processing_total) = processed?;
 		read_result?;
 		if show_progress {
 			info!(
@@ -1002,7 +961,7 @@ where
 				processing_total.as_secs_f64(),
 			);
 		}
-		Ok((owned, replay))
+		Ok(last_pmmr_index)
 	})
 }
 
@@ -4828,8 +4787,9 @@ mod scan_consistency_tests {
 	use crate::NodeHeaderLink;
 	use mwc_wallet_util::mwc_core::global::ChainTypes;
 	use mwc_wallet_util::mwc_crates::secp::ContextFlag;
-	use mwc_wallet_util::mwc_keychain::ExtKeychain;
+	use mwc_wallet_util::mwc_keychain::{ExtKeychain, ViewKey};
 	use mwc_wallet_util::mwc_node_workflow::context::{allocate_new_context, release_context};
+	use mwc_wallet_util::mwc_util::ToHex;
 
 	#[test]
 	fn interrupt_scan_accepts_allocated_and_rejects_released_context() {
@@ -4872,7 +4832,7 @@ mod scan_consistency_tests {
 	}
 
 	#[test]
-	fn parallel_output_scan_matches_serial_and_rejects_corruption() -> Result<(), Error> {
+	fn parallel_output_scans_match_serial_and_reject_corruption() -> Result<(), Error> {
 		let context_id = allocate_new_context(ChainTypes::Floonet, None, None)
 			.map_err(|e| Error::GenericError(e.to_string()))?;
 		let result = (|| {
@@ -4940,7 +4900,13 @@ mod scan_consistency_tests {
 				&mut secp, context_id, &keychain, &outputs, None, true, 0,
 			)?;
 			let parallel = identify_utxo_outputs(
-				&mut secp, context_id, &keychain, outputs.clone(), None, true, 0,
+				&mut secp,
+				context_id,
+				&keychain,
+				outputs.clone(),
+				None,
+				true,
+				0,
 			)?;
 			let summarize = |results: &[OutputResult]| {
 				results
@@ -4964,18 +4930,82 @@ mod scan_consistency_tests {
 			assert_eq!(summarize(&serial.0), summarize(&parallel.0));
 			assert_eq!(summarize(&serial.1), summarize(&parallel.1));
 
+			let rewind_hash = ViewKey::rewind_hash(&secp, keychain.public_root_key(&secp)?)?;
+			let rewind_hash = Zeroizing::new(
+				rewind_hash
+					.as_slice()
+					.try_into()
+					.expect("rewind hash must contain 32 bytes"),
+			);
+			let mut view_outputs = outputs.clone();
+			view_outputs[0].2 = true;
+			let serial_view = identify_rewind_hash_outputs_serial(
+				&mut secp,
+				context_id,
+				&rewind_hash,
+				&view_outputs,
+			)?;
+			let parallel_view: Vec<_> =
+				process_output_chunks(&mut secp, context_id, &view_outputs, |secp, chunk| {
+					identify_rewind_hash_outputs_serial(secp, context_id, &rewind_hash, chunk)
+				})?
+				.into_iter()
+				.flatten()
+				.collect();
+			let summarize_view = |results: &[ViewWalletOutputResult]| {
+				results
+					.iter()
+					.map(|out| {
+						(
+							out.commit.clone(),
+							out.mmr_index,
+							out.value,
+							out.height,
+							out.lock_height,
+							out.is_coinbase,
+						)
+					})
+					.collect::<Vec<_>>()
+			};
+			// View scans include both switch types and height-tagged matches.
+			assert_eq!(serial_view.len(), 256);
+			assert_eq!(parallel_view.iter().map(|out| out.value).sum::<u64>(), 8320);
+			assert_eq!(
+				parallel_view[0].lock_height,
+				1 + global::coinbase_maturity(context_id)
+			);
+			assert_eq!(summarize_view(&serial_view), summarize_view(&parallel_view));
+
 			// Corrupt an unowned proof in a later worker. Earlier matches must not
 			// escape as partial success, even though that proof would not rewind.
 			outputs[201].1.proof[31] ^= 1;
-			assert!(identify_utxo_outputs(
-				&mut secp, context_id, &keychain, outputs.clone(), None, false, 0
-			)
-			.is_err());
+			assert!(
+				process_output_chunks(&mut secp, context_id, &outputs, |secp, chunk| {
+					identify_rewind_hash_outputs_serial(secp, context_id, &rewind_hash, chunk)
+				})
+				.is_err()
+			);
+			assert!(
+				identify_utxo_outputs(
+					&mut secp,
+					context_id,
+					&keychain,
+					outputs.clone(),
+					None,
+					false,
+					0
+				)
+				.is_err()
+			);
 			interrupt_scan(context_id)?;
 			assert!(matches!(
-				identify_utxo_outputs(
-					&mut secp, context_id, &keychain, outputs, None, false, 0
-				),
+				process_output_chunks(&mut secp, context_id, &outputs, |secp, chunk| {
+					identify_rewind_hash_outputs_serial(secp, context_id, &rewind_hash, chunk)
+				}),
+				Err(Error::Interrupted)
+			));
+			assert!(matches!(
+				identify_utxo_outputs(&mut secp, context_id, &keychain, outputs, None, false, 0),
 				Err(Error::Interrupted)
 			));
 			release_interrupt_scan(context_id);
@@ -6648,7 +6678,7 @@ mod scan_consistency_tests {
 
 		assert!(error
 			.to_string()
-			.contains("changed node while reading chain state"));
+			.contains("changed node while retrieving output pages"));
 	}
 
 	#[test]
@@ -6683,14 +6713,19 @@ mod scan_consistency_tests {
 				outputs.push((commit, rangeproof, false, 1, index));
 			}
 			let caller_thread = std::thread::current().id();
-			for case in [
+			let rewind_hash =
+				Zeroizing::new(ViewKey::rewind_hash(&secp, keychain.public_root_key(&secp)?)?.to_hex());
+			for (case, view_only) in [
 				Case::Success,
 				Case::CorruptProof,
 				Case::NodeError,
 				Case::NodeChange,
 				Case::DuplicateOutput,
 				Case::Interrupted,
-			] {
+			]
+			.into_iter()
+			.flat_map(|case| [(case, false), (case, true)])
+			{
 				let mut first = outputs[0];
 				let mut second = outputs[1];
 				if matches!(case, Case::CorruptProof) {
@@ -6765,18 +6800,55 @@ mod scan_consistency_tests {
 						}
 					}
 				};
-				let scanned = collect_chain_outputs_bound(
-					&mut secp,
-					context_id,
-					&keychain,
-					client,
-					expected_connection,
-					1,
-					PmmrEndExpectation::Exact(50),
-					false,
-					None,
-					Some(&status),
-				);
+				let scanned = if view_only {
+					let session = NodeReadSession::bind(
+						&client,
+						ChainTip {
+							height: 10,
+							hash: "tip-a".to_owned(),
+						},
+						"View-wallet scan",
+					)?;
+					collect_chain_outputs_rewind_hash(
+						&mut secp,
+						context_id,
+						&client,
+						&session,
+						rewind_hash.clone(),
+						1,
+						Some(50),
+						Some(&status),
+					)
+					.map(|view| {
+						assert_eq!(view.total_balance, 30);
+						assert_eq!(view.last_pmmr_index, 50);
+						assert_eq!(view.rewind_hash, rewind_hash);
+						view.output_result
+							.iter()
+							.map(|out| (out.mmr_index, out.value))
+							.collect::<Vec<_>>()
+					})
+				} else {
+					collect_chain_outputs_bound(
+						&mut secp,
+						context_id,
+						&keychain,
+						client,
+						expected_connection,
+						1,
+						PmmrEndExpectation::Exact(50),
+						false,
+						None,
+						Some(&status),
+					)
+					.map(|(owned, replay)| {
+						assert!(replay.is_empty());
+						owned
+							.iter()
+							.map(|out| (out.mmr_index, out.value))
+							.collect::<Vec<_>>()
+					})
+				};
 				release_interrupt_scan(context_id);
 				assert!(processing_started.get());
 				assert_eq!(
@@ -6787,20 +6859,12 @@ mod scan_consistency_tests {
 				);
 				match case {
 					Case::Success => {
-						let (owned, replay) = scanned?;
-						assert_eq!(
-							owned
-								.iter()
-								.map(|out| (out.mmr_index, out.value))
-								.collect::<Vec<_>>(),
-							vec![(5, 10), (49, 20)],
-						);
-						assert!(replay.is_empty());
+						assert_eq!(scanned?, vec![(5, 10), (49, 20)]);
 					}
 					Case::CorruptProof => assert!(matches!(scanned, Err(Error::Secp(_)))),
-					Case::NodeError => assert!(
-						matches!(scanned, Err(Error::Node(msg)) if msg == "prefetch failed")
-					),
+					Case::NodeError => {
+						assert!(matches!(scanned, Err(Error::Node(msg)) if msg == "prefetch failed"))
+					}
 					Case::NodeChange => assert!(
 						scanned
 							.expect_err("changed node must fail")

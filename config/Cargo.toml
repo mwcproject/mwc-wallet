@@ -12,3 +12,7 @@ edition = "2024"
 [dependencies]
 mwc_wallet_util = { path = "../util", version = "7.0.0" }
 thiserror.workspace = true
+
+[features]
+default = []
+swaps = []

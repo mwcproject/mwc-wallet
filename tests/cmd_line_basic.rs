@@ -32,6 +32,7 @@ mod common;
 use common::{clean_output_dir, execute_command, initial_setup_wallet, instantiate_wallet, setup};
 use mwc_wallet_controller::controller;
 use mwc_wallet_libwallet::proof::proofaddress::ProvableAddress;
+use mwc_wallet_libwallet::wallet_lock;
 use mwc_wallet_util::Mutex;
 use mwc_wallet_util::mwc_core::consensus::calc_mwc_block_reward;
 use mwc_wallet_util::mwc_core::core::Transaction;
@@ -728,8 +729,7 @@ fn command_line_test_impl(test_dir: &str) -> Result<(), mwc_wallet_controller::E
 		panic!("Expected to fail because of another recipient")
 	}
 
-	// Retry invoice with correct slatepack address
-	// issue an invoice tx, wallet 2
+	// Retry with the correct Slatepack address and no explicit output file.
 	let arg_vec = vec![
 		"mwc-wallet",
 		"-p",
@@ -739,8 +739,6 @@ fn command_line_test_impl(test_dir: &str) -> Result<(), mwc_wallet_controller::E
 		"invoice",
 		"--slatepack_recipient",
 		tor_addr1.as_str(),
-		"-d",
-		out_file_name.as_str(),
 		"0.45", // 65 at mwc test
 	];
 	execute_command(&app, test_dir, "wallet2", &client2, arg_vec)?;
@@ -951,6 +949,149 @@ fn command_line_test_impl(test_dir: &str) -> Result<(), mwc_wallet_controller::E
 			Ok(())
 		},
 	)?;
+
+	// Estimate a decoded invoice from either side without creating a payment,
+	// consuming child keys, locking outputs, or posting to the node.
+	let invoice = std::fs::read_to_string(format!(
+		"{}/wallet2/slatepack/0436430c-2b02-624c-2032-570501212b08.invoice_init.slatepack",
+		test_dir
+	))
+	.unwrap();
+	for (name, password, account, client, config) in [
+		("wallet1", "password1", "mining", &client1, &config1),
+		("wallet2", "password2", "account_1", &client2, &config2),
+	] {
+		let (wallet, mask) = instantiate_wallet(
+			config.members.wallet.clone(),
+			client.clone(),
+			password,
+			account,
+		)?;
+		let api = mwc_wallet_api::Owner::new(0, wallet.clone(), None)?;
+		api.retrieve_outputs(mask.as_ref(), false, true, None)?;
+		let snapshot = || -> Result<_, mwc_wallet_libwallet::Error> {
+			wallet_lock!(wallet, w);
+			Ok((
+				w.current_child_index(&w.parent_key_id())?,
+				w.iter()?.collect::<Vec<_>>(),
+				w.tx_log_iter()?.count(),
+				tx_pool.lock().len(),
+			))
+		};
+		let before = snapshot()?;
+		execute_command(
+			&app,
+			test_dir,
+			name,
+			client,
+			vec![
+				"mwc-wallet",
+				"-p",
+				password,
+				"-a",
+				account,
+				"pay",
+				"-e",
+				"--content",
+				&invoice,
+			],
+		)?;
+		assert_eq!(snapshot()?, before);
+	}
+
+	// Exercise console responses with and without encryption and explicit file
+	// output. The backups contain exactly the Slatepack displayed to the user.
+	for (encrypted, save_file) in [(true, false), (false, false), (true, true), (false, true)] {
+		let slatepack_dir = format!("{}/wallet2/slatepack", test_dir);
+		let before_files: std::collections::HashSet<_> = std::fs::read_dir(&slatepack_dir)
+			.unwrap()
+			.map(|entry| entry.unwrap().path())
+			.collect();
+		let mut invoice_args = vec![
+			"mwc-wallet",
+			"-p",
+			"password2",
+			"-a",
+			"account_1",
+			"invoice",
+			"0.45",
+		];
+		if encrypted {
+			invoice_args.extend(["--slatepack_recipient", tor_addr1.as_str()]);
+		}
+		execute_command(&app, test_dir, "wallet2", &client2, invoice_args)?;
+		let new_files: Vec<_> = std::fs::read_dir(&slatepack_dir)
+			.unwrap()
+			.map(|entry| entry.unwrap().path())
+			.filter(|path| !before_files.contains(path))
+			.collect();
+		assert_eq!(new_files.len(), 1);
+		let invoice = std::fs::read_to_string(&new_files[0]).unwrap();
+		let header = if encrypted {
+			"BEGINSLATEPACK."
+		} else {
+			"BEGINSLATE_BIN."
+		};
+		assert!(invoice.starts_with(header));
+		let response_file = format!(
+			"{}/console_invoice_response_{}_{}.slate",
+			test_dir, encrypted, save_file
+		);
+		let mut pay_args = vec![
+			"mwc-wallet",
+			"-p",
+			"password1",
+			"-a",
+			"mining",
+			"pay",
+			"--content",
+			&invoice,
+			"--message",
+			"you are welcome",
+		];
+		if save_file {
+			pay_args.extend(["--dest", response_file.as_str()]);
+		}
+		// Use all remaining eligible coins in the last case, matching the user's flags.
+		if !encrypted && save_file {
+			pay_args.extend(["--selection", "all"]);
+		}
+		execute_command(&app, test_dir, "wallet1", &client1, pay_args)?;
+		let response_name = new_files[0]
+			.file_name()
+			.unwrap()
+			.to_str()
+			.unwrap()
+			.replace(".invoice_init.", ".invoice_response.");
+		let response =
+			std::fs::read_to_string(format!("{}/wallet1/slatepack/{}", test_dir, response_name))
+				.unwrap();
+		assert!(response.starts_with(header));
+		if save_file {
+			assert_eq!(std::fs::read_to_string(&response_file).unwrap(), response);
+		} else {
+			assert!(!std::path::Path::new(&response_file).exists());
+		}
+		let pending_transactions = tx_pool.lock().len();
+		execute_command(
+			&app,
+			test_dir,
+			"wallet2",
+			&client2,
+			vec![
+				"mwc-wallet",
+				"-p",
+				"password2",
+				"-a",
+				"account_1",
+				"finalize_invoice",
+				"--content",
+				&response,
+				"--nopost",
+			],
+		)?;
+		assert_eq!(tx_pool.lock().len(), pending_transactions);
+	}
 
 	// let logging finish
 	thread::sleep(Duration::from_millis(200));

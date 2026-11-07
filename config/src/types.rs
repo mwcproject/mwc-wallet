@@ -25,9 +25,13 @@ use mwc_wallet_util::mwc_core::global;
 use mwc_wallet_util::mwc_core::global::ChainTypes;
 use mwc_wallet_util::mwc_p2p::TorConfig;
 use mwc_wallet_util::mwc_util::logger::LoggingConfig;
+#[cfg(feature = "swaps")]
 use std::collections::BTreeMap;
 
 /// Command-line wallet configuration
+///
+/// Unknown fields are accepted so configs written with optional features also
+/// load in builds where those features are disabled.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(crate = "serde")]
 pub struct WalletConfig {
@@ -76,14 +80,18 @@ pub struct WalletConfig {
 	/// should match tx_fee_base parameter in mwc-server
 	pub tx_fee_base: Option<u64>,
 	/// Ethereum Swap Contract Address
+	#[cfg(feature = "swaps")]
 	pub eth_swap_contract_address: Option<String>,
 	/// ERC20 Swap Contract Address
+	#[cfg(feature = "swaps")]
 	pub erc20_swap_contract_address: Option<String>,
 	/// Ethereum Infura Project Id
+	#[cfg(feature = "swaps")]
 	pub eth_infura_project_id: Option<String>,
 	/// Electrum nodes for secondary coins
 	/// Key: <coin>_[main|test]_[1|2]
 	/// Value: url
+	#[cfg(feature = "swaps")]
 	pub swap_electrumx_addr: Option<BTreeMap<String, String>>,
 }
 
@@ -94,7 +102,9 @@ impl Default for WalletConfig {
 			api_listen_interface: None, // Some("127.0.0.1".to_string()),
 			api_listen_port: None,      // Some(3415),
 			mining_node_ip: None,
-			owner_api_listen_port: Some(WalletConfig::default_owner_api_listen_port()),
+			owner_api_listen_port: Some(WalletConfig::default_owner_api_listen_port(
+				ChainTypes::Mainnet,
+			)),
 			api_secret_path: Some(".owner_api_secret".to_string()),
 			node_api_secret_path: Some(NODE_API_SECRET_FILE_NAME.to_string()),
 			check_node_api_http_addr: Some("http://127.0.0.1:3413".to_string()),
@@ -105,11 +115,15 @@ impl Default for WalletConfig {
 			tls_certificate_key: None,
 			dark_background_color_scheme: Some(true),
 			wallet_data_dir: None,
+			#[cfg(feature = "swaps")]
 			eth_swap_contract_address: Some("2FA243fC8f9EAF014f8d6E909157B6A48cEE0bdC".to_string()),
+			#[cfg(feature = "swaps")]
 			erc20_swap_contract_address: Some(
 				"Dd62a95626453F54E686cF0531bCbf6766150794".to_string(),
 			),
+			#[cfg(feature = "swaps")]
 			eth_infura_project_id: Some("7f1274674be54d2881bf3c0168bf9855".to_string()),
+			#[cfg(feature = "swaps")]
 			swap_electrumx_addr: Some(
 				[
 					("btc_main_1", "btc.main1.swap.mwc.mw:18337"),
@@ -156,15 +170,19 @@ impl WalletConfig {
 		}
 	}
 
-	/// Default listener port
-	pub fn default_owner_api_listen_port() -> u16 {
-		3420
+	/// Default owner API listener port for the selected network.
+	pub fn default_owner_api_listen_port(chain_type: ChainTypes) -> u16 {
+		match chain_type {
+			ChainTypes::Floonet => 13420,
+			_ => 3420,
+		}
 	}
 
-	/// Use value from config file, defaulting to sensible value if missing.
+	/// Use the configured port, or the selected network's default if missing.
 	pub fn owner_api_listen_port(&self) -> u16 {
-		self.owner_api_listen_port
-			.unwrap_or_else(WalletConfig::default_owner_api_listen_port)
+		self.owner_api_listen_port.unwrap_or_else(|| {
+			Self::default_owner_api_listen_port(self.chain_type.unwrap_or_default())
+		})
 	}
 
 	/// Owner API listen address

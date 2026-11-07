@@ -38,6 +38,7 @@ use mwc_wallet_impls::{DefaultLCProvider, DefaultWalletImpl};
 use mwc_wallet_impls::{PathToSlateGetter, SlateGetter};
 use mwc_wallet_libwallet::proof::proofaddress;
 use mwc_wallet_libwallet::proof::proofaddress::ProvableAddress;
+use mwc_wallet_libwallet::slatepack::validate_slatepack_receive_direction;
 #[cfg(feature = "swaps")]
 use mwc_wallet_libwallet::swap::types::Currency;
 use mwc_wallet_libwallet::types::{
@@ -183,9 +184,12 @@ fn prompt_pay_invoice(slate: &Slate, method: &str, dest: &str) -> Result<bool, P
 		amount
 	);
 	if method == "http" {
+		println!("* The invoice response will be printed to the console.");
 		println!("* The resulting transaction will IMMEDIATELY be sent to the wallet listening at: '{}'.", dest);
+	} else if dest.is_empty() {
+		println!("* The invoice response will be printed to the console, which you can manually send back to the invoice creator.");
 	} else {
-		println!("* The resulting transaction will be saved to the file '{}', which you can manually send back to the invoice creator.", dest);
+		println!("* The invoice response will be printed to the console and saved to the file '{}', which you can manually send back to the invoice creator.", dest);
 	}
 	println!();
 	println!("The invoice slate's participant info is:");
@@ -417,21 +421,30 @@ pub fn parse_listen_args(
 		config.api_listen_port = Some(port.parse().map_err(|_| {
 			ParseError::ArgumentError(format!("port, unable to parse value {}", port))
 		})?);
-		if config.api_listen_interface.is_none() {
-			config.api_listen_interface = Some("127.0.0.1".to_string());
-		}
 	}
 
 	let method = parse_required(args, "method")?;
 	if args.is_present("no_tor") {
 		tor_config.tor_enabled = Some(false);
-		if config.api_listen_interface.is_none() {
-			config.api_listen_interface = Some("127.0.0.1".to_string());
+	}
+	let enable_secondary_socket_listener = args.is_present("listen_on_socket_with_tor");
+	if method == "http" && (!tor_config.is_tor_enabled() || enable_secondary_socket_listener) {
+		let missing = match (&config.api_listen_interface, config.api_listen_port) {
+			(None, None) => Some("wallet.api_listen_interface and wallet.api_listen_port"),
+			(None, _) => Some("wallet.api_listen_interface"),
+			(_, None) => Some("wallet.api_listen_port"),
+			_ => None,
+		};
+		if let Some(missing) = missing {
+			return Err(ParseError::ArgumentError(format!(
+				"Missing {} for the HTTP socket listener. Set the required settings in the [wallet] section of mwc-wallet.toml.",
+				missing,
+			)));
 		}
 	}
 	Ok(command::ListenArgs {
 		method: method.to_owned(),
-		enable_secondary_socket_listener: args.is_present("listen_on_socket_with_tor"),
+		enable_secondary_socket_listener,
 	})
 }
 
@@ -480,6 +493,76 @@ pub fn parse_send_args(
 	context_id: u32,
 	args: &ArgMatches,
 ) -> Result<command::SendArgs, ParseError> {
+	let method = parse_required(args, "method")?;
+	let estimate_selection_strategies = args.is_present("estimate_selection_strategies");
+	let proof = args.is_present("proof");
+
+	if estimate_selection_strategies {
+		// Estimates use coin-selection options but do not build or deliver a slate.
+		// Check occurrences so defaults, including --method and --selection, are allowed.
+		for (arg, flag) in [
+			("method", "--method"),
+			("dest", "--dest"),
+			("selection_strategy", "--selection"),
+			("apisecret", "--apisecret"),
+			("proof", "--proof"),
+			("proof_address", "--proof_address"),
+			("fluff", "--fluff"),
+			("message", "--message"),
+			("ttl_blocks", "--ttl_blocks"),
+			("late_lock", "--late-lock"),
+			("slatepack_recipient", "--slatepack_recipient"),
+			("slate_version", "--slate_version"),
+			("slatepack_qr", "--slatepack_qr"),
+		] {
+			if args.occurrences_of(arg) != 0 {
+				return Err(ParseError::ArgumentError(format!(
+					"{} cannot be used with --estimate-selection; estimates do not send a transaction and always compare both selection strategies",
+					flag,
+				)));
+			}
+		}
+	}
+
+	if args.is_present("proof_address") && !proof {
+		return Err(ParseError::ArgumentError(
+			"--proof_address requires --proof".to_owned(),
+		));
+	}
+	if method == "slatepack" && proof && !args.is_present("slatepack_recipient") {
+		return Err(ParseError::ArgumentError(
+			"--proof with --method slatepack requires --slatepack_recipient".to_owned(),
+		));
+	}
+	for (arg, flag, supported, methods) in [
+		("apisecret", "--apisecret", method == "http", "http"),
+		(
+			"fluff",
+			"--fluff",
+			matches!(method, "http" | "mwcmqs" | "self"),
+			"http, mwcmqs or self; for file/slatepack sends, use --fluff when finalizing",
+		),
+		(
+			"slatepack_recipient",
+			"--slatepack_recipient",
+			matches!(method, "http" | "file" | "slatepack"),
+			"http, file or slatepack",
+		),
+		(
+			"slatepack_qr",
+			"--slatepack_qr",
+			method == "slatepack",
+			"slatepack",
+		),
+	] {
+		if args.is_present(arg) && !supported {
+			return Err(ParseError::ArgumentError(format!(
+				"{} is only supported with --method {}",
+				flag, methods,
+			)));
+		}
+	}
+
 	// amount
 	let amount = parse_required(args, "amount")?;
 	let (amount, spend_max) = if amount.eq_ignore_ascii_case("max") {
@@ -509,15 +592,10 @@ pub fn parse_send_args(
 	// selection_strategy
 	let selection_strategy = parse_required(args, "selection_strategy")?;
 
-	// estimate_selection_strategies
-	let estimate_selection_strategies = args.is_present("estimate_selection_strategies");
-
 	let late_lock = args.is_present("late_lock");
 
-	// method
-	let method = parse_required(args, "method")?;
 	let address = {
-		if method == "file" && args.is_present("proof") {
+		if method == "file" && proof {
 			Some("file_proof".to_owned())
 		} else if method == "file" {
 			Some("file".to_owned())
@@ -544,6 +622,18 @@ pub fn parse_send_args(
 			}
 		}
 	};
+
+	if matches!(method, "file" | "slatepack")
+		&& (dest.starts_with("http://")
+			|| dest.starts_with("https://")
+			|| is_tor_address(dest).is_ok()
+			|| ProvableAddress::from_str(secp, context_id, dest).is_ok())
+	{
+		return Err(ParseError::ArgumentError(format!(
+			"--dest must be an output file path with --method {}; use --slatepack_recipient for Slatepack encryption, --proof_address for a payment-proof address, or --method http/mwcmqs to send to a listener",
+			method,
+		)));
+	}
 
 	let apisecret = args
 		.value_of("apisecret")
@@ -592,36 +682,43 @@ pub fn parse_send_args(
 		}
 	};
 
-	let payment_proof_address = {
-		match args.is_present("proof") {
-			true => {
-				// if the destination address is a TOR address, we don't need the address
-				// separately
-				let proof_dest = proofaddress::address_to_pubkey(dest.to_string());
-				match ProvableAddress::from_str(secp, context_id, &proof_dest) {
-					Ok(a) => Some(a),
-					Err(_) => {
-						let addr = parse_required(args, "proof_address")?;
-						match ProvableAddress::from_str(
-							secp,
-							context_id,
-							&proofaddress::address_to_pubkey(addr.to_string()),
-						) {
-							Ok(a) => Some(a),
-							Err(e) => {
-								if !estimate_selection_strategies {
-									println!("No recipient Slatepack address or provided address invalid. No payment proof will be requested.");
-								}
-								let msg = format!("Invalid proof address: {:?}", e);
-								return Err(ParseError::ArgumentError(msg));
-							}
-						}
-					}
-				}
-			}
-			false => None,
+	if let Some(version) = target_slate_version {
+		if !(2..=4).contains(&version) {
+			return Err(ParseError::ArgumentError(
+				"--slate_version must be 2, 3 or 4".to_owned(),
+			));
 		}
-	};
+		if version < 4 && (method == "slatepack" || args.is_present("slatepack_recipient")) {
+			return Err(ParseError::ArgumentError(
+				"--method slatepack and --slatepack_recipient require --slate_version 4".to_owned(),
+			));
+		}
+		if version == 2 && (proof || ttl_blocks.is_some()) {
+			return Err(ParseError::ArgumentError(
+				"--proof and --ttl_blocks require --slate_version 3 or 4".to_owned(),
+			));
+		}
+		if method == "self" && version == 4 {
+			return Err(ParseError::ArgumentError(
+				"--method self does not support --slate_version 4".to_owned(),
+			));
+		}
+	}
+	if method == "file" && args.is_present("slatepack_recipient") && target_slate_version != Some(4)
+	{
+		return Err(ParseError::ArgumentError(
+			"--method file with --slatepack_recipient requires --slate_version 4; alternatively use --method slatepack".to_owned(),
+		));
+	}
+	if late_lock
+		&& (method == "self"
+			|| target_slate_version.is_some_and(|version| version < 4)
+			|| (matches!(method, "file" | "mwcmqs") && target_slate_version != Some(4)))
+	{
+		return Err(ParseError::ArgumentError(
+			"--late-lock requires a compact slate (--slate_version 4) and cannot be used with --method self".to_owned(),
+		));
+	}
 
 	let minimum_confirmations_change_outputs_is_present =
 		args.occurrences_of("minimum_confirmations_change_outputs") != 0;
@@ -657,6 +754,44 @@ pub fn parse_send_args(
 			Some(addr)
 		}
 		None => None,
+	};
+
+	let payment_proof_address = if proof {
+		// An explicit proof address takes precedence. File destinations are paths,
+		// never recipient identities; encrypted Slatepacks can use their recipient.
+		if let Some(addr) = args.value_of("proof_address") {
+			Some(
+				ProvableAddress::from_str(
+					secp,
+					context_id,
+					&proofaddress::address_to_pubkey(addr.to_owned()),
+				)
+				.map_err(|e| {
+					ParseError::ArgumentError(format!("Invalid --proof_address: {}", e))
+				})?,
+			)
+		} else if let Some(recipient) = &slatepack_recipient {
+			Some(recipient.clone())
+		} else if matches!(method, "http" | "mwcmqs") {
+			Some(
+				ProvableAddress::from_str(
+					secp,
+					context_id,
+					&proofaddress::address_to_pubkey(dest.to_owned()),
+				)
+				.map_err(|_| {
+					ParseError::ArgumentError(
+						"--proof requires --proof_address when the destination is not a Tor or MQS address".to_owned(),
+					)
+				})?,
+			)
+		} else {
+			return Err(ParseError::ArgumentError(
+				"--proof requires --proof_address for this send method".to_owned(),
+			));
+		}
+	} else {
+		None
 	};
 
 	let min_fee = match args.value_of("min_fee") {
@@ -755,7 +890,42 @@ pub fn parse_receive_unpack_args(args: &ArgMatches) -> Result<command::ReceiveAr
 	})
 }
 
-pub fn parse_finalize_args(args: &ArgMatches) -> Result<command::FinalizeArgs, ParseError> {
+pub fn parse_finalize_args(
+	secp: &Secp256k1,
+	context_id: u32,
+	args: &ArgMatches,
+) -> Result<command::FinalizeArgs, ParseError> {
+	if args.is_present("file") == args.is_present("content") {
+		return Err(ParseError::ArgumentError(
+			"Specify exactly one of --file or --content".to_owned(),
+		));
+	}
+	if args.is_present("fluff") && args.is_present("nopost") {
+		return Err(ParseError::ArgumentError(
+			"--fluff cannot be used with --nopost; the transaction will not be posted".to_owned(),
+		));
+	}
+	if args
+		.value_of("content")
+		.is_some_and(|content| content.trim().is_empty())
+	{
+		return Err(ParseError::ArgumentError(
+			"--content must not be empty".to_owned(),
+		));
+	}
+	if let Some(dest) = args.value_of("dest") {
+		if dest.is_empty()
+			|| dest.starts_with("http://")
+			|| dest.starts_with("https://")
+			|| is_tor_address(dest).is_ok()
+			|| ProvableAddress::from_str(secp, context_id, dest).is_ok()
+		{
+			return Err(ParseError::ArgumentError(
+				"--dest must be an output file path for the finalized slate".to_owned(),
+			));
+		}
+	}
+
 	// input file
 	let input_file = match args.value_of("file") {
 		Some(file) => {
@@ -783,6 +953,26 @@ pub fn parse_issue_invoice_args(
 	context_id: u32,
 	args: &ArgMatches,
 ) -> Result<command::IssueInvoiceArgs, ParseError> {
+	let dest = parse_optional(args, "dest")?;
+	if args.is_present("slatepack_qr") && dest.is_some() && !args.is_present("slatepack_recipient")
+	{
+		return Err(ParseError::ArgumentError(
+			"--slatepack_qr requires Slatepack output; omit --dest or specify --slatepack_recipient".to_owned(),
+		));
+	}
+	if let Some(dest) = &dest {
+		if dest.is_empty()
+			|| dest.starts_with("http://")
+			|| dest.starts_with("https://")
+			|| is_tor_address(dest).is_ok()
+			|| ProvableAddress::from_str(secp, context_id, dest).is_ok()
+		{
+			return Err(ParseError::ArgumentError(
+				"--dest must be an output file path for the invoice; use --slatepack_recipient for its encryption address".to_owned(),
+			));
+		}
+	}
+
 	let amount = parse_required(args, "amount")?;
 	let amount = mwc_core::core::amount_from_hr_string(amount);
 	let amount = match amount {
@@ -826,13 +1016,11 @@ pub fn parse_issue_invoice_args(
 
 	let slatepack_qr = args.is_present("slatepack_qr");
 
-	// dest (output file)
-	let dest = parse_required(args, "dest")?;
 	Ok(command::IssueInvoiceArgs {
-		dest: dest.into(),
+		dest: dest.clone(),
 		issue_args: IssueInvoiceTxArgs {
 			dest_acct_name: None,
-			address: Some(String::from(dest)),
+			address: dest,
 			amount,
 			message,
 			target_slate_version,
@@ -849,7 +1037,40 @@ pub fn parse_process_invoice_args(
 	slatepack_secret: &ed25519_dalek::SigningKey,
 	secp: &Secp256k1,
 ) -> Result<command::ProcessInvoiceArgs, ParseError> {
-	// TODO: display and prompt for confirmation of what we're doing
+	let estimate_selection_strategies = args.is_present("estimate_selection_strategies");
+	if estimate_selection_strategies {
+		// Defaults are allowed; explicitly supplied options must affect the estimate.
+		for (arg, flag) in [
+			("method", "--method"),
+			("dest", "--dest"),
+			("selection_strategy", "--selection"),
+			("message", "--message"),
+			("slatepack_qr", "--slatepack_qr"),
+		] {
+			if args.occurrences_of(arg) != 0 {
+				return Err(ParseError::ArgumentError(format!(
+					"{} cannot be used with --estimate-selection; estimates do not pay an invoice and always compare both selection strategies",
+					flag,
+				)));
+			}
+		}
+	}
+	if args.is_present("file") == args.is_present("content") {
+		return Err(ParseError::ArgumentError(
+			"Specify exactly one of --file or --content".to_owned(),
+		));
+	}
+	if args
+		.value_of("content")
+		.is_some_and(|content| content.trim().is_empty())
+	{
+		return Err(ParseError::ArgumentError(
+			"--content must not be empty".to_owned(),
+		));
+	}
+	let method = parse_required(args, "method")?;
+	let slatepack_qr = args.is_present("slatepack_qr");
+
 	// message
 	let message = args.value_of("message").map(|m| String::from(m));
 
@@ -860,35 +1081,17 @@ pub fn parse_process_invoice_args(
 	// selection_strategy
 	let selection_strategy = parse_required(args, "selection_strategy")?;
 
-	// estimate_selection_strategies
-	let estimate_selection_strategies = args.is_present("estimate_selection_strategies");
-
-	// method
-	let method = parse_required(args, "method")?;
-
 	// dest
-	let mut dest = {
-		if method == "self" {
-			match args.value_of("dest") {
-				Some(d) => Some(d.to_string()),
-				None => Some("default".to_string()),
-			}
-		} else {
-			if !estimate_selection_strategies {
-				parse_optional(args, "dest")?
-			} else {
-				None
-			}
-		}
+	let mut dest = if estimate_selection_strategies {
+		None
+	} else {
+		parse_optional(args, "dest")?
 	};
-
-	// ttl_blocks
-	let ttl_blocks: Option<u64> = parse_number_or_none(args.value_of("ttl_blocks"), "ttl_blocks")?;
 
 	// max_outputs
 	let max_outputs = 500;
 
-	// file input only
+	// invoice input
 	let tx_file = parse_optional(args, "file")?;
 	let input_slatepack_message = args.value_of("content").map(|s| s.to_string());
 
@@ -918,7 +1121,7 @@ pub fn parse_process_invoice_args(
 		},
 	};
 
-	let (slate, sender, _, content, _) = slate
+	let (slate, sender, recipient, content, _) = slate
 		.to_slate()
 		.map_err(|e| ParseError::ArgumentError(format!("Unable to read the slate, {}", e)))?;
 
@@ -927,53 +1130,65 @@ pub fn parse_process_invoice_args(
 			"Slate has a wrong type, it is not initial invoice slate".to_string(),
 		));
 	}
-
-	if dest.is_none() {
-		dest = match &sender {
-			Some(sender) => Some(format!(
-				"http://{}",
-				OnionV3Address::from_bytes(*sender.as_bytes())
-					.map_err(|e| ParseError::ArgumentError(format!(
-						"Invalid sender address, {}",
-						e
-					)))?
-					.to_ov3_str()
-			)),
-			None => {
-				if !estimate_selection_strategies {
-					return Err(ParseError::ArgumentError(
-						"Please specify 'dest' argument".to_string(),
-					));
-				}
-				None
-			}
-		};
+	if slatepack_qr && !slate.compact_slate {
+		return Err(ParseError::ArgumentError(
+			"--slatepack_qr requires a Slatepack invoice".to_owned(),
+		));
 	}
 
-	if !estimate_selection_strategies && method == "http" {
+	if !estimate_selection_strategies {
+		if method == "http" && dest.is_none() {
+			if let Some(sender) = &sender {
+				dest = Some(format!(
+					"http://{}.onion",
+					OnionV3Address::from_bytes(*sender.as_bytes())
+						.map_err(|e| ParseError::ArgumentError(format!(
+							"Invalid sender address, {}",
+							e
+						)))?
+						.to_ov3_str()
+				));
+			}
+		}
+
 		if let Some(dest) = &dest {
-			if !dest.starts_with("http://") && !dest.starts_with("https://") {
+			if method == "file"
+				&& (dest.is_empty()
+					|| dest.starts_with("http://")
+					|| dest.starts_with("https://")
+					|| is_tor_address(dest).is_ok()
+					|| ProvableAddress::from_str(secp, context_id, dest).is_ok())
+			{
+				return Err(ParseError::ArgumentError(
+					"--dest must be an output file path with --method file; use --method http to send the invoice response to a listener".to_string(),
+				));
+			}
+			if method == "http"
+				&& !dest.starts_with("http://")
+				&& !dest.starts_with("https://")
+				&& is_tor_address(dest).is_err()
+			{
 				return Err(ParseError::ArgumentError(format!(
-					"HTTP Destination should start with http://: or https://: {}",
+					"HTTP Destination must be an http:// or https:// URL or a Tor address: {}",
 					dest
 				)));
 			}
+		} else if method == "http" {
+			return Err(ParseError::ArgumentError(
+				"Please specify --dest <http://address> for the invoice response".to_owned(),
+			));
+		}
+
+		// Reject invoices addressed to another wallet before asking to pay.
+		validate_slatepack_receive_direction(
+			sender.as_ref(),
+			recipient.as_ref(),
+			&ed25519_dalek::VerifyingKey::from(slatepack_secret),
+		)?;
+		if prompt && !prompt_pay_invoice(&slate, method, dest.as_deref().unwrap_or_default())? {
+			return Err(ParseError::CancelledError);
 		}
 	}
-
-	if prompt {
-		// Now we need to prompt the user whether they want to do this,
-		// which requires reading the slate
-		prompt_pay_invoice(
-			&slate,
-			method,
-			dest.as_ref().ok_or(ParseError::ArgumentError(
-				"Destination address is not found".into(),
-			))?,
-		)?;
-	}
-
-	let slatepack_qr = args.is_present("slatepack_qr");
 
 	Ok(command::ProcessInvoiceArgs {
 		message: message,
@@ -985,7 +1200,6 @@ pub fn parse_process_invoice_args(
 		max_outputs: max_outputs,
 		input_slatepack_message,
 		input_file: tx_file,
-		ttl_blocks,
 		slatepack_qr: slatepack_qr,
 	})
 }
@@ -1556,6 +1770,7 @@ where
 		>,
 	),
 {
+	let tor_config = tor_config.unwrap_or_default();
 	let secp = Secp256k1::with_caps(ContextFlag::Commit)?;
 	init_global_runtime()
 		.map_err(|e| Error::GenericError(format!("Unable to initialize async runtime, {}", e)))?;
@@ -1566,10 +1781,6 @@ where
 
 	if let Some(dir) = wallet_args.value_of("top_level_dir") {
 		wallet_config.data_file_dir = dir.to_string().clone();
-	}
-
-	if let Some(sa) = wallet_args.value_of("api_server_address") {
-		wallet_config.check_node_api_http_addr = Some(sa.to_string().clone());
 	}
 
 	let mut global_wallet_args = arg_parse!(parse_global_args(&wallet_config, &wallet_args));
@@ -1587,10 +1798,6 @@ where
 			))?
 			.into();
 	}
-
-	// for backwards compatibility: If tor config doesn't exist in the file, assume
-	// the top level directory for data
-	let tor_config = tor_config.unwrap_or(TorConfig::default());
 
 	let mqs_config = match mqs_config {
 		Some(mqs) => mqs,
@@ -1804,6 +2011,9 @@ where
 		}
 		("listen", Some(args)) => {
 			let mut c = wallet_config.clone();
+			if wallet_args.is_present("external") {
+				c.api_listen_interface = Some("0.0.0.0".to_string());
+			}
 			let mut t = tor_config.clone();
 			let m = mqs_config.clone();
 			let a = arg_parse!(parse_listen_args(&mut c, &mut t, &args)); //TODO: be able to pass in mqs domain and port.
@@ -1913,11 +2123,19 @@ where
 			command::receive(owner_api, km, &global_wallet_args, a)
 		}
 		("finalize", Some(args)) => {
-			let a = arg_parse!(parse_finalize_args(&args));
+			let context_id = {
+				wallet_lock!(owner_api.wallet_inst, w);
+				w.get_context_id()
+			};
+			let a = arg_parse!(parse_finalize_args(&secp, context_id, &args));
 			command::finalize(owner_api, km, a, false)
 		}
 		("finalize_invoice", Some(args)) => {
-			let a = arg_parse!(parse_finalize_args(&args));
+			let context_id = {
+				wallet_lock!(owner_api.wallet_inst, w);
+				w.get_context_id()
+			};
+			let a = arg_parse!(parse_finalize_args(&secp, context_id, &args));
 			command::finalize(owner_api, km, a, true)
 		}
 		("invoice", Some(args)) => {

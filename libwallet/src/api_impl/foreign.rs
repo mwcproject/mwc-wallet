@@ -700,13 +700,13 @@ where
 
 	if mwc_wallet_util::mwc_util::is_console_output_enabled() {
 		println!(
-			"Invoice slate [{}] for [{}] MWCs was processed and sent back for posting.",
+			"Invoice slate [{}] for [{}] MWCs was finalized.",
 			slate.id.to_string(),
 			amount_to_hr_string(slate.amount, false)
 		);
 	} else {
 		info!(
-			"Invoice slate [{}] for [{}] MWCs was processed and sent back for posting.",
+			"Invoice slate [{}] for [{}] MWCs was finalized.",
 			slate.id.to_string(),
 			amount_to_hr_string(slate.amount, false)
 		);

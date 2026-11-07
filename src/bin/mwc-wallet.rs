@@ -137,7 +137,7 @@ fn real_main() -> i32 {
 
 	// Load relevant config, try and load a wallet config file
 	// Use defaults for configuration if config file not found anywhere
-	let config = match mwc_wallet_config::initial_setup_wallet(
+	let mut config = match mwc_wallet_config::initial_setup_wallet(
 		&chain_type,
 		current_dir,
 		None,
@@ -156,7 +156,10 @@ fn real_main() -> i32 {
 		},
 	};
 
-	//config.members.as_mut().unwrap().wallet.chain_type = Some(chain_type);
+	// Apply the node override before constructing the HTTP client.
+	if let Some(address) = args.value_of("api_server_address") {
+		config.members.wallet.check_node_api_http_addr = Some(address.to_owned());
+	}
 
 	// Load logging config
 	let mut l = config

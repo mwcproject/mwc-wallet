@@ -36,11 +36,10 @@ use mwc_wallet_impls::{SlateGetter, create_sender};
 use mwc_wallet_libwallet::api_impl::owner;
 #[cfg(feature = "swaps")]
 use mwc_wallet_libwallet::api_impl::{owner_eth, owner_swap};
+use mwc_wallet_libwallet::status::scan_progress_callback;
 #[cfg(feature = "swaps")]
 use mwc_wallet_libwallet::swap::types::Currency;
-use mwc_wallet_libwallet::{
-	ChainTip, InitTxArgs, IssueInvoiceTxArgs, NodeClient, WalletLCProvider,
-};
+use mwc_wallet_libwallet::{ChainTip, InitTxArgs, IssueInvoiceTxArgs, NodeClient, WalletLCProvider};
 use mwc_wallet_util::mwc_api::TLSConfig;
 use mwc_wallet_util::mwc_core::{core, global};
 #[cfg(feature = "swaps")]
@@ -327,6 +326,7 @@ where
 		);
 
 		let mut secp = Secp256k1::with_caps(ContextFlag::Commit)?;
+		let status_callback = scan_progress_callback();
 
 		let result = owner::scan_rewind_hash_with_anchor(
 			api.wallet_inst.clone(),
@@ -334,11 +334,10 @@ where
 			rewind_hash,
 			Some(start_height),
 			tip,
-			None,
+			Some(&status_callback),
 		);
 
-		// Status-channel progress reporting was removed; `show_progress` now
-		// only selects the machine-parseable output format.
+		// This flag selects the machine-parseable result format.
 		if show_progress {
 			// Printing for parser
 			match result {
@@ -2110,6 +2109,16 @@ where
 				}
 			}
 		})?;
+	} else {
+		let msg = format!(
+			"Transaction [{}] finalized and saved locally; not posted (--nopost).",
+			slate.id
+		);
+		if is_console_output_enabled() {
+			println!("{}", msg);
+		} else {
+			info!("{}", msg);
+		}
 	}
 	drop(invoice_processing_guard);
 
@@ -2118,8 +2127,8 @@ where
 
 /// Issue Invoice Args
 pub struct IssueInvoiceArgs {
-	/// output file
-	pub dest: String,
+	/// Optional output file; without one, display the invoice as Slatepack.
+	pub dest: Option<String>,
 	/// issue invoice tx args
 	pub issue_args: IssueInvoiceTxArgs,
 	/// show slatepack as QR code
@@ -2129,13 +2138,17 @@ pub struct IssueInvoiceArgs {
 pub fn issue_invoice_tx<L, C, K>(
 	owner_api: &mut Owner<L, C, K>,
 	keychain_mask: Option<&SecretKey>,
-	args: IssueInvoiceArgs,
+	mut args: IssueInvoiceArgs,
 ) -> Result<(), Error>
 where
 	L: WalletLCProvider<'static, C, K> + 'static,
 	C: NodeClient + 'static,
 	K: Keychain + 'static,
 {
+	// Console output uses Slatepack even when no encryption recipient is set.
+	if args.dest.is_none() {
+		args.issue_args.target_slate_version = Some(4);
+	}
 	controller::owner_single_use(None, keychain_mask, Some(owner_api), |api, m| {
 		let mut recipient: Option<ed25519_dalek::VerifyingKey> = None;
 		if let Some(sp_address) = &args.issue_args.slatepack_recipient {
@@ -2171,10 +2184,10 @@ where
 			(slatepack_secret, slatepack_pk, secp, context_id)
 		};
 
-		let slatepack_format = recipient.is_some();
+		let slatepack_format = args.dest.is_none() || recipient.is_some();
 		let slate_str = PathToSlatePutter::build_encrypted(
 			context_id,
-			Some((&args.dest).into()),
+			args.dest.as_ref().map(PathBuf::from),
 			SlatePurpose::InvoiceInitial,
 			tor_address,
 			recipient.clone(),
@@ -2188,7 +2201,9 @@ where
 			&secp,
 		)?;
 		let mut generated_files = GeneratedSlateFiles::new();
-		generated_files.track(PathBuf::from(&args.dest));
+		if let Some(dest) = &args.dest {
+			generated_files.track(PathBuf::from(dest));
+		}
 
 		if slatepack_format {
 			let backup_path = show_slatepack(
@@ -2229,7 +2244,6 @@ pub struct ProcessInvoiceArgs {
 	pub input_file: Option<String>,
 	pub input_slatepack_message: Option<String>,
 	pub estimate_selection_strategies: bool,
-	pub ttl_blocks: Option<u64>,
 	pub slatepack_qr: bool,
 }
 
@@ -2287,17 +2301,29 @@ where
 	};
 
 	let (slate, sender_pk, recipient, content, _encrypted) = slate_pkg.to_slate()?;
-	// An encrypted invoice request must be addressed to this wallet. ECDH is
-	// symmetric, so a role-reversed envelope (our key as sender) still decrypts
-	// locally; without this check we would sign and lock payer inputs for an
-	// exchange the counterparty cannot complete.
-	validate_slatepack_receive_direction(sender_pk.as_ref(), recipient.as_ref(), &tor_address)?;
+	if !args.estimate_selection_strategies {
+		// ECDH also allows the sender to decrypt an invoice. Require the payer
+		// to be its recipient before signing or locking inputs; estimation only
+		// reads the amount and does not participate in the transaction.
+		validate_slatepack_receive_direction(sender_pk.as_ref(), recipient.as_ref(), &tor_address)?;
+	}
 
 	if !(content == SlatePurpose::FullSlate || content == SlatePurpose::InvoiceInitial) {
 		return Err(Error::ArgumentError(format!(
 			"Wrong slate content. Expecting InvoiceInitial, get {:?}",
 			content
 		)));
+	}
+	if !args.estimate_selection_strategies
+		&& args.method == "file"
+		&& args.dest.is_empty()
+		&& !slate.compact_slate
+		&& !is_console_output_enabled()
+	{
+		return Err(Error::ArgumentError(
+			"Please specify --dest to save the invoice response when console output is disabled"
+				.to_owned(),
+		));
 	}
 
 	controller::owner_single_use(None, keychain_mask, Some(owner_api), |api, m| {
@@ -2327,7 +2353,6 @@ where
 				num_change_outputs: 1usize,
 				selection_strategy_is_use_all: args.selection_strategy == "all",
 				message: args.message.clone(),
-				ttl_blocks: args.ttl_blocks,
 				send_args: None,
 				..Default::default()
 			};
@@ -2347,7 +2372,11 @@ where
 					info!(
 						"Invoice processed: {} mwc to {} (strategy '{}')",
 						core::amount_to_hr_string(slate.amount, false),
-						args.dest,
+						if args.dest.is_empty() {
+							"console"
+						} else {
+							&args.dest
+						},
 						args.selection_strategy,
 					);
 					result
@@ -2363,48 +2392,66 @@ where
 			let mut slate = process_result.slate;
 			let _processing_guard = process_result.processing_guard;
 
+			if args.method == "file" {
+				api.tx_lock_outputs(
+					m,
+					Some(&mut tx_session),
+					&slate,
+					Some(String::from("file")),
+					1,
+				)?;
+			}
+
+			// Display the response for either delivery method. Only file mode
+			// treats --dest as a path; a listener address is never a filename.
+			let dest = if args.method == "file" && !args.dest.is_empty() {
+				Some(PathBuf::from(&args.dest))
+			} else {
+				None
+			};
+			let slatepack_format = slate.compact_slate;
+			let slate_str = PathToSlatePutter::build_encrypted(
+				context_id,
+				dest.clone(),
+				SlatePurpose::InvoiceResponse,
+				tor_address,
+				sender_pk.clone(),
+				slatepack_format,
+			)
+			.put_tx(
+				&slate,
+				Some(&slatepack_secret),
+				#[cfg(feature = "test-support")]
+				false,
+				&secp,
+			)?;
+			let mut generated_files = GeneratedSlateFiles::new();
+			if let Some(dest) = dest {
+				generated_files.track(dest);
+			}
+
+			if slatepack_format {
+				let backup_path = show_slatepack(
+					api,
+					&slate_str,
+					&slate.id,
+					&SlatePurpose::InvoiceResponse,
+					sender_pk.is_some(),
+					false,
+					args.slatepack_qr,
+				)?;
+				generated_files.track(backup_path);
+			} else if is_console_output_enabled() {
+				println!(
+					"\nResponse slate follows. Please provide this output to the invoice creator"
+				);
+				println!("\n--- CUT BELOW THIS LINE ---\n");
+				println!("{}", escape_for_display(&slate_str));
+				println!("--- CUT ABOVE THIS LINE ---\n");
+			}
+
 			match args.method.as_str() {
 				"file" => {
-					api.tx_lock_outputs(
-						m,
-						Some(&mut tx_session),
-						&slate,
-						Some(String::from("file")),
-						1,
-					)?;
-
-					// Process invoice slate is not required to send anywhere. Let's write it for our records.
-					let slatepack_format = sender_pk.is_some();
-					let slate_str = PathToSlatePutter::build_encrypted(
-						context_id,
-						Some((&args.dest).into()),
-						SlatePurpose::InvoiceResponse,
-						tor_address,
-						sender_pk.clone(),
-						slatepack_format,
-					)
-					.put_tx(
-						&slate,
-						Some(&slatepack_secret),
-						#[cfg(feature = "test-support")]
-						false,
-						&secp,
-					)?;
-					let mut generated_files = GeneratedSlateFiles::new();
-					generated_files.track(PathBuf::from(&args.dest));
-
-					if slatepack_format {
-						let backup_path = show_slatepack(
-							api,
-							&slate_str, // encrypted (optionally) slate with a purpose.
-							&slate.id,
-							&SlatePurpose::InvoiceResponse,
-							sender_pk.is_some(),
-							false,
-							args.slatepack_qr,
-						)?;
-						generated_files.track(backup_path);
-					}
 					// The invoice response slate is ready for the issuer. Persist
 					// the staged session only now. If the save fails,
 					// `generated_files` removes the response destination and
@@ -2413,7 +2460,6 @@ where
 						wallet_lock!(api.wallet_inst, w);
 						tx_session.save_tx_data(&secp, &mut **w, m, &slate.id)?;
 					}
-					generated_files.keep();
 				}
 				"http" => {
 					let sender = create_sender(
@@ -2485,17 +2531,18 @@ where
 					);
 					info!("{}", msg);
 					println!("{}", msg);
-					return Ok(());
 				}
 				method => {
 					return Err(Error::ArgumentError(format!("Unknown method: {}", method)));
 				}
 			}
+			generated_files.keep();
 		}
 		Ok(())
 	})?;
 	Ok(())
 }
+
 /// Info command args
 pub struct InfoArgs {
 	pub minimum_confirmations: u64,
@@ -3041,11 +3088,17 @@ where
 		}
 		// A relative lookback is resolved inside the scan against the freshly
 		// fetched, verified chain tip the scan is anchored to.
-		let result = api.scan(
+		let mut secp = Secp256k1::with_caps(ContextFlag::Commit)?;
+		let status_callback = scan_progress_callback();
+		let result = owner::scan(
+			api.wallet_inst.clone(),
+			&mut secp,
 			m,
 			args.start_height,
 			args.backwards_from_tip,
 			args.delete_unconfirmed,
+			true,
+			Some(&status_callback),
 		);
 		match result {
 			Ok(_) => {
