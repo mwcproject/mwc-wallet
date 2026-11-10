@@ -251,6 +251,8 @@ pub fn initial_setup_wallet(dir_name: &str, wallet_name: &str) -> GlobalWalletCo
 	// authentication explicitly instead of relying on a missing configured
 	// secret file being interpreted as authentication disabled.
 	config.members.wallet.api_secret_path = None;
+	// Socket listeners are disabled by default; tests opt into loopback HTTP.
+	config.members.wallet.api_listen_interface = Some("127.0.0.1".to_string());
 	config
 }
 

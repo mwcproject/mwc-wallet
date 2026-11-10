@@ -1019,7 +1019,20 @@ fn command_line_test_impl(test_dir: &str) -> Result<(), mwc_wallet_controller::E
 		if encrypted {
 			invoice_args.extend(["--slatepack_recipient", tor_addr1.as_str()]);
 		}
-		execute_command(&app, test_dir, "wallet2", &client2, invoice_args)?;
+		// Fresh invoice keys avoid colliding with an earlier mined kernel.
+		// The fixed doctest keys deliberately reuse the same compact excess.
+		let mut invoice_config = config2.members.wallet.clone();
+		invoice_config.chain_type = None;
+		mwc_wallet::cmd::wallet_args::wallet_command(
+			0,
+			&app.clone().get_matches_from(invoice_args),
+			invoice_config,
+			config2.members.tor.clone(),
+			config2.members.mqs.clone(),
+			client2.clone(),
+			false,
+			|_| {},
+		)?;
 		let new_files: Vec<_> = std::fs::read_dir(&slatepack_dir)
 			.unwrap()
 			.map(|entry| entry.unwrap().path())

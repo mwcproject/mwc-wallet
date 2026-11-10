@@ -344,10 +344,11 @@ where
 	Ok(())
 }
 
+/// Validate and apply a block. The proxy checks the accumulated chain at shutdown;
+/// fixtures using a chain without a running proxy must validate it explicitly.
 pub fn process_block(chain: &Chain, block: mwc_core::core::Block) -> Result<(), mwc_chain::Error> {
 	let mut secp = Secp256k1::with_caps(ContextFlag::Commit).map_err(mwc_chain::Error::Secp)?;
 	chain.process_block(&mut secp, block, mwc_chain::Options::MINE, HashSet::new())?;
-	chain.validate(&secp, false)?;
 	Ok(())
 }
 

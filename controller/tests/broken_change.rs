@@ -23,8 +23,6 @@ use std::sync::Arc;
 
 use mwc_wallet_impls::test_framework::{self, LocalWalletClient};
 use mwc_wallet_libwallet::{InitTxArgs, IssueInvoiceTxArgs, Slate};
-use std::thread;
-use std::time::Duration;
 
 #[macro_use]
 mod common;
@@ -160,10 +158,8 @@ fn broken_change_test_impl(
 		)?;
 	}
 
-	// let logging finish
 	proxy_handle.stop()?;
 	drop(chain);
-	thread::sleep(Duration::from_millis(200));
 	Ok(())
 }
 

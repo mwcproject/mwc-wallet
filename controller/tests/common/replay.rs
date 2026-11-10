@@ -425,13 +425,16 @@ pub fn build_replay(
 		Some(sender_wallet.clone()),
 		(&sender_mask).as_ref(),
 		None,
-		|api, m| Ok(api.finalize_tx(m, None, &replay_slate, true)?),
-	)
+		|api, m| Ok(api.finalize_tx(m, None, &replay_slate, true)),
+	)?
 	.expect_err("online finalization must reject a replayed output");
+	// This attack reuses the mined kernel, which is rejected before the
+	// output replay check. Preserve the typed error through owner_single_use.
 	assert!(
-		replay_rejected
-			.to_string()
-			.contains("preflight rejected: transaction 0 replay:"),
+		matches!(
+			&replay_rejected,
+			mwc_wallet_libwallet::Error::TransactionAlreadyConfirmed
+		),
 		"unexpected replay finalization error: {replay_rejected}"
 	);
 	let finalized2 = {
@@ -501,16 +504,14 @@ pub fn build_replay(
 		Some(sender_wallet.clone()),
 		(&sender_mask).as_ref(),
 		None,
-		|api, m| {
-			api.post_tx(m, &tx2, true)?;
-			Ok(())
-		},
-	)
+		|api, m| Ok(api.post_tx(m, &tx2, true)),
+	)?
 	.expect_err("posting must reject a replayed output");
 	assert!(
-		post_rejected
-			.to_string()
-			.contains("preflight rejected: transaction 0 replay:"),
+		matches!(
+			&post_rejected,
+			mwc_wallet_libwallet::Error::TransactionAlreadyConfirmed
+		),
 		"unexpected replay publication error: {post_rejected}"
 	);
 	assert!(tx_pool.lock().is_empty());

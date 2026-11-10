@@ -31,6 +31,17 @@ tor-ptmgr = { git = "https://github.com/mwcproject/mwc-node.git", branch = "audi
 thiserror = "2"
 safer-ffi = { version = "0.1", features = ["std", "headers"] }
 
+# Keep wallet code debuggable while optimizing the expensive fixture operations.
+# KDF parameters, cryptographic checks, and Slatepack size limits stay unchanged.
+[profile.test.package.argon2]
+opt-level = 2
+
+[profile.test.package.mwc_secp256k1zkp]
+opt-level = 2
+
+[profile.test.package.bs58]
+opt-level = 2
+
 [dependencies]
 mwc_wallet_api = { path = "./api", version = "7.0.0" }
 mwc_wallet_impls = { path = "./impls", version = "7.0.0" }

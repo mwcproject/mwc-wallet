@@ -23,8 +23,6 @@ use std::sync::Arc;
 use mwc_wallet_impls::test_framework::{self, LocalWalletClient};
 use mwc_wallet_libwallet::{InitTxArgs, IssueInvoiceTxArgs, Slate};
 use mwc_wallet_util::mwc_core;
-use std::thread;
-use std::time::Duration;
 
 #[macro_use]
 mod common;
@@ -75,18 +73,19 @@ fn no_change_test_impl(
 		mwc_wallet_controller::Error::GenericError(format!("reward calculation failed: {}", e))
 	})?;
 
-	// Mine into wallet 1
-	let _ = test_framework::award_blocks_to_wallet(
+	// Fund both the send and invoice with distinct mature coinbase outputs.
+	// Mining the send makes one more output mature before paying the invoice.
+	test_framework::award_blocks_to_wallet(
 		&chain,
 		wallet1.clone(),
 		mask1,
-		4,
+		2 * inputs_num + global::coinbase_maturity(0) as usize - 1,
 		false,
 		tx_pool.lock().deref_mut(),
-	);
+	)?;
 	let fee = mwc_core::libtx::tx_fee(0, inputs_num, 1, 1)?;
 
-	// send a single block's worth of transactions with minimal strategy
+	// Spend exactly inputs_num outputs without producing change.
 	let mut slate = Slate::blank(2, false)?;
 	mwc_wallet_controller::controller::owner_single_use(
 		Some(wallet1.clone()),
@@ -231,10 +230,8 @@ fn no_change_test_impl(
 		},
 	)?;
 
-	// let logging finish
 	proxy_handle.stop()?;
 	drop(chain);
-	thread::sleep(Duration::from_millis(200));
 	Ok(())
 }
 
@@ -243,7 +240,7 @@ fn no_change() {
 	for inputs_num in 1..=3 {
 		let test_dir = format!("test_output/no_change{}", inputs_num);
 		setup(&test_dir);
-		if let Err(e) = no_change_test_impl(&test_dir, 1) {
+		if let Err(e) = no_change_test_impl(&test_dir, inputs_num) {
 			panic!("Libwallet Error: {}", e);
 		}
 		clean_output_dir(&test_dir);

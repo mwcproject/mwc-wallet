@@ -72,24 +72,33 @@ use std::time::Duration;
 pub struct WalletProxyHandle {
 	running: Arc<AtomicBool>,
 	thread: Option<thread::JoinHandle<Result<(), mwc_wallet_libwallet::Error>>>,
+	chain: Arc<Chain>,
 }
 
 impl WalletProxyHandle {
-	/// Stop the proxy and wait for its thread to release the chain and LMDB environment.
+	/// Stop and join the proxy, then fully validate its final chain state.
 	pub fn stop(mut self) -> Result<(), mwc_wallet_libwallet::Error> {
 		self.stop_and_join()
 	}
 
 	fn stop_and_join(&mut self) -> Result<(), mwc_wallet_libwallet::Error> {
 		self.running.store(false, Ordering::Release);
-		match self.thread.take() {
-			Some(thread) => thread.join().map_err(|_| {
+		if let Some(thread) = self.thread.take() {
+			thread.join().map_err(|_| {
 				mwc_wallet_libwallet::Error::GenericError(
 					"WalletProxyHandle::stop_and_join, wallet proxy thread panicked".to_owned(),
 				)
-			})?,
-			None => Ok(()),
+			})??;
+			// Check accumulated proofs and kernels once, using the fixture thread's
+			// chain settings (including deliberate replay scenarios).
+			let secp = Secp256k1::with_caps(ContextFlag::Commit)?;
+			self.chain.validate(&secp, false).map_err(|e| {
+				mwc_wallet_libwallet::Error::GenericError(format!(
+					"Unable to validate test chain at proxy shutdown: {}", e
+				))
+			})?;
 		}
+		Ok(())
 	}
 }
 
@@ -435,6 +444,7 @@ where
 		K: 'static,
 	{
 		let running = self.running.clone();
+		let chain = self.chain.clone();
 		running.store(true, Ordering::Release);
 		let thread = thread::spawn(move || {
 			set_local_chain_type(ChainTypes::AutomatedTesting);
@@ -449,6 +459,7 @@ where
 		WalletProxyHandle {
 			running,
 			thread: Some(thread),
+			chain,
 		}
 	}
 
@@ -460,7 +471,10 @@ where
 		C: 'static,
 		K: 'static,
 	{
-		let running = proxy.lock().running.clone();
+		let (running, chain) = {
+			let proxy = proxy.lock();
+			(proxy.running.clone(), proxy.chain.clone())
+		};
 		running.store(true, Ordering::Release);
 		let thread = thread::spawn(move || {
 			set_local_chain_type(ChainTypes::AutomatedTesting);
@@ -476,6 +490,7 @@ where
 		WalletProxyHandle {
 			running,
 			thread: Some(thread),
+			chain,
 		}
 	}
 
@@ -495,7 +510,6 @@ where
 
 	fn run_until_stopped(&mut self) -> Result<(), mwc_wallet_libwallet::Error> {
 		loop {
-			thread::sleep(Duration::from_millis(10));
 			if !self.running.load(Ordering::Acquire) {
 				info!("Proxy stopped");
 				return Ok(());
@@ -1527,6 +1541,23 @@ mod tests {
 
 	#[test]
 	fn proxy_handle_stops_and_joins_worker() -> Result<(), mwc_wallet_libwallet::Error> {
+		use super::{LocalWalletClient, WalletProxy};
+		use crate::DefaultLCProvider;
+		use mwc_wallet_util::mwc_core::global;
+		use mwc_wallet_util::mwc_crates::tempfile;
+		use mwc_wallet_util::mwc_keychain::ExtKeychain;
+		use mwc_wallet_util::Mutex;
+
+		global::set_local_nrd_enabled(true);
+		let directory = tempfile::tempdir().unwrap();
+		let proxy = WalletProxy::<
+			DefaultLCProvider<'static, LocalWalletClient, ExtKeychain>,
+			LocalWalletClient,
+			ExtKeychain,
+		>::new(
+			directory.path().to_str().unwrap().to_owned(),
+			Arc::new(Mutex::new(vec![])),
+		);
 		let running = Arc::new(AtomicBool::new(true));
 		let worker_running = running.clone();
 		let exited = Arc::new(AtomicBool::new(false));
@@ -1541,6 +1572,7 @@ mod tests {
 		let handle = WalletProxyHandle {
 			running,
 			thread: Some(thread),
+			chain: proxy.chain.clone(),
 		};
 
 		handle.stop()?;

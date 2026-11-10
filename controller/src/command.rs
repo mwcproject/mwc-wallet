@@ -2510,9 +2510,13 @@ where
 						Some(args.dest.clone()),
 						1,
 					)?;
+					// Compact locking rebuilds a provisional kernel. Save the
+					// finalized transaction we actually post so it can be reposted.
+					let finalized_tx = slate.tx_or_err()?;
+					tx_session.set_transaction(finalized_tx.clone());
 					tx_session.validate_tx_log_entry_size()?;
 
-					if let Err(e) = api.post_tx(m, slate.tx_or_err()?, true) {
+					if let Err(e) = api.post_tx(m, finalized_tx, true) {
 						error!("Tx post fail: {}", e);
 						return Err(Error::LibWallet(format!("Unable to post slate, {}", e)));
 					}

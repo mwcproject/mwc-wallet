@@ -41,27 +41,27 @@ bitcoin_hashes = { version = " 1.0", features = ["serde"] }
 #mwc_node_lib = { git = "https://github.com/mwcproject/mwc-node", version="7.2.0", tag = "7.2.0" }
 
 # For bleeding edge
-mwc_crates = { git = "https://github.com/mwcproject/mwc-node", branch = "audit" }
-mwc_config = { git = "https://github.com/mwcproject/mwc-node", branch = "audit" }
-mwc_core = { git = "https://github.com/mwcproject/mwc-node", branch = "audit" }
-mwc_keychain = { git = "https://github.com/mwcproject/mwc-node", branch = "audit" }
-mwc_chain = { git = "https://github.com/mwcproject/mwc-node", branch = "audit" }
-mwc_util = { git = "https://github.com/mwcproject/mwc-node", branch = "audit" }
-mwc_api = { git = "https://github.com/mwcproject/mwc-node", branch = "audit" }
-mwc_store = { git = "https://github.com/mwcproject/mwc-node", branch = "audit" }
-mwc_p2p = { git = "https://github.com/mwcproject/mwc-node", branch = "audit" }
-mwc_node_workflow = { git = "https://github.com/mwcproject/mwc-node", branch = "audit" }
-mwc_node_lib = { git = "https://github.com/mwcproject/mwc-node", branch = "audit" }
+#mwc_crates = { git = "https://github.com/mwcproject/mwc-node", branch = "audit" }
+#mwc_config = { git = "https://github.com/mwcproject/mwc-node", branch = "audit" }
+#mwc_core = { git = "https://github.com/mwcproject/mwc-node", branch = "audit" }
+#mwc_keychain = { git = "https://github.com/mwcproject/mwc-node", branch = "audit" }
+#mwc_chain = { git = "https://github.com/mwcproject/mwc-node", branch = "audit" }
+#mwc_util = { git = "https://github.com/mwcproject/mwc-node", branch = "audit" }
+#mwc_api = { git = "https://github.com/mwcproject/mwc-node", branch = "audit" }
+#mwc_store = { git = "https://github.com/mwcproject/mwc-node", branch = "audit" }
+#mwc_p2p = { git = "https://github.com/mwcproject/mwc-node", branch = "audit" }
+#mwc_node_workflow = { git = "https://github.com/mwcproject/mwc-node", branch = "audit" }
+#mwc_node_lib = { git = "https://github.com/mwcproject/mwc-node", branch = "audit" }
 
 # For local testing
-#mwc_crates = { path = "../../mwc-node/mwc_crates" }
-#mwc_config = { path = "../../mwc-node/config" }
-#mwc_core = { path = "../../mwc-node/core"}
-#mwc_keychain = { path = "../../mwc-node/keychain"}
-#mwc_chain = { path = "../../mwc-node/chain"}
-#mwc_util = { path = "../../mwc-node/util"}
-#mwc_api = { path = "../../mwc-node/api"}
-#mwc_store = { path = "../../mwc-node/store"}
-#mwc_p2p = { path = "../../mwc-node/p2p"}
-#mwc_node_workflow = { path = "../../mwc-node/node_workflow"}
-#mwc_node_lib = { path = "../../mwc-node/mwc_node_lib"}
+mwc_crates = { path = "../../mwc-node/mwc_crates" }
+mwc_config = { path = "../../mwc-node/config" }
+mwc_core = { path = "../../mwc-node/core"}
+mwc_keychain = { path = "../../mwc-node/keychain"}
+mwc_chain = { path = "../../mwc-node/chain"}
+mwc_util = { path = "../../mwc-node/util"}
+mwc_api = { path = "../../mwc-node/api"}
+mwc_store = { path = "../../mwc-node/store"}
+mwc_p2p = { path = "../../mwc-node/p2p"}
+mwc_node_workflow = { path = "../../mwc-node/node_workflow"}
+mwc_node_lib = { path = "../../mwc-node/mwc_node_lib"}

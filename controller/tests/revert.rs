@@ -31,7 +31,7 @@ use mwc_wallet_util::mwc_core::core::Transaction;
 use mwc_wallet_util::mwc_core::global;
 use mwc_wallet_util::mwc_core::pow;
 use mwc_wallet_util::mwc_crates::chrono::{self, Timelike, Utc};
-use mwc_wallet_util::mwc_crates::secp::Secp256k1;
+use mwc_wallet_util::mwc_crates::secp::{ContextFlag, Secp256k1};
 use mwc_wallet_util::mwc_crates::secp::key::SecretKey;
 use mwc_wallet_util::mwc_keychain::ExtKeychain;
 use std::ops::DerefMut;
@@ -76,7 +76,7 @@ fn revert(
 	let test_dir2 = format!("{}/chain2", test_dir);
 	let wallet_proxy2 = create_wallet_proxy(test_dir2, tx_pool.clone());
 	let chain2 = wallet_proxy2.chain.clone();
-	let secp = Secp256k1::new().unwrap();
+	let secp = Secp256k1::with_caps(ContextFlag::Commit)?;
 
 	create_wallet_and_add!(
 		client1,
@@ -282,6 +282,9 @@ fn revert(
 		mwc_wallet_controller::Error::GenericError(format!("process block failed: {}", e))
 	})?;
 	assert_eq!(chain.head_header().unwrap(), block_with.header);
+	chain.validate(&secp, false).map_err(|e| {
+		Error::GenericError(format!("validate confirmed chain failed: {}", e))
+	})?;
 
 	// Add block without tx to the parallel chain
 	process_block(&chain2, block_without.clone()).map_err(|e| {
@@ -322,6 +325,10 @@ fn revert(
 	// Attach more blocks to the parallel chain, making it the longest one
 	award_block_to_wallet(&chain2, &[], wallet1.clone(), mask1)?;
 	assert_eq!(chain2.head_header().unwrap().height, bh + 1);
+	// This fork's proxy is never started, so validate it at the reorg checkpoint.
+	chain2.validate(&secp, false).map_err(|e| {
+		Error::GenericError(format!("validate parallel chain failed: {}", e))
+	})?;
 	let new_head = chain2
 		.get_block_for_header(&chain2.head_header().unwrap())
 		.unwrap();
@@ -336,6 +343,9 @@ fn revert(
 		mwc_wallet_controller::Error::GenericError(format!("process block failed: {}", e))
 	})?; // But this should!
 	assert_eq!(chain.head_header().unwrap(), new_head.header);
+	chain.validate(&secp, false).map_err(|e| {
+		Error::GenericError(format!("validate reorganized chain failed: {}", e))
+	})?;
 
 	let bh = bh + 1;
 
