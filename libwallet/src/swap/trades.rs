@@ -28,7 +28,7 @@ use mwc_wallet_util::mwc_crates::uuid::Uuid;
 use mwc_wallet_util::mwc_crates::zeroize::Zeroizing;
 use mwc_wallet_util::mwc_util::{from_hex, to_hex};
 use mwc_wallet_util::sensitive;
-use mwc_wallet_util::{Mutex, RwLock};
+use mwc_wallet_util::{Mutex, RecursiveRwLock};
 use std::collections::{BTreeMap, HashMap};
 use std::fs;
 use std::fs::File;
@@ -71,20 +71,20 @@ fn sync_directory(_path: &Path) -> io::Result<()> {
 }
 
 lazy_static! {
-	static ref TRADE_DEALS_PATH: RwLock<HashMap<u32,PathBuf>> = RwLock::new(HashMap::new());
-	static ref ELECTRUM_X_URI: RwLock<HashMap<u32,BTreeMap<String, String>>> = RwLock::new(HashMap::new());
-	static ref ETH_SWAP_CONTRACT_ADDR: RwLock<HashMap<u32,String>> = RwLock::new(HashMap::new());
-	static ref ERC20_SWAP_CONTRACT_ADDR: RwLock<HashMap<u32,String>> = RwLock::new(HashMap::new());
-	static ref ETH_INFURA_PROJECTID: RwLock<HashMap<u32,String>> = RwLock::new(HashMap::new());
+	static ref TRADE_DEALS_PATH: RecursiveRwLock<HashMap<u32,PathBuf>> = RecursiveRwLock::new(HashMap::new());
+	static ref ELECTRUM_X_URI: RecursiveRwLock<HashMap<u32,BTreeMap<String, String>>> = RecursiveRwLock::new(HashMap::new());
+	static ref ETH_SWAP_CONTRACT_ADDR: RecursiveRwLock<HashMap<u32,String>> = RecursiveRwLock::new(HashMap::new());
+	static ref ERC20_SWAP_CONTRACT_ADDR: RecursiveRwLock<HashMap<u32,String>> = RecursiveRwLock::new(HashMap::new());
+	static ref ETH_INFURA_PROJECTID: RecursiveRwLock<HashMap<u32,String>> = RecursiveRwLock::new(HashMap::new());
 	// Weak entries prevent arbitrary lookups from growing a process-wide cache
 	// forever. Context is part of the key so wallet cleanup can evict its locks.
-	static ref SWAP_LOCKS: RwLock<HashMap<(u32, String), Weak<Mutex<()>>>> =
-		RwLock::new(HashMap::new());
+	static ref SWAP_LOCKS: RecursiveRwLock<HashMap<(u32, String), Weak<Mutex<()>>>> =
+		RecursiveRwLock::new(HashMap::new());
 	// Serializes discovery and persistence of resource-bearing swaps for one wallet
 	// context. A UUID lock cannot provide this guarantee because competing creations
 	// intentionally use different UUIDs.
-	static ref SWAP_CREATION_LOCKS: RwLock<HashMap<u32, Weak<Mutex<()>>>> =
-		RwLock::new(HashMap::new());
+	static ref SWAP_CREATION_LOCKS: RecursiveRwLock<HashMap<u32, Weak<Mutex<()>>>> =
+		RecursiveRwLock::new(HashMap::new());
 }
 
 /// Clear context-id-keyed swap storage and configuration.

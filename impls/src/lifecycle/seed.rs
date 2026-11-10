@@ -762,6 +762,22 @@ mod tests {
 	}
 
 	#[test]
+	fn wallet_seed_key_matches_argon2_0_5_fixture() {
+		// Generated with argon2 0.5.3, Argon2id v0x13, 64 MiB, 3 passes,
+		// 4 lanes and a 32-byte output. Existing seed files must keep the same key.
+		let key = EncryptedWalletSeed::derive_key(
+			b"0123456789abcdef",
+			b"dependency-upgrade-fixture",
+			Some(&KdfParams::current()),
+		)
+		.unwrap();
+		assert_eq!(
+			key.to_hex(),
+			"10e19612eb10f9758b93b2f3f614c4735104b3e3ba6e5eca2bec0daffb8af6cf"
+		);
+	}
+
+	#[test]
 	fn wallet_seed_encrypt() {
 		let password = ZeroingString::from("passwoid");
 		let wallet_seed = WalletSeed::init_new(32).unwrap();

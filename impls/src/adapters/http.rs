@@ -27,7 +27,7 @@ use mwc_wallet_libwallet::slate_versions::{SlateVersion, VersionedSlate};
 use mwc_wallet_libwallet::slatepack::{SlatePurpose, Slatepacker};
 #[cfg(feature = "swaps")]
 use mwc_wallet_libwallet::swap::message::Message;
-use mwc_wallet_util::RwLock;
+use mwc_wallet_util::RecursiveRwLock;
 use mwc_wallet_util::mwc_crates::ed25519_dalek;
 use mwc_wallet_util::mwc_crates::log::{debug, error, info, trace, warn};
 use mwc_wallet_util::mwc_crates::secp::{ContextFlag, Secp256k1};
@@ -253,7 +253,7 @@ fn decode_http_slate_response(
 pub struct HttpDataSender {
 	context_id: u32,
 	// Sender clones serialize access to the same cached connection and reconnect it as needed.
-	connection_cache: Arc<RwLock<Option<TcpDataStream>>>,
+	connection_cache: Arc<RecursiveRwLock<Option<TcpDataStream>>>,
 	// We need to be able to reconnect
 	reconnect_function: ReconnectHandler,
 	// Shared ownership avoids plaintext clones of the secret; zeroized when the last
@@ -333,7 +333,7 @@ impl HttpDataSender {
 
 		Ok(HttpDataSender {
 			context_id,
-			connection_cache: Arc::new(RwLock::new(Some(stream))),
+			connection_cache: Arc::new(RecursiveRwLock::new(Some(stream))),
 			reconnect_function: Arc::new(reconnect_fn),
 			apisecret,
 			base_url: base_url.to_string(),
@@ -426,7 +426,7 @@ impl HttpDataSender {
 
 		Ok(HttpDataSender {
 			context_id,
-			connection_cache: Arc::new(RwLock::new(Some(stream))),
+			connection_cache: Arc::new(RecursiveRwLock::new(Some(stream))),
 			reconnect_function: Arc::new(reconnect_fn),
 			apisecret,
 			base_url: base_url.to_string(),
@@ -1049,7 +1049,7 @@ mod tests {
 	fn assert_explicit_recipient_policy_error(version: SlateVersion, compact_slate: bool) {
 		let sender = HttpDataSender {
 			context_id: 0,
-			connection_cache: Arc::new(RwLock::new(None)),
+			connection_cache: Arc::new(RecursiveRwLock::new(None)),
 			reconnect_function: Arc::new(|| {
 				Err(Error::ConnectionError(
 					"unexpected HTTP reconnect".to_string(),

@@ -15,7 +15,8 @@
 #![cfg(feature = "test-support")]
 
 use mwc_wallet_impls::test_framework::{self, LocalWalletClient, WalletProxy};
-use mwc_wallet_util::mwc_crates::clap::{App, YamlLoader};
+use mwc_wallet_util::mwc_crates::yaml_rust2::YamlLoader;
+use mwc_wallet_util::mwc_util::cli::command_from_yaml;
 use std::ops::DerefMut;
 use std::sync::Arc;
 use std::thread;
@@ -75,7 +76,7 @@ fn owner_v2_sanity() -> Result<(), mwc_wallet_controller::Error> {
 	thread::spawn(move || {
 		global::set_local_chain_type(global::ChainTypes::AutomatedTesting);
 		let yml = YamlLoader::load_from_str(include_str!("../src/bin/mwc-wallet.yml")).unwrap();
-		let app = App::from_yaml(&yml[0]);
+		let app = command_from_yaml(&yml[0]);
 		execute_command(&app, test_dir, "wallet1", &client1, arg_vec.clone()).unwrap();
 	});
 
@@ -93,7 +94,7 @@ fn owner_v2_sanity() -> Result<(), mwc_wallet_controller::Error> {
 	thread::spawn(move || {
 		global::set_local_chain_type(global::ChainTypes::AutomatedTesting);
 		let yml = YamlLoader::load_from_str(include_str!("../src/bin/mwc-wallet.yml")).unwrap();
-		let app = App::from_yaml(&yml[0]);
+		let app = command_from_yaml(&yml[0]);
 		execute_command(&app, test_dir, "wallet2", &client2, arg_vec.clone()).unwrap();
 	});
 
@@ -121,7 +122,7 @@ fn owner_v2_sanity() -> Result<(), mwc_wallet_controller::Error> {
 		"2", // mwc: 10    Only one block reward is spendable
 	];
 	let yml = YamlLoader::load_from_str(include_str!("../src/bin/mwc-wallet.yml")).unwrap();
-	let app = App::from_yaml(&yml[0]);
+	let app = command_from_yaml(&yml[0]);
 	let res = execute_command(&app, test_dir, "wallet1", &client1_2, arg_vec.clone());
 	println!("Response 2: {:?}", res);
 	assert!(res.is_ok());

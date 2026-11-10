@@ -23,6 +23,7 @@ use mwc_wallet_util::mwc_crates::secp::key::SecretKey;
 use mwc_wallet_util::mwc_crates::secp::{ContextFlag, Secp256k1};
 use mwc_wallet_util::mwc_crates::zeroize::Zeroizing;
 use mwc_wallet_util::mwc_keychain;
+use mwc_wallet_util::mwc_util::cli::ArgMatchesExt;
 use mwc_wallet_util::mwc_util::file::get_owner_only_first_line_zeroizing;
 use mwc_wallet_util::mwc_util::init_global_runtime;
 use mwc_wallet_util::mwc_util::ZeroingString;
@@ -515,7 +516,9 @@ pub fn parse_send_args(
 			("slate_version", "--slate_version"),
 			("slatepack_qr", "--slatepack_qr"),
 		] {
-			if args.occurrences_of(arg) != 0 {
+			if args.value_source(arg)
+				== Some(mwc_wallet_util::mwc_crates::clap::parser::ValueSource::CommandLine)
+			{
 				return Err(ParseError::ArgumentError(format!(
 					"{} cannot be used with --estimate-selection; estimates do not send a transaction and always compare both selection strategies",
 					flag,
@@ -720,8 +723,9 @@ pub fn parse_send_args(
 		));
 	}
 
-	let minimum_confirmations_change_outputs_is_present =
-		args.occurrences_of("minimum_confirmations_change_outputs") != 0;
+	let minimum_confirmations_change_outputs_is_present = args
+		.value_source("minimum_confirmations_change_outputs")
+		== Some(mwc_wallet_util::mwc_crates::clap::parser::ValueSource::CommandLine);
 	let minimum_confirmations_change_outputs =
 		parse_required(args, "minimum_confirmations_change_outputs")?;
 	let minimum_confirmations_change_outputs: u64 = parse_number(
@@ -1047,7 +1051,9 @@ pub fn parse_process_invoice_args(
 			("message", "--message"),
 			("slatepack_qr", "--slatepack_qr"),
 		] {
-			if args.occurrences_of(arg) != 0 {
+			if args.value_source(arg)
+				== Some(mwc_wallet_util::mwc_crates::clap::parser::ValueSource::CommandLine)
+			{
 				return Err(ParseError::ArgumentError(format!(
 					"{} cannot be used with --estimate-selection; estimates do not pay an invoice and always compare both selection strategies",
 					flag,
@@ -1853,10 +1859,10 @@ where
 	// don't open wallet for certain lifecycle commands
 	let mut open_wallet = true;
 	match wallet_args.subcommand() {
-		("init", Some(_)) => open_wallet = false,
-		("recover", _) => open_wallet = false,
-		("cli", _) => open_wallet = false,
-		("owner_api", _) => {
+		Some(("init", _)) => open_wallet = false,
+		Some(("recover", _)) => open_wallet = false,
+		Some(("cli", _)) => open_wallet = false,
+		Some(("owner_api", _)) => {
 			// If wallet exists and password is present then open it. Otherwise, that's fine too.
 			let mut wallet_lock = wallet.lock();
 			let lc = wallet_lock.lc_provider()?;
@@ -1927,7 +1933,7 @@ where
 	};
 
 	let res = match wallet_args.subcommand() {
-		("cli", Some(_)) => command_loop(
+		Some(("cli", _)) => command_loop(
 			context_id,
 			wallet,
 			keychain_mask,
@@ -1958,7 +1964,7 @@ where
 	if let Err(e) = res {
 		Err(e)
 	} else {
-		Ok(wallet_args.subcommand().0.to_owned())
+		Ok(wallet_args.subcommand_name().unwrap_or("").to_owned())
 	}
 }
 
@@ -1989,7 +1995,7 @@ where
 	}
 
 	match wallet_args.subcommand() {
-		("init", Some(args)) => {
+		Some(("init", args)) => {
 			let a = arg_parse!(parse_init_args(
 				owner_api.wallet_inst.clone(),
 				wallet_config,
@@ -2005,11 +2011,11 @@ where
 				wallet_config.wallet_data_dir.as_deref(),
 			)
 		}
-		("recover", Some(_)) => {
+		Some(("recover", _)) => {
 			let a = arg_parse!(parse_recover_args(&global_wallet_args,));
 			command::recover(owner_api, a, wallet_config.wallet_data_dir.as_deref())
 		}
-		("listen", Some(args)) => {
+		Some(("listen", args)) => {
 			let mut c = wallet_config.clone();
 			if wallet_args.is_present("external") {
 				c.api_listen_interface = Some("0.0.0.0".to_string());
@@ -2027,7 +2033,7 @@ where
 				cli_mode,
 			)
 		}
-		("stop_listen", _) => {
+		Some(("stop_listen", _)) => {
 			let context_id = {
 				wallet_lock!(owner_api.wallet_inst, w);
 				w.get_context_id()
@@ -2035,7 +2041,7 @@ where
 			stop_foreign_api_running(context_id);
 			Ok(())
 		}
-		("get_address_index", _) => {
+		Some(("get_address_index", _)) => {
 			wallet_lock!(owner_api.wallet_inst, w);
 			let address_index: u32 = {
 				let mut batch = w.batch(&secp, None)?;
@@ -2053,7 +2059,7 @@ where
 			);
 			Ok(())
 		}
-		("set_address_index", Some(args)) => {
+		Some(("set_address_index", args)) => {
 			let address_index = arg_parse!(parse_required(args, "index"));
 			let address_index = arg_parse!(parse_number::<u64>(address_index, "index"));
 
@@ -2069,14 +2075,14 @@ where
 			batch.commit()?;
 			Ok(())
 		}
-		("owner_api", Some(args)) => {
+		Some(("owner_api", args)) => {
 			let mut c = wallet_config.clone();
 			let mut g = global_wallet_args.clone();
 			g.tls_conf = None;
 			arg_parse!(parse_owner_api_args(&mut c, &args));
 			command::owner_api(owner_api, keychain_mask, &c, &tor_config, &mqs_config, &g)
 		}
-		("web", Some(_)) => command::owner_api(
+		Some(("web", _)) => command::owner_api(
 			owner_api,
 			keychain_mask,
 			wallet_config,
@@ -2084,8 +2090,8 @@ where
 			mqs_config,
 			global_wallet_args,
 		),
-		("rewind_hash", Some(_)) => command::rewind_hash(owner_api, km, false),
-		("scan_rewind_hash", Some(args)) => {
+		Some(("rewind_hash", _)) => command::rewind_hash(owner_api, km, false),
+		Some(("scan_rewind_hash", args)) => {
 			let a = arg_parse!(parse_scan_rewind_hash_args(&args));
 			command::scan_rewind_hash(
 				owner_api,
@@ -2094,11 +2100,11 @@ where
 				false,
 			)
 		}
-		("account", Some(args)) => {
+		Some(("account", args)) => {
 			let a = arg_parse!(parse_account_args(&args));
 			command::account(owner_api, km, a)
 		}
-		("send", Some(args)) => {
+		Some(("send", args)) => {
 			let context_id = {
 				wallet_lock!(owner_api.wallet_inst, w);
 				w.get_context_id()
@@ -2114,15 +2120,15 @@ where
 			)?;
 			Ok(())
 		}
-		("unpack", Some(args)) => {
+		Some(("unpack", args)) => {
 			let a = arg_parse!(parse_receive_unpack_args(&args));
 			command::unpack(owner_api, km, a)
 		}
-		("receive", Some(args)) => {
+		Some(("receive", args)) => {
 			let a = arg_parse!(parse_receive_unpack_args(&args));
 			command::receive(owner_api, km, &global_wallet_args, a)
 		}
-		("finalize", Some(args)) => {
+		Some(("finalize", args)) => {
 			let context_id = {
 				wallet_lock!(owner_api.wallet_inst, w);
 				w.get_context_id()
@@ -2130,7 +2136,7 @@ where
 			let a = arg_parse!(parse_finalize_args(&secp, context_id, &args));
 			command::finalize(owner_api, km, a, false)
 		}
-		("finalize_invoice", Some(args)) => {
+		Some(("finalize_invoice", args)) => {
 			let context_id = {
 				wallet_lock!(owner_api.wallet_inst, w);
 				w.get_context_id()
@@ -2138,7 +2144,7 @@ where
 			let a = arg_parse!(parse_finalize_args(&secp, context_id, &args));
 			command::finalize(owner_api, km, a, true)
 		}
-		("invoice", Some(args)) => {
+		Some(("invoice", args)) => {
 			let context_id = {
 				wallet_lock!(owner_api.wallet_inst, w);
 				w.get_context_id()
@@ -2146,7 +2152,7 @@ where
 			let a = arg_parse!(parse_issue_invoice_args(&secp, context_id, &args));
 			command::issue_invoice_tx(owner_api, km, a)
 		}
-		("pay", Some(args)) => {
+		Some(("pay", args)) => {
 			let (slatepack_secret, secp, context_id) = {
 				wallet_lock!(owner_api.wallet_inst, w);
 				let keychain = w.keychain(&secp, km)?;
@@ -2188,7 +2194,7 @@ where
 				wallet_config.dark_background_color_scheme.unwrap_or(true),
 			)
 		}
-		("info", Some(args)) => {
+		Some(("info", args)) => {
 			let a = arg_parse!(parse_info_args(&args));
 			command::info(
 				owner_api,
@@ -2198,7 +2204,7 @@ where
 				wallet_config.dark_background_color_scheme.unwrap_or(true),
 			)
 		}
-		("outputs", Some(args)) => {
+		Some(("outputs", args)) => {
 			let a = arg_parse!(parse_outputs_args(&args));
 			command::outputs(
 				owner_api,
@@ -2208,7 +2214,7 @@ where
 				wallet_config.dark_background_color_scheme.unwrap_or(true),
 			)
 		}
-		("txs", Some(args)) => {
+		Some(("txs", args)) => {
 			let a = arg_parse!(parse_txs_args(&args));
 			command::txs(
 				owner_api,
@@ -2218,62 +2224,62 @@ where
 				wallet_config.dark_background_color_scheme.unwrap_or(true),
 			)
 		}
-		("post", Some(args)) => {
+		Some(("post", args)) => {
 			let a = arg_parse!(parse_post_args(&args));
 			command::post(owner_api, km, a)
 		}
 		// Submit is a synonim for 'post'. Since MWC introduce it earlier, let's keep it
-		("submit", Some(args)) => {
+		Some(("submit", args)) => {
 			let a = arg_parse!(parse_submit_args(&args));
 			command::submit(owner_api, km, a)
 		}
-		("repost", Some(args)) => {
+		Some(("repost", args)) => {
 			let a = arg_parse!(parse_repost_args(&args));
 			command::repost(owner_api, km, a)
 		}
-		("cancel", Some(args)) => {
+		Some(("cancel", args)) => {
 			let a = arg_parse!(parse_cancel_args(&args));
 			command::cancel(owner_api, km, a)
 		}
-		("export_proof", Some(args)) => {
+		Some(("export_proof", args)) => {
 			let a = arg_parse!(parse_export_proof_args(&args));
 			command::proof_export(owner_api, km, a)
 		}
-		("verify_proof", Some(args)) => {
+		Some(("verify_proof", args)) => {
 			let a = arg_parse!(parse_verify_proof_args(&args));
 			command::proof_verify(owner_api, km, a)
 		}
-		("address", Some(_)) => command::address(owner_api, &global_wallet_args, km),
-		("scan", Some(args)) => {
+		Some(("address", _)) => command::address(owner_api, &global_wallet_args, km),
+		Some(("scan", args)) => {
 			let a = arg_parse!(parse_check_args(&args));
 			command::scan(owner_api, km, a)
 		}
-		("dump-wallet-data", Some(args)) => command::dump_wallet_data(
+		Some(("dump-wallet-data", args)) => command::dump_wallet_data(
 			owner_api,
 			km,
 			arg_parse!(parse_required(args, "file")).to_owned(),
 		),
-		("open", Some(_)) => {
+		Some(("open", _)) => {
 			// for CLI mode only, should be handled externally
 			Ok(())
 		}
-		("close", Some(_)) => {
+		Some(("close", _)) => {
 			// for CLI mode only, should be handled externally
 			Ok(())
 		}
 		#[cfg(feature = "swaps")]
-		("swap_start", Some(args)) => {
+		Some(("swap_start", args)) => {
 			let a = arg_parse!(parse_swap_start_args(&args));
 			let _ = command::swap_start(owner_api, km, &a)?;
 			Ok(())
 		}
 		#[cfg(feature = "swaps")]
-		("swap_create_from_offer", Some(args)) => {
+		Some(("swap_create_from_offer", args)) => {
 			let mwc_amount = arg_parse!(parse_required(args, "file"));
 			command::swap_create_from_offer(owner_api, km, mwc_amount.to_string())
 		}
 		#[cfg(feature = "swaps")]
-		("swap", Some(args)) => {
+		Some(("swap", args)) => {
 			let a = arg_parse!(parse_swap_args(&args));
 			command::swap(
 				owner_api.wallet_inst.clone(),
@@ -2285,35 +2291,35 @@ where
 			)
 		}
 		#[cfg(feature = "swaps")]
-		("send_marketplace_message", Some(args)) => {
+		Some(("send_marketplace_message", args)) => {
 			let a = arg_parse!(parse_send_marketplace_message(&args));
 			command::send_marketplace_message(owner_api.wallet_inst.clone(), km, tor_config, a)
 				.map(|_| ())
 		}
-		("check_tor_connection", _) => {
+		Some(("check_tor_connection", _)) => {
 			command::check_tor_connection(owner_api.wallet_inst.clone(), km, tor_config)
 		}
 		#[cfg(feature = "swaps")]
-		("eth", Some(args)) => {
+		Some(("eth", args)) => {
 			let a = arg_parse!(parse_eth_args(&args));
 			command::eth(owner_api.wallet_inst.clone(), km, a)
 		}
-		("generate_ownership_proof", Some(args)) => {
+		Some(("generate_ownership_proof", args)) => {
 			let a = arg_parse!(parse_retrieve_ownership_proof(&args));
 			command::generate_ownership_proof(owner_api, km, a)
 		}
-		("validate_ownership_proof", Some(args)) => {
+		Some(("validate_ownership_proof", args)) => {
 			let proof = arg_parse!(parse_required(args, "proof"));
 			command::validate_ownership_proof(owner_api, km, proof)
 		}
-		("faucet_request", Some(args)) => {
+		Some(("faucet_request", args)) => {
 			let amount = arg_parse!(parse_faucet_request_args(&args));
 			command::fauset_request(owner_api, km, amount, Some(mqs_config.clone()))
 		}
-		(cmd, _) => {
+		_ => {
 			return Err(Error::ArgumentError(format!(
 				"Unknown wallet command '{}', use 'mwc help wallet' for details",
-				cmd
+				wallet_args.subcommand_name().unwrap_or("")
 			)));
 		}
 	}

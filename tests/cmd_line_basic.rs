@@ -19,7 +19,8 @@
 extern crate mwc_wallet;
 
 use mwc_wallet_impls::test_framework::{self, LocalWalletClient, WalletProxy};
-use mwc_wallet_util::mwc_crates::clap::{App, YamlLoader};
+use mwc_wallet_util::mwc_crates::yaml_rust2::YamlLoader;
+use mwc_wallet_util::mwc_util::cli::command_from_yaml;
 use std::ops::DerefMut;
 use std::sync::Arc;
 use std::thread;
@@ -51,7 +52,7 @@ fn command_line_test_impl(test_dir: &str) -> Result<(), mwc_wallet_controller::E
 
 	// load app yaml. If it don't exist, just say so and exit
 	let yml = YamlLoader::load_from_str(include_str!("../src/bin/mwc-wallet.yml")).unwrap();
-	let app = App::from_yaml(&yml[0]);
+	let app = command_from_yaml(&yml[0]);
 
 	// wallet init
 	let arg_vec = vec!["mwc-wallet", "-p", "password1", "init", "-h"];
@@ -1117,14 +1118,13 @@ fn command_line_test_impl(test_dir: &str) -> Result<(), mwc_wallet_controller::E
 #[test]
 fn dump_wallet_data_requires_file_argument() {
 	let yml = YamlLoader::load_from_str(include_str!("../src/bin/mwc-wallet.yml")).unwrap();
-	let mut app = App::from_yaml(&yml[0]);
+	let mut app = command_from_yaml(&yml[0]);
 
-	assert!(
-		app.get_matches_from_safe_borrow(vec!["mwc-wallet", "dump-wallet-data"])
-			.is_err()
-	);
-	assert!(
-		app.get_matches_from_safe_borrow(vec![
+	assert!(app
+		.try_get_matches_from_mut(vec!["mwc-wallet", "dump-wallet-data"])
+		.is_err());
+	assert!(app
+		.try_get_matches_from_mut(vec![
 			"mwc-wallet",
 			"dump-wallet-data",
 			"--file",

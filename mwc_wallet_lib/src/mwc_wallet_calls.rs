@@ -58,7 +58,7 @@ use mwc_wallet_util::mwc_node_workflow::context::{allocate_new_context, release_
 use mwc_wallet_util::mwc_p2p::TorConfig;
 use mwc_wallet_util::mwc_p2p::tor::arti;
 use mwc_wallet_util::mwc_p2p::tor::arti::is_arti_healthy;
-use mwc_wallet_util::{Mutex, RwLock};
+use mwc_wallet_util::{Mutex, RecursiveRwLock};
 use mwc_wallet_workflow::wallet::{init_wallet_context, release_wallet_context};
 use std::collections::HashMap;
 use std::ffi::CString;
@@ -79,9 +79,9 @@ pub type WalletArc = Arc<Mutex<Box<LibWallet>>>;
 
 lazy_static! {
 	// Full config for all wallet
-	static ref WALLET_CONFIG:  RwLock<HashMap<u32,GlobalWalletConfigMembers> > = RwLock::new(HashMap::new());
+	static ref WALLET_CONFIG:  RecursiveRwLock<HashMap<u32,GlobalWalletConfigMembers> > = RecursiveRwLock::new(HashMap::new());
 
-	static ref WALLET_INSTANCE: RwLock<HashMap<u32,WalletArc> > = RwLock::new(HashMap::new());
+	static ref WALLET_INSTANCE: RecursiveRwLock<HashMap<u32,WalletArc> > = RecursiveRwLock::new(HashMap::new());
 }
 
 fn release_wallet(context_id: u32) {
@@ -180,7 +180,7 @@ fn zip_file(src_path: &str, dst_path: &str, dst_file_name: &str) -> Result<(), S
 }
 
 fn dispatch_registered_callback(callback_name: &str, message: *const libc::c_char) {
-	let callbacks = LIB_CALLBACKS.read_recursive();
+	let callbacks = LIB_CALLBACKS.read();
 	if let Some((callback, context)) = callbacks.get(callback_name) {
 		// Keep the registry read lock until the callback returns. This makes
 		// unregister_lib_callback wait before the caller-owned context can be
@@ -212,7 +212,7 @@ fn process_request(input: String) -> Result<Value, String> {
 		"register_receive_slate_callback" => {
 			let callback_name: String = get_param(&params, "callback_name")?;
 
-			if !LIB_CALLBACKS.read_recursive().contains_key(&callback_name) {
+			if !LIB_CALLBACKS.read().contains_key(&callback_name) {
 				return Err(format!(
 					"Callback function {} is not registered",
 					callback_name

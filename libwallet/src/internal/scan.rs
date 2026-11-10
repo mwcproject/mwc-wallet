@@ -44,7 +44,7 @@ use mwc_wallet_util::mwc_crates::uuid::Uuid;
 use mwc_wallet_util::mwc_crates::zeroize::Zeroizing;
 use mwc_wallet_util::mwc_keychain::{Identifier, Keychain, SwitchCommitmentType};
 use mwc_wallet_util::mwc_util;
-use mwc_wallet_util::{Mutex, RwLock};
+use mwc_wallet_util::{Mutex, RecursiveRwLock};
 use std::cmp;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -71,7 +71,7 @@ const REPLAY_SELF_SPEND_BATCH_SIZE: usize = 50;
 const REPLAY_HEIGHT_GAP: u64 = 2 * DAY_HEIGHT;
 
 lazy_static! {
-	static ref SCAN_INTERRUPT: RwLock<HashMap<u32, bool>> = RwLock::new(HashMap::new());
+	static ref SCAN_INTERRUPT: RecursiveRwLock<HashMap<u32, bool>> = RecursiveRwLock::new(HashMap::new());
 }
 
 /// Clean up the scan interruption flag

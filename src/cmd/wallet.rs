@@ -34,7 +34,7 @@ fn safe_command_error(error: &impl std::fmt::Display) -> String {
 
 pub fn wallet_command(
 	context_id: u32,
-	wallet_args: &ArgMatches<'_>,
+	wallet_args: &ArgMatches,
 	config: GlobalWalletConfig,
 	mut node_client: HTTPNodeClient,
 ) -> i32 {
@@ -100,7 +100,7 @@ pub fn wallet_command(
 	} else {
 		println!(
 			"Command '{}' completed successfully",
-			wallet_args.subcommand().0
+			wallet_args.subcommand_name().unwrap_or("")
 		);
 		0
 	}

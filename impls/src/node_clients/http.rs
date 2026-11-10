@@ -43,7 +43,7 @@ use super::resp_types::*;
 use super::{is_kernel_not_found_error, validate_located_kernel_response};
 use crate::client_utils::json_rpc::*;
 use crate::client_utils::{Client, safe_node_error, safe_node_text, url_with_appended_path};
-use mwc_wallet_util::RwLock;
+use mwc_wallet_util::RecursiveRwLock;
 use mwc_wallet_util::mwc_crates::log::{debug, error, trace};
 use std::num::NonZeroUsize;
 use std::sync::Arc;
@@ -197,7 +197,7 @@ fn deserialize_block_printable_with_context(
 // Cached values are stored by key K and evicted by recency once the configured
 // capacity is reached.
 struct CachedValue<K, T> {
-	data: RwLock<LruCache<K, (T, Instant)>>,
+	data: RecursiveRwLock<LruCache<K, (T, Instant)>>,
 }
 
 impl<K, T> Clone for CachedValue<K, T>
@@ -207,7 +207,7 @@ where
 {
 	fn clone(&self) -> Self {
 		CachedValue {
-			data: RwLock::new(self.data.read_recursive().clone()),
+			data: RecursiveRwLock::new(self.data.read().clone()),
 		}
 	}
 }
@@ -221,7 +221,7 @@ where
 		let capacity =
 			NonZeroUsize::new(max_entries).expect("CachedValue capacity must be greater than zero");
 		CachedValue {
-			data: RwLock::new(LruCache::new(capacity)),
+			data: RecursiveRwLock::new(LruCache::new(capacity)),
 		}
 	}
 
@@ -2186,7 +2186,7 @@ mod tests {
 		assert_eq!(cache.get_value(&1), Some(10));
 		assert_eq!(cache.get_value(&2), None);
 		assert_eq!(cache.get_value(&3), Some(30));
-		assert_eq!(cache.data.read_recursive().len(), 2);
+		assert_eq!(cache.data.read().len(), 2);
 	}
 
 	#[test]
@@ -2201,7 +2201,7 @@ mod tests {
 		let _ = cache.data.write().put(1, (10, cached_at));
 
 		assert_eq!(cache.get_value(&1), None);
-		assert!(!cache.data.read_recursive().contains(&1));
+		assert!(!cache.data.read().contains(&1));
 	}
 
 	#[test]

@@ -21,7 +21,7 @@ use mwc_wallet_util::mwc_crates::log::{debug, error, info, warn};
 use mwc_wallet_util::mwc_p2p::PeerAddr;
 use mwc_wallet_util::mwc_p2p::tor::tcp_data_stream::TcpDataStream;
 use mwc_wallet_util::mwc_util::StopState;
-use mwc_wallet_util::{Mutex, RwLock};
+use mwc_wallet_util::{Mutex, RecursiveRwLock};
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
 use std::net::IpAddr;
@@ -160,7 +160,7 @@ impl Drop for ConnectionPermit {
 pub struct ForeignApiServer {
 	instance_id: u64,
 	pub stop_state: Arc<StopState>,
-	connections: Arc<RwLock<HashMap<String, JoinHandle<()>>>>,
+	connections: Arc<RecursiveRwLock<HashMap<String, JoinHandle<()>>>>,
 	active_connections: Arc<AtomicUsize>,
 	connection_limit: usize,
 	handlers: Arc<Mutex<Router>>,
@@ -178,7 +178,7 @@ impl ForeignApiServer {
 		Ok(ForeignApiServer {
 			instance_id: allocate_foreign_api_instance_id(&NEXT_FOREIGN_API_INSTANCE_ID)?,
 			stop_state: Arc::new(StopState::new()),
-			connections: Arc::new(RwLock::new(HashMap::new())),
+			connections: Arc::new(RecursiveRwLock::new(HashMap::new())),
 			active_connections: Arc::new(AtomicUsize::new(0)),
 			connection_limit,
 			handlers: Arc::new(Mutex::new(router)),

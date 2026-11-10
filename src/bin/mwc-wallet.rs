@@ -18,8 +18,9 @@
 use mwc_wallet_config::ConfigError;
 use mwc_wallet_impls::HTTPNodeClient;
 use mwc_wallet_util::mwc_core::global;
-use mwc_wallet_util::mwc_crates::clap::{App, AppSettings, YamlLoader};
+use mwc_wallet_util::mwc_crates::yaml_rust2::YamlLoader;
 use mwc_wallet_util::mwc_node_workflow::{context, logging};
+use mwc_wallet_util::mwc_util::cli::{command_from_yaml, ArgMatchesExt};
 use std::env;
 use std::io::Write;
 use std::path::PathBuf;
@@ -86,9 +87,8 @@ fn real_main() -> i32 {
 			return -1;
 		}
 	};
-	let args = App::from_yaml(yml)
+	let args = command_from_yaml(yml)
 		.version(built_info::PKG_VERSION)
-		.setting(AppSettings::VersionlessSubcommands)
 		.get_matches();
 
 	let chain_type = if args.is_present("floonet") {
@@ -116,7 +116,7 @@ fn real_main() -> i32 {
 
 	// special cases for certain lifecycle commands
 	match args.subcommand() {
-		("init", Some(init_args)) => {
+		Some(("init", init_args)) => {
 			if init_args.is_present("here") {
 				current_dir = match env::current_dir() {
 					Ok(dir) => Some(dir),
@@ -169,7 +169,7 @@ fn real_main() -> i32 {
 		.unwrap_or(LoggingConfig::default());
 	// no logging to stdout if we're running cli
 	match args.subcommand() {
-		("cli", _) => l.log_to_stdout = true,
+		Some(("cli", _)) => l.log_to_stdout = true,
 		_ => {}
 	};
 	let logs_rx = match logging::init_bin_logs(&l) {

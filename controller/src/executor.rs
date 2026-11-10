@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use crate::error::Error;
-use mwc_wallet_util::RwLock;
+use mwc_wallet_util::RecursiveRwLock;
 use mwc_wallet_util::mwc_crates::futures::Future;
 use mwc_wallet_util::mwc_crates::futures::task::{ArcWake, Context, Poll, waker_ref};
 use mwc_wallet_util::mwc_crates::log::error;
@@ -36,15 +36,15 @@ type WorkerThread = thread::JoinHandle<WorkerResult>;
 pub struct RunHandlerInThread {
 	// running flag is modifiable from worker thread and Poll.
 	running: Arc<AtomicBool>,
-	waker: Arc<RwLock<Option<std::task::Waker>>>,
+	waker: Arc<RecursiveRwLock<Option<std::task::Waker>>>,
 	// Need option because join require ownership transfer. That is why can't belong to 'self' dicertly
 	// (State, Result<Response<Body>>)  - resulting from API call as required by gotham
-	worker_thread: RwLock<Option<WorkerThread>>,
+	worker_thread: RecursiveRwLock<Option<WorkerThread>>,
 }
 
 struct ThreadCompletion {
 	running: Arc<AtomicBool>,
-	waker: Arc<RwLock<Option<std::task::Waker>>>,
+	waker: Arc<RecursiveRwLock<Option<std::task::Waker>>>,
 }
 
 impl Drop for ThreadCompletion {
@@ -103,7 +103,7 @@ impl RunHandlerInThread {
 	{
 		// 'self' variables
 		let running = Arc::new(AtomicBool::new(true));
-		let waker: Arc<RwLock<Option<std::task::Waker>>> = Arc::new(RwLock::new(None));
+		let waker: Arc<RecursiveRwLock<Option<std::task::Waker>>> = Arc::new(RecursiveRwLock::new(None));
 
 		// thread variables to move
 		let thr_waker = waker.clone();
@@ -148,7 +148,7 @@ impl RunHandlerInThread {
 		Ok(Self {
 			running,
 			waker,
-			worker_thread: RwLock::new(Some(worker_thread)),
+			worker_thread: RecursiveRwLock::new(Some(worker_thread)),
 		})
 	}
 }

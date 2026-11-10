@@ -42,7 +42,7 @@ use mwc_wallet_libwallet::swap::message::Message;
 #[cfg(feature = "swaps")]
 use mwc_wallet_libwallet::swap::message::SwapMessage;
 use mwc_wallet_libwallet::{Slate, SlateCtx, SlateVersion, VersionedSlate};
-use mwc_wallet_util::RwLock;
+use mwc_wallet_util::RecursiveRwLock;
 use mwc_wallet_util::mwc_core::core::amount_to_hr_string;
 use mwc_wallet_util::mwc_core::global;
 use mwc_wallet_util::mwc_crates::log::{error, info, warn};
@@ -516,10 +516,10 @@ impl Drop for MqsWorkerCleanup {
 // Also all dependent components want to use MQS and they need interface.
 // Since instance is single, interface will be global
 lazy_static! {
-	static ref MWCMQS_BROKER: RwLock<HashMap<u32, (Arc<MWCMQPublisher>, MWCMQSubscriber)>> =
-		RwLock::new(HashMap::new());
-	static ref MWCMQS_TERMINAL_STATES: RwLock<HashMap<u32, MqsObservedState>> =
-		RwLock::new(HashMap::new());
+	static ref MWCMQS_BROKER: RecursiveRwLock<HashMap<u32, (Arc<MWCMQPublisher>, MWCMQSubscriber)>> =
+		RecursiveRwLock::new(HashMap::new());
+	static ref MWCMQS_TERMINAL_STATES: RecursiveRwLock<HashMap<u32, MqsObservedState>> =
+		RecursiveRwLock::new(HashMap::new());
 	static ref MWCMQS_LIFECYCLE: Mutex<()> = Mutex::new(());
 	/// Contexts whose listener stop has begun but whose worker join is still
 	/// pending outside the lifecycle lock, either on a reaper or a synchronous

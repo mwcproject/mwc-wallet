@@ -14,17 +14,18 @@
 // limitations under the License.
 
 use crate::cmd::wallet_args;
-use mwc_wallet_util::Mutex;
-use mwc_wallet_util::mwc_crates::clap::{App, AppSettings, YamlLoader};
 use mwc_wallet_util::mwc_crates::lazy_static::lazy_static;
 use mwc_wallet_util::mwc_crates::secp::key::SecretKey;
 use mwc_wallet_util::mwc_crates::secp::{ContextFlag, Secp256k1};
 use mwc_wallet_util::mwc_crates::shlex;
+use mwc_wallet_util::mwc_crates::yaml_rust2::YamlLoader;
+use mwc_wallet_util::mwc_util::cli::{command_from_yaml, ArgMatchesExt};
+use mwc_wallet_util::Mutex;
 //use mwc_wallet_util::mwc_crates::colored::Colorize;
 use mwc_wallet_api::Owner;
 use mwc_wallet_config::{MQSConfig, WalletConfig};
-use mwc_wallet_controller::Error;
 use mwc_wallet_controller::command::GlobalArgs;
+use mwc_wallet_controller::Error;
 use mwc_wallet_impls::DefaultWalletImpl;
 use mwc_wallet_libwallet::{NodeClient, WalletInst, WalletLCProvider};
 use mwc_wallet_util::mwc_crates::rustyline::completion::{Completer, FilenameCompleter, Pair};
@@ -149,9 +150,7 @@ where
 	let schema = yml.first().ok_or_else(|| {
 		Error::GenericError("Embedded CLI schema contains no document".to_owned())
 	})?;
-	let mut app = App::from_yaml(schema)
-		.version(env!("CARGO_PKG_VERSION"))
-		.setting(AppSettings::VersionlessSubcommands);
+	let mut app = command_from_yaml(schema).version(env!("CARGO_PKG_VERSION"));
 	let mut keychain_mask = keychain_mask;
 
 	// No Tor configuration is supplied here; the embedded CLI runs
@@ -186,12 +185,12 @@ where
 					Some(command_split) => command_split,
 					None => vec!["mwc-wallet".to_string()],
 				};
-				let args = app.get_matches_from_safe_borrow(command_split);
+				let args = app.try_get_matches_from_mut(command_split);
 				let done = match args {
 					Ok(args) => {
 						// handle opening /closing separately
 						keychain_mask = match args.subcommand() {
-							("open", Some(args)) => {
+							Some(("open", args)) => {
 								let mut wallet_lock = owner_api.wallet_inst.lock();
 								let lc = wallet_lock.lc_provider()?;
 
@@ -245,7 +244,7 @@ where
 								}
 								mask
 							}
-							("close", Some(_)) => {
+							Some(("close", _)) => {
 								let mut wallet_lock = owner_api.wallet_inst.lock();
 								let lc = wallet_lock.lc_provider()?;
 								lc.close_wallet(None)?;
@@ -266,7 +265,10 @@ where
 							true,
 						) {
 							Ok(_) => {
-								cli_message!("Command '{}' completed", args.subcommand().0);
+								cli_message!(
+									"Command '{}' completed",
+									args.subcommand_name().unwrap_or("")
+								);
 								false
 							}
 							Err(err) => {

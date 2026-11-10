@@ -46,7 +46,7 @@ use mwc_wallet_util::mwc_keychain::Keychain;
 use mwc_wallet_util::mwc_util::OnionV3Address;
 #[cfg(feature = "swaps")]
 use mwc_wallet_util::Mutex;
-use mwc_wallet_util::RwLock;
+use mwc_wallet_util::RecursiveRwLock;
 use std::collections::HashMap;
 use std::sync::Arc;
 const FOREIGN_API_VERSION: u16 = 2;
@@ -54,10 +54,10 @@ const USER_MESSAGE_MAX_LEN: usize = 256;
 
 lazy_static! {
 	/// Recieve account can be specified separately and must be allpy to ALL receive operations
-	static ref RECV_ACCOUNT:   RwLock< HashMap<u32,Identifier>> = RwLock::new(HashMap::new());
+	static ref RECV_ACCOUNT:   RecursiveRwLock< HashMap<u32,Identifier>> = RecursiveRwLock::new(HashMap::new());
 
-	static ref RECEIVE_CALLBACK: RwLock<Option<Arc<dyn Fn(ReceiveData) + Send + Sync>>> =
-		RwLock::new(None);
+	static ref RECEIVE_CALLBACK: RecursiveRwLock<Option<Arc<dyn Fn(ReceiveData) + Send + Sync>>> =
+		RecursiveRwLock::new(None);
 }
 
 /// Clean up context

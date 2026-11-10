@@ -16,8 +16,9 @@
 
 use mwc_wallet_api::{ECDHPubkey, JsonId};
 use mwc_wallet_impls::test_framework::{self, LocalWalletClient, WalletProxy};
-use mwc_wallet_util::mwc_crates::clap::{App, YamlLoader};
 use mwc_wallet_util::mwc_crates::serde_json;
+use mwc_wallet_util::mwc_crates::yaml_rust2::YamlLoader;
+use mwc_wallet_util::mwc_util::cli::command_from_yaml;
 use std::ops::DerefMut;
 use std::thread;
 use std::time::Duration;
@@ -56,7 +57,7 @@ fn owner_v3_lifecycle() -> Result<(), mwc_wallet_controller::Error> {
 	setup(test_dir);
 
 	let yml = YamlLoader::load_from_str(include_str!("../src/bin/mwc-wallet.yml")).unwrap();
-	let app = App::from_yaml(&yml[0]);
+	let app = command_from_yaml(&yml[0]);
 
 	// Create a new proxy to simulate server and wallet responses
 	let tx_pool: Arc<Mutex<Vec<Transaction>>> = Arc::new(Mutex::new(Vec::new()));
@@ -108,7 +109,7 @@ fn owner_v3_lifecycle() -> Result<(), mwc_wallet_controller::Error> {
 		thread::spawn(move || {
 			global::set_local_chain_type(global::ChainTypes::AutomatedTesting);
 			let yml = YamlLoader::load_from_str(include_str!("../src/bin/mwc-wallet.yml")).unwrap();
-			let app = App::from_yaml(&yml[0]);
+			let app = command_from_yaml(&yml[0]);
 			execute_command_no_setup(
 				&app,
 				test_dir,

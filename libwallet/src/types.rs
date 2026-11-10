@@ -52,7 +52,7 @@ use mwc_wallet_util::mwc_p2p::TorConfig;
 use mwc_wallet_util::mwc_util::logger::LoggingConfig;
 use mwc_wallet_util::mwc_util::{ToHex, ZeroingString};
 use mwc_wallet_util::sensitive;
-use mwc_wallet_util::RwLock;
+use mwc_wallet_util::RecursiveRwLock;
 use std::collections::HashMap;
 use std::fmt;
 use std::sync::{Arc, Weak};
@@ -2021,8 +2021,8 @@ pub struct TxSession {
 lazy_static! {
 	// No need to have context_id because commits are unique. TxSession and the
 	// sessionless invoice processing guard share this collection.
-	static ref TX_INPUT_RESERVATIONS: RwLock<HashMap<String, Weak<()>>> =
-		RwLock::new(HashMap::new());
+	static ref TX_INPUT_RESERVATIONS: RecursiveRwLock<HashMap<String, Weak<()>>> =
+		RecursiveRwLock::new(HashMap::new());
 }
 
 /// Atomically reserve commitments for one live transaction owner. Validate the

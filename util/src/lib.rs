@@ -45,4 +45,4 @@ pub use mwc_web3;
 //pub use mwc_zcash_primitives;
 pub use bitcoin_hashes;
 
-pub use mwc_crates::parking_lot::{Mutex, RwLock};
+pub use mwc_crates::parking_lot::{Mutex, RecursiveRwLock};

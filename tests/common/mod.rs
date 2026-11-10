@@ -16,8 +16,7 @@
 extern crate mwc_wallet;
 
 use mwc_wallet_impls::test_framework::LocalWalletClient;
-use mwc_wallet_util::Mutex;
-use mwc_wallet_util::mwc_crates::clap::{App, ArgMatches};
+use mwc_wallet_util::mwc_crates::clap::{ArgMatches, Command};
 use mwc_wallet_util::mwc_crates::serde::de::DeserializeOwned;
 use mwc_wallet_util::mwc_crates::serde::{self, Deserialize, Serialize};
 use mwc_wallet_util::mwc_crates::serde_json;
@@ -25,7 +24,9 @@ use mwc_wallet_util::mwc_crates::serde_json::{Value, json};
 use mwc_wallet_util::mwc_crates::url::Url;
 use mwc_wallet_util::mwc_crates::zeroize::Zeroizing;
 use mwc_wallet_util::mwc_crates::{easy_jsonrpc_mwc, remove_dir_all};
-use mwc_wallet_util::mwc_util::{ZeroingString, file};
+use mwc_wallet_util::mwc_util::cli::ArgMatchesExt;
+use mwc_wallet_util::mwc_util::{file, ZeroingString};
+use mwc_wallet_util::Mutex;
 use std::env;
 use std::io;
 use std::net::{SocketAddr, TcpStream};
@@ -66,10 +67,11 @@ macro_rules! setup_proxy {
 		let $chain = wallet_proxy.chain.clone();
 
 		// load app yaml. If it don't exist, just say so and exit
-		let yml =
-			mwc_crates::clap::YamlLoader::load_from_str(include_str!("../src/bin/mwc-wallet.yml"))
-				.unwrap();
-		let app = App::from_yaml(&yml[0]);
+		let yml = mwc_crates::yaml_rust2::YamlLoader::load_from_str(include_str!(
+			"../src/bin/mwc-wallet.yml"
+		))
+		.unwrap();
+		let app = mwc_wallet_util::mwc_util::cli::command_from_yaml(&yml[0]);
 
 		// wallet init
 		let arg_vec = vec!["mwc-wallet", "-p", "password", "init", "-h"];
@@ -256,13 +258,9 @@ pub fn initial_setup_wallet(dir_name: &str, wallet_name: &str) -> GlobalWalletCo
 	config
 }
 
-fn get_wallet_subcommand<'a>(
-	wallet_dir: &str,
-	wallet_name: &str,
-	args: ArgMatches<'a>,
-) -> ArgMatches<'a> {
+fn get_wallet_subcommand(wallet_dir: &str, wallet_name: &str, args: ArgMatches) -> ArgMatches {
 	match args.subcommand() {
-		("init", Some(init_args)) => {
+		Some(("init", init_args)) => {
 			// wallet init command should spit out its config file then continue
 			// (if desired)
 			if init_args.is_present("here") {
@@ -270,7 +268,7 @@ fn get_wallet_subcommand<'a>(
 			}
 			init_args.to_owned()
 		}
-		_ => ArgMatches::new(),
+		_ => ArgMatches::default(),
 	}
 }
 //
@@ -337,7 +335,7 @@ pub fn instantiate_wallet(
 
 #[allow(dead_code)]
 pub fn execute_command(
-	app: &App,
+	app: &Command,
 	test_dir: &str,
 	wallet_name: &str,
 	client: &LocalWalletClient,
@@ -367,7 +365,7 @@ pub fn execute_command(
 // as above, but without necessarily setting up the wallet
 #[allow(dead_code)]
 pub fn execute_command_no_setup<C, F>(
-	app: &App,
+	app: &Command,
 	test_dir: &str,
 	wallet_name: &str,
 	client: &C,

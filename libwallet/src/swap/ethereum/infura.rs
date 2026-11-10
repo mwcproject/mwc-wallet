@@ -22,7 +22,7 @@ use crate::swap::is_test_mode;
 use crate::swap::set_test_mode;
 use crate::swap::types::Currency;
 #[cfg(feature = "test-support")]
-use mwc_wallet_util::RwLock;
+use mwc_wallet_util::RecursiveRwLock;
 use mwc_wallet_util::mwc_crates::crossbeam_utils::thread::scope;
 #[cfg(feature = "test-support")]
 use mwc_wallet_util::mwc_crates::lazy_static::lazy_static;
@@ -1214,7 +1214,7 @@ fn sign_redeem_authorization(
 #[cfg(feature = "test-support")]
 lazy_static! {
 	/// Recieve account can be specified separately and must be allpy to ALL receive operations
-	static ref REDEEM_WALLET:   RwLock<Option<EthereumWallet>>  = RwLock::new(None);
+	static ref REDEEM_WALLET:   RecursiveRwLock<Option<EthereumWallet>>  = RecursiveRwLock::new(None);
 }
 
 // macro_rules! mwc_web3_handle {

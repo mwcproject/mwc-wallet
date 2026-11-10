@@ -71,7 +71,7 @@ use mwc_wallet_libwallet::types::{
 	TxSession, U64_DATA_IDX_ADDRESS_INDEX, bounded_escape_for_display,
 };
 use mwc_wallet_util::Mutex;
-use mwc_wallet_util::RwLock;
+use mwc_wallet_util::RecursiveRwLock;
 use mwc_wallet_util::mwc_core::global;
 use mwc_wallet_util::mwc_crates::easy_jsonrpc_mwc::{
 	Error as RpcError, Handler, InvalidArgs, MaybeReply, Params as RpcParams,
@@ -373,15 +373,15 @@ lazy_static! {
 	// and connection JoinHandles until teardown has synchronously joined them.
 	// Owner entries remain registered until the API thread and all admitted
 	// requests have drained, including HTTP/2 streams whose connections ended.
-	static ref FOREIGN_API: RwLock<HashMap<u32, ForeignApiEntry>> = RwLock::new(HashMap::new());
-	static ref OWNER_API: RwLock<HashMap<u32, OwnerApiEntry>> = RwLock::new(HashMap::new());
+	static ref FOREIGN_API: RecursiveRwLock<HashMap<u32, ForeignApiEntry>> = RecursiveRwLock::new(HashMap::new());
+	static ref OWNER_API: RecursiveRwLock<HashMap<u32, OwnerApiEntry>> = RecursiveRwLock::new(HashMap::new());
 
-	static ref FOREIGN_API_HEALTH: RwLock<HashMap<u32, bool>> = RwLock::new(HashMap::new());
+	static ref FOREIGN_API_HEALTH: RecursiveRwLock<HashMap<u32, bool>> = RecursiveRwLock::new(HashMap::new());
 	// Primary Tor-listener state is generation-bound and independent from the
 	// aggregate foreign-API health flag. In particular, a healthy secondary
 	// plain-HTTP socket must not make an unhealthy Onion service appear ready.
-	static ref FOREIGN_TOR_LISTENER_READINESS: RwLock<HashMap<u32, ForeignTorListenerReadiness>> =
-		RwLock::new(HashMap::new());
+	static ref FOREIGN_TOR_LISTENER_READINESS: RecursiveRwLock<HashMap<u32, ForeignTorListenerReadiness>> =
+		RecursiveRwLock::new(HashMap::new());
 }
 
 pub fn get_foreign_api_health(context_id: u32) -> bool {
@@ -2091,7 +2091,7 @@ where
 		router.add_middleware(basic_auth_middleware);
 	}
 
-	let wallet_lifecycle_lock = Arc::new(RwLock::new(()));
+	let wallet_lifecycle_lock = Arc::new(RecursiveRwLock::new(()));
 	let api_handler_v2 = OwnerAPIHandlerV2::new(
 		context_id,
 		wallet.clone(),
@@ -2283,7 +2283,7 @@ where
 	let api_handler_v2 = ForeignAPIHandlerV2::new(
 		wallet.clone(),
 		keychain_mask.clone(),
-		Arc::new(RwLock::new(())),
+		Arc::new(RecursiveRwLock::new(())),
 	);
 	router
 		.add_route("/v2/foreign", Arc::new(api_handler_v2))
@@ -2595,11 +2595,11 @@ where
 	owner_api: Arc<Owner<L, C, K>>,
 	/// Prevents open_wallet or close_wallet from replacing the backend while a
 	/// V2 request is performing a multi-step wallet operation.
-	wallet_lifecycle_lock: Arc<RwLock<()>>,
+	wallet_lifecycle_lock: Arc<RecursiveRwLock<()>>,
 }
 
 fn with_wallet_lifecycle_read<T>(
-	wallet_lifecycle_lock: &RwLock<()>,
+	wallet_lifecycle_lock: &RecursiveRwLock<()>,
 	use_wallet: impl FnOnce() -> T,
 ) -> T {
 	let _wallet_lifecycle_guard = wallet_lifecycle_lock.read();
@@ -3040,7 +3040,7 @@ where
 		context_id: u32,
 		wallet: Arc<Mutex<Box<dyn WalletInst<'static, L, C, K> + 'static>>>,
 		tor_config: Option<TorConfig>,
-		wallet_lifecycle_lock: Arc<RwLock<()>>,
+		wallet_lifecycle_lock: Arc<RecursiveRwLock<()>>,
 	) -> Result<OwnerAPIHandlerV2<L, C, K>, Error> {
 		let owner_api = Arc::new(Owner::new(context_id, wallet, tor_config)?);
 		Ok(OwnerAPIHandlerV2 {
@@ -3052,7 +3052,7 @@ where
 	async fn call_api(
 		req: Request<Bytes>,
 		api: Arc<Owner<L, C, K>>,
-		wallet_lifecycle_lock: Arc<RwLock<()>>,
+		wallet_lifecycle_lock: Arc<RecursiveRwLock<()>>,
 	) -> Result<serde_json::Value, Error> {
 		let val: serde_json::Value = parse_body(req).await?;
 		let request_log_metadata =
@@ -3100,7 +3100,7 @@ where
 	async fn handle_post_request(
 		req: Request<Bytes>,
 		api: Arc<Owner<L, C, K>>,
-		wallet_lifecycle_lock: Arc<RwLock<()>>,
+		wallet_lifecycle_lock: Arc<RecursiveRwLock<()>>,
 	) -> Result<Response<Full<Bytes>>, Error> {
 		//Here is a wrapper to call future from that.
 		// Issue that we can't call future form future
@@ -3169,7 +3169,7 @@ where
 
 	/// Keeps the active wallet backend and its shared mask stable for co-hosted
 	/// Owner V2 and Foreign V2 requests while open_wallet or close_wallet runs.
-	wallet_lifecycle_lock: Arc<RwLock<()>>,
+	wallet_lifecycle_lock: Arc<RecursiveRwLock<()>>,
 
 	/// Nonces authenticated in the current secure session.
 	seen_nonces: Arc<Mutex<HashSet<[u8; 12]>>>,
@@ -3442,7 +3442,7 @@ where
 		wallet: Arc<Mutex<Box<dyn WalletInst<'static, L, C, K> + 'static>>>,
 		keychain_mask: Arc<Mutex<Option<SecretKey>>>,
 		tor_config: Option<TorConfig>,
-		wallet_lifecycle_lock: Arc<RwLock<()>>,
+		wallet_lifecycle_lock: Arc<RecursiveRwLock<()>>,
 	) -> Result<OwnerAPIHandlerV3<L, C, K>, Error> {
 		let owner_api = Owner::new(context_id, wallet.clone(), tor_config.clone())?;
 		owner_api.set_tor_config(tor_config);
@@ -3462,7 +3462,7 @@ where
 		req: Request<Bytes>,
 		key: Arc<Mutex<Option<SecretKey>>>,
 		request_lock: Arc<Mutex<()>>,
-		wallet_lifecycle_lock: Arc<RwLock<()>>,
+		wallet_lifecycle_lock: Arc<RecursiveRwLock<()>>,
 		seen_nonces: Arc<Mutex<HashSet<[u8; 12]>>>,
 		mask: Arc<Mutex<Option<SecretKey>>>,
 		api: Arc<Owner<L, C, K>>,
@@ -3725,7 +3725,7 @@ where
 		req: Request<Bytes>,
 		key: Arc<Mutex<Option<SecretKey>>>,
 		request_lock: Arc<Mutex<()>>,
-		wallet_lifecycle_lock: Arc<RwLock<()>>,
+		wallet_lifecycle_lock: Arc<RecursiveRwLock<()>>,
 		seen_nonces: Arc<Mutex<HashSet<[u8; 12]>>>,
 		mask: Arc<Mutex<Option<SecretKey>>>,
 		api: Arc<Owner<L, C, K>>,
@@ -3822,7 +3822,7 @@ where
 	pub keychain_mask: Arc<Mutex<Option<SecretKey>>>,
 	/// Prevents wallet lifecycle transitions while a co-hosted foreign request
 	/// is using a backend/mask pair.
-	wallet_lifecycle_lock: Arc<RwLock<()>>,
+	wallet_lifecycle_lock: Arc<RecursiveRwLock<()>>,
 	/// Number of dedicated Foreign API workers currently running.
 	active_worker_threads: Arc<AtomicUsize>,
 }
@@ -3851,7 +3851,7 @@ impl Drop for ForeignApiThreadPermit {
 }
 
 fn with_stable_wallet_mask<T>(
-	wallet_lifecycle_lock: &RwLock<()>,
+	wallet_lifecycle_lock: &RecursiveRwLock<()>,
 	keychain_mask: &Mutex<Option<SecretKey>>,
 	use_mask: impl FnOnce(Option<SecretKey>) -> T,
 ) -> Result<T, Error> {
@@ -3876,7 +3876,7 @@ where
 	pub fn new(
 		wallet: Arc<Mutex<Box<dyn WalletInst<'static, L, C, K> + 'static>>>,
 		keychain_mask: Arc<Mutex<Option<SecretKey>>>,
-		wallet_lifecycle_lock: Arc<RwLock<()>>,
+		wallet_lifecycle_lock: Arc<RecursiveRwLock<()>>,
 	) -> ForeignAPIHandlerV2<L, C, K> {
 		ForeignAPIHandlerV2 {
 			wallet,
@@ -3890,7 +3890,7 @@ where
 		req: Request<Bytes>,
 		wallet: Arc<Mutex<Box<dyn WalletInst<'static, L, C, K> + 'static>>>,
 		keychain_mask: Arc<Mutex<Option<SecretKey>>>,
-		wallet_lifecycle_lock: Arc<RwLock<()>>,
+		wallet_lifecycle_lock: Arc<RecursiveRwLock<()>>,
 	) -> Result<serde_json::Value, Error> {
 		let request_access = req
 			.extensions()
@@ -3945,7 +3945,7 @@ where
 		req: Request<Bytes>,
 		wallet: Arc<Mutex<Box<dyn WalletInst<'static, L, C, K> + 'static>>>,
 		keychain_mask: Arc<Mutex<Option<SecretKey>>>,
-		wallet_lifecycle_lock: Arc<RwLock<()>>,
+		wallet_lifecycle_lock: Arc<RecursiveRwLock<()>>,
 		active_worker_threads: Arc<AtomicUsize>,
 	) -> Result<Response<Full<Bytes>>, Error> {
 		let Some(thread_permit) = ForeignApiThreadPermit::try_acquire(active_worker_threads)
@@ -4809,7 +4809,7 @@ mod owner_v3_helpers_tests {
 
 	#[test]
 	fn owner_v2_dispatch_holds_lifecycle_read_lock_until_completion() {
-		let wallet_lifecycle_lock = Arc::new(RwLock::new(()));
+		let wallet_lifecycle_lock = Arc::new(RecursiveRwLock::new(()));
 		let backend_generation = Arc::new(AtomicU64::new(0));
 		let (dispatch_started_sender, dispatch_started_receiver) = mpsc::channel();
 		let (finish_dispatch_sender, finish_dispatch_receiver) = mpsc::channel();
@@ -4867,7 +4867,7 @@ mod owner_v3_helpers_tests {
 		let old_mask = SecretKey::from_slice(&secp, &[1_u8; 32]).unwrap();
 		let new_mask = SecretKey::from_slice(&secp, &[2_u8; 32]).unwrap();
 		let expected_mask = new_mask.clone();
-		let wallet_lifecycle_lock = Arc::new(RwLock::new(()));
+		let wallet_lifecycle_lock = Arc::new(RecursiveRwLock::new(()));
 		let keychain_mask = Arc::new(Mutex::new(Some(old_mask)));
 		let backend_generation = Arc::new(AtomicU64::new(0));
 		let (backend_switched_sender, backend_switched_receiver) = mpsc::channel();

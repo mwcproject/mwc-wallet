@@ -16,19 +16,20 @@
 
 use mwc_wallet_api::{ECDHPubkey, JsonId};
 use mwc_wallet_impls::test_framework::{self, LocalWalletClient, WalletProxy};
-use mwc_wallet_util::mwc_crates::clap::{App, YamlLoader};
 use mwc_wallet_util::mwc_crates::serde_json;
+use mwc_wallet_util::mwc_crates::yaml_rust2::YamlLoader;
+use mwc_wallet_util::mwc_util::cli::command_from_yaml;
 use std::ops::DerefMut;
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
 use mwc_wallet_impls::DefaultLCProvider;
-use mwc_wallet_util::Mutex;
 use mwc_wallet_util::mwc_core::global;
 use mwc_wallet_util::mwc_crates::secp::key::SecretKey;
 use mwc_wallet_util::mwc_keychain::ExtKeychain;
 use mwc_wallet_util::mwc_util::from_hex;
+use mwc_wallet_util::Mutex;
 
 #[macro_use]
 mod common;
@@ -77,7 +78,7 @@ fn owner_v3_init_secure() -> Result<(), mwc_wallet_controller::Error> {
 	thread::spawn(move || {
 		global::set_local_chain_type(global::ChainTypes::AutomatedTesting);
 		let yml = YamlLoader::load_from_str(include_str!("../src/bin/mwc-wallet.yml")).unwrap();
-		let app = App::from_yaml(&yml[0]);
+		let app = command_from_yaml(&yml[0]);
 		execute_command(&app, test_dir, "wallet1", &client1, arg_vec.clone()).unwrap();
 	});
 	wait_for_listener("127.0.0.1:33420", Duration::from_secs(10))

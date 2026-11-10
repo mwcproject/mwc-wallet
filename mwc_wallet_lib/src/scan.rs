@@ -24,10 +24,7 @@ use mwc_wallet_util::mwc_node_lib::ffi::LIB_CALLBACKS;
 use std::ffi::CString;
 
 fn ensure_status_callback_registered(response_callback: &str) -> Result<(), String> {
-	if LIB_CALLBACKS
-		.read_recursive()
-		.contains_key(response_callback)
-	{
+	if LIB_CALLBACKS.read().contains_key(response_callback) {
 		Ok(())
 	} else {
 		Err(format!(
@@ -57,7 +54,7 @@ fn dispatch_status_callback(response_callback: &str, response_id: &str, status: 
 		}
 	};
 
-	let callbacks = LIB_CALLBACKS.read_recursive();
+	let callbacks = LIB_CALLBACKS.read();
 	if let Some((callback, context)) = callbacks.get(response_callback) {
 		// Keep the registry read lock until the callback returns so unregistering
 		// cannot free or reuse its caller-owned context during this invocation.

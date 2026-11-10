@@ -49,7 +49,7 @@ use mwc_wallet_util::mwc_keychain::ExtKeychainPath;
 use mwc_wallet_util::mwc_keychain::{Identifier, Keychain, SwitchCommitmentType};
 use mwc_wallet_util::mwc_util::to_hex;
 use mwc_wallet_util::mwc_web3::types::Address;
-use mwc_wallet_util::RwLock;
+use mwc_wallet_util::RecursiveRwLock;
 use std::collections::{HashMap, HashSet};
 use std::convert::TryFrom;
 use std::fs::File;
@@ -59,7 +59,7 @@ use std::sync::Arc;
 lazy_static! {
 	/// Offers that are online now. It is needed to answer correctly about offers status
 	/// Key: offer Id,  Value: message uuid
-	static ref ONLINE_OFFERS:   RwLock<HashMap<u32, HashMap<String,Uuid>>>  = RwLock::new(HashMap::new());
+	static ref ONLINE_OFFERS:   RecursiveRwLock<HashMap<u32, HashMap<String,Uuid>>>  = RecursiveRwLock::new(HashMap::new());
 }
 
 const MAX_MARKETPLACE_DISPLAY_BYTES: usize = 1024;

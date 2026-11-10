@@ -15,8 +15,9 @@
 #![cfg(feature = "test-support")]
 
 use mwc_wallet_impls::test_framework::{self, LocalWalletClient, WalletProxy};
-use mwc_wallet_util::mwc_crates::clap::{App, YamlLoader};
+use mwc_wallet_util::mwc_crates::yaml_rust2::YamlLoader;
 use mwc_wallet_util::mwc_util;
+use mwc_wallet_util::mwc_util::cli::command_from_yaml;
 use std::ops::DerefMut;
 use std::sync::Arc;
 use std::thread;
@@ -50,7 +51,7 @@ fn socks_tor() -> Result<(), mwc_wallet_controller::Error> {
 
 	let test_dir = "target/test_output/socks_tor";
 	let yml = YamlLoader::load_from_str(include_str!("../src/bin/mwc-wallet.yml")).unwrap();
-	let app = App::from_yaml(&yml[0]);
+	let app = command_from_yaml(&yml[0]);
 	setup_no_clean();
 
 	let tx_pool: Arc<Mutex<Vec<Transaction>>> = Arc::new(Mutex::new(Vec::new()));
@@ -77,7 +78,7 @@ fn socks_tor() -> Result<(), mwc_wallet_controller::Error> {
 	// Set owner listener running
 	thread::spawn(move || {
 		let yml = YamlLoader::load_from_str(include_str!("../src/bin/mwc-wallet.yml")).unwrap();
-		let app = App::from_yaml(&yml[0]);
+		let app = command_from_yaml(&yml[0]);
 		execute_command(&app, test_dir, "wallet2", &client2, arg_vec.clone()).unwrap();
 	});
 

@@ -15,18 +15,18 @@
 //! Tor status for the wallet. That data can be sharable by many components. We just
 //! need to know how it is running.
 
-use mwc_wallet_util::RwLock;
+use mwc_wallet_util::RecursiveRwLock;
 use mwc_wallet_util::mwc_crates::lazy_static::lazy_static;
 use std::collections::HashMap;
 
 lazy_static! {
 	// Current address that is tor is listening on (also mean that listener is running)
-	static ref TOR_ONION_ADDRESS: RwLock<HashMap<u32,String>> = RwLock::new(HashMap::new());
+	static ref TOR_ONION_ADDRESS: RecursiveRwLock<HashMap<u32,String>> = RecursiveRwLock::new(HashMap::new());
 
 	// Flag if listener tor process is running. (we want to keep listener and sender separately)
 	// And we want to have them single socks port to use. That is why the tor starting process args
 	// can be adjusted
-	static ref TOR_SENDER_RUNNING: RwLock<HashMap<u32,bool>> = RwLock::new(HashMap::new());
+	static ref TOR_SENDER_RUNNING: RecursiveRwLock<HashMap<u32,bool>> = RecursiveRwLock::new(HashMap::new());
 }
 
 pub fn tor_status_clean_context(context_id: u32) {

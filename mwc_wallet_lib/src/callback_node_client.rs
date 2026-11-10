@@ -162,7 +162,7 @@ impl CallbackNodeClient {
 			// Keep the registry read lock until the callback response has been copied.
 			// This makes unregister_lib_callback wait before the caller-owned context
 			// or response storage can be freed or reused by the host application.
-			let callbacks = LIB_CALLBACKS.read_recursive();
+			let callbacks = LIB_CALLBACKS.read();
 			let (callback, callback_context) =
 				callbacks.get(&self.callback_name).ok_or_else(|| {
 					Error::ClientCallback(format!(

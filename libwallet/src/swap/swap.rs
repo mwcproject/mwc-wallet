@@ -38,7 +38,7 @@ use mwc_wallet_util::mwc_keychain::SwitchCommitmentType;
 use crate::slate::SlateCtx;
 use mwc_wallet_util::mwc_core::global;
 #[cfg(feature = "test-support")]
-use mwc_wallet_util::RwLock;
+use mwc_wallet_util::RecursiveRwLock;
 
 /// The protocol never intentionally locks either chain for more than 30 days.
 /// Keep the ingress and chain-specific builders on one limit so an accepted
@@ -1621,7 +1621,7 @@ pub fn publish_transaction<C: NodeClient>(
 
 #[cfg(feature = "test-support")]
 lazy_static! {
-	static ref CURRENT_TEST_TIME: RwLock<Option<i64>> = RwLock::new(None);
+	static ref CURRENT_TEST_TIME: RecursiveRwLock<Option<i64>> = RecursiveRwLock::new(None);
 }
 
 /// Override the current timestamp for deterministic tests.
