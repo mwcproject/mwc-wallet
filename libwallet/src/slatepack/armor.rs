@@ -23,8 +23,8 @@
 
 use crate::Error;
 use mwc_wallet_util::mwc_core::global::max_tx_weight;
-use regex::Regex;
-use sha2::{Digest, Sha256};
+use mwc_wallet_util::mwc_crates::bs58;
+use mwc_wallet_util::mwc_crates::sha2::{Digest, Sha256};
 use std::str;
 
 // Framing and formatting for slate armor. Headers and footers better to be the same size, otherwise formatting makes it ugly
@@ -37,31 +37,37 @@ static FOOTER_BIN: &str = ". ENDSLATE_BIN.";
 const WORD_LENGTH: usize = 15;
 const WORDS_PER_LINE: usize = 200;
 const WEIGHT_RATIO: u64 = 32;
+// The binary format stores its payload length in 16 bits. A maximum-size
+// binary Slatepack, its four-byte armor checksum, Base58 expansion, canonical
+// formatting, and a generous allowance for copied/quoted whitespace remain
+// below 128 KiB. Keep an absolute bound here so malformed network input cannot
+// drive the quadratic Base58 decoder with multi-megabyte payloads.
+const MAX_ARMORED_SLATEPACK_BYTES: usize = 131_072;
 
 /// Maximum size for an armored Slatepack file
 pub fn max_size(context_id: u32) -> u64 {
-	max_tx_weight(context_id)
-		.saturating_mul(WEIGHT_RATIO)
-		.saturating_add(HEADER_ENC.len() as u64)
-		.saturating_add(FOOTER_ENC.len() as u64)
+	// Consensus bounds max transaction weight far below u64::MAX / WEIGHT_RATIO.
+	// usize-to-u64 is lossless on the project's supported (at most 64-bit) targets,
+	// and both framing lengths are fixed constants.
+	#[allow(
+		clippy::arithmetic_side_effects,
+		reason = "consensus transaction weight and fixed framing constants fit u64"
+	)]
+	{
+		let consensus_limit = max_tx_weight(context_id) * WEIGHT_RATIO
+			+ HEADER_ENC.len() as u64
+			+ FOOTER_ENC.len() as u64;
+		consensus_limit.min(MAX_ARMORED_SLATEPACK_BYTES as u64)
+	}
 }
 
 /// Minimum size for an armored Slatepack file or stream
 pub fn min_size() -> u64 {
+	// usize-to-u64 is lossless on the project's supported (at most 64-bit) targets.
 	HEADER_ENC.len() as u64
 }
 
-lazy_static! {
-	static ref HEADER_REGEX_ENC: Regex =
-		Regex::new(concat!(r"^[>\n\r\t ]*BEGINSLATEPACK[>\n\r\t ]*$")).unwrap();
-	static ref FOOTER_REGEX_ENC: Regex =
-		Regex::new(concat!(r"^[>\n\r\t ]*ENDSLATEPACK[>\n\r\t ]*$")).unwrap();
-	static ref HEADER_REGEX_BIN: Regex =
-		Regex::new(concat!(r"^[>\n\r\t ]*BEGINSLATE_BIN[>\n\r\t ]*$")).unwrap();
-	static ref FOOTER_REGEX_BIN: Regex =
-		Regex::new(concat!(r"^[>\n\r\t ]*ENDSLATE_BIN[>\n\r\t ]*$")).unwrap();
-	static ref WHITESPACE_LIST: [u8; 5] = [b'>', b'\n', b'\r', b'\t', b' '];
-}
+static WHITESPACE_LIST: [u8; 5] = [b'>', b'\n', b'\r', b'\t', b' '];
 
 /// Wrapper for associated functions
 pub struct SlatepackArmor;
@@ -69,6 +75,15 @@ pub struct SlatepackArmor;
 impl SlatepackArmor {
 	/// Decode an armored Slatepack
 	pub fn decode(armor_bytes: &[u8]) -> Result<(Vec<u8>, bool), Error> {
+		// Reject before collecting temporary buffers or entering Base58 decoding.
+		if armor_bytes.len() > MAX_ARMORED_SLATEPACK_BYTES {
+			return Err(Error::SlatepackDecodeError(format!(
+				"Armored Slatepack exceeds maximum size, actual={} maximum={}",
+				armor_bytes.len(),
+				MAX_ARMORED_SLATEPACK_BYTES
+			)));
+		}
+
 		// Collect the bytes up to the first period, this is the header
 		let header_bytes = armor_bytes
 			.iter()
@@ -78,12 +93,19 @@ impl SlatepackArmor {
 		// Verify the header...
 		let henc = check_header(&header_bytes)?;
 		// Get the length of the header
-		let header_len = header_bytes.len() + 1;
+		let header_len = header_bytes.len().checked_add(1).ok_or_else(|| {
+			Error::DataOverflow(format!(
+				"SlatepackArmor::decode, armor header length overflow, header_len={} separator_len=1",
+				header_bytes.len()
+			))
+		})?;
 		if armor_bytes.len() <= header_len {
 			return Err(Error::SlatepackDecodeError("Bad armor header".to_string()));
 		}
 		// Skip the length of the header to read for the payload until the next period
-		let payload_bytes = armor_bytes[header_len as usize..]
+		let payload_bytes = armor_bytes
+			.get(header_len..)
+			.ok_or_else(|| Error::SlatepackDecodeError("Bad armor header".to_owned()))?
 			.iter()
 			.take_while(|byte| **byte != b'.')
 			.cloned()
@@ -91,11 +113,21 @@ impl SlatepackArmor {
 		// Get length of the payload to check the footer framing
 		let payload_len = payload_bytes.len();
 		// Get footer bytes and verify them
-		let consumed_bytes = header_len + payload_len + 1;
+		let consumed_bytes = header_len
+			.checked_add(payload_len)
+			.and_then(|len| len.checked_add(1))
+			.ok_or_else(|| {
+				Error::DataOverflow(format!(
+					"SlatepackArmor::decode, armor length overflow, header_len={} payload_len={} footer_separator_len=1",
+					header_len, payload_len
+				))
+			})?;
 		if armor_bytes.len() <= consumed_bytes {
 			return Err(Error::SlatepackDecodeError("Bad armor content".to_string()));
 		}
-		let footer_bytes = armor_bytes[consumed_bytes as usize..]
+		let footer_bytes = armor_bytes
+			.get(consumed_bytes..)
+			.ok_or_else(|| Error::SlatepackDecodeError("Bad armor content".to_owned()))?
 			.iter()
 			.take_while(|byte| **byte != b'.')
 			.cloned()
@@ -116,8 +148,12 @@ impl SlatepackArmor {
 		let base_decode = bs58::decode(&clean_payload)
 			.into_vec()
 			.map_err(|_| Error::SlatepackDecodeError("Invalid armored data".into()))?;
-		let error_code = &base_decode[0..4];
-		let slatepack_bytes = &base_decode[4..];
+		if base_decode.len() < 4 {
+			return Err(Error::SlatepackDecodeError(
+				"Armored data is shorter than its checksum".to_string(),
+			));
+		}
+		let (error_code, slatepack_bytes) = base_decode.split_at(4);
 		// Make sure the error check code is valid for the slate data
 		error_check(error_code, slatepack_bytes)?;
 		// Return slate as binary or string
@@ -152,9 +188,10 @@ fn error_check(error_code: &[u8], slate_bytes: &[u8]) -> Result<(), Error> {
 fn check_header(header: &[u8]) -> Result<bool, Error> {
 	let framing = str::from_utf8(header)
 		.map_err(|_| Error::SlatepackDecodeError("Bad bytes at armored data".into()))?;
-	if HEADER_REGEX_ENC.is_match(framing) {
+	let framing = framing.trim_matches(|c| matches!(c, '>' | '\n' | '\r' | '\t' | ' '));
+	if framing == "BEGINSLATEPACK" {
 		Ok(true)
-	} else if HEADER_REGEX_BIN.is_match(framing) {
+	} else if framing == "BEGINSLATE_BIN" {
 		Ok(false)
 	} else {
 		Err(Error::SlatepackDecodeError("Bad armor header".to_string()))
@@ -165,9 +202,10 @@ fn check_header(header: &[u8]) -> Result<bool, Error> {
 fn check_footer(footer: &[u8]) -> Result<bool, Error> {
 	let framing = str::from_utf8(footer)
 		.map_err(|_| Error::SlatepackDecodeError("Bad bytes at armored data".into()))?;
-	if FOOTER_REGEX_ENC.is_match(framing) {
+	let framing = framing.trim_matches(|c| matches!(c, '>' | '\n' | '\r' | '\t' | ' '));
+	if framing == "ENDSLATEPACK" {
 		Ok(true)
-	} else if FOOTER_REGEX_BIN.is_match(framing) {
+	} else if framing == "ENDSLATE_BIN" {
 		Ok(false)
 	} else {
 		Err(Error::SlatepackDecodeError("Bad armor footer".to_string()))
@@ -221,4 +259,30 @@ pub fn generate_check(payload: &[u8]) -> Result<Vec<u8>, Error> {
 	let checksum = second_hash.finalize();
 	let check_bytes: Vec<u8> = checksum[0..4].to_vec();
 	Ok(check_bytes)
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn decode_rejects_payload_shorter_than_checksum() {
+		let payload = bs58::encode([1u8, 2, 3]).into_string();
+		let armor = format!("{}{}. ENDSLATE_BIN.", HEADER_BIN, payload);
+		assert!(SlatepackArmor::decode(armor.as_bytes()).is_err());
+	}
+
+	#[test]
+	fn decode_rejects_oversized_input_before_parsing() {
+		let mut armor = HEADER_ENC.as_bytes().to_vec();
+		armor.resize(MAX_ARMORED_SLATEPACK_BYTES + 1, b'1');
+
+		let error = SlatepackArmor::decode(&armor).unwrap_err();
+		match error {
+			Error::SlatepackDecodeError(message) => {
+				assert!(message.contains("exceeds maximum size"));
+			}
+			other => panic!("unexpected error: {other}"),
+		}
+	}
 }

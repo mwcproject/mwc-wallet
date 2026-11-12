@@ -15,62 +15,43 @@
 //! Tor status for the wallet. That data can be sharable by many components. We just
 //! need to know how it is running.
 
+use mwc_wallet_util::RecursiveRwLock;
+use mwc_wallet_util::mwc_crates::lazy_static::lazy_static;
 use std::collections::HashMap;
-use std::sync::RwLock;
 
 lazy_static! {
 	// Current address that is tor is listening on (also mean that listener is running)
-	static ref TOR_ONION_ADDRESS: RwLock<HashMap<u32,String>> = RwLock::new(HashMap::new());
+	static ref TOR_ONION_ADDRESS: RecursiveRwLock<HashMap<u32,String>> = RecursiveRwLock::new(HashMap::new());
 
 	// Flag if listener tor process is running. (we want to keep listener and sender separately)
 	// And we want to have them single socks port to use. That is why the tor starting process args
 	// can be adjusted
-	static ref TOR_SENDER_RUNNING: RwLock<HashMap<u32,bool>> = RwLock::new(HashMap::new());
+	static ref TOR_SENDER_RUNNING: RecursiveRwLock<HashMap<u32,bool>> = RecursiveRwLock::new(HashMap::new());
 }
 
 pub fn tor_status_clean_context(context_id: u32) {
-	TOR_ONION_ADDRESS
-		.write()
-		.unwrap_or_else(|e| e.into_inner())
-		.remove(&context_id);
-	TOR_SENDER_RUNNING
-		.write()
-		.unwrap_or_else(|e| e.into_inner())
-		.remove(&context_id);
+	TOR_ONION_ADDRESS.write().remove(&context_id);
+	TOR_SENDER_RUNNING.write().remove(&context_id);
 }
 
 pub fn set_tor_address(context_id: u32, address: Option<String>) {
 	match address {
-		Some(address) => TOR_ONION_ADDRESS
-			.write()
-			.unwrap_or_else(|e| e.into_inner())
-			.insert(context_id, address),
-		None => TOR_ONION_ADDRESS
-			.write()
-			.unwrap_or_else(|e| e.into_inner())
-			.remove(&context_id),
+		Some(address) => TOR_ONION_ADDRESS.write().insert(context_id, address),
+		None => TOR_ONION_ADDRESS.write().remove(&context_id),
 	};
 }
 
 pub fn get_tor_address(context_id: u32) -> Option<String> {
-	TOR_ONION_ADDRESS
-		.read()
-		.unwrap_or_else(|e| e.into_inner())
-		.get(&context_id)
-		.cloned()
+	TOR_ONION_ADDRESS.read().get(&context_id).cloned()
 }
 
 pub fn set_tor_sender_running(context_id: u32, running: bool) {
-	TOR_SENDER_RUNNING
-		.write()
-		.unwrap_or_else(|e| e.into_inner())
-		.insert(context_id, running);
+	TOR_SENDER_RUNNING.write().insert(context_id, running);
 }
 
 pub fn get_tor_sender_running(context_id: u32) -> bool {
 	TOR_SENDER_RUNNING
 		.read()
-		.unwrap_or_else(|e| e.into_inner())
 		.get(&context_id)
 		.cloned()
 		.unwrap_or(false)

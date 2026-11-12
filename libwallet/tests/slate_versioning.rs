@@ -13,7 +13,62 @@
 // limitations under the License.
 
 //! core::libtx specific tests
-//use mwc_wallet_libwallet::Slate;
+use mwc_wallet_libwallet::Slate;
+use mwc_wallet_libwallet::slate_versions::v2::SlateV2ParseTTL;
+use mwc_wallet_util::mwc_crates::serde_json;
+
+#[test]
+fn v2_slate_allows_missing_optional_ttl() {
+	let slate = include_str!("slates/v2.slate");
+
+	let slate: SlateV2ParseTTL = serde_json::from_str(slate).unwrap();
+
+	assert_eq!(slate.ttl_cutoff_height, None);
+}
+
+#[test]
+fn v2_slate_rejects_malformed_ttl_instead_of_dropping_it() {
+	let mut slate: serde_json::Value =
+		serde_json::from_str(include_str!("slates/v2.slate")).unwrap();
+	slate["ttl_cutoff_height"] = serde_json::json!("not-a-height");
+
+	let error = Slate::deserialize_upgrade_plain(0, &slate.to_string()).unwrap_err();
+
+	assert!(error.to_string().contains("SlateV2 TTL metadata"));
+}
+
+#[test]
+fn malformed_slate_errors_do_not_echo_untrusted_content() {
+	let terminal_payload = "{\u{1b}]52;c;forged\u{7}";
+	let parse_error = Slate::parse_slate_version(terminal_payload)
+		.unwrap_err()
+		.to_string();
+	assert!(!parse_error.contains("forged"));
+	assert!(!parse_error.chars().any(char::is_control));
+
+	let mut slate: serde_json::Value =
+		serde_json::from_str(include_str!("slates/v2.slate")).unwrap();
+	slate.as_object_mut().unwrap().remove("id");
+	slate["attacker_marker"] = serde_json::json!("DO_NOT_ECHO_THIS_SLATE");
+
+	for version in [2, 3] {
+		slate["version_info"]["version"] = serde_json::json!(version);
+		let error = Slate::deserialize_upgrade_plain(0, &slate.to_string())
+			.unwrap_err()
+			.to_string();
+		assert!(!error.contains("DO_NOT_ECHO_THIS_SLATE"));
+	}
+
+	let mut slate: serde_json::Value =
+		serde_json::from_str(include_str!("slates/v2.slate")).unwrap();
+	slate["tx"]["body"]["inputs"][0]["features"] =
+		serde_json::json!("\u{1b}]52;c;forged\u{7}");
+	let enum_error = Slate::deserialize_upgrade_plain(0, &slate.to_string())
+		.unwrap_err()
+		.to_string();
+	assert!(!enum_error.contains("forged"));
+	assert!(!enum_error.chars().any(char::is_control));
+}
 
 // test all slate conversions
 /* TODO: Turn back on upon release of new slate version

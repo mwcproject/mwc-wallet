@@ -15,43 +15,49 @@
 //! Common functions for wallet integration tests
 extern crate mwc_wallet;
 
-use mwc_wallet_config as config;
 use mwc_wallet_impls::test_framework::LocalWalletClient;
-use mwc_wallet_util::mwc_util as util;
-
-use clap::{App, ArgMatches};
+use mwc_wallet_util::mwc_crates::clap::{ArgMatches, Command};
+use mwc_wallet_util::mwc_crates::serde::de::DeserializeOwned;
+use mwc_wallet_util::mwc_crates::serde::{self, Deserialize, Serialize};
+use mwc_wallet_util::mwc_crates::serde_json;
+use mwc_wallet_util::mwc_crates::serde_json::{Value, json};
+use mwc_wallet_util::mwc_crates::url::Url;
+use mwc_wallet_util::mwc_crates::zeroize::Zeroizing;
+use mwc_wallet_util::mwc_crates::{easy_jsonrpc_mwc, remove_dir_all};
+use mwc_wallet_util::mwc_util::cli::ArgMatchesExt;
+use mwc_wallet_util::mwc_util::{file, ZeroingString};
+use mwc_wallet_util::Mutex;
+use std::env;
+use std::io;
+use std::net::{SocketAddr, TcpStream};
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::sync::Mutex;
-use std::{env, fs};
-use util::ZeroingString;
 
 use mwc_wallet_api::{EncryptedRequest, EncryptedResponse, JsonId};
-use mwc_wallet_config::{GlobalWalletConfig, WalletConfig, MWC_WALLET_DIR};
+use mwc_wallet_config::{GlobalWalletConfig, MWC_WALLET_DIR, WalletConfig};
 use mwc_wallet_impls::{DefaultLCProvider, DefaultWalletImpl};
 use mwc_wallet_libwallet::{NodeClient, WalletInfo, WalletInst};
-use mwc_wallet_util::mwc_core::global::{self, ChainTypes};
+#[cfg(feature = "test-support")]
+use mwc_wallet_util::mwc_core::global;
+use mwc_wallet_util::mwc_core::global::ChainTypes;
+use mwc_wallet_util::mwc_crates::secp::key::{PublicKey, SecretKey};
 use mwc_wallet_util::mwc_keychain::ExtKeychain;
 use mwc_wallet_util::mwc_util::from_hex;
-use util::secp::key::{PublicKey, SecretKey};
 
 use mwc_wallet::cmd::wallet_args;
-use mwc_wallet_util::mwc_api as api;
 
+use mwc_wallet_util::mwc_api;
 use mwc_wallet_util::mwc_api::client::HttpClient;
+#[cfg(feature = "test-support")]
 use mwc_wallet_util::mwc_core::consensus;
-use mwc_wallet_util::mwc_util::secp::Secp256k1;
-use serde::de::DeserializeOwned;
-use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use mwc_wallet_util::mwc_crates::secp::{ContextFlag, Secp256k1};
 use std::thread;
-use std::time::Duration;
-use url::Url;
+use std::time::{Duration, Instant};
 
 // Set up 2 wallets and launch the test proxy behind them
 #[macro_export]
 macro_rules! setup_proxy {
-	($test_dir: expr,  $tx_pool: ident, $chain: ident, $wallet1: ident, $client1: ident, $mask1: ident, $wallet2: ident, $client2: ident, $mask2: ident) => {
+	($test_dir: expr, $tx_pool: ident, $chain: ident, $proxy_handle: ident, $wallet1: ident, $client1: ident, $mask1: ident, $wallet2: ident, $client2: ident, $mask2: ident) => {
 		// Create a new proxy to simulate server and wallet responses
 		let mut wallet_proxy: WalletProxy<
 			DefaultLCProvider<LocalWalletClient, ExtKeychain>,
@@ -61,8 +67,11 @@ macro_rules! setup_proxy {
 		let $chain = wallet_proxy.chain.clone();
 
 		// load app yaml. If it don't exist, just say so and exit
-		let yml = load_yaml!("../src/bin/mwc-wallet.yml");
-		let app = App::from_yaml(yml);
+		let yml = mwc_crates::yaml_rust2::YamlLoader::load_from_str(include_str!(
+			"../src/bin/mwc-wallet.yml"
+		))
+		.unwrap();
+		let app = mwc_wallet_util::mwc_util::cli::command_from_yaml(&yml[0]);
 
 		// wallet init
 		let arg_vec = vec!["mwc-wallet", "-p", "password", "init", "-h"];
@@ -118,15 +127,8 @@ macro_rules! setup_proxy {
 			mask2_i.clone(),
 		);
 
-		// Set the wallet proxy listener running
-		thread::spawn(move || {
-			mwc_wallet_util::mwc_core::global::set_local_chain_type(
-				mwc_wallet_util::mwc_core::global::ChainTypes::AutomatedTesting,
-			);
-			if let Err(e) = wallet_proxy.run() {
-				error!("Wallet Proxy error: {}", e);
-			}
-		});
+		// Set the wallet proxy listener running and retain a joinable handle.
+		let $proxy_handle = wallet_proxy.start();
 	};
 }
 
@@ -136,11 +138,34 @@ pub fn clean_output_dir(test_dir: &str) {
 }
 
 #[allow(dead_code)]
+pub fn wait_for_listener(addr: &str, timeout: Duration) -> io::Result<()> {
+	let socket_addr: SocketAddr = addr
+		.parse()
+		.map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?;
+	let deadline = Instant::now() + timeout;
+
+	loop {
+		match TcpStream::connect_timeout(&socket_addr, Duration::from_millis(100)) {
+			Ok(_) => return Ok(()),
+			Err(e) if Instant::now() >= deadline => return Err(e),
+			Err(_) => thread::sleep(Duration::from_millis(50)),
+		}
+	}
+}
+
+#[allow(dead_code)]
+#[cfg(not(feature = "test-support"))]
+pub fn setup(_test_dir: &str) {
+	panic!("test-support feature is required to run the tests");
+}
+
+#[allow(dead_code)]
+#[cfg(feature = "test-support")]
 pub fn setup(test_dir: &str) {
-	util::init_test_logger();
+	mwc_wallet_util::mwc_util::init_test_logger().unwrap();
 	clean_output_dir(test_dir);
 	global::set_local_chain_type(global::ChainTypes::AutomatedTesting);
-	global::set_local_accept_fee_base(consensus::MILLI_MWC / 100);
+	global::set_local_accept_fee_base(consensus::MILLI_MWC / 100).unwrap();
 	global::set_local_nrd_enabled(true);
 }
 
@@ -150,10 +175,17 @@ pub fn setup(test_dir: &str) {
 /// It is recommended to avoid relying on this if at all possible as global chain_type
 /// leaks across multiple tests and will likely have unintended consequences.
 #[allow(dead_code)]
+#[cfg(not(feature = "test-support"))]
 pub fn setup_global_chain_type() {
-	global::init_global_chain_type(0, global::ChainTypes::AutomatedTesting);
-	global::init_global_nrd_enabled(0, false);
-	global::init_global_accept_fee_base(0, global::DEFAULT_ACCEPT_FEE_BASE);
+	panic!("test-support feature is required to run the tests");
+}
+
+#[allow(dead_code)]
+#[cfg(feature = "test-support")]
+pub fn setup_global_chain_type() {
+	global::init_global_chain_type(0, global::ChainTypes::AutomatedTesting).unwrap();
+	global::init_global_nrd_enabled(0, false).unwrap();
+	global::init_global_accept_fee_base(0, global::DEFAULT_ACCEPT_FEE_BASE).unwrap();
 }
 
 /// Create a wallet config file in the given current directory
@@ -168,7 +200,9 @@ pub fn config_command_wallet(
 	});
 	current_dir.push(dir_name);
 	current_dir.push(wallet_name);
-	let _ = fs::create_dir_all(current_dir.clone());
+	// Create the wallet root securely even with a group-writable Unix umask.
+	// The shared helper also handles platforms without Unix permission bits.
+	file::ensure_owner_only_dir_all(&current_dir).expect("Error creating wallet directory");
 	let mut config_file_name = current_dir.clone();
 	config_file_name.push("mwc-wallet.toml");
 	if config_file_name.exists() {
@@ -205,19 +239,28 @@ pub fn initial_setup_wallet(dir_name: &str, wallet_name: &str) -> GlobalWalletCo
 	});
 	current_dir.push(dir_name);
 	current_dir.push(wallet_name);
-	let _ = fs::create_dir_all(current_dir.clone());
-	let mut config_file_name = current_dir.clone();
-	config_file_name.push("mwc-wallet.toml");
-	GlobalWalletConfig::new(config_file_name.to_str().unwrap()).unwrap()
+	// Match binary startup: create and validate configured API-secret files
+	// before wallet_command parses them.
+	let mut config = mwc_wallet_config::initial_setup_wallet(
+		&ChainTypes::AutomatedTesting,
+		Some(current_dir),
+		None,
+		true,
+	)
+	.unwrap();
+	// These integration tests exercise wallet/RPC behavior and their shared
+	// HTTP client does not supply Basic authentication. Disable owner API
+	// authentication explicitly instead of relying on a missing configured
+	// secret file being interpreted as authentication disabled.
+	config.members.wallet.api_secret_path = None;
+	// Socket listeners are disabled by default; tests opt into loopback HTTP.
+	config.members.wallet.api_listen_interface = Some("127.0.0.1".to_string());
+	config
 }
 
-fn get_wallet_subcommand<'a>(
-	wallet_dir: &str,
-	wallet_name: &str,
-	args: ArgMatches<'a>,
-) -> ArgMatches<'a> {
+fn get_wallet_subcommand(wallet_dir: &str, wallet_name: &str, args: ArgMatches) -> ArgMatches {
 	match args.subcommand() {
-		("init", Some(init_args)) => {
+		Some(("init", init_args)) => {
 			// wallet init command should spit out its config file then continue
 			// (if desired)
 			if init_args.is_present("here") {
@@ -225,7 +268,7 @@ fn get_wallet_subcommand<'a>(
 			}
 			init_args.to_owned()
 		}
-		_ => ArgMatches::new(),
+		_ => ArgMatches::default(),
 	}
 }
 //
@@ -273,11 +316,14 @@ pub fn instantiate_wallet(
 		wallet_config.data_file_dir = top_level_wallet_dir.to_str().unwrap().into();
 	}
 	let _ = lc.set_top_level_directory(&wallet_config.data_file_dir);
+	let secp = Secp256k1::with_caps(ContextFlag::Commit).unwrap();
 	let keychain_mask = lc
 		.open_wallet(
+			&secp,
 			None,
 			ZeroingString::from(passphrase),
 			true,
+			#[cfg(feature = "test-support")]
 			false,
 			wallet_config.wallet_data_dir.as_deref(),
 		)
@@ -289,7 +335,7 @@ pub fn instantiate_wallet(
 
 #[allow(dead_code)]
 pub fn execute_command(
-	app: &App,
+	app: &Command,
 	test_dir: &str,
 	wallet_name: &str,
 	client: &LocalWalletClient,
@@ -310,6 +356,7 @@ pub fn execute_command(
 		tor_config,
 		mqs_config,
 		client.clone(),
+		#[cfg(feature = "test-support")]
 		true,
 		|_| {},
 	)
@@ -318,7 +365,7 @@ pub fn execute_command(
 // as above, but without necessarily setting up the wallet
 #[allow(dead_code)]
 pub fn execute_command_no_setup<C, F>(
-	app: &App,
+	app: &Command,
 	test_dir: &str,
 	wallet_name: &str,
 	client: &C,
@@ -344,8 +391,16 @@ where
 {
 	let args = app.clone().get_matches_from(arg_vec);
 	let _ = get_wallet_subcommand(test_dir, wallet_name, args.clone());
-	let config =
-		config::initial_setup_wallet(&ChainTypes::AutomatedTesting, None, None, true).unwrap();
+	// Keep the unopened wallet's initial configuration inside the test tree.
+	// Using the default home directory makes this test depend on the user's
+	// configuration and permissions, and can create API secrets outside it.
+	let config = mwc_wallet_config::initial_setup_wallet(
+		&ChainTypes::AutomatedTesting,
+		Some(env::current_dir().unwrap().join(test_dir).join("auto")),
+		None,
+		true,
+	)
+	.unwrap();
 	let mut wallet_config = config.clone().members.wallet;
 	wallet_config.chain_type = None;
 	wallet_config.api_secret_path = None;
@@ -359,13 +414,14 @@ where
 		tor_config,
 		mqs_config,
 		client.clone(),
+		#[cfg(feature = "test-support")]
 		true,
 		f,
 	)
 }
 
-pub fn post(url: &Url, api_secret: Option<String>, input: &Value) -> Result<Value, api::Error> {
-	let client = HttpClient::new(0, Duration::from_secs(10), api_secret);
+pub fn post(url: &Url, api_secret: Option<String>, input: &Value) -> Result<Value, mwc_api::Error> {
+	let client = HttpClient::new(0, Duration::from_secs(10), api_secret.map(Zeroizing::new));
 	let res = client.post_request(url.as_str(), input)?;
 	Ok(res)
 }
@@ -375,7 +431,7 @@ pub fn send_request<OUT>(
 	id: u64,
 	dest: &str,
 	req: &str,
-) -> Result<Result<OUT, WalletAPIReturnError>, api::Error>
+) -> Result<Result<OUT, WalletAPIReturnError>, mwc_api::Error>
 where
 	OUT: DeserializeOwned,
 {
@@ -418,7 +474,7 @@ pub fn send_request_enc<OUT>(
 	dest: &str,
 	req: &str,
 	shared_key: &SecretKey,
-) -> Result<Result<OUT, WalletAPIReturnError>, api::Error>
+) -> Result<Result<OUT, WalletAPIReturnError>, mwc_api::Error>
 where
 	OUT: DeserializeOwned,
 {
@@ -491,12 +547,13 @@ pub fn derive_ecdh_key(sec_key_str: &str, other_pubkey: &PublicKey, secp: &Secp2
 	let mut shared_pubkey = other_pubkey.clone();
 	shared_pubkey.mul_assign(secp, &sec_key).unwrap();
 
-	let x_coord = shared_pubkey.serialize_vec(secp, true);
+	let x_coord = shared_pubkey.serialize_vec(secp, true).unwrap();
 	SecretKey::from_slice(secp, &x_coord[1..]).unwrap()
 }
 
 // Types to make working with json responses easier
 #[derive(Clone, Debug, Serialize, Deserialize, thiserror::Error)]
+#[serde(crate = "serde")]
 pub struct WalletAPIReturnError {
 	pub message: String,
 	pub code: i32,
@@ -519,4 +576,5 @@ impl From<mwc_wallet_controller::Error> for WalletAPIReturnError {
 
 #[allow(dead_code)]
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(crate = "serde")]
 pub struct RetrieveSummaryInfoResp(pub bool, pub WalletInfo);

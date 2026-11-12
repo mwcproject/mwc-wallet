@@ -15,16 +15,17 @@
 
 /// File Output 'plugin' implementation
 use std::fs::{metadata, File};
-use std::io::{Read, Write};
+use std::io::Read;
 
 use crate::adapters::SlateGetData;
 use crate::error::Error;
-use crate::libwallet::{Slate, SlateVersion, VersionedSlate};
 use crate::{SlateGetter, SlatePutter};
-use ed25519_dalek::{PublicKey as DalekPublicKey, SecretKey as DalekSecretKey};
 use mwc_wallet_libwallet::slatepack;
 use mwc_wallet_libwallet::slatepack::SlatePurpose;
-use mwc_wallet_util::mwc_util::secp::Secp256k1;
+use mwc_wallet_libwallet::{Slate, SlateVersion, VersionedSlate};
+use mwc_wallet_util::mwc_crates::ed25519_dalek;
+use mwc_wallet_util::mwc_crates::log::warn;
+use mwc_wallet_util::mwc_crates::secp::Secp256k1;
 use std::path::PathBuf;
 
 #[derive(Clone)]
@@ -32,8 +33,8 @@ pub struct PathToSlatePutter {
 	context_id: u32,
 	path_buf: Option<PathBuf>,
 	content: Option<SlatePurpose>,
-	sender: Option<DalekPublicKey>,
-	recipient: Option<DalekPublicKey>,
+	sender: Option<ed25519_dalek::VerifyingKey>,
+	recipient: Option<ed25519_dalek::VerifyingKey>,
 	slatepack_format: bool,
 }
 
@@ -51,8 +52,8 @@ impl PathToSlatePutter {
 		context_id: u32,
 		path_buf: Option<PathBuf>,
 		content: SlatePurpose,
-		sender: DalekPublicKey,
-		recipient: Option<DalekPublicKey>,
+		sender: ed25519_dalek::VerifyingKey,
+		recipient: Option<ed25519_dalek::VerifyingKey>,
 		slatepack_format: bool,
 	) -> Self {
 		Self {
@@ -99,8 +100,8 @@ impl SlatePutter for PathToSlatePutter {
 	fn put_tx(
 		&self,
 		slate: &Slate,
-		slatepack_secret: Option<&DalekSecretKey>,
-		use_test_rng: bool,
+		slatepack_secret: Option<&ed25519_dalek::SigningKey>,
+		#[cfg(feature = "test-support")] use_test_rng: bool,
 		secp: &Secp256k1,
 	) -> Result<String, Error> {
 		let out_slate = {
@@ -127,6 +128,7 @@ impl SlatePutter for PathToSlatePutter {
 					sender,
 					self.recipient.clone(),
 					slatepack_secret,
+					#[cfg(feature = "test-support")]
 					use_test_rng,
 					secp,
 				)
@@ -160,22 +162,16 @@ impl SlatePutter for PathToSlatePutter {
 
 		if let Some(path_buf) = &self.path_buf {
 			let file_name = path_buf.to_str().unwrap_or("INVALID PATH");
-			let mut pub_tx = File::create(&path_buf)
-				.map_err(|e| Error::IO(format!("Unable to create file {}, {}", file_name, e)))?;
-
-			pub_tx.write_all(slate_str.as_bytes()).map_err(|e| {
-				Error::IO(format!(
-					"Unable to store slate at file {}, {}",
-					file_name, e
-				))
-			})?;
-
-			pub_tx.sync_all().map_err(|e| {
-				Error::IO(format!(
-					"Unable to store slate at file {}, {}",
-					file_name, e
-				))
-			})?;
+			// Slate data can be unencrypted (plain V2/V3 slates contain amounts,
+			// participant messages and addresses), so the response file is written
+			// atomically with owner-only permissions. If the rename succeeds but
+			// syncing its parent directory fails, this returns an error even though
+			// the destination may already be installed; caller cleanup is best-effort.
+			mwc_wallet_util::mwc_util::file::replace_owner_only_file(
+				&path_buf,
+				slate_str.as_bytes(),
+			)
+			.map_err(|e| Error::IO(format!("Unable to store slate at file {}, {}", file_name, e)))?;
 		}
 
 		Ok(slate_str)
@@ -185,7 +181,7 @@ impl SlatePutter for PathToSlatePutter {
 impl SlateGetter for PathToSlateGetter {
 	fn get_tx(
 		&self,
-		slatepack_secret: Option<&DalekSecretKey>,
+		slatepack_secret: Option<&ed25519_dalek::SigningKey>,
 		secp: &Secp256k1,
 	) -> Result<SlateGetData, Error> {
 		let content = match &self.slate_str {

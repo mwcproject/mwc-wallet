@@ -12,27 +12,37 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#[allow(deprecated)]
-use digest::generic_array::GenericArray;
-use hmac::{Hmac, Mac, NewMac};
-use ripemd160::Ripemd160;
-use sha2::{Digest, Sha256, Sha512};
+use mwc_wallet_util::mwc_crates::ripemd::Ripemd160;
+use mwc_wallet_util::mwc_crates::sha2::{Digest, Sha256};
 
-use crate::mwc_core::global::is_floonet;
-use crate::mwc_keychain::extkey_bip32::{BIP32Hasher, ChildNumber, ExtendedPrivKey};
-use crate::mwc_keychain::Keychain;
-use crate::mwc_keychain::SwitchCommitmentType;
-use crate::mwc_util::secp::key::SecretKey;
+use mwc_wallet_util::mwc_core::global::is_floonet;
+use mwc_wallet_util::mwc_crates::secp::Secp256k1;
+use mwc_wallet_util::mwc_crates::secp::key::SecretKey;
+use mwc_wallet_util::mwc_keychain;
+use mwc_wallet_util::mwc_keychain::Keychain;
+use mwc_wallet_util::mwc_keychain::SwitchCommitmentType;
+use mwc_wallet_util::mwc_keychain::extkey_bip32::{
+	BIP32Hasher, BIP32HmacOutput, ChildNumber, ExtendedPrivKey,
+};
+use mwc_wallet_util::mwc_keychain::zeroizing_hmac_sha512::ZeroizingHmacSha512;
+use std::fmt;
 
 use crate::Error;
 
-type HmacSha512 = Hmac<Sha512>;
-
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 ///BIP32MwcboxHasher
 pub struct BIP32MwcboxHasher {
 	is_floonet: bool,
-	hmac_sha512: HmacSha512,
+	hmac_sha512: Option<ZeroizingHmacSha512>,
+}
+
+impl fmt::Debug for BIP32MwcboxHasher {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		f.debug_struct("BIP32MwcboxHasher")
+			.field("is_floonet", &self.is_floonet)
+			.field("hmac_sha512", &self.hmac_sha512.is_some())
+			.finish()
+	}
 }
 
 impl BIP32MwcboxHasher {
@@ -40,8 +50,7 @@ impl BIP32MwcboxHasher {
 	pub fn new(is_floonet: bool) -> Self {
 		Self {
 			is_floonet,
-			#[allow(deprecated)]
-			hmac_sha512: HmacSha512::new(GenericArray::from_slice(&[0u8; 128])),
+			hmac_sha512: None,
 		}
 	}
 }
@@ -66,28 +75,39 @@ impl BIP32Hasher for BIP32MwcboxHasher {
 		&mut self,
 		seed: &[u8],
 	) -> Result<(), mwc_wallet_util::mwc_keychain::extkey_bip32::Error> {
-		self.hmac_sha512 = HmacSha512::new_from_slice(seed).map_err(|e| {
-			mwc_wallet_util::mwc_keychain::extkey_bip32::Error::Generic(format!(
-				"Unable to build sha512 for seed, {}",
-				e
-			))
-		})?;
+		self.hmac_sha512 = Some(ZeroizingHmacSha512::new(seed)?);
 		Ok(())
 	}
-	fn append_sha512(&mut self, value: &[u8]) {
-		self.hmac_sha512.update(value);
+
+	fn append_sha512(
+		&mut self,
+		value: &[u8],
+	) -> Result<(), mwc_wallet_util::mwc_keychain::extkey_bip32::Error> {
+		let hmac_sha512 = self.hmac_sha512.as_mut().ok_or_else(|| {
+			mwc_keychain::extkey_bip32::Error::Generic("sha512 is not initialized".into())
+		})?;
+		hmac_sha512.update(value);
+		Ok(())
 	}
-	fn result_sha512(&mut self) -> [u8; 64] {
-		let mut result = [0; 64];
-		#[allow(deprecated)]
-		result.copy_from_slice(self.hmac_sha512.clone().finalize().into_bytes().as_slice());
-		result
+
+	fn result_sha512(
+		&mut self,
+		output: &mut BIP32HmacOutput,
+	) -> Result<(), mwc_wallet_util::mwc_keychain::extkey_bip32::Error> {
+		let hmac_sha512 = self.hmac_sha512.as_mut().ok_or_else(|| {
+			mwc_keychain::extkey_bip32::Error::Generic("sha512 is not initialized".into())
+		})?;
+		hmac_sha512.finalize_into(output);
+
+		// Drop the secret-bearing HMAC state in place. Moving it out with take()
+		// could leave an unwiped copy in the field's former storage.
+		self.hmac_sha512 = None;
+		Ok(())
 	}
 	fn sha_256(&self, input: &[u8]) -> [u8; 32] {
 		let mut sha2_res = [0; 32];
 		let mut sha2 = Sha256::new();
 		sha2.update(input);
-		#[allow(deprecated)]
 		sha2_res.copy_from_slice(sha2.finalize().as_slice());
 		sha2_res
 	}
@@ -95,7 +115,6 @@ impl BIP32Hasher for BIP32MwcboxHasher {
 		let mut ripemd_res = [0; 20];
 		let mut ripemd = Ripemd160::new();
 		ripemd.update(input);
-		#[allow(deprecated)]
 		ripemd_res.copy_from_slice(ripemd.finalize().as_slice());
 		ripemd_res
 	}
@@ -103,19 +122,21 @@ impl BIP32Hasher for BIP32MwcboxHasher {
 
 ///this derive_address_key will used in both mwc-wallet and wallet713 to derive the key.
 pub fn derive_address_key<K: Keychain>(
+	secp: &Secp256k1,
 	context_id: u32,
 	keychain: &K,
 	index: u32,
 ) -> Result<SecretKey, Error> {
 	let root = keychain
-		.derive_key(713, &K::root_key_id()?, SwitchCommitmentType::Regular)
+		.derive_key(secp, 713, &K::root_key_id()?, SwitchCommitmentType::Regular)
 		.map_err(|e| Error::DeriveKeyError(format!("Derive key error, {}", e)))?;
 	let mut hasher = BIP32MwcboxHasher::new(is_floonet(context_id));
-	let secp = keychain.secp();
 	let master = ExtendedPrivKey::new_master(secp, &mut hasher, &root.0)
 		.map_err(|e| Error::DeriveKeyError(format!("Derive key error, {}", e)))?;
+	let child_number = ChildNumber::from_normal_idx(index)
+		.map_err(|e| Error::DeriveKeyError(format!("Derive key error, {}", e)))?;
 	let private_key = master
-		.ckd_priv(secp, &mut hasher, ChildNumber::from_normal_idx(index))
+		.ckd_priv(secp, &mut hasher, child_number)
 		.map_err(|e| Error::DeriveKeyError(format!("Derive key error, {}", e)))?;
 	Ok(private_key.secret_key)
 }

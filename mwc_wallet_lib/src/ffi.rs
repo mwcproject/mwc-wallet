@@ -14,6 +14,10 @@
 
 use crate::mwc_wallet_calls::call_mwc_wallet_request;
 use safer_ffi::prelude::*;
+use std::ffi::{CStr, CString};
+
+static FFI_ERROR_RESPONSE: &CStr =
+	c"{\"success\":false,\"error\":\"Response contained an interior NUL byte\"}";
 
 /// Process mwc-wallet related call.
 /// Input: json stirng param
@@ -22,6 +26,7 @@ use safer_ffi::prelude::*;
 fn process_mwc_wallet_request(input: char_p::Ref<'_>) -> char_p::Box {
 	let input = input.to_str();
 
-	let resposne: String = call_mwc_wallet_request(input.to_string());
-	resposne.try_into().expect("Safer FFI failure")
+	let response = call_mwc_wallet_request(input.to_string());
+	let response = CString::new(response).unwrap_or_else(|_| FFI_ERROR_RESPONSE.to_owned());
+	response.into()
 }

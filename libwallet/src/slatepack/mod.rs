@@ -20,5 +20,6 @@ mod packer;
 mod slatepack;
 
 pub use self::armor::{generate_check, max_size, min_size, SlatepackArmor, HEADER_ENC};
-pub use self::packer::Slatepacker;
+pub use self::packer::{validate_slatepack_receive_direction, Slatepacker};
+pub(crate) use self::slatepack::validate_slatepack_size;
 pub use self::slatepack::{SlatePurpose, Slatepack};

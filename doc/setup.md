@@ -43,33 +43,6 @@ Floonet: mwc713.floonet.mwc.mw mwc7132.floonet.mwc.mw mwc7133.floonet.mwc.mw mwc
 
 api_seed in the .api_seed file(same directory as mwc-wallet.toml file) will also be updated.
 
-## Build webtunnel client
-
-In order to launch Tor in restricted areas, mwc-wallet need webtunnelclient executable. Here is how you can build it.
-
-### Intall go.
-
-MacOS:
-```
-$ brew install go
-```
-
-Ubuntu:
-```
-$ sudo apt-get install -y golang
-```
-
-### Build webtunnelclient
-
-```
-$ clone https://gitlab.torproject.org/tpo/anti-censorship/pluggable-transports/webtunnel
-$ cd webtunnel/main/client
-$ go build
-$ mv client ../../webtunnelclient
-```
-
-webtunnelclient copy into the same directory where mwc-wallet executable is located. 
-
 ## Build wallet library
 
 If you need integrate mwc-wallet and mwc-node into the  

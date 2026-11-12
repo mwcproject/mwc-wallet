@@ -13,22 +13,23 @@
 // limitations under the License.
 
 use super::error::Error;
-use crate::blake2::blake2b::blake2b;
-use crate::mwc_core::core::{
+use crate::swap::ser::*;
+use mwc_wallet_util::mwc_core::core::{
 	Input as TxInput, Output as TxOutput, OutputFeatures, OutputIdentifier,
 };
-use crate::mwc_core::libtx::secp_ser;
-use crate::mwc_util::secp::constants::SECRET_KEY_SIZE;
-use crate::mwc_util::secp::key::{PublicKey, SecretKey};
-use crate::mwc_util::secp::pedersen::{Commitment, RangeProof};
-use crate::mwc_util::secp::Secp256k1;
-use crate::swap::ser::*;
-use hex::FromHex;
-use rand::thread_rng;
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use mwc_wallet_util::mwc_core::libtx::secp_ser;
+use mwc_wallet_util::mwc_crates::blake2_rfc::blake2b::blake2b;
+use mwc_wallet_util::mwc_crates::hex::{self, FromHex};
+use mwc_wallet_util::mwc_crates::rand::rngs::SysRng;
+use mwc_wallet_util::mwc_crates::secp::constants::SECRET_KEY_SIZE;
+use mwc_wallet_util::mwc_crates::secp::key::{PublicKey, SecretKey};
+use mwc_wallet_util::mwc_crates::secp::pedersen::{Commitment, RangeProof};
+use mwc_wallet_util::mwc_crates::secp::{self, Secp256k1};
+use mwc_wallet_util::mwc_crates::serde::{self, Deserialize, Deserializer, Serialize, Serializer};
 
 /// Multisig builder
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(crate = "serde")]
 pub struct Builder {
 	/// Number of participant. For swap it is 2
 	num_participants: usize,
@@ -86,7 +87,8 @@ impl Builder {
 		if id != self.participant_id {
 			return Err(Error::ParticipantOrdering);
 		}
-		let partial_commitment = secp.commit(0, secret_key.clone())?;
+		let partial_pubkey = PublicKey::from_secret_key(secp, secret_key)?;
+		let partial_commitment = Commitment::from_pubkey(secp, &partial_pubkey)?;
 		self.participants.push(if self.commit_reveal {
 			ParticipantData::new_commit(partial_commitment)?
 		} else {
@@ -133,7 +135,11 @@ impl Builder {
 		}
 
 		match participant.partial_commitment.as_ref() {
-			Some(p) => self.participants[id].reveal(p),
+			Some(p) => self
+				.participants
+				.get_mut(id)
+				.ok_or(Error::ParticipantDoesntExist)?
+				.reveal(p),
 			None => Err(Error::Reveal),
 		}
 	}
@@ -156,8 +162,12 @@ impl Builder {
 			return Err(Error::Round1Missing);
 		}
 
-		self.participants[id].t_1 = participant.t_1.clone();
-		self.participants[id].t_2 = participant.t_2.clone();
+		let stored_participant = self
+			.participants
+			.get_mut(id)
+			.ok_or(Error::ParticipantDoesntExist)?;
+		stored_participant.t_1 = participant.t_1.clone();
+		stored_participant.t_2 = participant.t_2.clone();
 		Ok(())
 	}
 
@@ -179,7 +189,10 @@ impl Builder {
 			return Err(Error::Round2Missing);
 		}
 
-		self.participants[id].tau_x = participant.tau_x.clone();
+		self.participants
+			.get_mut(id)
+			.ok_or(Error::ParticipantDoesntExist)?
+			.tau_x = participant.tau_x.clone();
 		Ok(())
 	}
 
@@ -189,7 +202,10 @@ impl Builder {
 			return Err(Error::ParticipantDoesntExist);
 		}
 
-		Ok(self.participants[self.participant_id].clone())
+		self.participants
+			.get(self.participant_id)
+			.cloned()
+			.ok_or(Error::ParticipantDoesntExist)
 	}
 
 	/// Checking revealed data
@@ -198,21 +214,27 @@ impl Builder {
 			return Err(Error::MultiSigIncomplete);
 		}
 
-		let partial_commitment = secp.commit(0, secret_key.clone())?;
-		self.participants[self.participant_id].reveal(&partial_commitment)?;
+		let partial_pubkey = PublicKey::from_secret_key(secp, secret_key)?;
+		let partial_commitment = Commitment::from_pubkey(secp, &partial_pubkey)?;
+		self.participants
+			.get_mut(self.participant_id)
+			.ok_or(Error::ParticipantDoesntExist)?
+			.reveal(&partial_commitment)?;
 		Ok(())
 	}
 
 	/// Mulisig buiding round 1
-	pub fn round_1(&mut self, secp: &Secp256k1, blind: &SecretKey) -> Result<(), Error> {
-		let mut t_1 = PublicKey::new();
-		let mut t_2 = PublicKey::new();
+	pub fn round_1(&mut self, secp: &mut Secp256k1, blind: &SecretKey) -> Result<(), Error> {
+		let mut t_1 = PublicKey::from_secret_key(secp, blind)?;
+		let mut t_2 = t_1.clone();
 		// Round 1 doesnt require knowledge of total commit or common nonce, we should allow NULL argument in libsecp
-		let commit = secp.commit(0, SecretKey::new(secp, &mut thread_rng()))?;
-		let common_nonce = self
-			.common_nonce
-			.clone()
-			.unwrap_or(SecretKey::new(secp, &mut thread_rng()));
+		let commit_key = SecretKey::new(secp, &mut SysRng)?;
+		let commit_pubkey = PublicKey::from_secret_key(secp, &commit_key)?;
+		let commit = Commitment::from_pubkey(secp, &commit_pubkey)?;
+		let common_nonce = match self.common_nonce.clone() {
+			Some(common_nonce) => common_nonce,
+			None => SecretKey::new(secp, &mut SysRng)?,
+		};
 		secp.bullet_proof_multisig(
 			self.amount,
 			blind.clone(),
@@ -225,14 +247,18 @@ impl Builder {
 			vec![commit],
 			Some(&self.nonce),
 			1,
-		);
-		self.participants[self.participant_id].t_1 = Some(t_1);
-		self.participants[self.participant_id].t_2 = Some(t_2);
+		)?;
+		let participant = self
+			.participants
+			.get_mut(self.participant_id)
+			.ok_or(Error::ParticipantDoesntExist)?;
+		participant.t_1 = Some(t_1);
+		participant.t_2 = Some(t_2);
 		Ok(())
 	}
 
 	/// Mulisig buiding round 2
-	pub fn round_2(&mut self, secp: &Secp256k1, blind: &SecretKey) -> Result<(), Error> {
+	pub fn round_2(&mut self, secp: &mut Secp256k1, blind: &SecretKey) -> Result<(), Error> {
 		let mut t_1 = self.sum_t_1(secp)?;
 		let mut t_2 = self.sum_t_2(secp)?;
 		let mut tau_x = SecretKey([0; SECRET_KEY_SIZE]);
@@ -249,13 +275,16 @@ impl Builder {
 			vec![commit],
 			Some(&self.nonce),
 			2,
-		);
-		self.participants[self.participant_id].tau_x = Some(tau_x);
+		)?;
+		self.participants
+			.get_mut(self.participant_id)
+			.ok_or(Error::ParticipantDoesntExist)?
+			.tau_x = Some(tau_x);
 		Ok(())
 	}
 
 	/// Finalize building multisig
-	pub fn finalize(&self, secp: &Secp256k1, blind: &SecretKey) -> Result<RangeProof, Error> {
+	pub fn finalize(&self, secp: &mut Secp256k1, blind: &SecretKey) -> Result<RangeProof, Error> {
 		let mut t_1 = self.sum_t_1(secp)?;
 		let mut t_2 = self.sum_t_2(secp)?;
 		let mut tau_x = self.sum_tau_x(secp)?;
@@ -273,7 +302,7 @@ impl Builder {
 				vec![commit],
 				Some(&self.nonce),
 				0,
-			)
+			)?
 			.ok_or(Error::MultiSigIncomplete)?;
 		secp.verify_bullet_proof(commit, proof, None)?;
 		Ok(proof)
@@ -288,7 +317,7 @@ impl Builder {
 	}
 
 	/// Multisig as output
-	pub fn as_output(&self, secp: &Secp256k1, blind: &SecretKey) -> Result<TxOutput, Error> {
+	pub fn as_output(&self, secp: &mut Secp256k1, blind: &SecretKey) -> Result<TxOutput, Error> {
 		Ok(TxOutput {
 			identifier: OutputIdentifier {
 				features: OutputFeatures::Plain,
@@ -371,6 +400,7 @@ impl Builder {
 
 /// Multisig participant data
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(crate = "serde")]
 pub struct ParticipantData {
 	/// Hash for commit (not revealed data)
 	#[serde(skip_serializing_if = "Option::is_none", default)]
@@ -410,6 +440,37 @@ pub struct ParticipantData {
 }
 
 impl ParticipantData {
+	/// Validate the revealed commitment and round-one fields carried by a
+	/// non-commit/reveal swap offer before any wallet keys are allocated.
+	pub(crate) fn validate_revealed_round_1(&self, secp: &Secp256k1) -> Result<(), Error> {
+		let partial_commitment = self
+			.partial_commitment
+			.as_ref()
+			.ok_or(Error::ParticipantInvalid)?;
+		if self.t_1.is_none() || self.t_2.is_none() {
+			return Err(Error::Round1Missing);
+		}
+
+		// Commitment::from_vec only enforces the encoded length. Parse the peer's
+		// bytes with libsecp and round-trip them before the caller allocates any
+		// durable wallet child keys. Invalid peer data remains deterministic, while
+		// unexpected local secp failures keep their structured source.
+		let partial_pubkey = partial_commitment
+			.to_pubkey(secp)
+			.map_err(|error| match error {
+				secp::Error::InvalidCommit | secp::Error::InvalidPublicKey => {
+					Error::ParticipantCommitmentInvalid
+				}
+				other => Error::Secp(other),
+			})?;
+		let canonical_commitment =
+			Commitment::from_pubkey(secp, &partial_pubkey).map_err(Error::Secp)?;
+		if canonical_commitment != *partial_commitment {
+			return Err(Error::ParticipantCommitmentInvalid);
+		}
+		Ok(())
+	}
+
 	/// Build from commitment as not revealed
 	pub fn new_commit(partial_commitment: Commitment) -> Result<Self, Error> {
 		Ok(ParticipantData {
@@ -466,6 +527,7 @@ impl ParticipantData {
 	fn reveal(&mut self, partial_commitment: &Commitment) -> Result<(), Error> {
 		let hash = self.partial_commitment_hash.as_ref().ok_or(Error::Reveal)?;
 		if &partial_commitment.hash()? == hash {
+			self.partial_commitment = Some(partial_commitment.clone());
 			Ok(())
 		} else {
 			Err(Error::Reveal)
@@ -510,7 +572,7 @@ impl<'de> Deserialize<'de> for Hash {
 	where
 		D: Deserializer<'de>,
 	{
-		use serde::de::Error;
+		use mwc_wallet_util::mwc_crates::serde::de::Error;
 		let s = String::deserialize(deserializer)?;
 
 		let v = Vec::from_hex(&s).map_err(D::Error::custom)?;
@@ -541,49 +603,96 @@ impl Hashed for Vec<u8> {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::mwc_util::secp::ContextFlag;
-	use rand::thread_rng;
+	use mwc_wallet_util::mwc_crates::rand::rngs::SysRng;
+	use mwc_wallet_util::mwc_crates::secp::ContextFlag;
 
-	/*
+	#[test]
+	fn revealed_round_one_rejects_a_length_valid_malformed_commitment() {
+		let mut secp = Secp256k1::with_caps(ContextFlag::Commit).unwrap();
+		let secret = SecretKey::new(&secp, &mut SysRng).unwrap();
+		let nonce = SecretKey::new(&secp, &mut SysRng).unwrap();
+		let mut builder = Builder::new(1, 42_000_000, false, 0, nonce, None);
+		builder.create_participant(&secp, &secret).unwrap();
+		builder.round_1(&mut secp, &secret).unwrap();
+
+		let mut participant = builder.export().unwrap();
+		assert!(participant.validate_revealed_round_1(&secp).is_ok());
+
+		// The wire deserializer accepts this because it has exactly 33 bytes, but
+		// libsecp rejects it as a Pedersen commitment.
+		participant.partial_commitment = Some(Commitment::from_vec(vec![0; 33]).unwrap());
+		assert!(matches!(
+			participant.validate_revealed_round_1(&secp),
+			Err(Error::ParticipantCommitmentInvalid)
+		));
+	}
+
 	/// Test proof for 2-of-2 multisig with a commit & reveal phase
-	// TODO: fix this test
 	#[test]
 	fn test_builder() {
-		let secp = Secp256k1::with_caps(ContextFlag::Commit);
+		let mut secp = Secp256k1::with_caps(ContextFlag::Commit).unwrap();
+		let mut rng = SysRng;
 
-		//// Set up phase: parties agree on the participants (and an ordering), amount and a common nonce ////
+		// Set up phase: parties agree on the participants (and an ordering),
+		// amount and a common nonce.
 		let num_participants: usize = 2;
 		let amount: u64 = 713_000_000;
-		let (common_nonce, _) = secp.generate_keypair(&mut thread_rng()).unwrap();
+		let common_nonce = SecretKey::new(&secp, &mut rng).unwrap();
 
-		//// Commit phase: parties all send their hashed partial commitment to each other (inside the ParticipantData) ////
+		// Commit phase: parties send hashed partial commitments.
 		// A
 		let id_a = 0;
-		let (secret_a, _) = secp.generate_keypair(&mut thread_rng()).unwrap();
-		let (nonce_a, _) = secp.generate_keypair(&mut thread_rng()).unwrap();
-		let mut builder_a = Builder::new(num_participants, amount, true, id_a, nonce_a, Some(common_nonce.clone()));
+		let secret_a = SecretKey::new(&secp, &mut rng).unwrap();
+		let nonce_a = SecretKey::new(&secp, &mut rng).unwrap();
+		let mut builder_a = Builder::new(
+			num_participants,
+			amount,
+			true,
+			id_a,
+			nonce_a,
+			Some(common_nonce.clone()),
+		);
 		assert!(builder_a.create_participant(&secp, &secret_a).is_ok());
 		// A cannot reveal yet
-		assert!(builder_a.reveal(&secp, &secret_a).is_err());
+		assert!(matches!(
+			builder_a.reveal(&secp, &secret_a),
+			Err(Error::MultiSigIncomplete)
+		));
 		let part_a = builder_a.export().unwrap(); // A -> all
 
 		// B
 		let id_b = 1;
-		let (secret_b, _) = secp.generate_keypair(&mut thread_rng()).unwrap();
-		let (nonce_b, _) = secp.generate_keypair(&mut thread_rng()).unwrap();
-		let mut builder_b = Builder::new(num_participants, amount, true, id_b, nonce_b, Some(common_nonce.clone()));
+		let secret_b = SecretKey::new(&secp, &mut rng).unwrap();
+		let nonce_b = SecretKey::new(&secp, &mut rng).unwrap();
+		let mut builder_b = Builder::new(
+			num_participants,
+			amount,
+			true,
+			id_b,
+			nonce_b,
+			Some(common_nonce.clone()),
+		);
 		// Participant cannot be created before previous ones are imported
-		assert!(builder_b.create_participant(&secp, &secret_b).is_err());
+		assert!(matches!(
+			builder_b.create_participant(&secp, &secret_b),
+			Err(Error::ParticipantOrdering)
+		));
 		assert!(builder_b.import_participant(id_a, &part_a).is_ok());
 		assert!(builder_b.create_participant(&secp, &secret_b).is_ok());
 
-		//// Reveal phase ////
+		// Reveal phase
 		// B
 		// Revealing with the wrong secret will fail
-		assert!(builder_b.reveal(&secp, &secret_a).is_err());
+		assert!(matches!(
+			builder_b.reveal(&secp, &secret_a),
+			Err(Error::Reveal)
+		));
 		assert!(builder_b.reveal(&secp, &secret_b).is_ok());
 		// A hasn't revealed yet, we don't know the total commitment
-		assert!(builder_b.commit(&secp).is_err());
+		assert!(matches!(
+			builder_b.commit(&secp),
+			Err(Error::MultiSigIncomplete)
+		));
 		let part_b = builder_b.export().unwrap(); // B -> all
 
 		// A
@@ -593,76 +702,100 @@ mod tests {
 		assert!(builder_a.reveal(&secp, &secret_a).is_ok());
 		assert!(builder_a.commit(&secp).is_ok());
 
-		//// Build phase round 1: T_1 and T_2 ////
+		// Build phase round 1: T_1 and T_2
 		// A
-		assert!(builder_a.round_1(&secp, &secret_a).is_ok());
+		assert!(builder_a.round_1(&mut secp, &secret_a).is_ok());
 		let part_a = builder_a.export().unwrap(); // A -> all
 
 		// B
 		// (reveal+round 1 of A at the same time to save on communication, not required)
 		// Revealing with the wrong commitment will fail
-		assert!(builder_b.reveal_participant(id_a, &part_b).is_err());
+		assert!(matches!(
+			builder_b.reveal_participant(id_a, &part_b),
+			Err(Error::Reveal)
+		));
 		assert!(builder_b.reveal_participant(id_a, &part_a).is_ok());
 		// All parties agree on the total commitment
-		assert_eq!(builder_a.commit(&secp).unwrap(), builder_b.commit(&secp).unwrap());
-		assert!(builder_b.round_1(&secp, &secret_b).is_ok());
+		assert_eq!(
+			builder_a.commit(&secp).unwrap(),
+			builder_b.commit(&secp).unwrap()
+		);
+		assert!(builder_b.round_1(&mut secp, &secret_b).is_ok());
 		assert!(builder_b.round_1_participant(id_a, &part_a).is_ok());
 
-		//// Build phase round 2: tau_x ////
+		// Build phase round 2: tau_x
 		// B
-		assert!(builder_b.round_2(&secp, &secret_b).is_ok());
+		assert!(builder_b.round_2(&mut secp, &secret_b).is_ok());
 		let part_b = builder_b.export().unwrap(); // B -> all
 
 		// A
 		// (round 1+round 2 of B at the same time to save on communication, not required)
 		// Round 2 cannot be done without all round 1 information
-		assert!(builder_a.round_2(&secp, &secret_a).is_err());
+		assert!(matches!(
+			builder_a.round_2(&mut secp, &secret_a),
+			Err(Error::MultiSigIncomplete)
+		));
 		assert!(builder_a.round_1_participant(id_b, &part_b).is_ok());
 		// All parties agree on the total T_1 and T_2
-		assert_eq!(builder_a.sum_t_1(&secp).unwrap(), builder_b.sum_t_1(&secp).unwrap());
-		assert_eq!(builder_a.sum_t_2(&secp).unwrap(), builder_b.sum_t_2(&secp).unwrap());
-		assert!(builder_a.round_2(&secp, &secret_a).is_ok());
+		assert_eq!(
+			builder_a.sum_t_1(&secp).unwrap(),
+			builder_b.sum_t_1(&secp).unwrap()
+		);
+		assert_eq!(
+			builder_a.sum_t_2(&secp).unwrap(),
+			builder_b.sum_t_2(&secp).unwrap()
+		);
+		assert!(builder_a.round_2(&mut secp, &secret_a).is_ok());
 
-		//// Finalization phase ////
+		// Finalization phase
 		// A
 		// Finalization cannot be done without all round 2 information
-		assert!(builder_a.finalize(&secp, &secret_a).is_err());
+		assert!(matches!(
+			builder_a.finalize(&mut secp, &secret_a),
+			Err(Error::MultiSigIncomplete)
+		));
 		assert!(builder_a.round_2_participant(id_b, &part_b).is_ok());
-		assert!(builder_a.finalize(&secp, &secret_a).is_ok());
+		let proof_a = builder_a.finalize(&mut secp, &secret_a).unwrap();
 		// Explicitly verify proof
 		let commit_a = builder_a.commit(&secp).unwrap();
-		let proof_a = builder_a.proof().unwrap();
-		assert!(secp.verify_bullet_proof(commit_a, proof_a, None).is_ok());
+		assert!(secp
+			.verify_bullet_proof(commit_a, proof_a.clone(), None)
+			.is_ok());
 		// For completeness, do same on B
 		let part_a = builder_a.export().unwrap(); // A -> all
 
 		// B
 		assert!(builder_b.round_2_participant(id_a, &part_a).is_ok());
 		// All parties agree on the total tau_x
-		assert_eq!(builder_a.sum_tau_x(&secp).unwrap(), builder_b.sum_tau_x(&secp).unwrap());
-		assert!(builder_b.finalize(&secp, &secret_b).is_ok());
+		assert_eq!(
+			builder_a.sum_tau_x(&secp).unwrap(),
+			builder_b.sum_tau_x(&secp).unwrap()
+		);
+		let proof_b = builder_b.finalize(&mut secp, &secret_b).unwrap();
 		// Explicitly verify proof
 		let commit_b = builder_b.commit(&secp).unwrap();
-		let proof_b = builder_b.proof().unwrap();
-		assert!(secp.verify_bullet_proof(commit_b, proof_b, None).is_ok());
+		assert!(secp
+			.verify_bullet_proof(commit_b, proof_b.clone(), None)
+			.is_ok());
 		// Generated proof is the same
 		assert_eq!(proof_a, proof_b);
-	}*/
+	}
 
 	/// Test proof for 2-of-2 multisig in a single round trip
 	#[test]
 	fn test_builder_single() {
-		let secp = Secp256k1::with_caps(ContextFlag::Commit);
+		let mut secp = Secp256k1::with_caps(ContextFlag::Commit).unwrap();
+		let mut rng = SysRng;
 
 		//// Set up phase: parties agree on the participants (and an ordering), amount and a common nonce
 		let num_participants: usize = 2;
 		let amount: u64 = 42_000_000;
-		let common_nonce = SecretKey::new(&secp, &mut thread_rng());
+		let common_nonce = SecretKey::new(&secp, &mut rng).unwrap();
 
 		// A: round 1
 		let id_a = 0;
-		let secret_a = SecretKey::new(&secp, &mut thread_rng());
-		let nonce_a = SecretKey::new(&secp, &mut thread_rng());
+		let secret_a = SecretKey::new(&secp, &mut rng).unwrap();
+		let nonce_a = SecretKey::new(&secp, &mut rng).unwrap();
 		let mut builder_a = Builder::new(
 			num_participants,
 			amount,
@@ -672,13 +805,13 @@ mod tests {
 			Some(common_nonce.clone()),
 		);
 		assert!(builder_a.create_participant(&secp, &secret_a).is_ok());
-		assert!(builder_a.round_1(&secp, &secret_a).is_ok());
+		assert!(builder_a.round_1(&mut secp, &secret_a).is_ok());
 		let part_a = builder_a.export().unwrap(); // A -> B
 
 		// B: round 1 + round 2
 		let id_b = 1;
-		let secret_b = SecretKey::new(&secp, &mut thread_rng());
-		let nonce_b = SecretKey::new(&secp, &mut thread_rng());
+		let secret_b = SecretKey::new(&secp, &mut rng).unwrap();
+		let nonce_b = SecretKey::new(&secp, &mut rng).unwrap();
 		let mut builder_b = Builder::new(
 			num_participants,
 			amount,
@@ -690,16 +823,16 @@ mod tests {
 		assert!(builder_b.import_participant(id_a, &part_a).is_ok());
 		assert!(builder_b.create_participant(&secp, &secret_b).is_ok());
 		assert!(builder_b.round_1_participant(id_a, &part_a).is_ok());
-		assert!(builder_b.round_1(&secp, &secret_b).is_ok());
-		assert!(builder_b.round_2(&secp, &secret_b).is_ok());
+		assert!(builder_b.round_1(&mut secp, &secret_b).is_ok());
+		assert!(builder_b.round_2(&mut secp, &secret_b).is_ok());
 		let part_b = builder_b.export().unwrap(); // B -> A
 
 		// A: round 2 + finalize
 		assert!(builder_a.import_participant(id_b, &part_b).is_ok());
 		assert!(builder_a.round_1_participant(id_b, &part_b).is_ok());
 		assert!(builder_a.round_2_participant(id_b, &part_b).is_ok());
-		assert!(builder_a.round_2(&secp, &secret_a).is_ok());
-		let proof = builder_a.finalize(&secp, &secret_a).unwrap();
+		assert!(builder_a.round_2(&mut secp, &secret_a).is_ok());
+		let proof = builder_a.finalize(&mut secp, &secret_a).unwrap();
 
 		// Explicitly verify proof
 		let commit = builder_a.commit(&secp).unwrap();

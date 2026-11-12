@@ -19,16 +19,16 @@
 //! remains for future needs
 
 use crate::slate::{Slate, SlateCtx};
-use crate::slate_versions::v2::{CoinbaseV2, SlateV2};
-use crate::slate_versions::v3::{CoinbaseV3, SlateV3};
+use crate::slate_versions::v2::SlateV2;
+use crate::slate_versions::v3::SlateV3;
 use crate::slatepack::SlatePurpose;
-use crate::types::CbData;
+use crate::slatepack::Slatepacker;
 use crate::Error;
-use crate::Slatepacker;
-use ed25519_dalek::PublicKey as DalekPublicKey;
-use ed25519_dalek::SecretKey as DalekSecretKey;
 use mwc_wallet_util::mwc_core::global;
-use mwc_wallet_util::mwc_util::secp::Secp256k1;
+use mwc_wallet_util::mwc_crates::ed25519_dalek;
+use mwc_wallet_util::mwc_crates::secp::Secp256k1;
+use mwc_wallet_util::mwc_crates::serde::{self, Deserialize, Deserializer, Serialize};
+use mwc_wallet_util::mwc_crates::serde_json;
 use std::convert::TryFrom;
 
 pub mod ser;
@@ -45,7 +45,8 @@ pub const CURRENT_SLATE_VERSION: u16 = 3;
 pub const MWC_BLOCK_HEADER_VERSION: u16 = 3;
 
 /// Existing versions of the slate
-#[derive(EnumIter, Serialize, Deserialize, Clone, Debug, PartialEq, PartialOrd, Eq, Ord)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, PartialOrd, Eq, Ord)]
+#[serde(crate = "serde")]
 pub enum SlateVersion {
 	/// SP - has a slatepack support
 	SP,
@@ -60,6 +61,18 @@ pub enum SlateVersion {
 }
 
 impl SlateVersion {
+	/// Iterate over all supported slate versions.
+	pub fn iter() -> impl Iterator<Item = SlateVersion> {
+		[
+			SlateVersion::SP,
+			SlateVersion::V3B,
+			SlateVersion::V3,
+			SlateVersion::V2,
+		]
+		.iter()
+		.cloned()
+	}
+
 	/// Convert this version into numeric value
 	pub fn to_numeric_version(&self) -> i32 {
 		match self {
@@ -70,10 +83,13 @@ impl SlateVersion {
 	}
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Clone)]
+#[serde(crate = "serde")]
 #[serde(untagged)]
-/// Versions are ordered newest to oldest so serde attempts to
-/// deserialize newer versions first, then falls back to older versions.
+/// Slate versions are serialized without an enum tag. Deserialization uses
+/// the version declared by the slate rather than relying on structural
+/// fallbacks, because optional fields make the V2 and V3 structures
+/// intentionally overlap.
 pub enum VersionedSlate {
 	/// Slatepack
 	SP(String),
@@ -82,6 +98,70 @@ pub enum VersionedSlate {
 	V3(SlateV3),
 	/// V2 (2.0.0 - Onwards)
 	V2(SlateV2),
+}
+
+pub(crate) fn validate_slatepack_recipient_version(
+	version: &SlateVersion,
+	has_recipient: bool,
+) -> Result<(), Error> {
+	if has_recipient && *version != SlateVersion::SP {
+		return Err(Error::SlatepackEncodeError(format!(
+			"Slatepack recipient requires SP version, requested {:?}",
+			version
+		)));
+	}
+	Ok(())
+}
+
+impl<'de> Deserialize<'de> for VersionedSlate {
+	fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+	where
+		D: Deserializer<'de>,
+	{
+		let value = serde_json::Value::deserialize(deserializer)?;
+		if let serde_json::Value::String(slatepack) = value {
+			return Ok(VersionedSlate::SP(slatepack));
+		}
+
+		let version = value
+			.get("version_info")
+			.and_then(|info| info.get("version"))
+			.and_then(serde_json::Value::as_u64)
+			.or_else(|| value.get("version").and_then(serde_json::Value::as_u64))
+			.ok_or_else(|| {
+				serde::de::Error::custom(
+					"Unable to determine slate version: missing numeric version_info.version",
+				)
+			})?;
+
+		match version {
+			3 => serde_json::from_value::<SlateV3>(value)
+				.map(VersionedSlate::V3)
+				.map_err(|e| {
+					serde::de::Error::custom(format!("Unable to deserialize SlateV3: {}", e))
+				}),
+			2 => {
+				if matches!(
+					value.get("ttl_cutoff_height"),
+					Some(ttl_cutoff_height) if !ttl_cutoff_height.is_null()
+				) {
+					return Err(serde::de::Error::custom(
+						"SlateV2 does not support ttl_cutoff_height",
+					));
+				}
+
+				serde_json::from_value::<SlateV2>(value)
+					.map(VersionedSlate::V2)
+					.map_err(|e| {
+						serde::de::Error::custom(format!("Unable to deserialize SlateV2: {}", e))
+					})
+			}
+			unsupported => Err(serde::de::Error::custom(format!(
+				"Unsupported slate version {}",
+				unsupported
+			))),
+		}
+	}
 }
 
 impl VersionedSlate {
@@ -108,12 +188,13 @@ impl VersionedSlate {
 		slate: Slate,
 		version: SlateVersion,
 		content: SlatePurpose,
-		sender: DalekPublicKey,
-		recipient: Option<DalekPublicKey>,
-		secret: &DalekSecretKey,
-		use_test_rng: bool,
+		sender: ed25519_dalek::VerifyingKey,
+		recipient: Option<ed25519_dalek::VerifyingKey>,
+		secret: &ed25519_dalek::SigningKey,
+		#[cfg(feature = "test-support")] use_test_rng: bool,
 		secp: &Secp256k1,
 	) -> Result<VersionedSlate, Error> {
+		validate_slatepack_recipient_version(&version, recipient.is_some())?;
 		match version {
 			SlateVersion::SP => {
 				let armored_slatepack = Slatepacker::encrypt_to_send(
@@ -124,6 +205,7 @@ impl VersionedSlate {
 					sender,
 					recipient,
 					secret,
+					#[cfg(feature = "test-support")]
 					use_test_rng,
 					secp,
 				)?;
@@ -160,7 +242,7 @@ impl VersionedSlate {
 	pub fn into_slatepack(
 		&self,
 		context_id: u32,
-		dec_key: &DalekSecretKey,
+		dec_key: &ed25519_dalek::SigningKey,
 		secp: &Secp256k1,
 	) -> Result<Slatepacker, Error> {
 		match self {
@@ -218,25 +300,68 @@ impl VersionedSlate {
 	}
 }
 
-#[derive(Deserialize, Serialize)]
-#[serde(untagged)]
-/// Versions are ordered newest to oldest so serde attempts to
-/// deserialize newer versions first, then falls back to older versions.
-pub enum VersionedCoinbase {
-	/// Current supported coinbase version.
-	V3(CoinbaseV3),
-	/// Previous
-	V2(CoinbaseV2),
-}
+#[cfg(test)]
+mod tests {
+	use super::{SlatePurpose, SlateVersion, VersionedSlate};
+	use crate::{Error, Slate, SlateCtx};
+	use mwc_wallet_util::mwc_core::global;
+	use mwc_wallet_util::mwc_crates::ed25519_dalek;
+	use mwc_wallet_util::mwc_crates::secp::Secp256k1;
+	use mwc_wallet_util::mwc_crates::serde_json;
 
-impl VersionedCoinbase {
-	/// convert this coinbase data to a specific versioned representation for the json api.
-	pub fn into_version(cb: CbData, version: SlateVersion) -> VersionedCoinbase {
-		match version {
-			SlateVersion::SP | SlateVersion::V3B | SlateVersion::V3 => {
-				VersionedCoinbase::V3(cb.into())
-			}
-			SlateVersion::V2 => VersionedCoinbase::V2(cb.into()),
-		}
+	fn v2_slate_value() -> serde_json::Value {
+		global::set_local_chain_type(global::ChainTypes::AutomatedTesting);
+		let slate = Slate::blank(2, false).unwrap();
+		let versioned = VersionedSlate::into_version_plain(0, &slate, SlateVersion::V2).unwrap();
+		serde_json::to_value(versioned).unwrap()
+	}
+
+	#[test]
+	fn slate_ctx_v2_deserialization_rejects_ttl_cutoff_height() {
+		let mut value = v2_slate_value();
+		value.as_object_mut().unwrap().insert(
+			"ttl_cutoff_height".to_string(),
+			serde_json::Value::String("42".to_string()),
+		);
+
+		let error = serde_json::from_value::<SlateCtx>(value).unwrap_err();
+		assert!(error
+			.to_string()
+			.contains("SlateV2 does not support ttl_cutoff_height"));
+	}
+
+	#[test]
+	fn slate_ctx_v2_deserialization_accepts_null_ttl_cutoff_height() {
+		let mut value = v2_slate_value();
+		value
+			.as_object_mut()
+			.unwrap()
+			.insert("ttl_cutoff_height".to_string(), serde_json::Value::Null);
+
+		let slate_ctx = serde_json::from_value::<SlateCtx>(value).unwrap();
+		assert_eq!(slate_ctx.slate.ttl_cutoff_height, None);
+	}
+
+	#[test]
+	fn recipient_requires_slatepack_version() {
+		let secp = Secp256k1::new().unwrap();
+		let secret = ed25519_dalek::SigningKey::from_bytes(&[7_u8; 32]);
+		let sender = secret.verifying_key();
+		let recipient = ed25519_dalek::SigningKey::from_bytes(&[8_u8; 32]).verifying_key();
+		let error = VersionedSlate::into_version(
+			0,
+			Slate::blank(2, false).unwrap(),
+			SlateVersion::V3,
+			SlatePurpose::FullSlate,
+			sender,
+			Some(recipient),
+			&secret,
+			#[cfg(feature = "test-support")]
+			false,
+			&secp,
+		)
+		.unwrap_err();
+
+		assert!(matches!(error, Error::SlatepackEncodeError(_)));
 	}
 }

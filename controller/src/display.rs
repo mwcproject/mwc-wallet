@@ -13,30 +13,40 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::core::core::{self, amount_to_hr_string};
-use crate::core::global;
 #[cfg(feature = "swaps")]
-use crate::libwallet::swap::fsm::state::StateEtaInfo;
+use mwc_wallet_libwallet::swap::fsm::state::StateEtaInfo;
 #[cfg(feature = "swaps")]
-use crate::libwallet::swap::swap;
+use mwc_wallet_libwallet::swap::swap;
 #[cfg(feature = "swaps")]
-use crate::libwallet::swap::types::{Action, Currency, Role};
-use crate::libwallet::{
+use mwc_wallet_libwallet::swap::types::{Action, Currency, Role};
+#[cfg(feature = "swaps")]
+use mwc_wallet_libwallet::types::bounded_escape_for_display;
+use mwc_wallet_libwallet::types::escape_for_display;
+use mwc_wallet_libwallet::{
 	AcctPathMapping, Error, OutputCommitMapping, OutputStatus, TxLogEntry, ViewWallet, WalletInfo,
 };
+use mwc_wallet_util::mwc_core::core::{self, amount_to_hr_string};
+use mwc_wallet_util::mwc_core::global;
+use mwc_wallet_util::mwc_crates::prettytable;
+use mwc_wallet_util::mwc_crates::term;
 
-use crate::util::{to_hex, ToHex};
-#[cfg(feature = "swaps")]
-use chrono::prelude::*;
-#[cfg(feature = "swaps")]
-use chrono::Local;
-use colored::*;
 #[cfg(feature = "swaps")]
 use mwc_wallet_libwallet::swap::swap::SwapJournalRecord;
 #[cfg(feature = "swaps")]
 use mwc_wallet_libwallet::swap::types::SwapTransactionsConfirmations;
-use mwc_wallet_util::mwc_util::secp::Secp256k1;
-use prettytable;
+#[cfg(feature = "swaps")]
+use mwc_wallet_util::mwc_crates::chrono::prelude::*;
+#[cfg(feature = "swaps")]
+use mwc_wallet_util::mwc_crates::chrono::Local;
+use mwc_wallet_util::mwc_crates::colored::*;
+use mwc_wallet_util::mwc_crates::prettytable::{row, table};
+use mwc_wallet_util::mwc_crates::secp::Secp256k1;
+use mwc_wallet_util::mwc_util::{to_hex, ToHex};
+
+#[cfg(feature = "swaps")]
+const MAX_SWAP_DISPLAY_FIELD_BYTES: usize = 1_024;
+#[cfg(feature = "swaps")]
+const MAX_SWAP_DISPLAY_MESSAGE_BYTES: usize = 4_096;
 
 /// Display outputs in a pretty way
 pub fn outputs(
@@ -136,31 +146,9 @@ pub fn outputs(
 }
 
 /// Display transaction log in a pretty way
-pub fn txs(
-	account: &Option<String>,
-	cur_height: u64,
-	validated: bool,
-	txs: &[TxLogEntry],
-	include_status: bool,
-	dark_background_color_scheme: bool,
-	show_full_info: bool,
-	has_proof: impl Fn(&TxLogEntry) -> bool,
-) -> Result<(), Error> {
-	println!();
-	println!(
-		"{}",
-		format!(
-			"Transaction Log - Account '{}' - Block Height: {}",
-			account.as_deref().unwrap_or("default"),
-			cur_height
-		)
-		.magenta()
-	);
-
-	let mut table = table!();
-
+fn txs_titles(show_full_info: bool) -> prettytable::Row {
 	if show_full_info {
-		table.set_titles(row![
+		row![
 			bMG->"Id",
 			bMG->"Type",
 			bMG->"Shared Transaction Id",
@@ -179,10 +167,10 @@ pub fn txs(
 			bMG->"Payment \nProof",
 			bMG->"Kernel",
 			bMG->"Tx \nData",
-		]);
+		]
 	} else {
 		// 'short' format is used by mwc 713 wallet
-		table.set_titles(row![
+		row![
 			bMG->"Id",
 			bMG->"Type",
 			bMG->"TXID", // short 'Shared Transaction Id' value
@@ -193,151 +181,208 @@ pub fn txs(
 			bMG->"Confirmation Time",
 			bMG->"Net \nDifference",
 			bMG->"Proof?",
-		]);
+		]
 	}
+}
 
-	for t in txs {
-		let id = format!("{}", t.id);
-		let slate_id = match t.tx_slate_id {
-			Some(m) => format!("{}", m),
-			None => "None".to_owned(),
-		};
-		// mwc713 (short) representation of ID
-		let short_slate_id = match t.tx_slate_id {
-			Some(m) => to_hex(&m.as_bytes()[..4]),
-			None => String::from(""),
-		};
+/// Build a single transaction log row. The cell count must always match
+/// `txs_titles` for the same `show_full_info` value: prettytable pads short
+/// rows silently, so a missing cell shifts every subsequent value one column
+/// away from its heading.
+fn txs_data_row<F>(
+	t: &TxLogEntry,
+	dark_background_color_scheme: bool,
+	show_full_info: bool,
+	has_proof: &F,
+) -> Result<prettytable::Row, Error>
+where
+	F: Fn(&TxLogEntry) -> Result<bool, Error>,
+{
+	let id = format!("{}", t.id);
+	let slate_id = match t.tx_slate_id {
+		Some(m) => format!("{}", m),
+		None => "None".to_owned(),
+	};
+	// mwc713 (short) representation of ID
+	let short_slate_id = match t.tx_slate_id {
+		Some(m) => to_hex(&m.as_bytes()[..4]),
+		None => String::from(""),
+	};
 
-		let address = match &t.address {
-			Some(addr) => addr,
-			None => "",
-		};
-		let entry_type = format!("{}", t.tx_type);
-		let creation_ts = format!("{}", t.creation_ts.format("%Y-%m-%d %H:%M:%S"));
-		let ttl_cutoff_height = match t.ttl_cutoff_height {
-			Some(b) => format!("{}", b),
-			None => "None".to_owned(),
-		};
-		let confirmation_ts = match t.confirmation_ts {
-			Some(m) => format!("{}", m.format("%Y-%m-%d %H:%M:%S")),
-			None => "None".to_owned(),
-		};
-		let confirmed = format!("{}", t.confirmed);
-		let height = if t.confirmed && t.output_height > 0 {
-			format!("{}", t.output_height)
-		} else {
-			"".to_string()
-		};
-		let num_inputs = format!("{}", t.num_inputs);
-		let num_outputs = format!("{}", t.num_outputs);
-		let amount_debited_str = core::amount_to_hr_string(t.amount_debited, true);
-		let amount_credited_str = core::amount_to_hr_string(t.amount_credited, true);
-		let fee = match t.fee {
-			Some(f) => format!("{}", core::amount_to_hr_string(f, true)),
-			None => "None".to_owned(),
-		};
-		let net_diff = if t.amount_credited >= t.amount_debited {
-			core::amount_to_hr_string(t.amount_credited - t.amount_debited, true)
-		} else {
-			format!(
-				"-{}",
-				core::amount_to_hr_string(t.amount_debited - t.amount_credited, true)
-			)
-		};
-		let tx_data = match t.stored_tx {
-			Some(_) => "Yes".to_owned(),
-			None => "None".to_owned(),
-		};
-		let kernel_excess = match t.kernel_excess {
-			Some(e) => e.0.as_ref().to_hex(),
-			None => "None".to_owned(),
-		};
-		let payment_proof = if has_proof(t) {
-			"Yes".to_owned()
-		} else {
-			"None".to_owned()
-		};
+	let address = match &t.address {
+		Some(addr) => escape_for_display(addr),
+		None => String::new(),
+	};
+	let entry_type = format!("{}", t.tx_type);
+	let creation_ts = format!("{}", t.creation_ts.format("%Y-%m-%d %H:%M:%S"));
+	let ttl_cutoff_height = match t.ttl_cutoff_height {
+		Some(b) => format!("{}", b),
+		None => "None".to_owned(),
+	};
+	let confirmation_ts = match t.confirmation_ts {
+		Some(m) => format!("{}", m.format("%Y-%m-%d %H:%M:%S")),
+		None => "None".to_owned(),
+	};
+	let confirmed = format!("{}", t.confirmed);
+	let height = if t.confirmed && t.output_height > 0 {
+		format!("{}", t.output_height)
+	} else {
+		"".to_string()
+	};
+	let num_inputs = format!("{}", t.num_inputs);
+	let num_outputs = format!("{}", t.num_outputs);
+	let amount_debited_str = core::amount_to_hr_string(t.amount_debited, true);
+	let amount_credited_str = core::amount_to_hr_string(t.amount_credited, true);
+	let fee = match t.fee {
+		Some(f) => format!("{}", core::amount_to_hr_string(f, true)),
+		None => "None".to_owned(),
+	};
+	let net_diff = if t.amount_credited >= t.amount_debited {
+		// The branch condition proves this subtraction cannot underflow.
+		#[allow(
+			clippy::arithmetic_side_effects,
+			reason = "the branch checks amount_credited >= amount_debited"
+		)]
+		core::amount_to_hr_string(t.amount_credited - t.amount_debited, true)
+	} else {
+		// The else branch proves this subtraction cannot underflow.
+		#[allow(
+			clippy::arithmetic_side_effects,
+			reason = "the else branch implies amount_debited > amount_credited"
+		)]
+		let debit = t.amount_debited - t.amount_credited;
+		format!("-{}", core::amount_to_hr_string(debit, true))
+	};
+	let tx_data = match t.stored_tx {
+		Some(_) => "Yes".to_owned(),
+		None => "None".to_owned(),
+	};
+	let kernel_excess = match t.kernel_excess {
+		Some(e) => e.0.as_ref().to_hex(),
+		None => "None".to_owned(),
+	};
+	let payment_proof = if has_proof(t)? {
+		"Yes".to_owned()
+	} else {
+		"None".to_owned()
+	};
 
-		if show_full_info {
-			if dark_background_color_scheme {
-				table.add_row(row![
-					bFC->id,
-					bFC->entry_type,
-					bFC->slate_id,
-					bFC->address,
-					bFB->creation_ts,
-					bFB->ttl_cutoff_height,
-					bFC->confirmed,
-					bFC->height,
-					bFB->confirmation_ts,
-					bFC->num_inputs,
-					bFC->num_outputs,
-					bFG->amount_credited_str,
-					bFR->amount_debited_str,
-					bFR->fee,
-					bFY->net_diff,
-					bfG->payment_proof,
-					bFB->kernel_excess,
-					bFb->tx_data,
-				]);
-			} else {
-				if t.confirmed {
-					table.add_row(row![
-						bFD->id,
-						bFb->entry_type,
-						bFD->slate_id,
-						bFD->address,
-						bFB->creation_ts,
-						bFg->confirmed,
-						bFg->height,
-						bFB->confirmation_ts,
-						bFD->num_inputs,
-						bFD->num_outputs,
-						bFG->amount_credited_str,
-						bFD->amount_debited_str,
-						bFD->fee,
-						bFG->net_diff,
-						bfG->payment_proof,
-						bFB->kernel_excess,
-						bFB->tx_data,
-					]);
-				} else {
-					table.add_row(row![
-						bFD->id,
-						bFb->entry_type,
-						bFD->slate_id,
-						bFD->address,
-						bFB->creation_ts,
-						bFR->confirmed,
-						bFR->height,
-						bFB->confirmation_ts,
-						bFD->num_inputs,
-						bFD->num_outputs,
-						bFG->amount_credited_str,
-						bFD->amount_debited_str,
-						bFD->fee,
-						bFG->net_diff,
-						bfG->payment_proof,
-						bFB->kernel_excess,
-						bFB->tx_data,
-					]);
-				}
-			}
-		} else {
-			// Short supports only dark scheme, we really don't need more
-			table.add_row(row![
+	let row = if show_full_info {
+		if dark_background_color_scheme {
+			row![
 				bFC->id,
 				bFC->entry_type,
-				bFB->short_slate_id,
+				bFC->slate_id,
 				bFC->address,
 				bFB->creation_ts,
-				bFG->confirmed,
-				bFG->height,
+				bFB->ttl_cutoff_height,
+				bFC->confirmed,
+				bFC->height,
 				bFB->confirmation_ts,
+				bFC->num_inputs,
+				bFC->num_outputs,
+				bFG->amount_credited_str,
+				bFR->amount_debited_str,
+				bFR->fee,
 				bFY->net_diff,
-				bFG->payment_proof,
-			]);
+				bfG->payment_proof,
+				bFB->kernel_excess,
+				bFb->tx_data,
+			]
+		} else {
+			if t.confirmed {
+				row![
+					bFD->id,
+					bFb->entry_type,
+					bFD->slate_id,
+					bFD->address,
+					bFB->creation_ts,
+					bFB->ttl_cutoff_height,
+					bFg->confirmed,
+					bFg->height,
+					bFB->confirmation_ts,
+					bFD->num_inputs,
+					bFD->num_outputs,
+					bFG->amount_credited_str,
+					bFD->amount_debited_str,
+					bFD->fee,
+					bFG->net_diff,
+					bfG->payment_proof,
+					bFB->kernel_excess,
+					bFB->tx_data,
+				]
+			} else {
+				row![
+					bFD->id,
+					bFb->entry_type,
+					bFD->slate_id,
+					bFD->address,
+					bFB->creation_ts,
+					bFB->ttl_cutoff_height,
+					bFR->confirmed,
+					bFR->height,
+					bFB->confirmation_ts,
+					bFD->num_inputs,
+					bFD->num_outputs,
+					bFG->amount_credited_str,
+					bFD->amount_debited_str,
+					bFD->fee,
+					bFG->net_diff,
+					bfG->payment_proof,
+					bFB->kernel_excess,
+					bFB->tx_data,
+				]
+			}
 		}
+	} else {
+		// Short supports only dark scheme, we really don't need more
+		row![
+			bFC->id,
+			bFC->entry_type,
+			bFB->short_slate_id,
+			bFC->address,
+			bFB->creation_ts,
+			bFG->confirmed,
+			bFG->height,
+			bFB->confirmation_ts,
+			bFY->net_diff,
+			bFG->payment_proof,
+		]
+	};
+	Ok(row)
+}
+
+pub fn txs(
+	account: &Option<String>,
+	cur_height: u64,
+	validated: bool,
+	txs: &[TxLogEntry],
+	include_status: bool,
+	dark_background_color_scheme: bool,
+	show_full_info: bool,
+	has_proof: impl Fn(&TxLogEntry) -> Result<bool, Error>,
+) -> Result<(), Error> {
+	println!();
+	println!(
+		"{}",
+		format!(
+			"Transaction Log - Account '{}' - Block Height: {}",
+			account.as_deref().unwrap_or("default"),
+			cur_height
+		)
+		.magenta()
+	);
+
+	let mut table = table!();
+	table.set_titles(txs_titles(show_full_info));
+
+	for t in txs {
+		table.add_row(txs_data_row(
+			t,
+			dark_background_color_scheme,
+			show_full_info,
+			&has_proof,
+		)?);
 	}
 
 	table.set_format(*prettytable::format::consts::FORMAT_NO_COLSEP);
@@ -354,21 +399,76 @@ pub fn txs(
 	Ok(())
 }
 
-pub fn view_wallet_balance(w: ViewWallet, cur_height: u64, dark_background_color_scheme: bool) {
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use mwc_wallet_libwallet::TxLogEntryType;
+	use mwc_wallet_util::mwc_keychain::Identifier;
+
+	fn sample_tx(confirmed: bool) -> TxLogEntry {
+		let mut tx = TxLogEntry::new(Identifier::zero(), TxLogEntryType::TxSent, 1);
+		tx.confirmed = confirmed;
+		tx
+	}
+
+	// The header and every row variant must have the same cell count;
+	// prettytable pads short rows silently, shifting values under wrong headings.
+	#[test]
+	fn txs_header_and_row_column_counts_match() {
+		for show_full_info in &[true, false] {
+			let titles = txs_titles(*show_full_info);
+			for dark_scheme in &[true, false] {
+				for confirmed in &[true, false] {
+					let tx = sample_tx(*confirmed);
+					let row =
+						txs_data_row(&tx, *dark_scheme, *show_full_info, &|_| Ok(false)).unwrap();
+					assert_eq!(
+						titles.len(),
+						row.len(),
+						"txs table column mismatch: show_full_info={} dark={} confirmed={}",
+						show_full_info,
+						dark_scheme,
+						confirmed
+					);
+				}
+			}
+		}
+	}
+
+	#[test]
+	fn txs_address_is_escaped_for_terminal_display() {
+		let mut tx = sample_tx(false);
+		tx.address = Some("peer\u{1b}[2J\n\u{202e}address".to_owned());
+		let expected = "peer\\u001b[2J\\u000a\\u202eaddress";
+
+		for show_full_info in &[true, false] {
+			for dark_scheme in &[true, false] {
+				let row = txs_data_row(&tx, *dark_scheme, *show_full_info, &|_| Ok(false)).unwrap();
+				assert_eq!(row.get_cell(3).unwrap().get_content(), expected);
+			}
+		}
+	}
+}
+
+pub fn view_wallet_balance(w: &ViewWallet, cur_height: u64, dark_background_color_scheme: bool) {
+	// `rewind_hash` is the value the operator supplied to the view-wallet scan,
+	// not a credential newly retrieved from the local wallet. Echo it intentionally
+	// so the human-readable report identifies the scan input it summarizes.
 	println!(
-		"\n____ View Wallet Summary Info - Block Height: {} ____\n Rewind Hash - {}\n",
-		cur_height, w.rewind_hash
+		"\n____ View Wallet Summary Info - Block Height: {} ____\n Rewind Hash - {}\n Warning: outputs and total are rewind matches, not proof that this wallet can spend them.\n",
+		cur_height,
+		w.rewind_hash.as_str()
 	);
 	let mut table = table!();
 
 	if dark_background_color_scheme {
 		table.add_row(row![
-			bFG->"Total Balance",
+			bFG->"Rewind-Matched Total",
 			FG->amount_to_hr_string(w.total_balance, false)
 		]);
 	} else {
 		table.add_row(row![
-			bFG->"Total Balance",
+			bFG->"Rewind-Matched Total",
 			FG->amount_to_hr_string(w.total_balance, false)
 		]);
 	};
@@ -378,7 +478,7 @@ pub fn view_wallet_balance(w: ViewWallet, cur_height: u64, dark_background_color
 }
 
 pub fn view_wallet_output(
-	view_wallet: ViewWallet,
+	view_wallet: &ViewWallet,
 	cur_height: u64,
 	dark_background_color_scheme: bool,
 ) -> Result<(), Error> {
@@ -411,7 +511,7 @@ pub fn view_wallet_output(
 		bMG->"Value",
 	]);
 
-	for m in view_wallet.output_result {
+	for m in &view_wallet.output_result {
 		let commit = format!("{}", m.commit);
 		let index = m.mmr_index;
 		let height = format!("{}", m.height);
@@ -650,13 +750,13 @@ pub fn tx_messages(
 
 	for m in msgs.messages {
 		let id = format!("{}", m.id);
-		let public_key = format!("{}", m.public_key.serialize_vec(secp, true).to_hex());
+		let public_key = format!("{}", m.public_key.serialize_vec(secp, true)?.to_hex());
 		let message = match m.message {
-			Some(m) => format!("{}", m),
+			Some(message) => escape_for_display(&message),
 			None => "None".to_owned(),
 		};
 		let message_sig = match m.message_sig {
-			Some(s) => format!("{}", s.serialize_der(secp).to_hex()),
+			Some(signature) => signature.serialize_raw(secp)?.to_hex(),
 			None => "None".to_owned(),
 		};
 		if dark_background_color_scheme {
@@ -678,62 +778,6 @@ pub fn tx_messages(
 
 	table.set_format(*prettytable::format::consts::FORMAT_NO_COLSEP);
 	table.printstd();
-	println!();
-
-	Ok(())
-}
-
-/// Display individual Payment Proof
-#[cfg(feature = "grin_proof")]
-pub fn payment_proof(tx: &TxLogEntry) -> Result<(), Error> {
-	println!();
-	println!(
-		"{}",
-		format!("Payment Proof - Transaction '{}'", tx.id,).magenta()
-	);
-
-	let pp = match &tx.payment_proof {
-		None => {
-			println!("None");
-			return Ok(());
-		}
-		Some(p) => p.clone(),
-	};
-
-	println!();
-	let receiver_signature = match pp.receiver_signature {
-		Some(s) => s.to_hex(),
-		None => "None".to_owned(),
-	};
-	let fee = match tx.fee {
-		Some(f) => f,
-		None => 0,
-	};
-	let amount = if tx.amount_credited >= tx.amount_debited {
-		core::amount_to_hr_string(tx.amount_credited - tx.amount_debited, true)
-	} else {
-		format!(
-			"{}",
-			core::amount_to_hr_string(tx.amount_debited - tx.amount_credited - fee, true)
-		)
-	};
-
-	let sender_signature = match pp.sender_signature {
-		Some(s) => s.to_hex(),
-		None => "None".to_owned(),
-	};
-	let kernel_excess = match tx.kernel_excess {
-		Some(e) => e.to_hex(),
-		None => "None".to_owned(),
-	};
-
-	println!("Receiver Address: {}", pp.receiver_address.public_key);
-	println!("Receiver Signature: {}", receiver_signature);
-	println!("Amount: {}", amount);
-	println!("Kernel Excess: {}", kernel_excess);
-	println!("Sender Address: {}", pp.sender_address.public_key);
-	println!("Sender Signature: {}", sender_signature);
-
 	println!();
 
 	Ok(())
@@ -822,9 +866,27 @@ pub fn swap_trade(
 	};
 	println!("    Locking order: {}", lock_str.bold().yellow());
 
-	if tx_conf.mwc_tip < swap.refund_slate.slate.get_lock_height_check()? {
-		let mwc_lock_sec =
-			(swap.refund_slate.slate.get_lock_height_check()? - tx_conf.mwc_tip) * 60;
+	let lock_height = swap.refund_slate.slate.get_lock_height_check()?;
+	if !tx_conf.mwc_observed {
+		println!("    MWC lock status is currently unavailable");
+	} else if tx_conf.mwc_tip < lock_height {
+		// The surrounding branch proves lock_height > mwc_tip.
+		#[allow(
+			clippy::arithmetic_side_effects,
+			reason = "the branch checks mwc_tip < lock_height"
+		)]
+		let remaining_blocks = lock_height - tx_conf.mwc_tip;
+		let mwc_lock_sec = remaining_blocks.checked_mul(60).ok_or_else(|| {
+			Error::DataOverflow(format!(
+					"display::swap_trade, MWC lock duration overflow, remaining_blocks={} seconds_per_block=60",
+					remaining_blocks
+				))
+		})?;
+		// Both time-unit divisors are fixed nonzero constants.
+		#[allow(
+			clippy::arithmetic_side_effects,
+			reason = "the hour and minute divisors are fixed nonzero constants"
+		)]
 		let sel_lock_h = mwc_lock_sec / 3600;
 		let sel_lock_m = (mwc_lock_sec % 3600) / 60;
 		let est_time_str = format!("{} hours and {} minutes", sel_lock_h, sel_lock_m);
@@ -843,9 +905,19 @@ pub fn swap_trade(
 	}
 
 	let now_ts = Utc::now().timestamp();
-	let btc_lock_time = swap.get_time_secondary_lock_publish();
+	let btc_lock_time = swap.get_time_secondary_lock_publish()?;
 	if now_ts < btc_lock_time {
-		let buyer_lock_time = btc_lock_time - now_ts;
+		let buyer_lock_time = btc_lock_time.checked_sub(now_ts).ok_or_else(|| {
+			Error::DataOverflow(format!(
+				"display::swap_trade, secondary lock duration overflow, lock_time={} current_time={}",
+				btc_lock_time, now_ts
+			))
+		})?;
+		// Both time-unit divisors are fixed nonzero constants.
+		#[allow(
+			clippy::arithmetic_side_effects,
+			reason = "the hour and minute divisors are fixed nonzero constants"
+		)]
 		let buy_lock_h = buyer_lock_time / 3600;
 		let buy_lock_m = (buyer_lock_time % 3600) / 60;
 		let est_time_str = format!("{} hours and {} minutes", buy_lock_h, buy_lock_m);
@@ -860,37 +932,41 @@ pub fn swap_trade(
 
 	match &swap.role {
 		Role::Seller(address, _) => {
+			let safe_address =
+				bounded_escape_for_display(address, MAX_SWAP_DISPLAY_FIELD_BYTES);
 			if !swap.secondary_currency.is_btc_family()
 				&& address == "0x0000000000000000000000000000000000000000"
 			{
 				println!(
 					"    {} redeem address: {}",
 					"Internal Eth Wallet Address",
-					address.bold().yellow()
+					safe_address.bold().yellow()
 				);
 			} else {
 				println!(
 					"    {} redeem address: {}",
 					swap.secondary_currency,
-					address.bold().yellow()
+					safe_address.bold().yellow()
 				);
 			}
 		}
 		Role::Buyer(address) => match address {
 			Some(address) => {
+				let safe_address =
+					bounded_escape_for_display(address, MAX_SWAP_DISPLAY_FIELD_BYTES);
 				if !swap.secondary_currency.is_btc_family()
 					&& address == "0x0000000000000000000000000000000000000000"
 				{
 					println!(
 						"    {} refund address: {}",
 						"Internal Eth Wallet Address",
-						address.bold().yellow()
+						safe_address.bold().yellow()
 					);
 				} else {
 					println!(
 						"    {} refund address: {}",
 						swap.secondary_currency,
-						address.bold().yellow()
+						safe_address.bold().yellow()
 					);
 				}
 			}
@@ -902,20 +978,28 @@ pub fn swap_trade(
 	println!(
 		"    Current {} transaction fee: {} {}",
 		swap.secondary_currency,
-		swap.secondary_fee.to_string().bold().yellow(),
+		swap.secondary_fee_units.to_string().bold().yellow(),
 		swap.secondary_currency.get_fee_units().0
 	);
 
 	println!("");
+	let communication_method = bounded_escape_for_display(
+		&swap.communication_method,
+		MAX_SWAP_DISPLAY_FIELD_BYTES,
+	);
+	let communication_address = bounded_escape_for_display(
+		&swap.communication_address,
+		MAX_SWAP_DISPLAY_FIELD_BYTES,
+	);
 	if swap.is_seller() {
 		println!(
 			"    Buyer address: {}, {}",
-			swap.communication_method, swap.communication_address
+			communication_method, communication_address
 		);
 	} else {
 		println!(
 			"    Seller address: {}, {}",
-			swap.communication_method, swap.communication_address
+			communication_method, communication_address
 		);
 	}
 
@@ -925,15 +1009,17 @@ pub fn swap_trade(
 	} else {
 		format!("{}, {}", action, expired_str)
 	};
+	let action_str = bounded_escape_for_display(&action_str, MAX_SWAP_DISPLAY_MESSAGE_BYTES);
 
 	// Status info
 	println!("");
 	println!("-------- Execution plan --------");
 	for eta in roadmap {
+		let eta_name = bounded_escape_for_display(&eta.name, MAX_SWAP_DISPLAY_FIELD_BYTES);
 		if eta.active {
-			print!("{}{:40}", "--> ".yellow(), eta.name.bold().yellow());
+			print!("{}{:40}", "--> ".yellow(), eta_name.bold().yellow());
 		} else {
-			print!("{}{:40}", "    ", eta.name);
+			print!("{}{:40}", "    ", eta_name);
 		}
 
 		if let Some(t) = eta.start_time {
@@ -952,7 +1038,11 @@ pub fn swap_trade(
 	println!("");
 	println!("-------- Trade Journal --------");
 	for j in journal_records {
-		println!("    {:20} {}", timestamp_to_local_time(j.time), j.message);
+		println!(
+			"    {:20} {}",
+			timestamp_to_local_time(j.time),
+			bounded_escape_for_display(&j.message, MAX_SWAP_DISPLAY_MESSAGE_BYTES)
+		);
 	}
 
 	if show_requied_action {

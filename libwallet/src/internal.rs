@@ -22,7 +22,9 @@
 #![deny(unused_mut)]
 #![warn(missing_docs)]
 
+pub(crate) mod chain_session;
 pub mod keys;
+pub(crate) mod output_proof;
 pub mod scan;
 pub mod selection;
 pub mod tx;

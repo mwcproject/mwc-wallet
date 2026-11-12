@@ -12,10 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::mwc_util::secp;
+use mwc_wallet_util::mwc_crates::secp;
 
 /// Multisig error
-#[derive(Clone, Eq, PartialEq, Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error)]
 pub enum Error {
 	/// Reveal phase error
 	#[error("Multisig Invalid reveal")]
@@ -35,6 +35,10 @@ pub enum Error {
 	/// Participant invalid
 	#[error("Multisig Participant invalid")]
 	ParticipantInvalid,
+	/// A revealed participant commitment is not a canonical, parseable Pedersen
+	/// commitment.
+	#[error("Multisig Participant commitment is invalid")]
+	ParticipantCommitmentInvalid,
 	/// Multisig incomplete
 	#[error("Multisig incomplete")]
 	MultiSigIncomplete,
@@ -49,5 +53,22 @@ pub enum Error {
 	Round2Missing,
 	/// Secp error
 	#[error("Multisig Secp: {0}")]
-	Secp(#[from] secp::Error),
+	Secp(secp::Error),
+}
+
+impl From<secp::Error> for Error {
+	fn from(error: secp::Error) -> Error {
+		Error::Secp(error)
+	}
+}
+
+impl Error {
+	/// Whether this multisig failure came from a local condition that can change
+	/// on retry rather than from peer-controlled protocol data.
+	pub(crate) fn is_transient(&self) -> bool {
+		matches!(
+			self,
+			Self::Secp(secp::Error::SysRngFailure | secp::Error::AllocationError)
+		)
+	}
 }

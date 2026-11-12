@@ -45,7 +45,7 @@ jobs:
   steps:
     - script: |
         sudo apt-get update -yqq
-        sudo apt install clang-11 git curl make build-essential mesa-utils libgl1-mesa-dev openssl libssl-dev golang -y
+        sudo apt install clang-11 git curl make build-essential mesa-utils libgl1-mesa-dev openssl libssl-dev -y
         sudo apt-get install -yqq --no-install-recommends libncursesw5-dev
         echo "Disk before cleanup:"
         df -h
@@ -69,9 +69,6 @@ jobs:
         CI_JOB: release
         PLATFORM: macos-x64
   steps:
-    - script: |
-        brew install go
-      displayName: Install Go
     - template: '.ci/test.yml'
     - template: '.ci/release.yml'
 - job: windows
@@ -88,7 +85,6 @@ jobs:
     - script: |
         choco install -y llvm
         choco install -y openssl
-        choco install -y golang
       displayName: Windows Install Dependencies
     - template: '.ci/test.yml'
     - template: '.ci/windows-release.yml'

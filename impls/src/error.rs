@@ -14,13 +14,16 @@
 // limitations under the License.
 
 //! Implementation specific error types
-use crate::core::libtx;
-use crate::keychain;
-use mwc_wallet_util::OnionV3AddressError;
+use mwc_wallet_util::mwc_core::libtx;
+use mwc_wallet_util::mwc_crates::secp;
 
 /// Wallet errors, mostly wrappers around underlying crypto or I/O errors.
-#[derive(Clone, thiserror::Error, Eq, PartialEq, Debug)]
+#[derive(thiserror::Error, Debug)]
 pub enum Error {
+	/// Integer conversion or arithmetic overflow/underflow.
+	#[error("Wallet implementation data overflow error, {0}")]
+	DataOverflow(String),
+
 	/// LibTX Error
 	#[error("LibTx Error, {0}")]
 	LibTX(#[from] libtx::Error),
@@ -31,11 +34,11 @@ pub enum Error {
 
 	/// Keychain error
 	#[error("Keychain error, {0}")]
-	Keychain(#[from] keychain::Error),
+	Keychain(#[from] mwc_wallet_util::mwc_keychain::Error),
 
 	/// Onion V3 Address Error
 	#[error("Onion V3 Address Error, {0}")]
-	OnionV3Address(#[from] OnionV3AddressError),
+	OnionV3Address(#[from] mwc_wallet_util::mwc_util::OnionV3Error),
 
 	/// Error when obfs4proxy is not in the user path if TOR brigde is enabled
 	#[error("Unable to find obfs4proxy binary in your path; {0}")]
@@ -137,6 +140,18 @@ pub enum Error {
 	#[error("Connection error: {0}")]
 	ConnectionError(String),
 
+	/// A non-success status returned by an HTTP endpoint.
+	#[error("HTTP error {0}")]
+	HttpStatus(u16),
+
+	/// An HTTP request or response exceeded its absolute read deadline.
+	#[error("HTTP read timeout: {0}")]
+	HttpReadTimeout(String),
+
+	/// An HTTP request or response exceeded an application-level size limit.
+	#[error("HTTP message too large: {0}")]
+	HttpMessageTooLarge(String),
+
 	#[error("unknown address!, {0}")]
 	UnknownAddressType(String),
 
@@ -154,4 +169,10 @@ pub enum Error {
 
 	#[error("proof address mismatch {0}, {1}!")]
 	ProofAddressMismatch(String, String),
+}
+
+impl From<secp::Error> for Error {
+	fn from(error: secp::Error) -> Self {
+		Error::Secp(format!("{}", error))
+	}
 }

@@ -24,7 +24,6 @@
 
 pub mod foreign;
 pub mod owner;
-#[cfg(feature = "libp2p")]
-pub mod owner_libp2p;
-pub mod owner_updater;
+#[cfg(feature = "swaps")]
+pub use crate::swap::{owner_eth, owner_swap};
 pub mod types;

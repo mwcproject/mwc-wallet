@@ -36,19 +36,22 @@
 //!    orig_version: u16,
 //!    block_header_version: u16,
 
-use crate::mwc_core::core::transaction::OutputFeatures;
-use crate::mwc_core::libtx::secp_ser;
-use crate::mwc_keychain::{BlindingFactor, Identifier};
-use crate::mwc_util::secp;
-use crate::mwc_util::secp::key::PublicKey;
-use crate::mwc_util::secp::pedersen::{Commitment, RangeProof};
-use crate::mwc_util::secp::Signature;
 use crate::slate::CompatKernelFeatures;
-use crate::slate_versions::v3::{OutputV3, TxKernelV3};
-use crate::types::CbData;
-use uuid::Uuid;
+use crate::slate_versions::v3::{
+	kernel_excess_serde, kernel_sig_serde, option_aggsig_serde,
+};
+use mwc_wallet_util::mwc_core::core::transaction::OutputFeatures;
+use mwc_wallet_util::mwc_core::libtx::secp_ser;
+use mwc_wallet_util::mwc_crates::secp;
+use mwc_wallet_util::mwc_crates::secp::key::PublicKey;
+use mwc_wallet_util::mwc_crates::secp::pedersen::{Commitment, RangeProof};
+use mwc_wallet_util::mwc_crates::secp::AggSigSignature;
+use mwc_wallet_util::mwc_crates::serde::{self, Deserialize, Serialize};
+use mwc_wallet_util::mwc_crates::uuid::Uuid;
+use mwc_wallet_util::mwc_keychain::BlindingFactor;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(crate = "serde")]
 pub struct SlateV2ParseTTL {
 	/// Versioning info
 	pub version_info: VersionCompatInfoV2,
@@ -74,7 +77,7 @@ pub struct SlateV2ParseTTL {
 	/// Participant data, each participant in the transaction will
 	/// insert their public data here. For now, 0 is sender and 1
 	/// is receiver, though this will change for multi-party
-	#[serde(with = "secp_ser::opt_string_or_u64")]
+	#[serde(default, with = "secp_ser::opt_string_or_u64")]
 	pub ttl_cutoff_height: Option<u64>,
 	/// If a wallet doesn't support them, they will be filtered out.
 	/// coin Type the default is mwc.
@@ -88,6 +91,7 @@ pub struct SlateV2ParseTTL {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(crate = "serde")]
 pub struct SlateV2 {
 	/// Versioning info
 	pub version_info: VersionCompatInfoV2,
@@ -122,6 +126,7 @@ pub struct SlateV2 {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(crate = "serde")]
 pub struct VersionCompatInfoV2 {
 	/// The current version of the slate format
 	pub version: u16,
@@ -132,6 +137,7 @@ pub struct VersionCompatInfoV2 {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(crate = "serde")]
 pub struct ParticipantDataV2 {
 	/// Id of participant in the transaction. (For now, 0=sender, 1=rec)
 	#[serde(with = "secp_ser::string_or_u64")]
@@ -143,17 +149,18 @@ pub struct ParticipantDataV2 {
 	#[serde(with = "secp_ser::pubkey_serde")]
 	pub public_nonce: PublicKey,
 	/// Public partial signature
-	#[serde(with = "secp_ser::option_sig_serde")]
-	pub part_sig: Option<Signature>,
+	#[serde(default, with = "option_aggsig_serde")]
+	pub part_sig: Option<AggSigSignature>,
 	/// A message for other participants
 	pub message: Option<String>,
 	/// Signature, created with private key corresponding to 'public_blind_excess'
-	#[serde(with = "secp_ser::option_sig_serde")]
-	pub message_sig: Option<Signature>,
+	#[serde(default, with = "option_aggsig_serde")]
+	pub message_sig: Option<AggSigSignature>,
 }
 
 /// A transaction
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(crate = "serde")]
 pub struct TransactionV2 {
 	/// The kernel "offset" k2
 	/// excess is k1G after splitting the key k = k1 + k2
@@ -168,6 +175,7 @@ pub struct TransactionV2 {
 
 /// TransactionBody is a common abstraction for transaction and block
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(crate = "serde")]
 pub struct TransactionBodyV2 {
 	/// List of inputs spent by the transaction.
 	pub inputs: Vec<InputV2>,
@@ -177,6 +185,7 @@ pub struct TransactionBodyV2 {
 	pub kernels: Vec<TxKernelV2>,
 }
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(crate = "serde")]
 pub struct InputV2 {
 	/// The features of the output being spent.
 	/// We will check maturity for coinbase output.
@@ -190,6 +199,7 @@ pub struct InputV2 {
 }
 
 #[derive(Debug, Copy, Clone, Serialize, Deserialize)]
+#[serde(crate = "serde")]
 pub struct OutputV2 {
 	/// Options for an output's structure or use
 	pub features: OutputFeatures,
@@ -201,13 +211,14 @@ pub struct OutputV2 {
 	pub commit: Commitment,
 	/// A proof that the commitment is in the right range
 	#[serde(
-		serialize_with = "secp_ser::as_hex",
+		serialize_with = "secp_ser::rangeproof_as_hex",
 		deserialize_with = "secp_ser::rangeproof_from_hex"
 	)]
 	pub proof: RangeProof,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(crate = "serde")]
 pub struct TxKernelV2 {
 	/// Options for a kernel's structure or use
 	pub features: CompatKernelFeatures,
@@ -221,39 +232,34 @@ pub struct TxKernelV2 {
 	/// Remainder of the sum of all transaction commitments. If the transaction
 	/// is well formed, amounts components should sum to zero and the excess
 	/// is hence a valid public key.
-	#[serde(
-		serialize_with = "secp_ser::as_hex",
-		deserialize_with = "secp_ser::commitment_from_hex"
-	)]
+	#[serde(with = "kernel_excess_serde")]
 	pub excess: Commitment,
 	/// The signature proving the excess is a valid public key, which signs
 	/// the transaction fee.
-	#[serde(with = "secp_ser::sig_serde")]
-	pub excess_sig: secp::Signature,
+	#[serde(with = "kernel_sig_serde")]
+	pub excess_sig: secp::AggSigSignature,
 }
 
-/// A mining node requests new coinbase via the foreign api every time a new candidate block is built.
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct CoinbaseV2 {
-	/// Output
-	pub output: OutputV2,
-	/// Kernel
-	pub kernel: TxKernelV2,
-	/// Key Id
-	pub key_id: Option<Identifier>,
-}
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use mwc_wallet_util::mwc_crates::serde_json;
 
-// Coinbase data to versioned.
-impl From<CbData> for CoinbaseV2 {
-	fn from(cb: CbData) -> CoinbaseV2 {
-		let output = OutputV3::from(&cb.output);
-		let output = OutputV2::from(&output);
-		let kernel = TxKernelV3::from(&cb.kernel);
-		let kernel = TxKernelV2::from(&kernel);
-		CoinbaseV2 {
-			output,
-			kernel,
-			key_id: cb.key_id,
-		}
+	#[test]
+	fn output_proof_with_oversized_length_fails_deserialization() {
+		// RangeProof's constructor prevents invalid in-memory lengths. Check
+		// that oversized peer-supplied proofs are rejected at the JSON boundary.
+		let secp = secp::Secp256k1::with_caps(secp::ContextFlag::Commit).unwrap();
+		let output = OutputV2 {
+			features: OutputFeatures::Plain,
+			commit: secp.commit_value(1).unwrap(),
+			proof: RangeProof::zero(),
+		};
+		let mut value = serde_json::to_value(&output).unwrap();
+		assert!(serde_json::from_value::<OutputV2>(value.clone()).is_ok());
+		value["proof"] =
+			serde_json::Value::String("00".repeat(secp::constants::MAX_PROOF_SIZE + 1));
+		let error = serde_json::from_value::<OutputV2>(value).unwrap_err();
+		assert!(error.to_string().contains("at most MAX_PROOF_SIZE bytes"));
 	}
 }

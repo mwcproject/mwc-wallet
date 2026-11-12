@@ -1,0 +1,49 @@
+{
+  "downloaded_contracts": [
+    {
+      "address": "0x2FA243fC8f9EAF014f8d6E909157B6A48cEE0bdC",
+      "network": "ethereum-mainnet",
+      "name": "SwapContractAggregateSignature",
+      "source": "Etherscan",
+      "source_url": "https://etherscan.io/address/0x2FA243fC8f9EAF014f8d6E909157B6A48cEE0bdC#code",
+      "compiler": "solc 0.7.6",
+      "optimizer": {
+        "enabled": true,
+        "runs": 200
+      },
+      "evm_version": "byzantium",
+      "source_sha256": {
+        "SwapContractAggregateSignature.sol": "cda1595c700c45dd8b6e139492abfe2b772b89b03889291e5d702e8db07ca97f",
+        "openzeppelin-solidity/contracts/cryptography/ECDSA.sol": "b616c207727963f2ee9b93185c3bcc6c7fccbbe8f3a455c6c4ffcd0ca7271b92"
+      },
+      "creation_bytecode_sha256": "48bb14f7e6bedbb00feaf2c5ff13782c0e84f7ed1a5851889d05f2aa3488e1df",
+      "deployed_bytecode_sha256": "8cf5559735f6b00deba073cd9def8459bdd293d8edd46057c160ce0510caaa2d"
+    },
+    {
+      "address": "0xDd62a95626453F54E686cF0531bCbf6766150794",
+      "network": "ethereum-mainnet",
+      "name": "ERC20SwapContractAggregateSignature",
+      "source": "Blockscout",
+      "source_url": "https://eth.blockscout.com/address/0xDd62a95626453F54E686cF0531bCbf6766150794?tab=contract",
+      "compiler": "0.7.6+commit.7338295f",
+      "optimizer": {
+        "enabled": true,
+        "runs": 200
+      },
+      "evm_version": "byzantium",
+      "verified": true,
+      "fully_verified": true,
+      "source_sha256": {
+        "ERC20SwapContractAggregateSignature.sol": "334efafca305c1fc948662aa9e2760f5e9287e629fc6ddb99211eed6eb44cbeb",
+        "openzeppelin-solidity/contracts/cryptography/ECDSA.sol": "b616c207727963f2ee9b93185c3bcc6c7fccbbe8f3a455c6c4ffcd0ca7271b92",
+        "openzeppelin-solidity/contracts/math/SafeMath.sol": "38e47d1b5299ce0d5e48db837ed9248449043c50d90ffa0ee2ceb58ffde942c2",
+        "openzeppelin-solidity/contracts/token/ERC20/IERC20.sol": "0573c2961569aa4906845d0cd428b5b7394956170054ceeaa8f8af96cd44875c",
+        "openzeppelin-solidity/contracts/token/ERC20/SafeERC20.sol": "eea796f96939e7dd6119de00941717ce5772d8a942b184f5e48d2b962d0ab655",
+        "openzeppelin-solidity/contracts/utils/Address.sol": "7a6f9acee77ad6aa4db616c473d507a5726698c3bd9005d6c54d8258c3cb6480"
+      },
+      "creation_bytecode_sha256": "06e308d3c5f2361b3b033e01775077d034afd93e369fbe607ba2dd7ab756d936",
+      "deployed_bytecode_sha256": "003c68f25148c8b1a528fb3e83ad9b9d01debc8f2d507a1441160845d66a4683"
+    }
+  ],
+  "note": "Explorer-verified source snapshots for the default mwc-wallet Ethereum mainnet swap addresses."
+}

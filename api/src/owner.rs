@@ -15,59 +15,59 @@
 
 //! Owner API External Definition
 
-use chrono::prelude::*;
-use ed25519_dalek::PublicKey as DalekPublicKey;
+#[cfg(feature = "test-support")]
+use mwc_wallet_util::mwc_crates::chrono::prelude::*;
+use mwc_wallet_util::mwc_crates::ed25519_dalek;
+use mwc_wallet_util::mwc_crates::lazy_static::lazy_static;
+use mwc_wallet_util::mwc_crates::uuid::Uuid;
 use std::path::Path;
-use uuid::Uuid;
 
-use crate::config::{MQSConfig, WalletConfig};
-use crate::core::core::OutputFeatures;
-use crate::core::core::Transaction;
-use crate::core::global;
-use crate::impls::create_sender;
-use crate::keychain::{Identifier, Keychain};
-use crate::libwallet::api_impl::foreign;
-use crate::libwallet::api_impl::owner_updater::{start_updater_log_thread, StatusMessage};
-use crate::libwallet::api_impl::{owner, owner_updater};
+use mwc_wallet_config::{MQSConfig, WalletConfig};
+use mwc_wallet_impls::create_sender;
 #[cfg(feature = "swaps")]
-use crate::libwallet::api_impl::{owner_eth, owner_swap};
-use crate::libwallet::proof::proofaddress;
-use crate::libwallet::proof::tx_proof::TxProof;
+use mwc_wallet_libwallet::SwapStartArgs;
+use mwc_wallet_libwallet::api_impl::foreign;
+use mwc_wallet_libwallet::api_impl::owner;
 #[cfg(feature = "swaps")]
-use crate::libwallet::swap::fsm::state::{StateEtaInfo, StateId, StateProcessRespond};
+use mwc_wallet_libwallet::api_impl::{owner_eth, owner_swap};
+use mwc_wallet_libwallet::proof::proofaddress;
+use mwc_wallet_libwallet::proof::tx_proof::TxProof;
+use mwc_wallet_libwallet::slate_process::SlateProcessGuard;
 #[cfg(feature = "swaps")]
-use crate::libwallet::swap::types::{Action, Currency, SwapTransactionsConfirmations};
+use mwc_wallet_libwallet::swap::fsm::state::{StateEtaInfo, StateId, StateProcessRespond};
 #[cfg(feature = "swaps")]
-use crate::libwallet::swap::{message::Message, swap::Swap, swap::SwapJournalRecord};
-#[cfg(feature = "grin_proof")]
-use crate::libwallet::PaymentProof;
-#[cfg(feature = "grin_proof")]
-use crate::libwallet::SwapStartArgs;
-use crate::libwallet::{
+use mwc_wallet_libwallet::swap::types::{Action, Currency, SwapTransactionsConfirmations};
+#[cfg(feature = "swaps")]
+use mwc_wallet_libwallet::swap::{message::Message, swap::Swap, swap::SwapJournalRecord};
+use mwc_wallet_libwallet::{
 	AcctPathMapping, BuiltOutput, Error, InitTxArgs, IssueInvoiceTxArgs, NodeClient,
-	NodeHeightResult, OutputCommitMapping, Slate, SlatePurpose, SlateVersion, TxLogEntry,
-	VersionedSlate, ViewWallet, WalletInfo, WalletInst, WalletLCProvider,
+	NodeHeightResult, OutputCommitMapping, Slate, SlatePurpose, SlateVersion, StoredTxLocator,
+	TxLogEntry, VersionedSlate, ViewWallet, WalletInfo, WalletInst, WalletLCProvider,
 };
+use mwc_wallet_util::mwc_core::core::OutputFeatures;
+use mwc_wallet_util::mwc_core::core::Transaction;
+use mwc_wallet_util::mwc_core::global;
+use mwc_wallet_util::mwc_keychain::{Identifier, Keychain};
 
-use crate::util::logger::LoggingConfig;
-use crate::util::secp::key::SecretKey;
-use crate::util::{from_hex, ZeroingString};
-use libwallet::proof::tx_proof;
-use libwallet::proof::tx_proof::VerifyProofResult;
-use libwallet::types::{TxSession, U64_DATA_IDX_ADDRESS_INDEX};
-use libwallet::{
-	wallet_lock, Context, OwnershipProof, OwnershipProofValidation, RetrieveTxQueryArgs,
+use mwc_wallet_libwallet::proof::tx_proof;
+use mwc_wallet_libwallet::proof::tx_proof::VerifyProofResult;
+use mwc_wallet_libwallet::types::{TxSession, U64_DATA_IDX_ADDRESS_INDEX};
+use mwc_wallet_libwallet::{
+	Context, OwnershipProof, OwnershipProofValidation, RetrieveTxQueryArgs, wallet_lock,
 };
+use mwc_wallet_util::Mutex;
+use mwc_wallet_util::mwc_crates::log::{error, info};
+use mwc_wallet_util::mwc_crates::secp::key::PublicKey;
+use mwc_wallet_util::mwc_crates::secp::key::SecretKey;
+use mwc_wallet_util::mwc_crates::secp::{ContextFlag, Secp256k1};
+use mwc_wallet_util::mwc_crates::zeroize::Zeroizing;
 use mwc_wallet_util::mwc_p2p::TorConfig;
-use mwc_wallet_util::mwc_util::secp::key::PublicKey;
-use mwc_wallet_util::mwc_util::secp::{ContextFlag, Secp256k1};
-use mwc_wallet_util::mwc_util::static_secp_instance;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{channel, Sender};
-use std::sync::{Arc, Mutex};
-use std::thread;
-use std::thread::JoinHandle;
-use std::time::Duration;
+use mwc_wallet_util::mwc_util::ZeroingString;
+#[cfg(feature = "test-support")]
+use mwc_wallet_util::mwc_util::from_hex;
+use mwc_wallet_util::mwc_util::logger::LoggingConfig;
+use std::convert::TryFrom;
+use std::sync::Arc;
 
 lazy_static! {
 	// Flag that send call is in the progress. init_send_tx is not atomic because we don't want
@@ -104,61 +104,27 @@ where
 	/// contain all methods to manage the wallet
 	pub wallet_inst: Arc<Mutex<Box<dyn WalletInst<'static, L, C, K>>>>,
 	/// Flag to normalize some output during testing. Can mostly be ignored.
+	#[cfg(feature = "test-support")]
 	pub doctest_mode: bool,
 	/// retail TLD during doctest
+	#[cfg(feature = "test-support")]
 	pub doctest_retain_tld: bool,
 	/// Share ECDH key
 	pub shared_key: Arc<Mutex<Option<SecretKey>>>,
-	/// Update thread
-	updater: Arc<Mutex<owner_updater::Updater<'static, L, C, K>>>,
-	// Updater thread for tracking
-	updater_thread: Mutex<Option<JoinHandle<()>>>,
-	/// Stop state for update thread
-	pub updater_running: Arc<AtomicBool>,
-	/// Sender for update messages
-	status_tx: Mutex<Option<Sender<StatusMessage>>>,
-	/// Holds all update and status messages returned by the
-	/// updater process
-	updater_messages: Arc<Mutex<Vec<StatusMessage>>>,
 	/// Optional TOR configuration, holding address of sender and
 	/// data directory
 	tor_config: Mutex<Option<TorConfig>>,
-
-	/// updater log thread. Expected to be removed at next rebase
-	updater_log_thread: Option<JoinHandle<()>>,
-	// Atomic to stop the thread
-	updater_log_running_state: Arc<AtomicBool>,
 }
 
-// Owner need to release the resources. We have a thread that is running in background
-impl<L, C, K> Drop for Owner<L, C, K>
-where
-	L: WalletLCProvider<'static, C, K> + 'static,
-	C: NodeClient,
-	K: Keychain,
-{
-	/// We have a start_updater_log_thread running in the background.
-	/// We neeed to stop it on the exit. Note, we don't like this design but it is how
-	/// mwc implement it. We are keeping it with smaller number of changes and
-	/// really hope to get a better solution with a next fix
-	fn drop(&mut self) {
-		self.updater_running.store(false, Ordering::Relaxed);
-		self.updater_log_running_state
-			.store(false, Ordering::Relaxed);
-
-		if let Some(thr_info) = self.updater_log_thread.take() {
-			let _ = thr_info.join();
-		}
-
-		if let Some(thr) = self
-			.updater_thread
-			.lock()
-			.unwrap_or_else(|e| e.into_inner())
-			.take()
-		{
-			let _ = thr.join();
-		}
-	}
+/// Result of processing an invoice request.
+///
+/// Keep `processing_guard` alive until `tx_lock_outputs`, the response exchange,
+/// optional post, and transaction-session save have finished.
+pub struct ProcessInvoiceTxResult {
+	/// Invoice response Slate.
+	pub slate: Slate,
+	/// Process-local ownership of this externally supplied Slate UUID.
+	pub processing_guard: SlateProcessGuard,
 }
 
 impl<L, C, K> Owner<L, C, K>
@@ -177,8 +143,6 @@ where
 	///
 	/// # Arguments
 	/// * `wallet_in` - A reference-counted mutex containing an implementation of the
-	/// * `custom_channel` - A custom MPSC Tx/Rx pair to capture status
-	/// updates
 	/// [`WalletBackend`](../mwc_wallet_libwallet/types/trait.WalletBackend.html) trait.
 	///
 	/// # Returns
@@ -187,24 +151,22 @@ where
 	/// # Example
 	/// ```
 	/// use mwc_wallet_util::mwc_keychain as keychain;
-	/// use mwc_wallet_util::mwc_util as util;
-	/// use mwc_wallet_util::mwc_core;
 	/// use mwc_wallet_api as api;
 	/// use mwc_wallet_config as config;
 	/// use mwc_wallet_impls as impls;
-	/// use mwc_wallet_libwallet as libwallet;
 	///
-	/// use mwc_core::global;
+	/// use mwc_wallet_util::mwc_core::global;
 	/// use keychain::ExtKeychain;
-	/// use tempfile::tempdir;
+	/// use mwc_wallet_util::mwc_crates::tempfile::tempdir;
 	///
-	/// use std::sync::{Mutex,Arc};
-	/// use util::ZeroingString;
+	/// use mwc_wallet_util::Mutex;
+	/// use std::sync::Arc;
+	/// use mwc_wallet_util::mwc_util::ZeroingString;
 	///
 	/// use api::Owner;
 	/// use config::WalletConfig;
 	/// use impls::{DefaultWalletImpl, DefaultLCProvider, HTTPNodeClient};
-	/// use libwallet::WalletInst;
+	/// use mwc_wallet_libwallet::WalletInst;
 	/// use config::parse_node_address_string;
 	///
 	/// global::set_local_chain_type(global::ChainTypes::AutomatedTesting);
@@ -240,12 +202,23 @@ where
 	///
 	/// // Wallet must be opened with the password (TBD)
 	/// let pw = ZeroingString::from("wallet_password");
-	/// lc.open_wallet(None, pw, false, false, None);
+	/// let secp = mwc_wallet_util::mwc_crates::secp::Secp256k1::with_caps(
+	///     mwc_wallet_util::mwc_crates::secp::ContextFlag::Commit,
+	/// ).unwrap();
+	/// lc.open_wallet(
+	///     &secp,
+	///     None,
+	///     pw,
+	///     false,
+	///     # #[cfg(feature = "test-support")]
+	///     false,
+	///     None,
+	/// );
 	///
 	/// // All wallet functions operate on an Arc::Mutex to allow multithreading where needed
 	/// let mut wallet = Arc::new(Mutex::new(wallet));
 	///
-	/// let api_owner = Owner::new(0, wallet.clone(), None, None);
+	/// let api_owner = Owner::new(0, wallet.clone(), None).unwrap();
 	/// // .. perform wallet operations
 	///
 	/// ```
@@ -253,43 +226,18 @@ where
 	pub fn new(
 		context_id: u32,
 		wallet_inst: Arc<Mutex<Box<dyn WalletInst<'static, L, C, K>>>>,
-		custom_channel: Option<Sender<StatusMessage>>,
 		tor_config: Option<TorConfig>,
-	) -> Self {
-		let updater_running = Arc::new(AtomicBool::new(false));
-		let updater = Arc::new(Mutex::new(owner_updater::Updater::new(
-			wallet_inst.clone(),
-			updater_running.clone(),
-		)));
-		let updater_messages = Arc::new(Mutex::new(vec![]));
-
-		let running = Arc::new(AtomicBool::new(true));
-		let (tx, handle) = match custom_channel {
-			Some(c) => (c, None),
-			None => {
-				let (tx, rx) = channel();
-				let handle =
-					start_updater_log_thread(rx, updater_messages.clone(), running.clone())
-						.unwrap();
-				(tx, Some(handle))
-			}
-		};
-
-		Owner {
+	) -> Result<Self, Error> {
+		Ok(Owner {
 			context_id,
 			wallet_inst,
+			#[cfg(feature = "test-support")]
 			doctest_mode: false,
+			#[cfg(feature = "test-support")]
 			doctest_retain_tld: false,
 			shared_key: Arc::new(Mutex::new(None)),
-			updater,
-			updater_thread: Mutex::new(None),
-			updater_running,
-			status_tx: Mutex::new(Some(tx)),
-			updater_messages,
 			tor_config: Mutex::new(tor_config),
-			updater_log_thread: handle,
-			updater_log_running_state: running,
-		}
+		})
 	}
 
 	/// Set the TOR configuration for this instance of the OwnerAPI, used during
@@ -301,7 +249,7 @@ where
 	/// * Nothing
 
 	pub fn set_tor_config(&self, tor_config: Option<TorConfig>) {
-		let mut lock = self.tor_config.lock().unwrap_or_else(|e| e.into_inner());
+		let mut lock = self.tor_config.lock();
 		*lock = tor_config;
 	}
 
@@ -314,7 +262,7 @@ where
 	/// # Returns
 	/// * Result Containing:
 	/// * A Vector of [`AcctPathMapping`](../mwc_wallet_libwallet/types/struct.AcctPathMapping.html) data
-	/// * or [`libwallet::Error`](../mwc_wallet_libwallet/struct.Error.html) if an error is encountered.
+	/// * or [`mwc_wallet_libwallet::Error`](../mwc_wallet_libwallet/struct.Error.html) if an error is encountered.
 	///
 	/// # Remarks
 	///
@@ -327,7 +275,7 @@ where
 	/// ```
 	/// # mwc_wallet_api::doctest_helper_setup_doc_env!(wallet, wallet_config);
 	///
-	/// let api_owner = Owner::new(0, wallet.clone(), None, None);
+	/// let api_owner = Owner::new(0, wallet.clone(), None).unwrap();
 	///
 	/// let result = api_owner.accounts(None);
 	///
@@ -340,9 +288,10 @@ where
 		&self,
 		keychain_mask: Option<&SecretKey>,
 	) -> Result<Vec<AcctPathMapping>, Error> {
+		let secp = Secp256k1::with_caps(ContextFlag::Commit)?;
 		wallet_lock!(self.wallet_inst, w);
 		// Test keychain mask, to keep API consistent
-		let _ = w.keychain(keychain_mask)?;
+		let _ = w.keychain(&secp, keychain_mask)?;
 		owner::accounts(&mut **w)
 	}
 
@@ -358,7 +307,7 @@ where
 	/// # Returns
 	/// * Result Containing:
 	/// * A [Keychain Identifier](../mwc_keychain/struct.Identifier.html) for the new path
-	/// * or [`libwallet::Error`](../mwc_wallet_libwallet/struct.Error.html) if an error is encountered.
+	/// * or [`mwc_wallet_libwallet::Error`](../mwc_wallet_libwallet/struct.Error.html) if an error is encountered.
 	///
 	/// # Remarks
 	///
@@ -377,7 +326,7 @@ where
 	/// ```
 	/// # mwc_wallet_api::doctest_helper_setup_doc_env!(wallet, wallet_config);
 	///
-	/// let api_owner = Owner::new(0, wallet.clone(), None, None);
+	/// let api_owner = Owner::new(0, wallet.clone(), None).unwrap();
 	///
 	/// let result = api_owner.create_account_path(None, "account1");
 	///
@@ -391,8 +340,9 @@ where
 		keychain_mask: Option<&SecretKey>,
 		label: &str,
 	) -> Result<Identifier, Error> {
+		let secp = Secp256k1::with_caps(ContextFlag::Commit)?;
 		wallet_lock!(self.wallet_inst, w);
-		owner::create_account_path(&mut **w, keychain_mask, label)
+		owner::create_account_path(&mut **w, &secp, keychain_mask, label)
 	}
 
 	/// Sets the wallet's currently active account. This sets the
@@ -407,7 +357,7 @@ where
 	/// # Returns
 	/// * Result Containing:
 	/// * `Ok(())` if the path was correctly set
-	/// * or [`libwallet::Error`](../mwc_wallet_libwallet/struct.Error.html) if an error is encountered.
+	/// * or [`mwc_wallet_libwallet::Error`](../mwc_wallet_libwallet/struct.Error.html) if an error is encountered.
 	///
 	/// # Remarks
 	///
@@ -423,7 +373,7 @@ where
 	/// ```
 	/// # mwc_wallet_api::doctest_helper_setup_doc_env!(wallet, wallet_config);
 	///
-	/// let api_owner = Owner::new(0, wallet.clone(), None, None);
+	/// let api_owner = Owner::new(0, wallet.clone(), None).unwrap();
 	///
 	/// let result = api_owner.create_account_path(None, "account1");
 	///
@@ -438,9 +388,10 @@ where
 		keychain_mask: Option<&SecretKey>,
 		label: &str,
 	) -> Result<(), Error> {
+		let secp = Secp256k1::with_caps(ContextFlag::Commit)?;
 		wallet_lock!(self.wallet_inst, w);
 		// Test keychain mask, to keep API consistent
-		let _ = w.keychain(keychain_mask)?;
+		let _ = w.keychain(&secp, keychain_mask)?;
 		owner::set_active_account(&mut **w, label)
 	}
 
@@ -457,8 +408,6 @@ where
 	/// provided during wallet instantiation). If `false`, the results will
 	/// contain output information that may be out-of-date (from the last time
 	/// the wallet's output set was refreshed against the node).
-	/// Note this setting is ignored if the updater process is running via a call to
-	/// [`start_updater`](struct.Owner.html#method.start_updater)
 	/// * `tx_id` - If `Some(i)`, only return the outputs associated with
 	/// the transaction log entry of id `i`.
 	///
@@ -478,17 +427,22 @@ where
 	/// ```
 	/// # mwc_wallet_api::doctest_helper_setup_doc_env!(wallet, wallet_config);
 	///
-	/// let api_owner = Owner::new(0, wallet.clone(), None, None);
+	/// let api_owner = Owner::new(0, wallet.clone(), None).unwrap();
 	/// let show_spent = false;
 	/// let update_from_node = true;
 	/// let tx_id = None;
 	///
 	/// let result = api_owner.retrieve_outputs(None, show_spent, update_from_node, tx_id);
 	///
-	/// if let Ok((was_updated, output_mappings)) = result {
+	/// if let Ok((was_updated, refresh_anchor_height, output_mappings)) = result {
 	///     //...
 	/// }
 	/// ```
+	///
+	/// When `update_from_node` is set and the node update succeeds,
+	/// `refresh_anchor_height` is the node tip the wallet state was
+	/// reconciled against; use that same snapshot for any displayed height or
+	/// confirmation count. Otherwise it is 0.
 
 	pub fn retrieve_outputs(
 		&self,
@@ -496,19 +450,12 @@ where
 		include_spent: bool,
 		refresh_from_node: bool,
 		tx_id: Option<u32>,
-	) -> Result<(bool, Vec<OutputCommitMapping>), Error> {
-		let tx = {
-			let t = self.status_tx.lock().unwrap_or_else(|e| e.into_inner());
-			t.clone()
-		};
-		let refresh_from_node = match self.updater_running.load(Ordering::Relaxed) {
-			true => false,
-			false => refresh_from_node,
-		};
+	) -> Result<(bool, u64, Vec<OutputCommitMapping>), Error> {
+		let mut secp = Secp256k1::with_caps(ContextFlag::Commit)?;
 		owner::retrieve_outputs(
 			self.wallet_inst.clone(),
+			&mut secp,
 			keychain_mask,
-			&tx,
 			include_spent,
 			refresh_from_node,
 			tx_id,
@@ -526,8 +473,6 @@ where
 	/// provided during wallet instantiation). If `false`, the results will
 	/// contain transaction information that may be out-of-date (from the last time
 	/// the wallet's output set was refreshed against the node).
-	/// Note this setting is ignored if the updater process is running via a call to
-	/// [`start_updater`](struct.Owner.html#method.start_updater)
 	/// * `tx_id` - If `Some(i)`, only return the transactions associated with
 	/// the transaction log entry of id `i`.
 	/// * `tx_slate_id` - If `Some(uuid)`, only return transactions associated with
@@ -535,13 +480,23 @@ where
 	/// * `tx_query_args` - If provided, use advanced query arguments as documented in
 	/// (../mwc_wallet_libwallet/types.struct.RetrieveTxQueryArgs.html). If either
 	/// `tx_id` or `tx_slate_id` is provided in the same call, this argument is ignored
+	/// * `show_last_four_days` - If true, show transactions within approximately four
+	/// days of the node tip, plus outstanding transactions of any age. Entries with
+	/// no confirmation height, including cancelled transactions, use their creation
+	/// timestamp for the four-day window. Cancellation time is not recorded.
+	/// On chains younger than four days, this filter keeps all entries.
 	///
 	/// # Returns
-	/// * `(bool, Vec<TxLogEntry)` - A tuple:
+	/// * `(bool, Option<u64>, Vec<TxLogEntry>)` - A tuple:
 	/// * The first `bool` element indicates whether the data was successfully
 	/// refreshed from the node (note this may be false even if the `refresh_from_node`
 	/// argument was set to `true`.
-	/// * The second element contains the set of retrieved
+	/// * The second element is the chain tip height against which the wallet state
+	/// was refreshed, `Some` only when the first element is `true`. Data displayed
+	/// alongside the returned transactions (e.g. confirmation counts) should use
+	/// this anchor rather than an independently sampled node height, which may
+	/// come from a stale cache or a different node.
+	/// * The third element contains the set of retrieved
 	/// [TxLogEntries](../mwc_wallet_libwallet/types/struct.TxLogEntry.html)
 	///
 	/// # Example
@@ -549,15 +504,15 @@ where
 	/// ```
 	/// # mwc_wallet_api::doctest_helper_setup_doc_env!(wallet, wallet_config);
 	///
-	/// let api_owner = Owner::new(0, wallet.clone(), None, None);
+	/// let api_owner = Owner::new(0, wallet.clone(), None).unwrap();
 	/// let update_from_node = true;
 	/// let tx_id = None;
 	/// let tx_slate_id = None;
 	///
-	/// // Return all TxLogEntries
+	/// // Return recent TxLogEntries, including recent cancellations, plus outstanding entries
 	/// let result = api_owner.retrieve_txs(None, update_from_node, tx_id, tx_slate_id, None, Some(true));
 	///
-	/// if let Ok((was_updated, tx_log_entries)) = result {
+	/// if let Ok((was_updated, anchor_height, tx_log_entries)) = result {
 	///     //...
 	/// }
 	/// ```
@@ -570,28 +525,24 @@ where
 		tx_slate_id: Option<Uuid>,
 		tx_query_args: Option<RetrieveTxQueryArgs>,
 		show_last_four_days: Option<bool>,
-	) -> Result<(bool, Vec<TxLogEntry>), Error> {
-		let tx = {
-			let t = self.status_tx.lock().unwrap_or_else(|e| e.into_inner());
-			t.clone()
-		};
-		let refresh_from_node = match self.updater_running.load(Ordering::Relaxed) {
-			true => false,
-			false => refresh_from_node,
-		};
-		let mut res = owner::retrieve_txs(
+	) -> Result<(bool, Option<u64>, Vec<TxLogEntry>), Error> {
+		let mut secp = Secp256k1::with_caps(ContextFlag::Commit)?;
+		let res = owner::retrieve_txs(
 			self.wallet_inst.clone(),
+			&mut secp,
 			keychain_mask,
-			&tx,
 			refresh_from_node,
 			tx_id,
 			tx_slate_id,
 			tx_query_args,
 			show_last_four_days,
 		)?;
+		#[cfg(feature = "test-support")]
+		let mut res = res;
+		#[cfg(feature = "test-support")]
 		if self.doctest_mode {
-			res.1 = res
-				.1
+			res.2 = res
+				.2
 				.into_iter()
 				.map(|mut t| {
 					t.confirmation_ts = Some(Utc.with_ymd_and_hms(2019, 1, 15, 16, 1, 26).unwrap());
@@ -613,8 +564,6 @@ where
 	/// provided during wallet instantiation). If `false`, the results will
 	/// contain transaction information that may be out-of-date (from the last time
 	/// the wallet's output set was refreshed against the node).
-	/// Note this setting is ignored if the updater process is running via a call to
-	/// [`start_updater`](struct.Owner.html#method.start_updater)
 	/// * `minimum_confirmations` - The minimum number of confirmations an output
 	/// should have before it's included in the 'amount_currently_spendable' total
 	///
@@ -630,7 +579,7 @@ where
 	/// ```
 	/// # mwc_wallet_api::doctest_helper_setup_doc_env!(wallet, wallet_config);
 	///
-	/// let mut api_owner = Owner::new(0, wallet.clone(), None, None);
+	/// let mut api_owner = Owner::new(0, wallet.clone(), None).unwrap();
 	/// let update_from_node = true;
 	/// let minimum_confirmations=10;
 	///
@@ -648,18 +597,11 @@ where
 		refresh_from_node: bool,
 		minimum_confirmations: u64,
 	) -> Result<(bool, WalletInfo), Error> {
-		let tx = {
-			let t = self.status_tx.lock().unwrap_or_else(|e| e.into_inner());
-			t.clone()
-		};
-		let refresh_from_node = match self.updater_running.load(Ordering::Relaxed) {
-			true => false,
-			false => refresh_from_node,
-		};
+		let mut secp = Secp256k1::with_caps(ContextFlag::Commit)?;
 		owner::retrieve_summary_info(
 			self.wallet_inst.clone(),
+			&mut secp,
 			keychain_mask,
-			&tx,
 			refresh_from_node,
 			minimum_confirmations,
 		)
@@ -702,7 +644,7 @@ where
 	/// transaction outputs should be locked via a call to
 	/// [`tx_lock_outputs`](struct.Owner.html#method.tx_lock_outputs). This must be called before calling
 	/// [`finalize_tx`](struct.Owner.html#method.finalize_tx).
-	/// * or [`libwallet::Error`](../mwc_wallet_libwallet/struct.Error.html) if an error is encountered.
+	/// * or [`mwc_wallet_libwallet::Error`](../mwc_wallet_libwallet/struct.Error.html) if an error is encountered.
 	///
 	/// # Remarks
 	///
@@ -716,7 +658,7 @@ where
 	/// ```
 	/// # mwc_wallet_api::doctest_helper_setup_doc_env!(wallet, wallet_config);
 	///
-	/// let mut api_owner = Owner::new(0, wallet.clone(), None, None);
+	/// let mut api_owner = Owner::new(0, wallet.clone(), None).unwrap();
 	/// // Attempt to create a transaction using the 'default' account
 	/// let args = InitTxArgs {
 	///     src_acct_name: None,
@@ -772,7 +714,7 @@ where
 			None => {}
 		}
 
-		let mut recipient: Option<DalekPublicKey> = None;
+		let mut recipient: Option<ed25519_dalek::VerifyingKey> = None;
 		if let Some(r) = &args.slatepack_recipient {
 			recipient = Some(r.tor_public_key()?);
 		}
@@ -788,12 +730,12 @@ where
 						wallet_lock!(self.wallet_inst, w);
 						(w.get_data_file_dir().to_string(), w.get_context_id())
 					};
-					let tor_config_lock = self.tor_config.lock().unwrap_or_else(|e| e.into_inner());
+					let tor_config_lock = self.tor_config.lock();
 					let comm_adapter = create_sender(
 						context_id,
 						&sa.method,
 						&sa.dest,
-						&sa.apisecret,
+						&sa.apisecret.as_ref().map(|s| Arc::new(s.clone())),
 						tor_config_lock.as_ref(),
 						Path::new(&base_path),
 					)
@@ -809,8 +751,15 @@ where
 
 					if let Some(other_wallet_version) = &other_wallet_version {
 						if args.target_slate_version.is_none() {
-							args.target_slate_version =
-								Some(other_wallet_version.0.to_numeric_version() as u16);
+							args.target_slate_version = Some(
+							u16::try_from(other_wallet_version.0.to_numeric_version())
+								.map_err(|e| {
+									Error::DataOverflow(format!(
+										"Owner::init_send_tx, peer returned an invalid slate version, numeric_version={} error={}",
+										other_wallet_version.0.to_numeric_version(), e
+									))
+									})?,
+							);
 						}
 					}
 					Some((comm_adapter, other_wallet_version))
@@ -823,39 +772,55 @@ where
 
 		// Using it as a global lock for the API
 		// Without usage it still works until the end of the block
-		let _send_lock = INIT_SEND_FINALIZE_TX_LOCK
-			.lock()
-			.unwrap_or_else(|e| e.into_inner());
+		let _send_lock = INIT_SEND_FINALIZE_TX_LOCK.lock();
 
-		let (mut slate, slatepack_secret, secp) = {
+		let (mut slate, slatepack_secret, mut secp) = {
 			wallet_lock!(self.wallet_inst, w);
-			owner::update_wallet_state(&mut **w, keychain_mask, &None)?;
+			let mut secp = Secp256k1::with_caps(ContextFlag::Commit)?;
+			let (validated, _tip) =
+				owner::update_wallet_state(&mut **w, &mut secp, keychain_mask, None)?;
+			// update_wallet_state reports Ok(false) when it could not validate the
+			// wallet state against a node tip (e.g. the node has no headers yet).
+			// Never select outputs or build a slate from unvalidated state.
+			if !validated {
+				return Err(Error::GenericError(
+					"Unable to validate wallet state against the node, cannot init send tx"
+						.to_string(),
+				));
+			}
 
 			let slate = {
 				owner::init_send_tx(
 					&mut **w,
+					&mut secp,
 					keychain_mask,
 					&mut tx_session,
 					&args,
+					#[cfg(feature = "test-support")]
 					self.doctest_mode,
 					routputs,
 				)?
 			};
 
 			let address_index: u32 = {
-				let mut batch = w.batch(keychain_mask)?;
+				let mut batch = w.batch(&secp, keychain_mask)?;
 				let index = batch.load_u64(U64_DATA_IDX_ADDRESS_INDEX, 0u64)?;
-				index as u32
+				u32::try_from(index).map_err(|e| {
+					Error::DataOverflow(format!(
+						"Owner::init_send_tx, address index does not fit into u32, index={} error={}",
+						index, e
+					))
+				})?
 			};
 
-			let keychain = w.keychain(keychain_mask)?;
+			let keychain = w.keychain(&secp, keychain_mask)?;
 			let slatepack_secret = proofaddress::payment_proof_address_dalek_secret(
+				&secp,
 				w.get_context_id(),
 				&keychain,
 				address_index,
 			)?;
-
-			(slate, slatepack_secret, keychain.secp().clone())
+			(slate, slatepack_secret, secp)
 		};
 
 		let res = match send_args {
@@ -891,8 +856,9 @@ where
 
 				// Restore back ttl, because it can be gone
 				slate.ttl_cutoff_height = original_slate.ttl_cutoff_height.clone();
+				original_slate.validate_send_response(&slate)?;
 
-				owner::verify_slate_messages(&slate).map_err(|e| {
+				owner::verify_slate_messages(&slate, &secp).map_err(|e| {
 					error!(
 						"Unable to validate participant messages at slate {}: {}",
 						slate.id, e
@@ -905,11 +871,13 @@ where
 
 					owner::tx_lock_outputs(
 						&mut **w,
+						&mut secp,
 						keychain_mask,
 						&mut tx_session,
 						&slate,
 						address,
 						0,
+						#[cfg(feature = "test-support")]
 						self.doctest_mode,
 					)?;
 
@@ -917,10 +885,12 @@ where
 						true => {
 							let (slate_res, _context) = owner::finalize_tx(
 								&mut **w,
+								&mut secp,
 								keychain_mask,
 								&mut tx_session,
 								&slate,
 								true,
+								#[cfg(feature = "test-support")]
 								self.doctest_mode,
 								args.payment_proof_recipient_address.is_some(),
 							)?;
@@ -928,6 +898,9 @@ where
 						}
 						false => slate,
 					};
+					if let Some(tx_session) = tx_session.as_deref() {
+						tx_session.validate_tx_log_entry_size()?;
+					}
 
 					if mwc_wallet_util::mwc_util::is_console_output_enabled() {
 						println!(
@@ -945,7 +918,7 @@ where
 				};
 
 				if sa.post_tx {
-					owner::post_tx(&w2n_client, slate.tx_or_err()?, sa.fluff)?;
+					owner::post_tx(self.context_id, &w2n_client, slate.tx_or_err()?, sa.fluff)?;
 				}
 				if mwc_wallet_util::mwc_util::is_console_output_enabled() {
 					println!(
@@ -981,14 +954,14 @@ where
 	/// # Returns
 	/// * ``Ok([`slate`](../mwc_wallet_libwallet/slate/struct.Slate.html))` if successful,
 	/// containing the updated slate.
-	/// * or [`libwallet::Error`](../mwc_wallet_libwallet/struct.Error.html) if an error is encountered.
+	/// * or [`mwc_wallet_libwallet::Error`](../mwc_wallet_libwallet/struct.Error.html) if an error is encountered.
 	///
 	/// # Example
 	/// Set up as in [`new`](struct.Owner.html#method.new) method above.
 	/// ```
 	/// # mwc_wallet_api::doctest_helper_setup_doc_env!(wallet, wallet_config);
 	///
-	/// let mut api_owner = Owner::new(0, wallet.clone(), None, None);
+	/// let mut api_owner = Owner::new(0, wallet.clone(), None).unwrap();
 	///
 	/// let args = IssueInvoiceTxArgs {
 	///     amount: 60_000_000_000,
@@ -1009,16 +982,17 @@ where
 	) -> Result<Slate, Error> {
 		// Using it as a global lock for the API
 		// Without usage it still works until the end of the block
-		let mut _send_lock = INIT_SEND_FINALIZE_TX_LOCK
-			.lock()
-			.unwrap_or_else(|e| e.into_inner());
+		let mut _send_lock = INIT_SEND_FINALIZE_TX_LOCK.lock();
 
+		let mut secp = Secp256k1::with_caps(ContextFlag::Commit)?;
 		wallet_lock!(self.wallet_inst, w);
 		owner::issue_invoice_tx(
 			&mut **w,
+			&mut secp,
 			keychain_mask,
 			tx_session,
 			args,
+			#[cfg(feature = "test-support")]
 			self.doctest_mode,
 			1,
 		)
@@ -1032,12 +1006,11 @@ where
 	) -> Result<(Slate, Context), Error> {
 		// Using it as a global lock for the API
 		// Without usage it still works until the end of the block
-		let mut _send_lock = INIT_SEND_FINALIZE_TX_LOCK
-			.lock()
-			.unwrap_or_else(|e| e.into_inner());
+		let _send_lock = INIT_SEND_FINALIZE_TX_LOCK.lock();
 
+		let mut secp = Secp256k1::with_caps(ContextFlag::Commit)?;
 		wallet_lock!(self.wallet_inst, w);
-		owner::generate_invoice_slate(&mut **w, keychain_mask, amount, tx_session)
+		owner::generate_invoice_slate(&mut **w, &mut secp, keychain_mask, amount, tx_session)
 	}
 
 	/// Processes an invoice tranaction created by another party, essentially
@@ -1051,8 +1024,14 @@ where
 	/// it is up to the caller to present the request for payment to the user
 	/// and verify that payment should go ahead.
 	///
-	/// This function also stores the final transaction in the user's wallet files for retrieval
-	/// via the [`get_stored_tx`](struct.Owner.html#method.get_stored_tx) function.
+	/// With a transaction session, this function only stages wallet state. The caller should
+	/// exchange and optionally post the completed transaction before saving the session.
+	///
+	/// `estimate_only: Some(true)` is rejected. For a fee estimate, call `init_send_tx`
+	/// with the invoice amount and `estimate_only: Some(true)`. When `outputs` is provided,
+	/// only those outputs may fund the invoice, including its fees.
+	/// `payment_proof_recipient_address: Some(_)` is rejected because invoice payment
+	/// proofs are unsupported.
 	///
 	/// # Arguments
 	/// * `keychain_mask` - Wallet secret mask to XOR against the stored wallet seed before using, if
@@ -1063,20 +1042,20 @@ where
 	/// transaction initialization arguments. See struct documentation for further detail.
 	///
 	/// # Returns
-	/// * ``Ok([`slate`](../mwc_wallet_libwallet/slate/struct.Slate.html))` if successful,
-	/// containing the updated slate.
-	/// * or [`libwallet::Error`](../mwc_wallet_libwallet/struct.Error.html) if an error is encountered.
+	/// * `Ok(ProcessInvoiceTxResult)` if successful, containing the updated slate and a
+	/// process-local UUID guard that must remain alive through exchange and session save.
+	/// * or [`mwc_wallet_libwallet::Error`](../mwc_wallet_libwallet/struct.Error.html) if an error is encountered.
 	///
 	/// # Example
 	/// Set up as in [`new`](struct.Owner.html#method.new) method above.
 	/// ```
 	/// # mwc_wallet_api::doctest_helper_setup_doc_env!(wallet, wallet_config);
 	///
-	/// let mut api_owner = Owner::new(0, wallet.clone(), None, None);
+	/// let mut api_owner = Owner::new(0, wallet.clone(), None).unwrap();
 	///
 	/// // . . .
 	/// // The slate has been recieved from the invoicer, somehow
-	/// # let slate = Slate::blank(2, false);
+	/// # let Ok(slate) = Slate::blank(2, false) else { return; };
 	/// let args = InitTxArgs {
 	///     src_acct_name: None,
 	///     amount: slate.amount,
@@ -1089,8 +1068,9 @@ where
 	///
 	/// let result = api_owner.process_invoice_tx(None, None, &slate, &args);
 	///
-	/// if let Ok(slate) = result {
+	/// if let Ok(result) = result {
 	/// // If result okay, send back to the invoicer
+	/// let slate = result.slate;
 	/// // . . .
 	/// }
 	/// ```
@@ -1101,16 +1081,28 @@ where
 		mut tx_session: Option<&mut TxSession>,
 		slate: &Slate,
 		args: &InitTxArgs,
-	) -> Result<Slate, Error> {
+	) -> Result<ProcessInvoiceTxResult, Error> {
+		owner::validate_invoice_tx_args(args)?;
+
 		// Using it as a global lock for the API
 		// Without usage it still works until the end of the block
-		let mut _send_lock = INIT_SEND_FINALIZE_TX_LOCK
-			.lock()
-			.unwrap_or_else(|e| e.into_inner());
+		let mut _send_lock = INIT_SEND_FINALIZE_TX_LOCK.lock();
 
+		let mut secp = Secp256k1::with_caps(ContextFlag::Commit)?;
 		wallet_lock!(self.wallet_inst, w);
+		let processing_guard = w.slate_process_tracker().acquire(slate.id)?;
 
-		owner::update_wallet_state(&mut **w, keychain_mask, &None)?;
+		let (validated, _tip) =
+			owner::update_wallet_state(&mut **w, &mut secp, keychain_mask, None)?;
+		// update_wallet_state reports Ok(false) when it could not validate the
+		// wallet state against a node tip (e.g. the node has no headers yet).
+		// Never select outputs or sign an invoice response from unvalidated state.
+		if !validated {
+			return Err(Error::GenericError(
+				"Unable to validate wallet state against the node, cannot process invoice"
+					.to_string(),
+			));
+		}
 
 		//minimum_confirmations cannot be zero.
 		let minimum_confirmations = args.minimum_confirmations.clone();
@@ -1119,15 +1111,21 @@ where
 				"minimum_confirmations can not smaller than 1".to_owned(),
 			));
 		}
-		owner::process_invoice_tx(
+		let slate = owner::process_invoice_tx(
 			&mut **w,
+			&mut secp,
 			keychain_mask,
 			&mut tx_session,
 			slate,
 			args,
+			#[cfg(feature = "test-support")]
 			self.doctest_mode,
 			true,
-		)
+		)?;
+		Ok(ProcessInvoiceTxResult {
+			slate,
+			processing_guard,
+		})
 	}
 
 	/// Locks the outputs associated with the inputs to the transaction in the given
@@ -1154,14 +1152,14 @@ where
 	///
 	/// # Returns
 	/// * Ok(()) if successful
-	/// * or [`libwallet::Error`](../mwc_wallet_libwallet/struct.Error.html) if an error is encountered.
+	/// * or [`mwc_wallet_libwallet::Error`](../mwc_wallet_libwallet/struct.Error.html) if an error is encountered.
 	///
 	/// # Example
 	/// Set up as in [`new`](struct.Owner.html#method.new) method above.
 	/// ```
 	/// # mwc_wallet_api::doctest_helper_setup_doc_env!(wallet, wallet_config);
 	///
-	/// let mut api_owner = Owner::new(0, wallet.clone(), None, None);
+	/// let mut api_owner = Owner::new(0, wallet.clone(), None).unwrap();
 	/// let args = InitTxArgs {
 	///     src_acct_name: None,
 	///     amount: 2_000_000_000,
@@ -1195,14 +1193,17 @@ where
 		address: Option<String>,
 		participant_id: usize,
 	) -> Result<(), Error> {
+		let mut secp = Secp256k1::with_caps(ContextFlag::Commit)?;
 		wallet_lock!(self.wallet_inst, w);
 		owner::tx_lock_outputs(
 			&mut **w,
+			&mut secp,
 			keychain_mask,
 			&mut tx_session,
 			slate,
 			address,
 			participant_id,
+			#[cfg(feature = "test-support")]
 			self.doctest_mode,
 		)
 	}
@@ -1231,14 +1232,14 @@ where
 	/// # Returns
 	/// * ``Ok([`slate`](../mwc_wallet_libwallet/slate/struct.Slate.html))` if successful,
 	/// containing the new finalized slate.
-	/// * or [`libwallet::Error`](../mwc_wallet_libwallet/struct.Error.html) if an error is encountered.
+	/// * or [`mwc_wallet_libwallet::Error`](../mwc_wallet_libwallet/struct.Error.html) if an error is encountered.
 	///
 	/// # Example
 	/// Set up as in [`new`](struct.Owner.html#method.new) method above.
 	/// ```
 	/// # mwc_wallet_api::doctest_helper_setup_doc_env!(wallet, wallet_config);
 	///
-	/// let mut api_owner = Owner::new(0, wallet.clone(), None, None);
+	/// let mut api_owner = Owner::new(0, wallet.clone(), None).unwrap();
 	/// let args = InitTxArgs {
 	///     src_acct_name: None,
 	///     amount: 2_000_000_000,
@@ -1271,25 +1272,40 @@ where
 	pub fn finalize_tx(
 		&self,
 		keychain_mask: Option<&SecretKey>,
-		mut tx_session: Option<&mut TxSession>,
+		tx_session: Option<&mut TxSession>,
 		slate: &Slate,
 		do_proof: bool,
 	) -> Result<Slate, Error> {
+		self.finalize_tx_with_output_version(keychain_mask, tx_session, slate, do_proof, None)
+	}
+
+	/// Finalize for the specified response format, checking the SP size budget
+	/// before committing late locks or consuming the signing context.
+	pub fn finalize_tx_with_output_version(
+		&self,
+		keychain_mask: Option<&SecretKey>,
+		mut tx_session: Option<&mut TxSession>,
+		slate: &Slate,
+		do_proof: bool,
+		output_version: Option<SlateVersion>,
+	) -> Result<Slate, Error> {
 		// Using it as a global lock for the API
 		// Without usage it still works until the end of the block
-		let mut _send_lock = INIT_SEND_FINALIZE_TX_LOCK
-			.lock()
-			.unwrap_or_else(|e| e.into_inner());
+		let _send_lock = INIT_SEND_FINALIZE_TX_LOCK.lock();
 
+		let mut secp = Secp256k1::with_caps(ContextFlag::Commit)?;
 		wallet_lock!(self.wallet_inst, w);
-		let (slate_res, _context) = owner::finalize_tx(
+		let (slate_res, _context) = owner::finalize_tx_with_output_version(
 			&mut **w,
+			&mut secp,
 			keychain_mask,
 			&mut tx_session,
 			slate,
 			true,
+			#[cfg(feature = "test-support")]
 			self.doctest_mode,
 			do_proof,
+			output_version,
 		)?;
 
 		Ok(slate_res)
@@ -1310,14 +1326,14 @@ where
 	///
 	/// # Returns
 	/// * `Ok(())` if successful
-	/// * or [`libwallet::Error`](../mwc_wallet_libwallet/struct.Error.html) if an error is encountered.
+	/// * or [`mwc_wallet_libwallet::Error`](../mwc_wallet_libwallet/struct.Error.html) if an error is encountered.
 	///
 	/// # Example
 	/// Set up as in [`new`](struct.Owner.html#method.new) method above.
 	/// ```
 	/// # mwc_wallet_api::doctest_helper_setup_doc_env!(wallet, wallet_config);
 	///
-	/// let mut api_owner = Owner::new(0, wallet.clone(), None, None);
+	/// let mut api_owner = Owner::new(0, wallet.clone(), None).unwrap();
 	/// let args = InitTxArgs {
 	///     src_acct_name: None,
 	///     amount: 2_000_000_000,
@@ -1354,13 +1370,14 @@ where
 		tx: &Transaction,
 		fluff: bool,
 	) -> Result<(), Error> {
+		let secp = Secp256k1::with_caps(ContextFlag::Commit)?;
 		let client = {
 			wallet_lock!(self.wallet_inst, w);
 			// Test keychain mask, to keep API consistent
-			let _ = w.keychain(keychain_mask)?;
+			let _ = w.keychain(&secp, keychain_mask)?;
 			w.w2n_client().clone()
 		};
-		owner::post_tx(&client, tx, fluff)
+		owner::post_tx(self.context_id, &client, tx, fluff)
 	}
 
 	/// Cancels a transaction. This entails:
@@ -1371,6 +1388,11 @@ where
 	///
 	/// Transactions can be cancelled by transaction log id or slate id (call with either set to
 	/// Some, not both)
+	///
+	/// Cancellation is idempotent. If the selected transaction is already cancelled, this method
+	/// returns `Ok(())`. This is important because the wallet refresh performed by this method can
+	/// cancel a TTL-expired transaction before the explicit cancellation step runs. Missing,
+	/// confirmed, and otherwise non-cancellable transactions still return an error.
 	///
 	/// # Arguments
 	///
@@ -1383,14 +1405,14 @@ where
 	///
 	/// # Returns
 	/// * `Ok(())` if successful
-	/// * or [`libwallet::Error`](../mwc_wallet_libwallet/struct.Error.html) if an error is encountered.
+	/// * or [`mwc_wallet_libwallet::Error`](../mwc_wallet_libwallet/struct.Error.html) if an error is encountered.
 	///
 	/// # Example
 	/// Set up as in [`new`](struct.Owner.html#method.new) method above.
 	/// ```
 	/// # mwc_wallet_api::doctest_helper_setup_doc_env!(wallet, wallet_config);
 	///
-	/// let mut api_owner = Owner::new(0, wallet.clone(), None, None);
+	/// let mut api_owner = Owner::new(0, wallet.clone(), None).unwrap();
 	/// let args = InitTxArgs {
 	///     src_acct_name: None,
 	///     amount: 2_000_000_000,
@@ -1426,39 +1448,37 @@ where
 		tx_id: Option<u32>,
 		tx_slate_id: Option<Uuid>,
 	) -> Result<(), Error> {
-		let tx = {
-			let t = self.status_tx.lock().unwrap_or_else(|e| e.into_inner());
-			t.clone()
-		};
+		let mut secp = Secp256k1::with_caps(ContextFlag::Commit)?;
 		owner::cancel_tx(
 			self.wallet_inst.clone(),
+			&mut secp,
 			keychain_mask,
-			&tx,
 			tx_id,
 			tx_slate_id,
 		)
 	}
 
-	/// Retrieves the stored transaction associated with a TxLogEntry. Can be used even after the
-	/// transaction has completed.
+	/// Retrieves the stored transaction identified by a [`StoredTxLocator`]. Can
+	/// be used even after the transaction has completed.
 	///
 	/// # Arguments
 	///
 	/// * `keychain_mask` - Wallet secret mask to XOR against the stored wallet seed before using, if
 	/// being used.
-	/// * `tx_log_entry` - A [`TxLogEntry`](../mwc_wallet_libwallet/types/struct.TxLogEntry.html)
+	/// * `locator` - A wallet-local transaction ID, Slate UUID, stored transaction filename, or a
+	/// matching combination of those fields.
 	///
 	/// # Returns
 	/// * Ok with the stored  [`Transaction`](../mwc_core/core/transaction/struct.Transaction.html)
 	/// if successful
-	/// * or [`libwallet::Error`](../mwc_wallet_libwallet/struct.Error.html) if an error is encountered.
+	/// * or [`mwc_wallet_libwallet::Error`](../mwc_wallet_libwallet/struct.Error.html) if an error is encountered.
 	///
 	/// # Example
 	/// Set up as in [`new`](struct.Owner.html#method.new) method above.
 	/// ```
 	/// # mwc_wallet_api::doctest_helper_setup_doc_env!(wallet, wallet_config);
 	///
-	/// let api_owner = Owner::new(0, wallet.clone(), None, None);
+	/// let api_owner = Owner::new(0, wallet.clone(), None).unwrap();
 	/// let update_from_node = true;
 	/// let tx_id = None;
 	/// let tx_slate_id = None;
@@ -1466,22 +1486,23 @@ where
 	/// // Return all TxLogEntries
 	/// let result = api_owner.retrieve_txs(None, update_from_node, tx_id, tx_slate_id, None, None);
 	///
-	/// if let Ok((was_updated, tx_log_entries)) = result {
-	///     let stored_tx = api_owner.get_stored_tx(None, &tx_log_entries[0]).unwrap();
+	/// if let Ok((was_updated, _, tx_log_entries)) = result {
+	///     let locator = mwc_wallet_api::StoredTxLocator::from(&tx_log_entries[0]);
+	///     let stored_tx = api_owner.get_stored_tx(None, &locator).unwrap();
 	///     //...
 	/// }
 	/// ```
 
-	// TODO: Should be accepting an id, not an entire entry struct
 	pub fn get_stored_tx(
 		&self,
 		keychain_mask: Option<&SecretKey>,
-		tx_log_entry: &TxLogEntry,
+		locator: &StoredTxLocator,
 	) -> Result<Option<Transaction>, Error> {
+		let secp = Secp256k1::with_caps(ContextFlag::Commit)?;
 		wallet_lock!(self.wallet_inst, w);
 		// Test keychain mask, to keep API consistent
-		let _ = w.keychain(keychain_mask)?;
-		owner::get_stored_tx(&**w, tx_log_entry)
+		let _ = w.keychain(&secp, keychain_mask)?;
+		owner::get_stored_tx(&mut **w, keychain_mask, locator)
 	}
 
 	/// Loads a stored transaction from a file
@@ -1506,14 +1527,14 @@ where
 	///
 	/// # Returns
 	/// * `Ok(())` if successful and the signatures validate
-	/// * or [`libwallet::Error`](../mwc_wallet_libwallet/struct.Error.html) if an error is encountered.
+	/// * or [`mwc_wallet_libwallet::Error`](../mwc_wallet_libwallet/struct.Error.html) if an error is encountered.
 	///
 	/// # Example
 	/// Set up as in [`new`](struct.Owner.html#method.new) method above.
 	/// ```
 	/// # mwc_wallet_api::doctest_helper_setup_doc_env!(wallet, wallet_config);
 	///
-	/// let mut api_owner = Owner::new(0, wallet.clone(), None, None);
+	/// let mut api_owner = Owner::new(0, wallet.clone(), None).unwrap();
 	/// let args = InitTxArgs {
 	///     src_acct_name: None,
 	///     amount: 2_000_000_000,
@@ -1547,16 +1568,19 @@ where
 		keychain_mask: Option<&SecretKey>,
 		slate: &Slate,
 	) -> Result<(), Error> {
+		let secp = Secp256k1::with_caps(ContextFlag::Commit)?;
 		{
 			wallet_lock!(self.wallet_inst, w);
 			// Test keychain mask, to keep API consistent
-			let _ = w.keychain(keychain_mask)?;
+			let _ = w.keychain(&secp, keychain_mask)?;
 		}
-		owner::verify_slate_messages(slate)
+		owner::verify_slate_messages(slate, &secp)
 	}
 
 	/// Return the rewind hash of the wallet.
-	/// The rewind hash when shared, help third-party to retrieve informations (outputs, balance, ...) that belongs to this wallet.
+	///
+	/// This is a viewing credential: sharing it lets a third party inspect
+	/// matching output values. It does not provide spend authority.
 	///
 	/// # Arguments
 	///
@@ -1564,34 +1588,38 @@ where
 	/// being used.
 	///
 	/// # Returns
-	/// * `Ok(String)` if successful
-	/// * or [`libwallet::Error`](../mwc_wallet_libwallet/struct.Error.html) if an error is encountered.
+	/// * `Ok(Zeroizing<String>)` if successful
+	/// * or [`mwc_wallet_libwallet::Error`](../mwc_wallet_libwallet/struct.Error.html) if an error is encountered.
 
 	/// # Example
 	/// Set up as in [`new`](struct.Owner.html#method.new) method above.
 	/// ```
 	/// # mwc_wallet_api::doctest_helper_setup_doc_env!(wallet, wallet_config);
 	///
-	/// let mut api_owner = Owner::new(0, wallet.clone(), None, None);
-	/// let result = api_owner.scan(
-	///     None,
-	///     Some(20000),
-	///     false,
-	/// );
+	/// let api_owner = Owner::new(0, wallet.clone(), None).unwrap();
+	/// let result = api_owner.get_rewind_hash(None);
 	///
-	/// if let Ok(_) = result {
-	///     // Wallet outputs should be consistent with what's on chain
+	/// if let Ok(rewind_hash) = result {
+	///     // Share the rewind hash with a view-only wallet
 	///     // ...
 	/// }
 	/// ```
 
-	pub fn get_rewind_hash(&self, keychain_mask: Option<&SecretKey>) -> Result<String, Error> {
-		owner::get_rewind_hash(self.wallet_inst.clone(), keychain_mask)
+	pub fn get_rewind_hash(
+		&self,
+		keychain_mask: Option<&SecretKey>,
+	) -> Result<Zeroizing<String>, Error> {
+		let secp = Secp256k1::with_caps(ContextFlag::Commit)?;
+		owner::get_rewind_hash(self.wallet_inst.clone(), &secp, keychain_mask)
 	}
 
-	/// Scans the entire UTXO set from the node, identify which outputs belong to the given rewind hash view wallet.
+	/// Scans the entire UTXO set for outputs matching the given rewind hash.
 	///
-	/// This function can be used to retrieve outputs informations (outputs, balance, ...) from a rewind hash view wallet.
+	/// A match proves only that the rangeproof used the supplied rewind
+	/// credential. It does not prove spend ownership: anyone who knows the
+	/// rewind hash can create an unrelated valid output that also matches it.
+	/// Therefore `ViewWallet::total_balance` is a view-only estimate, not an
+	/// authenticated wallet balance.
 	///
 	/// This operation scans the entire chain, and is expected to be time intensive. It is imperative
 	/// that no other processes should be trying to use the wallet at the same time this function is
@@ -1605,22 +1633,19 @@ where
 	///
 	/// # Returns
 	/// * `Ok(ViewWallet)` if successful
-	/// * or [`libwallet::Error`](../mwc_wallet_libwallet/struct.Error.html) if an error is encountered.
+	/// * or [`mwc_wallet_libwallet::Error`](../mwc_wallet_libwallet/struct.Error.html) if an error is encountered.
 
 	/// # Example
 	/// Set up as in [`new`](struct.Owner.html#method.new) method above.
 	/// ```
 	/// # mwc_wallet_api::doctest_helper_setup_doc_env!(wallet, wallet_config);
 	///
-	/// let mut api_owner = Owner::new(0, wallet.clone(), None, None);
-	/// let result = api_owner.scan(
-	///     None,
-	///     Some(20000),
-	///     false,
-	/// );
+	/// let api_owner = Owner::new(0, wallet.clone(), None).unwrap();
+	/// let rewind_hash = String::from("<rewind hash shared by the wallet owner>");
+	/// let result = api_owner.scan_rewind_hash(rewind_hash, Some(20000));
 	///
-	/// if let Ok(_) = result {
-	///     // Wallet outputs should be consistent with what's on chain
+	/// if let Ok(view_wallet) = result {
+	///     // Inspect the outputs visible through the rewind hash
 	///     // ...
 	/// }
 	/// ```
@@ -1630,11 +1655,18 @@ where
 		rewind_hash: String,
 		start_height: Option<u64>,
 	) -> Result<ViewWallet, Error> {
-		let tx = {
-			let t = self.status_tx.lock().unwrap_or_else(|e| e.into_inner());
-			t.clone()
-		};
-		owner::scan_rewind_hash(self.wallet_inst.clone(), rewind_hash, start_height, &tx)
+		// Move the capability into zeroizing storage before the first fallible
+		// operation so context-construction errors cannot drop it as a plain String.
+		let rewind_hash = Zeroizing::new(rewind_hash);
+		let mut secp = Secp256k1::with_caps(ContextFlag::Commit)?;
+		owner::scan_rewind_hash(
+			self.wallet_inst.clone(),
+			&mut secp,
+			rewind_hash,
+			start_height,
+			None,
+			None,
+		)
 	}
 
 	/// Scans the entire UTXO set from the node, identify which outputs belong to the given wallet
@@ -1669,17 +1701,18 @@ where
 	///
 	/// # Returns
 	/// * `Ok(())` if successful
-	/// * or [`libwallet::Error`](../mwc_wallet_libwallet/struct.Error.html) if an error is encountered.
+	/// * or [`mwc_wallet_libwallet::Error`](../mwc_wallet_libwallet/struct.Error.html) if an error is encountered.
 
 	/// # Example
 	/// Set up as in [`new`](struct.Owner.html#method.new) method above.
 	/// ```
 	/// # mwc_wallet_api::doctest_helper_setup_doc_env!(wallet, wallet_config);
 	///
-	/// let mut api_owner = Owner::new(0, wallet.clone(), None, None);
+	/// let mut api_owner = Owner::new(0, wallet.clone(), None).unwrap();
 	/// let result = api_owner.scan(
 	///     None,
 	///     Some(20000),
+	/// 	None,
 	///     false,
 	/// );
 	///
@@ -1689,38 +1722,42 @@ where
 	/// }
 	/// ```
 
+	/// Scans the UTXO set like [`Owner::scan`](#method.scan), additionally
+	/// accepting a relative lookback.
+	///
+	/// When `backwards_from_tip` is provided it takes precedence over
+	/// `start_height`, and the scan start is resolved as that many blocks back
+	/// from the chain tip that is freshly fetched and verified when the scan's
+	/// node read session starts. The requested range therefore always refers
+	/// to the same tip the scan itself authenticates against, rather than a
+	/// possibly cached or locally derived earlier sample.
 	pub fn scan(
 		&self,
 		keychain_mask: Option<&SecretKey>,
 		start_height: Option<u64>,
+		backwards_from_tip: Option<u64>,
 		delete_unconfirmed: bool,
 	) -> Result<u64, Error> {
-		let tx = {
-			let t = self.status_tx.lock().unwrap_or_else(|e| e.into_inner());
-			t.clone()
-		};
+		let mut secp = Secp256k1::with_caps(ContextFlag::Commit)?;
 		owner::scan(
 			self.wallet_inst.clone(),
+			&mut secp,
 			keychain_mask,
 			start_height,
+			backwards_from_tip,
 			delete_unconfirmed,
-			&tx,
 			true,
+			None,
 		)
 	}
 
-	/// Dump wallet data (outputs,transactions) into the logs
-	pub fn dump_wallet_data(&self, file_name: Option<String>) -> Result<(), Error> {
-		let tx = {
-			let t = self.status_tx.lock().unwrap_or_else(|e| e.into_inner());
-			t.clone()
-		};
-
-		owner::dump_wallet_data(
-			self.wallet_inst.clone(),
-			&tx.ok_or(Error::GenericError("Status sender is not set".into()))?,
-			file_name,
-		)
+	/// Dump wallet data (outputs and transactions) into a file.
+	pub fn dump_wallet_data(
+		&self,
+		keychain_mask: Option<&SecretKey>,
+		file_name: String,
+	) -> Result<(), Error> {
+		owner::dump_wallet_data(self.wallet_inst.clone(), keychain_mask, file_name)
 	}
 
 	/// Retrieves the last known height known by the wallet. This is determined as follows:
@@ -1742,14 +1779,14 @@ where
 	/// * Ok with a  [`NodeHeightResult`](../mwc_wallet_libwallet/types/struct.NodeHeightResult.html)
 	/// if successful. If the height result was obtained from the configured node,
 	/// `updated_from_node` will be set to `true`
-	/// * or [`libwallet::Error`](../mwc_wallet_libwallet/struct.Error.html) if an error is encountered.
+	/// * or [`mwc_wallet_libwallet::Error`](../mwc_wallet_libwallet/struct.Error.html) if an error is encountered.
 	///
 	/// # Example
 	/// Set up as in [`new`](struct.Owner.html#method.new) method above.
 	/// ```
 	/// # mwc_wallet_api::doctest_helper_setup_doc_env!(wallet, wallet_config);
 	///
-	/// let api_owner = Owner::new(0, wallet.clone(), None, None);
+	/// let api_owner = Owner::new(0, wallet.clone(), None).unwrap();
 	/// let result = api_owner.node_height(None);
 	///
 	/// if let Ok(node_height_result) = result {
@@ -1765,12 +1802,16 @@ where
 		&self,
 		keychain_mask: Option<&SecretKey>,
 	) -> Result<NodeHeightResult, Error> {
+		let mut secp = Secp256k1::with_caps(ContextFlag::Commit)?;
 		{
 			wallet_lock!(self.wallet_inst, w);
 			// Test keychain mask, to keep API consistent
-			let _ = w.keychain(keychain_mask)?;
+			let _ = w.keychain(&secp, keychain_mask)?;
 		}
-		let mut res = owner::node_height(self.wallet_inst.clone(), keychain_mask)?;
+		let res = owner::node_height(self.wallet_inst.clone(), &mut secp, keychain_mask)?;
+		#[cfg(feature = "test-support")]
+		let mut res = res;
+		#[cfg(feature = "test-support")]
 		if self.doctest_mode {
 			// return a consistent hash for doctest
 			res.header_hash =
@@ -1798,14 +1839,14 @@ where
 	///
 	/// # Returns
 	/// * Ok with a String value representing the full path to the top level wallet dierctory
-	/// * or [`libwallet::Error`](../mwc_wallet_libwallet/struct.Error.html) if an error is encountered.
+	/// * or [`mwc_wallet_libwallet::Error`](../mwc_wallet_libwallet/struct.Error.html) if an error is encountered.
 	///
 	/// # Example
 	/// Set up as in [`new`](struct.Owner.html#method.new) method above.
 	/// ```
 	/// # mwc_wallet_api::doctest_helper_setup_doc_env!(wallet, wallet_config);
 	///
-	/// let api_owner = Owner::new(0, wallet.clone(), None, None);
+	/// let api_owner = Owner::new(0, wallet.clone(), None).unwrap();
 	/// let result = api_owner.get_top_level_directory();
 	///
 	/// if let Ok(dir) = result {
@@ -1815,13 +1856,13 @@ where
 	/// ```
 
 	pub fn get_top_level_directory(&self) -> Result<String, Error> {
-		let mut w_lock = self.wallet_inst.lock().unwrap_or_else(|e| e.into_inner());
+		let mut w_lock = self.wallet_inst.lock();
 		let lc = w_lock.lc_provider()?;
+		#[cfg(feature = "test-support")]
 		if self.doctest_mode && !self.doctest_retain_tld {
-			Ok("/doctest/dir".to_owned())
-		} else {
-			lc.get_top_level_directory()
+			return Ok("/doctest/dir".to_owned());
 		}
+		lc.get_top_level_directory()
 	}
 
 	/// Set the top-level directory for the wallet. This directory can be empty, and will be created
@@ -1837,7 +1878,7 @@ where
 	///
 	/// # Returns
 	/// * Ok if successful
-	/// * or [`libwallet::Error`](../mwc_wallet_libwallet/struct.Error.html) if an error is encountered.
+	/// * or [`mwc_wallet_libwallet::Error`](../mwc_wallet_libwallet/struct.Error.html) if an error is encountered.
 	///
 	/// # Example
 	/// Set up as in [`new`](struct.Owner.html#method.new) method above.
@@ -1853,7 +1894,7 @@ where
 	/// #   .ok_or("Failed to convert tmpdir path to string.".to_owned())
 	/// #   .unwrap();
 	///
-	/// let api_owner = Owner::new(0, wallet.clone(), None, None);
+	/// let api_owner = Owner::new(0, wallet.clone(), None).unwrap();
 	/// let result = api_owner.set_top_level_directory(dir);
 	///
 	/// if let Ok(dir) = result {
@@ -1862,7 +1903,7 @@ where
 	/// ```
 
 	pub fn set_top_level_directory(&self, dir: &str) -> Result<(), Error> {
-		let mut w_lock = self.wallet_inst.lock().unwrap_or_else(|e| e.into_inner());
+		let mut w_lock = self.wallet_inst.lock();
 		let lc = w_lock.lc_provider()?;
 		lc.set_top_level_directory(dir)
 	}
@@ -1885,14 +1926,14 @@ where
 	///
 	/// # Returns
 	/// * Ok if successful
-	/// * or [`libwallet::Error`](../mwc_wallet_libwallet/struct.Error.html) if an error is encountered.
+	/// * or [`mwc_wallet_libwallet::Error`](../mwc_wallet_libwallet/struct.Error.html) if an error is encountered.
 	///
 	/// # Example
 	/// Set up as in [`new`](struct.Owner.html#method.new) method above.
 	/// ```
 	/// # mwc_wallet_api::doctest_helper_setup_doc_env!(wallet, wallet_config);
 	///
-	/// use mwc_core::global::ChainTypes;
+	/// use mwc_wallet_util::mwc_core::global::ChainTypes;
 	///
 	/// let dir = "path/to/wallet/dir";
 	///
@@ -1903,7 +1944,7 @@ where
 	/// #   .ok_or("Failed to convert tmpdir path to string.".to_owned())
 	/// #   .unwrap();
 	///
-	/// let api_owner = Owner::new(0, wallet.clone(), None, None);
+	/// let api_owner = Owner::new(0, wallet.clone(), None).unwrap();
 	/// let _ = api_owner.set_top_level_directory(dir);
 	///
 	/// let result = api_owner.create_config(&ChainTypes::Mainnet, None, None, None, None );
@@ -1921,7 +1962,7 @@ where
 		tor_config: Option<TorConfig>,
 		mqs_config: Option<MQSConfig>,
 	) -> Result<(), Error> {
-		let mut w_lock = self.wallet_inst.lock().unwrap_or_else(|e| e.into_inner());
+		let mut w_lock = self.wallet_inst.lock();
 		let lc = w_lock.lc_provider()?;
 		lc.create_config(
 			chain_type,
@@ -1948,20 +1989,21 @@ where
 	/// * `name`: Reserved for future use, use `None` for the time being.
 	/// * `mnemonic`: If present, restore the wallet seed from the given mnemonic instead of creating
 	/// a new random seed.
-	/// * `mnemonic_length`: Desired length of mnemonic in bytes (16 or 32, either 12 or 24 words).
-	/// Use 0 if mnemonic isn't being used.
+	/// * `mnemonic_length`: Desired entropy length for a new mnemonic in bytes. Supported values
+	/// are 16, 20, 24, 28, and 32 (12, 15, 18, 21, and 24 words respectively). This value is
+	/// ignored when `mnemonic` supplies a recovery phrase.
 	/// * `password`: The password used to encrypt/decrypt the `wallet.seed` file
 	///
 	/// # Returns
 	/// * Ok with mnemonic phrase if successful
-	/// * or [`libwallet::Error`](../mwc_wallet_libwallet/struct.Error.html) if an error is encountered.
+	/// * or [`mwc_wallet_libwallet::Error`](../mwc_wallet_libwallet/struct.Error.html) if an error is encountered.
 	///
 	/// # Example
 	/// Set up as in [`new`](struct.Owner.html#method.new) method above.
 	/// ```
 	/// # mwc_wallet_api::doctest_helper_setup_doc_env!(wallet, wallet_config);
 	///
-	/// use mwc_core::global::ChainTypes;
+	/// use mwc_wallet_util::mwc_core::global::ChainTypes;
 	///
 	/// // note that the WalletInst struct does not necessarily need to contain an
 	/// // instantiated wallet
@@ -1974,7 +2016,7 @@ where
 	/// #   .to_str()
 	/// #   .ok_or("Failed to convert tmpdir path to string.".to_owned())
 	/// #   .unwrap();
-	/// let api_owner = Owner::new(0, wallet.clone(), None, None);
+	/// let api_owner = Owner::new(0, wallet.clone(), None).unwrap();
 	/// let _ = api_owner.set_top_level_directory(dir);
 	///
 	/// // Create configuration
@@ -1998,13 +2040,20 @@ where
 		wallet_data_dir: Option<&str>,
 		show_seed: bool,
 	) -> Result<ZeroingString, Error> {
-		let mut w_lock = self.wallet_inst.lock().unwrap_or_else(|e| e.into_inner());
+		let mut w_lock = self.wallet_inst.lock();
 		let lc = w_lock.lc_provider()?;
+		let mnemonic_length = usize::try_from(mnemonic_length).map_err(|e| {
+			Error::DataOverflow(format!(
+				"Owner::create_wallet, mnemonic length does not fit usize, mnemonic_length={} error={}",
+				mnemonic_length, e
+			))
+		})?;
 		lc.create_wallet(
 			name,
 			mnemonic,
-			mnemonic_length as usize,
+			mnemonic_length,
 			password,
+			#[cfg(feature = "test-support")]
 			self.doctest_mode,
 			wallet_data_dir,
 			show_seed,
@@ -2026,14 +2075,14 @@ where
 	///
 	/// # Returns
 	/// * Ok if successful
-	/// * or [`libwallet::Error`](../mwc_wallet_libwallet/struct.Error.html) if an error is encountered.
+	/// * or [`mwc_wallet_libwallet::Error`](../mwc_wallet_libwallet/struct.Error.html) if an error is encountered.
 	///
 	/// # Example
 	/// Set up as in [`new`](struct.Owner.html#method.new) method above.
 	/// ```
 	/// # mwc_wallet_api::doctest_helper_setup_doc_env!(wallet, wallet_config);
 	///
-	/// use mwc_core::global::ChainTypes;
+	/// use mwc_wallet_util::mwc_core::global::ChainTypes;
 	///
 	/// // note that the WalletInst struct does not necessarily need to contain an
 	/// // instantiated wallet
@@ -2045,7 +2094,7 @@ where
 	/// #   .to_str()
 	/// #   .ok_or("Failed to convert tmpdir path to string.".to_owned())
 	/// #   .unwrap();
-	/// let api_owner = Owner::new(0, wallet.clone(), None, None);
+	/// let api_owner = Owner::new(0, wallet.clone(), None).unwrap();
 	/// let _ = api_owner.set_top_level_directory(dir);
 	///
 	/// // Create configuration
@@ -2070,19 +2119,29 @@ where
 		use_mask: bool,
 		wallet_data_dir: Option<&str>,
 	) -> Result<Option<SecretKey>, Error> {
+		let secp = Secp256k1::with_caps(ContextFlag::Commit)?;
 		// just return a representative string for doctest mode
+		#[cfg(feature = "test-support")]
 		if self.doctest_mode {
-			let secp_inst = static_secp_instance();
-			let secp = secp_inst.lock().unwrap_or_else(|e| e.into_inner());
 			return Ok(Some(SecretKey::from_slice(
 				&secp,
 				&from_hex("d096b3cb75986b3b13f80b8f5243a9edf0af4c74ac37578c5a12cfb5b59b1868")
-					.unwrap(),
+					.map_err(|e| {
+						Error::GenericError(format!("Unable to decode doctest key, {}", e))
+					})?,
 			)?));
 		}
-		let mut w_lock = self.wallet_inst.lock().unwrap_or_else(|e| e.into_inner());
+		let mut w_lock = self.wallet_inst.lock();
 		let lc = w_lock.lc_provider()?;
-		lc.open_wallet(name, password, use_mask, self.doctest_mode, wallet_data_dir)
+		lc.open_wallet(
+			&secp,
+			name,
+			password,
+			use_mask,
+			#[cfg(feature = "test-support")]
+			self.doctest_mode,
+			wallet_data_dir,
+		)
 	}
 
 	/// `Close` a wallet, removing the master seed from memory.
@@ -2093,17 +2152,17 @@ where
 	///
 	/// # Returns
 	/// * Ok if successful
-	/// * or [`libwallet::Error`](../mwc_wallet_libwallet/struct.Error.html) if an error is encountered.
+	/// * or [`mwc_wallet_libwallet::Error`](../mwc_wallet_libwallet/struct.Error.html) if an error is encountered.
 	///
 	/// # Example
 	/// Set up as in [`new`](struct.Owner.html#method.new) method above.
 	/// ```
 	/// # mwc_wallet_api::doctest_helper_setup_doc_env!(wallet, wallet_config);
 	///
-	/// use mwc_core::global::ChainTypes;
+	/// use mwc_wallet_util::mwc_core::global::ChainTypes;
 	///
 	/// // Set up as above
-	/// # let api_owner = Owner::new(0, wallet.clone(), None, None);
+	/// # let api_owner = Owner::new(0, wallet.clone(), None).unwrap();
 	///
 	/// let res = api_owner.close_wallet(None);
 	///
@@ -2113,7 +2172,7 @@ where
 	/// ```
 
 	pub fn close_wallet(&self, name: Option<&str>) -> Result<(), Error> {
-		let mut w_lock = self.wallet_inst.lock().unwrap_or_else(|e| e.into_inner());
+		let mut w_lock = self.wallet_inst.lock();
 		let lc = w_lock.lc_provider()?;
 		lc.close_wallet(name)
 	}
@@ -2129,17 +2188,17 @@ where
 	///
 	/// # Returns
 	/// * Ok(BIP-39 mneminc) if successful
-	/// * or [`libwallet::Error`](../mwc_wallet_libwallet/struct.Error.html) if an error is encountered.
+	/// * or [`mwc_wallet_libwallet::Error`](../mwc_wallet_libwallet/struct.Error.html) if an error is encountered.
 	///
 	/// # Example
 	/// Set up as in [`new`](struct.Owner.html#method.new) method above.
 	/// ```
 	/// # mwc_wallet_api::doctest_helper_setup_doc_env!(wallet, wallet_config);
 	///
-	/// use mwc_core::global::ChainTypes;
+	/// use mwc_wallet_util::mwc_core::global::ChainTypes;
 	///
 	/// // Set up as above
-	/// # let api_owner = Owner::new(0, wallet.clone(), None, None);
+	/// # let api_owner = Owner::new(0, wallet.clone(), None).unwrap();
 	///
 	///	let pw = ZeroingString::from("my_password");
 	/// let res = api_owner.get_mnemonic(None, pw, None);
@@ -2154,7 +2213,7 @@ where
 		password: ZeroingString,
 		wallet_data_dir: Option<&str>,
 	) -> Result<ZeroingString, Error> {
-		let mut w_lock = self.wallet_inst.lock().unwrap_or_else(|e| e.into_inner());
+		let mut w_lock = self.wallet_inst.lock();
 		let lc = w_lock.lc_provider()?;
 		lc.get_mnemonic(name, password, wallet_data_dir)
 	}
@@ -2175,17 +2234,17 @@ where
 	///
 	/// # Returns
 	/// * Ok(()) if successful
-	/// * or [`libwallet::Error`](../mwc_wallet_libwallet/struct.Error.html) if an error is encountered.
+	/// * or [`mwc_wallet_libwallet::Error`](../mwc_wallet_libwallet/struct.Error.html) if an error is encountered.
 	///
 	/// # Example
 	/// Set up as in [`new`](struct.Owner.html#method.new) method above.
 	/// ```
 	/// # mwc_wallet_api::doctest_helper_setup_doc_env!(wallet, wallet_config);
 	///
-	/// use mwc_core::global::ChainTypes;
+	/// use mwc_wallet_util::mwc_core::global::ChainTypes;
 	///
 	/// // Set up as above
-	/// # let api_owner = Owner::new(0, wallet.clone(), None, None);
+	/// # let api_owner = Owner::new(0, wallet.clone(), None).unwrap();
 	///
 	///	let old = ZeroingString::from("my_password");
 	///	let new = ZeroingString::from("new_password");
@@ -2202,7 +2261,7 @@ where
 		new: ZeroingString,
 		wallet_data_dir: Option<&str>,
 	) -> Result<(), Error> {
-		let mut w_lock = self.wallet_inst.lock().unwrap_or_else(|e| e.into_inner());
+		let mut w_lock = self.wallet_inst.lock();
 		let lc = w_lock.lc_provider()?;
 		lc.change_password(name, old, new, wallet_data_dir)
 	}
@@ -2210,8 +2269,7 @@ where
 	/// Deletes a wallet, removing the config file, seed file and all data files.
 	/// Obviously, use with extreme caution and plenty of user warning
 	///
-	/// Highly recommended that the wallet be explicitly closed first via the `close_wallet`
-	/// function.
+	/// The wallet must be explicitly closed first via the `close_wallet` function.
 	///
 	/// # Arguments
 	///
@@ -2219,18 +2277,19 @@ where
 	///
 	/// # Returns
 	/// * Ok if successful
-	/// * or [`libwallet::Error`](../mwc_wallet_libwallet/struct.Error.html) if an error is encountered.
+	/// * or [`mwc_wallet_libwallet::Error`](../mwc_wallet_libwallet/struct.Error.html) if an error is encountered.
 	///
 	/// # Example
 	/// Set up as in [`new`](struct.Owner.html#method.new) method above.
 	/// ```
 	/// # mwc_wallet_api::doctest_helper_setup_doc_env!(wallet, wallet_config);
 	///
-	/// use mwc_core::global::ChainTypes;
+	/// use mwc_wallet_util::mwc_core::global::ChainTypes;
 	///
 	/// // Set up as above
-	/// # let api_owner = Owner::new(0, wallet.clone(), None, None);
+	/// # let api_owner = Owner::new(0, wallet.clone(), None).unwrap();
 	///
+	/// api_owner.close_wallet(None).unwrap();
 	/// let res = api_owner.delete_wallet(None);
 	///
 	/// if let Ok(_) = res {
@@ -2239,191 +2298,9 @@ where
 	/// ```
 
 	pub fn delete_wallet(&self, name: Option<&str>) -> Result<(), Error> {
-		let mut w_lock = self.wallet_inst.lock().unwrap_or_else(|e| e.into_inner());
+		let mut w_lock = self.wallet_inst.lock();
 		let lc = w_lock.lc_provider()?;
 		lc.delete_wallet(name)
-	}
-
-	/// Starts a background wallet update thread, which performs the wallet update process
-	/// automatically at the frequency specified.
-	///
-	/// The updater process is as follows:
-	///
-	/// * Reconcile the wallet outputs against the node's current UTXO set, confirming
-	/// transactions if needs be.
-	/// * Look up transactions by kernel in cases where it's necessary (for instance, when
-	/// there are no change outputs for a transaction and transaction status can't be
-	/// inferred from the output state.
-	/// * Incrementally perform a scan of the UTXO set, correcting outputs and transactions
-	/// where their local state differs from what's on-chain. The wallet stores the last
-	/// position scanned, and will scan back 100 blocks worth of UTXOs on each update, to
-	/// correct any differences due to forks or otherwise.
-	///
-	/// Note that an update process can take a long time, particularly when the entire
-	/// UTXO set is being scanned for correctness. The wallet status can be determined by
-	/// calling the [`get_updater_messages`](struct.Owner.html#method.get_updater_messages).
-	///
-	/// # Arguments
-	///
-	/// * `keychain_mask` - Wallet secret mask to XOR against the stored wallet seed before using, if
-	/// being used.
-	/// * `frequency`: The frequency at which to call the update process. Note this is
-	/// time elapsed since the last successful update process. If calling via the JSON-RPC
-	/// api, this represents milliseconds.
-	///
-	/// # Returns
-	/// * Ok if successful
-	/// * or [`libwallet::Error`](../mwc_wallet_libwallet/struct.Error.html) if an error is encountered.
-	///
-	/// # Example
-	/// Set up as in [`new`](struct.Owner.html#method.new) method above.
-	/// ```
-	/// # mwc_wallet_api::doctest_helper_setup_doc_env!(wallet, wallet_config);
-	///
-	/// use mwc_core::global::ChainTypes;
-	///
-	/// use std::time::Duration;
-	///
-	/// // Set up as above
-	/// # let mut api_owner = Owner::new(0, wallet.clone(), None, None);
-	///
-	/// let res = api_owner.start_updater(None, Duration::from_secs(60));
-	///
-	/// if let Ok(_) = res {
-	///   // ...
-	/// }
-	/// ```
-
-	pub fn start_updater(
-		&self,
-		keychain_mask: Option<&SecretKey>,
-		frequency: Duration,
-	) -> Result<(), Error> {
-		let mut updater_thread = self
-			.updater_thread
-			.lock()
-			.unwrap_or_else(|e| e.into_inner());
-
-		if updater_thread.is_some() {
-			return Err(Error::Lifecycle("Updater thread is already started".into()));
-		}
-
-		let updater_inner = self.updater.clone();
-		let tx_inner = {
-			let t = self.status_tx.lock().unwrap_or_else(|e| e.into_inner());
-			t.clone()
-		};
-		let keychain_mask = match keychain_mask {
-			Some(m) => Some(m.clone()),
-			None => None,
-		};
-		self.updater_running.store(true, Ordering::Relaxed);
-		let updater_thr = thread::Builder::new()
-			.name(format!("wallet-updater-{}", self.context_id))
-			.spawn(move || {
-				let u = updater_inner.lock().unwrap_or_else(|e| e.into_inner());
-				if let Err(e) = u.run(frequency, keychain_mask, &tx_inner) {
-					error!("Wallet state updater failed with error: {}", e);
-				}
-			})?;
-		let _ = updater_thread.insert(updater_thr);
-		thread::sleep(Duration::from_millis(10));
-		Ok(())
-	}
-
-	/// Stops the background update thread. If the updater is currently updating, the
-	/// thread will stop after the next update
-	///
-	/// # Arguments
-	///
-	/// * None
-	///
-	/// # Returns
-	/// * Ok if successful
-	/// * or [`libwallet::Error`](../mwc_wallet_libwallet/struct.Error.html) if an error is encountered.
-	///
-	/// # Example
-	/// Set up as in [`new`](struct.Owner.html#method.new) method above.
-	/// ```
-	/// # mwc_wallet_api::doctest_helper_setup_doc_env!(wallet, wallet_config);
-	///
-	/// use mwc_core::global::ChainTypes;
-	///
-	/// use std::time::Duration;
-	///
-	/// // Set up as above
-	/// # let api_owner = Owner::new(0, wallet.clone(), None, None);
-	///
-	/// let res = api_owner.start_updater(None, Duration::from_secs(60));
-	///
-	/// if let Ok(_) = res {
-	///   // ...
-	/// }
-	///
-	/// let res = api_owner.stop_updater();
-	/// ```
-
-	pub fn stop_updater(&self) -> Result<(), Error> {
-		self.updater_running.store(false, Ordering::Relaxed);
-		if let Some(thr) = self
-			.updater_thread
-			.lock()
-			.unwrap_or_else(|e| e.into_inner())
-			.take()
-		{
-			let _ = thr.join();
-		}
-		Ok(())
-	}
-
-	/// Retrieve messages from the updater thread, up to `count` number of messages.
-	/// The resulting array will be ordered newest messages first. The updater will
-	/// store a maximum of 10,000 messages, after which it will start removing the oldest
-	/// messages as newer ones are created.
-	///
-	/// Messages retrieved via this method are removed from the internal queue, so calling
-	/// this function at a specified interval should result in a complete message history.
-	///
-	/// # Arguments
-	///
-	/// * `count` - The number of messages to retrieve.
-	///
-	/// # Returns
-	/// * Ok with a Vec of [`StatusMessage`](../mwc_wallet_libwallet/api_impl/owner_updater/enum.StatusMessage.html)
-	/// * or [`libwallet::Error`](../mwc_wallet_libwallet/struct.Error.html) if an error is encountered.
-	///
-	/// # Example
-	/// Set up as in [`new`](struct.Owner.html#method.new) method above.
-	/// ```
-	/// # mwc_wallet_api::doctest_helper_setup_doc_env!(wallet, wallet_config);
-	///
-	/// use mwc_core::global::ChainTypes;
-	///
-	/// use std::time::Duration;
-	///
-	/// // Set up as above
-	/// # let api_owner = Owner::new(0, wallet.clone(), None, None);
-	///
-	/// let res = api_owner.start_updater(None, Duration::from_secs(60));
-	///
-	/// let messages = api_owner.get_updater_messages(Some(10000));
-	///
-	/// if let Ok(_) = res {
-	///   // ...
-	/// }
-	///
-	/// ```
-
-	pub fn get_updater_messages(&self, count: Option<u32>) -> Result<Vec<StatusMessage>, Error> {
-		let mut q = self
-			.updater_messages
-			.lock()
-			.unwrap_or_else(|e| e.into_inner());
-		let index = match count {
-			Some(count) => q.len().saturating_sub(count as usize),
-			None => 0,
-		};
-		Ok(q.split_off(index))
 	}
 
 	/// Retrieve the MQS address associated with the wallet. This address can be changed with
@@ -2435,19 +2312,19 @@ where
 	///
 	/// # Returns
 	/// * Ok with a PublicKey that representing the address for MQS
-	/// * or [`libwallet::Error`](../mwc_wallet_libwallet/struct.Error.html) if an error is encountered.
+	/// * or [`mwc_wallet_libwallet::Error`](../mwc_wallet_libwallet/struct.Error.html) if an error is encountered.
 	///
 	/// # Example
 	/// Set up as in [`new`](struct.Owner.html#method.new) method above.
 	/// ```
 	/// # mwc_wallet_api::doctest_helper_setup_doc_env!(wallet, wallet_config);
 	///
-	/// use mwc_core::global::ChainTypes;
+	/// use mwc_wallet_util::mwc_core::global::ChainTypes;
 	///
 	/// use std::time::Duration;
 	///
 	/// // Set up as above
-	/// # let api_owner = Owner::new(0, wallet.clone(), None, None);
+	/// # let api_owner = Owner::new(0, wallet.clone(), None).unwrap();
 	///
 	/// let res = api_owner.get_mqs_address(None);
 	///
@@ -2458,7 +2335,8 @@ where
 	/// ```
 
 	pub fn get_mqs_address(&self, keychain_mask: Option<&SecretKey>) -> Result<PublicKey, Error> {
-		owner::get_mqs_address(self.wallet_inst.clone(), keychain_mask)
+		let secp = Secp256k1::with_caps(ContextFlag::Commit)?;
+		owner::get_mqs_address(self.wallet_inst.clone(), &secp, keychain_mask)
 	}
 
 	/// Retrieve the Tor or wallet public address associated with the wallet. This address can be changed with
@@ -2469,8 +2347,8 @@ where
 	/// * `keychain_mask` - Wallet secret mask to XOR against the stored wallet seed before using, if
 	///
 	/// # Returns
-	/// * Ok(DalekPublicKey) representing the public key associated with the address, if successful
-	/// * or [`libwallet::Error`](../mwc_wallet_libwallet/struct.Error.html) if an error is encountered
+	/// * Ok(ed25519_dalek::VerifyingKey) representing the public key associated with the address, if successful
+	/// * or [`mwc_wallet_libwallet::Error`](../mwc_wallet_libwallet/struct.Error.html) if an error is encountered
 	/// or the address provided is invalid
 	///
 	/// # Example
@@ -2478,12 +2356,12 @@ where
 	/// ```
 	/// # mwc_wallet_api::doctest_helper_setup_doc_env!(wallet, wallet_config);
 	///
-	/// use mwc_core::global::ChainTypes;
+	/// use mwc_wallet_util::mwc_core::global::ChainTypes;
 	///
 	/// use std::time::Duration;
 	///
 	/// // Set up as above
-	/// # let api_owner = Owner::new(0, wallet.clone(), None, None);
+	/// # let api_owner = Owner::new(0, wallet.clone(), None).unwrap();
 	///
 	/// let res = api_owner.get_wallet_public_address(None);
 	///
@@ -2496,90 +2374,22 @@ where
 	pub fn get_wallet_public_address(
 		&self,
 		keychain_mask: Option<&SecretKey>,
-	) -> Result<DalekPublicKey, Error> {
-		owner::get_wallet_public_address(self.wallet_inst.clone(), keychain_mask)
+	) -> Result<ed25519_dalek::VerifyingKey, Error> {
+		let secp = Secp256k1::with_caps(ContextFlag::Commit)?;
+		owner::get_wallet_public_address(self.wallet_inst.clone(), &secp, keychain_mask)
 	}
 
-	/// Returns a single, exportable [PaymentProof](../mwc_wallet_libwallet/api_impl/types/struct.PaymentProof.html)
-	/// from a completed transaction within the wallet.
+	/// Retrieve a stored payment proof after validating the wallet's keychain mask.
 	///
-	/// The transaction must have been created with a payment proof, and the transaction must be
-	/// complete in order for a payment proof to be returned. Either the `tx_id` or `tx_slate_id`
-	/// argument must be provided, or the function will return an error.
-	///
-	/// # Arguments
-	/// * `keychain_mask` - Wallet secret mask to XOR against the stored wallet seed before using, if
-	/// being used.
-	/// * `refresh_from_node` - If true, the wallet will attempt to contact
-	/// a node (via the [`NodeClient`](../mwc_wallet_libwallet/types/trait.NodeClient.html)
-	/// provided during wallet instantiation). If `false`, the results will
-	/// contain transaction information that may be out-of-date (from the last time
-	/// the wallet's output set was refreshed against the node).
-	/// Note this setting is ignored if the updater process is running via a call to
-	/// [`start_updater`](struct.Owner.html#method.start_updater)
-	/// * `tx_id` - If `Some(i)` return the proof associated with the transaction with id `i`
-	/// * `tx_slate_id` - If `Some(uuid)`, return the proof associated with the transaction with the
-	/// given `uuid`
-	///
-	/// # Returns
-	/// * Ok([PaymentProof](../mwc_wallet_libwallet/api_impl/types/struct.PaymentProof.html)) if successful
-	/// * or [`libwallet::Error`](../mwc_wallet_libwallet/struct.Error.html) if an error is encountered
-	/// or the proof is not present or complete
-	///
-	/// # Example
-	/// Set up as in [`new`](struct.Owner.html#method.new) method above.
 	/// ```
 	/// # mwc_wallet_api::doctest_helper_setup_doc_env!(wallet, wallet_config);
 	///
-	/// let api_owner = Owner::new(0, wallet.clone(), None, None);
+	/// let api_owner = Owner::new(0, wallet.clone(), None).unwrap();
 	/// let update_from_node = true;
 	/// let tx_id = None;
 	/// let tx_slate_id = Some(Uuid::parse_str("0436430c-2b02-624c-2032-570501212b00").unwrap());
 	///
-	/// // Return all TxLogEntries
-	/// #[cfg(feature = "grin_proof")]
-	/// let result = api_owner.retrieve_payment_proof(None, update_from_node, tx_id, tx_slate_id);
-	/// #[cfg(feature = "grin_proof")]
-	/// if let Ok(p) = result {
-	///     //...
-	/// }
-	/// ```
-
-	#[cfg(feature = "grin_proof")]
-	pub fn retrieve_payment_proof(
-		&self,
-		keychain_mask: Option<&SecretKey>,
-		refresh_from_node: bool,
-		tx_id: Option<u32>,
-		tx_slate_id: Option<Uuid>,
-	) -> Result<PaymentProof, Error> {
-		let tx = {
-			let t = self.status_tx.lock().unwrap_or_else(|e| e.into_inner());
-			t.clone()
-		};
-		let refresh_from_node = match self.updater_running.load(Ordering::Relaxed) {
-			true => false,
-			false => refresh_from_node,
-		};
-		owner::retrieve_payment_proof(
-			self.wallet_inst.clone(),
-			keychain_mask,
-			&tx,
-			refresh_from_node,
-			tx_id,
-			tx_slate_id,
-		)
-	}
-
-	/// ```
-	/// # mwc_wallet_api::doctest_helper_setup_doc_env!(wallet, wallet_config);
-	///
-	/// let api_owner = Owner::new(0, wallet.clone(), None, None);
-	/// let update_from_node = true;
-	/// let tx_id = None;
-	/// let tx_slate_id = Some(Uuid::parse_str("0436430c-2b02-624c-2032-570501212b00").unwrap());
-	///
-	/// // Return all TxLogEntries
+	/// // Return the stored payment proof
 	/// let result = api_owner.get_stored_tx_proof(None, tx_id, tx_slate_id);
 	/// if let Ok(p) = result {
 	///     //...
@@ -2587,74 +2397,22 @@ where
 	/// ```
 	pub fn get_stored_tx_proof(
 		&self,
-		_keychain_mask: Option<&SecretKey>,
+		keychain_mask: Option<&SecretKey>,
 		tx_id: Option<u32>,
 		tx_slate_id: Option<Uuid>,
 	) -> Result<TxProof, Error> {
-		owner::get_stored_tx_proof(self.wallet_inst.clone(), tx_id, tx_slate_id)
-	}
-
-	/// Verifies a [PaymentProof](../mwc_wallet_libwallet/api_impl/types/struct.PaymentProof.html)
-	/// This process entails:
-	///
-	/// * Ensuring the kernel identified by the proof's stored excess commitment exists in the kernel set
-	/// * Reproducing the signed message `amount|kernel_commitment|sender_address`
-	/// * Validating the proof's `recipient_sig` against the message using the recipient's
-	/// address as the public key and
-	/// * Validating the proof's `sender_sig` against the message using the senders's
-	/// address as the public key
-	///
-	/// This function also checks whether the sender or recipient address belongs to the currently
-	/// open wallet, and returns 2 booleans indicating whether the address belongs to the sender and
-	/// whether the address belongs to the recipient respectively
-	///
-	/// # Arguments
-	/// * `keychain_mask` - Wallet secret mask to XOR against the stored wallet seed before using, if
-	/// being used.
-	/// * `proof` A [PaymentProof](../mwc_wallet_libwallet/api_impl/types/struct.PaymentProof.html))
-	///
-	/// # Returns
-	/// * Ok((bool, bool)) if the proof is valid. The first boolean indicates whether the sender
-	/// address belongs to this wallet, the second whether the recipient address belongs to this
-	/// wallet
-	/// * or [`libwallet::Error`](../mwc_wallet_libwallet/struct.Error.html) if an error is encountered
-	/// or the proof is not present or complete
-	///
-	/// # Example
-	/// Set up as in [`new`](struct.Owner.html#method.new) method above.
-	/// ```
-	/// # mwc_wallet_api::doctest_helper_setup_doc_env!(wallet, wallet_config);
-	///
-	/// let api_owner = Owner::new(0, wallet.clone(), None, None);
-	/// let update_from_node = true;
-	/// let tx_id = None;
-	/// let tx_slate_id = Some(Uuid::parse_str("0436430c-2b02-624c-2032-570501212b00").unwrap());
-	///
-	/// // Return all TxLogEntries
-	/// #[cfg(feature = "grin_proof")]
-	/// let result = api_owner.retrieve_payment_proof(None, update_from_node, tx_id, tx_slate_id);
-	///
-	/// // The proof will likely be exported as JSON to be provided to another party
-	/// #[cfg(feature = "grin_proof")]
-	/// if let Ok(p) = result {
-	///     let valid = api_owner.verify_payment_proof(None, &p);
-	///     if let Ok(_) = valid {
-	///       //...
-	///     }
-	/// }
-	/// ```
-
-	#[cfg(feature = "grin_proof")]
-	pub fn verify_payment_proof(
-		&self,
-		keychain_mask: Option<&SecretKey>,
-		proof: &PaymentProof,
-	) -> Result<(bool, bool), Error> {
-		owner::verify_payment_proof(self.wallet_inst.clone(), keychain_mask, proof)
+		let secp = Secp256k1::with_caps(ContextFlag::Commit)?;
+		owner::get_stored_tx_proof(
+			self.wallet_inst.clone(),
+			&secp,
+			keychain_mask,
+			tx_id,
+			tx_slate_id,
+		)
 	}
 
 	pub fn verify_tx_proof(&self, proof: &TxProof) -> Result<VerifyProofResult, Error> {
-		let secp = Secp256k1::with_caps(ContextFlag::Commit);
+		let secp = Secp256k1::with_caps(ContextFlag::Commit)?;
 		let context_id = {
 			wallet_lock!(self.wallet_inst, w);
 			w.get_context_id()
@@ -2670,8 +2428,10 @@ where
 		include_tor_address: bool,
 		include_mqs_address: bool,
 	) -> Result<OwnershipProof, Error> {
+		let secp = Secp256k1::with_caps(ContextFlag::Commit)?;
 		owner::generate_ownership_proof(
 			self.wallet_inst.clone(),
+			&secp,
 			keychain_mask,
 			message,
 			include_public_root_key,
@@ -2684,11 +2444,12 @@ where
 		&self,
 		proof: OwnershipProof,
 	) -> Result<OwnershipProofValidation, Error> {
+		let secp = Secp256k1::with_caps(ContextFlag::Commit)?;
 		let context_id = {
 			wallet_lock!(self.wallet_inst, w);
 			w.get_context_id()
 		};
-		owner::validate_ownership_proof(context_id, proof)
+		owner::validate_ownership_proof(&secp, context_id, proof)
 	}
 
 	/// Start swap trade process. Return SwapID that can be used to check the status or perform further action.
@@ -2698,12 +2459,8 @@ where
 		keychain_mask: Option<&SecretKey>,
 		params: &SwapStartArgs,
 	) -> Result<String, Error> {
-		// Updating wallet state first because we need to select outputs.
-		{
-			wallet_lock!(self.wallet_inst, w);
-			owner::update_wallet_state(&mut **w, keychain_mask, &None)?;
-		}
-		owner_swap::swap_start(self.wallet_inst.clone(), keychain_mask, params)
+		let mut secp = Secp256k1::with_caps(ContextFlag::Commit)?;
+		owner_swap::swap_start(self.wallet_inst.clone(), &mut secp, keychain_mask, params)
 			.map_err(|e| e.into())
 	}
 
@@ -2713,8 +2470,10 @@ where
 		keychain_mask: Option<&SecretKey>,
 		message_filename: String,
 	) -> Result<String, Error> {
+		let mut secp = Secp256k1::with_caps(ContextFlag::Commit)?;
 		owner_swap::swap_create_from_offer(
 			self.wallet_inst.clone(),
+			&mut secp,
 			keychain_mask,
 			message_filename,
 		)
@@ -2727,8 +2486,15 @@ where
 		&self,
 		keychain_mask: Option<&SecretKey>,
 		do_check: bool,
-	) -> Result<(Vec<owner_swap::SwapListInfo>, Vec<Swap>), Error> {
-		owner_swap::swap_list(self.wallet_inst.clone(), keychain_mask, do_check)
+	) -> Result<
+		(
+			Vec<owner_swap::SwapListInfo>,
+			Vec<owner_swap::MarketplaceCancelNotification>,
+		),
+		Error,
+	> {
+		let mut secp = Secp256k1::with_caps(ContextFlag::Commit)?;
+		owner_swap::swap_list(self.wallet_inst.clone(), &mut secp, keychain_mask, do_check)
 			.map_err(|e| e.into())
 	}
 
@@ -2739,7 +2505,8 @@ where
 		keychain_mask: Option<&SecretKey>,
 		swap_id: String,
 	) -> Result<(), Error> {
-		owner_swap::swap_delete(self.wallet_inst.clone(), keychain_mask, &swap_id)
+		let secp = Secp256k1::with_caps(ContextFlag::Commit)?;
+		owner_swap::swap_delete(self.wallet_inst.clone(), &secp, keychain_mask, &swap_id)
 			.map_err(|e| e.into())
 	}
 	/// Retrieve swap trade
@@ -2749,7 +2516,8 @@ where
 		keychain_mask: Option<&SecretKey>,
 		swap_id: String,
 	) -> Result<Swap, Error> {
-		owner_swap::swap_get(self.wallet_inst.clone(), keychain_mask, &swap_id)
+		let secp = Secp256k1::with_caps(ContextFlag::Commit)?;
+		owner_swap::swap_get(self.wallet_inst.clone(), &secp, keychain_mask, &swap_id)
 			.map_err(|e| e.into())
 	}
 
@@ -2764,14 +2532,16 @@ where
 		method: Option<String>,
 		destination: Option<String>,
 		secondary_address: Option<String>, // secondary address to adjust
-		secondary_fee: Option<f32>,
+		secondary_fee: Option<String>,
 		electrum_node_uri1: Option<String>,
 		electrum_node_uri2: Option<String>,
 		eth_infura_project_id: Option<String>,
 		tag: Option<String>,
 	) -> Result<(StateId, Action), Error> {
+		let mut secp = Secp256k1::with_caps(ContextFlag::Commit)?;
 		owner_swap::swap_adjust(
 			self.wallet_inst.clone(),
+			&mut secp,
 			keychain_mask,
 			&swap_id,
 			&adjust_cmd,
@@ -2794,29 +2564,61 @@ where
 		keychain_mask: Option<&SecretKey>,
 		swap_id: String,
 	) -> Result<String, Error> {
-		owner_swap::swap_dump(self.wallet_inst.clone(), keychain_mask, &swap_id)
+		let secp = Secp256k1::with_caps(ContextFlag::Commit)?;
+		owner_swap::swap_dump(self.wallet_inst.clone(), &secp, keychain_mask, &swap_id)
 			.map_err(|e| e.into())
 	}
 
 	/// dump ethereum info
 	#[cfg(feature = "swaps")]
-	pub fn eth_info(&self, currency: Currency) -> Result<(String, String, String), Error> {
-		owner_eth::info(self.wallet_inst.clone(), currency).map_err(|e| e.into())
+	pub fn eth_info(
+		&self,
+		keychain_mask: Option<&SecretKey>,
+		currency: Currency,
+	) -> Result<(String, String, String), Error> {
+		owner_eth::info(self.wallet_inst.clone(), keychain_mask, currency).map_err(|e| e.into())
 	}
 
 	/// ethereum transfer
 	#[cfg(feature = "swaps")]
 	pub fn eth_transfer(
 		&self,
+		keychain_mask: Option<&SecretKey>,
 		dest: String,
 		currency: Currency,
 		amount: &String,
-	) -> Result<(), libwallet::swap::Error> {
-		owner_eth::transfer(self.wallet_inst.clone(), currency, dest, amount)
+	) -> Result<mwc_wallet_util::mwc_web3::types::H256, mwc_wallet_libwallet::swap::Error> {
+		owner_eth::transfer(
+			self.wallet_inst.clone(),
+			keychain_mask,
+			currency,
+			dest,
+			amount,
+		)
+	}
+
+	/// Retry a direct ETH/ERC20 transfer retained by the running wallet process.
+	/// Any original or replacement hash identifies the same payment. None keeps
+	/// its current fee budget; Some authorizes a maximum fee budget in gwei.
+	#[cfg(feature = "swaps")]
+	pub fn eth_retry_transfer(
+		&self,
+		keychain_mask: Option<&SecretKey>,
+		tx_hash: mwc_wallet_util::mwc_web3::types::H256,
+		gas_budget_gwei: Option<u64>,
+	) -> Result<mwc_wallet_util::mwc_web3::types::H256, mwc_wallet_libwallet::swap::Error> {
+		owner_eth::retry_transfer(
+			self.wallet_inst.clone(),
+			keychain_mask,
+			tx_hash,
+			gas_budget_gwei,
+		)
 	}
 
 	/// Refresh and get a status and current expected action for the swap.
-	/// return: <state>, <Action>, <time limit>, <Roadmap lines>, <Journal records>, <last error> , <mkt place cancelled trades>
+	/// Supplied Ethereum contract addresses must match the immutable addresses
+	/// pinned in the trade; a different address returns an error.
+	/// return: <state>, <Action>, <time limit>, <Roadmap lines>, <Journal records>, <last error> , <marketplace cancellation notifications>
 	/// time limit shows when this action will be expired
 	#[cfg(feature = "swaps")]
 	pub fn update_swap_status_action(
@@ -2836,12 +2638,14 @@ where
 			Vec<StateEtaInfo>,
 			Vec<SwapJournalRecord>,
 			Option<String>,
-			Vec<Swap>,
+			Vec<owner_swap::MarketplaceCancelNotification>,
 		),
 		Error,
 	> {
+		let mut secp = Secp256k1::with_caps(ContextFlag::Commit)?;
 		owner_swap::update_swap_status_action(
 			self.wallet_inst.clone(),
+			&mut secp,
 			keychain_mask,
 			&swap_id,
 			electrum_node_uri1,
@@ -2855,6 +2659,8 @@ where
 	}
 
 	/// Get a status of the transactions that involved into the swap.
+	/// Supplied Ethereum contract addresses must match the immutable addresses
+	/// pinned in the trade; a different address returns an error.
 	#[cfg(feature = "swaps")]
 	pub fn get_swap_tx_tstatus(
 		&self,
@@ -2866,8 +2672,10 @@ where
 		erc20_swap_contract_address: Option<String>,
 		eth_infura_project_id: Option<String>,
 	) -> Result<SwapTransactionsConfirmations, Error> {
+		let secp = Secp256k1::with_caps(ContextFlag::Commit)?;
 		owner_swap::get_swap_tx_tstatus(
 			self.wallet_inst.clone(),
+			&secp,
 			keychain_mask,
 			&swap_id,
 			electrum_node_uri1,
@@ -2887,18 +2695,31 @@ where
 		message_sender: F,
 		message_file_name: Option<String>,
 		buyer_refund_address: Option<String>,
-		secondary_fee: Option<f32>,
+		secondary_fee: Option<String>,
 		secondary_address: Option<String>,
 		electrum_node_uri1: Option<String>,
 		electrum_node_uri2: Option<String>,
 		eth_infura_project_id: Option<String>,
-	) -> Result<(StateProcessRespond, Vec<Swap>), Error>
+	) -> Result<
+		(
+			StateProcessRespond,
+			Vec<owner_swap::MarketplaceCancelNotification>,
+		),
+		Error,
+	>
 	where
-		F: FnOnce(Message, String, String) -> Result<(bool, String), libwallet::swap::Error>
+		F: FnOnce(
+				Message,
+				String,
+				String,
+				&Secp256k1,
+			) -> Result<(bool, String), mwc_wallet_libwallet::swap::Error>
 			+ 'static,
 	{
+		let mut secp = Secp256k1::with_caps(ContextFlag::Commit)?;
 		owner_swap::swap_process(
 			self.wallet_inst.clone(),
+			&mut secp,
 			keychain_mask,
 			swap_id,
 			message_sender,
@@ -2914,15 +2735,31 @@ where
 		.map_err(|e| e.into())
 	}
 
-	/// Process swap income message
+	/// Process a swap message received over the network. The optional sender must
+	/// be authenticated by the MQS transport; unauthenticated delivery cannot
+	/// update an existing MQS trade. Owner-selected files use the file import APIs.
 	#[cfg(feature = "swaps")]
 	pub fn swap_income_message(
 		&self,
 		keychain_mask: Option<&SecretKey>,
 		message: String,
+		authenticated_sender: Option<String>,
 	) -> Result<Option<Message>, Error> {
-		owner_swap::swap_income_message(self.wallet_inst.clone(), keychain_mask, &message, None)
-			.map_err(|e| e.into())
+		let mut secp = Secp256k1::with_caps(ContextFlag::Commit).map_err(|e| {
+			// Preserve the transient/deterministic classification: SysRngFailure
+			// and AllocationError are local, recoverable conditions and must
+			// surface as SwapTransient so the broker redelivers instead of
+			// dropping the message.
+			Error::from(mwc_wallet_libwallet::swap::error::Error::Secp(e))
+		})?;
+		owner_swap::swap_income_message(
+			self.wallet_inst.clone(),
+			&mut secp,
+			keychain_mask,
+			&message,
+			authenticated_sender.as_deref(),
+		)
+		.map_err(|e| e.into())
 	}
 
 	// decryipt income slate. It is the common routine for most API calls that accept the slates
@@ -2931,7 +2768,14 @@ where
 		&self,
 		keychain_mask: Option<&SecretKey>,
 		in_slate: VersionedSlate,
-	) -> Result<(Slate, Option<SlatePurpose>, Option<DalekPublicKey>), Error> {
+	) -> Result<
+		(
+			Slate,
+			Option<SlatePurpose>,
+			Option<ed25519_dalek::VerifyingKey>,
+		),
+		Error,
+	> {
 		let (slate_from, content, sender) = if in_slate.is_slatepack() {
 			let (slate_from, content, sender, _receiver) = self
 				.decrypt_slatepack(keychain_mask, in_slate, None)
@@ -2960,13 +2804,23 @@ where
 		(
 			Slate,
 			SlatePurpose,
-			Option<DalekPublicKey>,
-			Option<DalekPublicKey>,
+			Option<ed25519_dalek::VerifyingKey>,
+			Option<ed25519_dalek::VerifyingKey>,
 		),
 		Error,
 	> {
+		let secp = Secp256k1::with_caps(ContextFlag::Commit)?;
 		wallet_lock!(self.wallet_inst, w);
-		foreign::decrypt_slate(&mut **w, keychain_mask, encrypted_slate, address_index)
+		// Owner flows also process this wallet's own outgoing slatepacks (e.g.
+		// tx_lock_outputs after a send), so the local key may be the sender.
+		foreign::decrypt_slate(
+			&mut **w,
+			&secp,
+			keychain_mask,
+			encrypted_slate,
+			address_index,
+			false,
+		)
 	}
 
 	// Encrypt slate to send back.
@@ -2976,32 +2830,37 @@ where
 		slate: &Slate,
 		version: Option<SlateVersion>,
 		content: SlatePurpose,
-		slatepack_recipient: Option<DalekPublicKey>,
+		slatepack_recipient: Option<ed25519_dalek::VerifyingKey>,
 		address_index: Option<u32>,
-		use_test_rng: bool,
+		#[cfg(feature = "test-support")] use_test_rng: bool,
 	) -> Result<VersionedSlate, Error> {
+		let secp = Secp256k1::with_caps(ContextFlag::Commit)?;
 		wallet_lock!(self.wallet_inst, w);
 		foreign::encrypt_slate(
 			&mut **w,
+			&secp,
 			keychain_mask,
 			slate,
 			version,
 			content,
 			slatepack_recipient,
 			address_index,
+			#[cfg(feature = "test-support")]
 			use_test_rng,
 		)
 	}
 
 	/// Builds an output
+	/// For plain outputs, sync the wallet first so its last confirmed height is nonzero.
 	pub fn build_output(
 		&self,
 		keychain_mask: Option<&SecretKey>,
 		features: OutputFeatures,
 		amount: u64,
 	) -> Result<BuiltOutput, Error> {
+		let mut secp = Secp256k1::with_caps(ContextFlag::Commit)?;
 		wallet_lock!(self.wallet_inst, w);
-		owner::build_output(&mut **w, keychain_mask, features, amount)
+		owner::build_output(&mut **w, &mut secp, keychain_mask, features, amount)
 	}
 }
 
@@ -3009,34 +2868,28 @@ where
 #[macro_export]
 macro_rules! doctest_helper_setup_doc_env {
 	($wallet:ident, $wallet_config:ident) => {
-		use mwc_wallet_api as api;
-		use mwc_wallet_config as config;
-		use mwc_wallet_impls as impls;
-		use mwc_wallet_libwallet as libwallet;
 		use mwc_wallet_util::mwc_core;
-		use mwc_wallet_util::mwc_keychain as keychain;
-		use mwc_wallet_util::mwc_util as util;
+		use mwc_wallet_util::mwc_core::global;
 
-		use mwc_core::global;
+		use mwc_wallet_util::mwc_crates::tempfile::tempdir;
+		use mwc_wallet_util::mwc_keychain::ExtKeychain;
 
-		use keychain::ExtKeychain;
-		use tempfile::tempdir;
-
+		use mwc_wallet_util::Mutex;
+		use mwc_wallet_util::mwc_util::ZeroingString;
 		use std::sync::Arc;
-		use std::sync::Mutex;
-		use util::ZeroingString;
 
-		use api::{Foreign, Owner};
-		use config::{parse_node_address_string, WalletConfig};
-		use impls::{DefaultLCProvider, DefaultWalletImpl, HTTPNodeClient};
-		use libwallet::{BlockFees, InitTxArgs, IssueInvoiceTxArgs, Slate, WalletInst};
+		use mwc_wallet_api::{Foreign, Owner};
+		use mwc_wallet_config::{WalletConfig, parse_node_address_string};
+		use mwc_wallet_impls::{DefaultLCProvider, DefaultWalletImpl, HTTPNodeClient};
+		use mwc_wallet_libwallet::{BlockFees, InitTxArgs, IssueInvoiceTxArgs, Slate, WalletInst};
 
-		use uuid::Uuid;
+		use mwc_wallet_util::mwc_crates::uuid::Uuid;
 
 		// Set our local chain_type for testing.
 		global::set_local_chain_type(global::ChainTypes::AutomatedTesting);
 		global::set_local_nrd_enabled(true);
-		global::set_local_accept_fee_base(global::DEFAULT_ACCEPT_FEE_BASE);
+		global::set_local_accept_fee_base(global::DEFAULT_ACCEPT_FEE_BASE)
+			.expect("Failed to set doctest fee base");
 
 		// don't run on windows CI, which gives very inconsistent results
 		if cfg!(windows) {
@@ -3065,16 +2918,44 @@ macro_rules! doctest_helper_setup_doc_env {
 			node_client.clone(),
 		))
 			as Box<
-				WalletInst<
-					'static,
-					DefaultLCProvider<HTTPNodeClient, ExtKeychain>,
-					HTTPNodeClient,
-					ExtKeychain,
-				>,
+				dyn WalletInst<
+						'static,
+						DefaultLCProvider<HTTPNodeClient, ExtKeychain>,
+						HTTPNodeClient,
+						ExtKeychain,
+					>,
 			>;
 		let lc = wallet.lc_provider().unwrap();
-		let _ = lc.set_top_level_directory(&wallet_config.data_file_dir);
-		lc.open_wallet(None, pw, false, false, None);
+		lc.set_top_level_directory(&wallet_config.data_file_dir)
+			.expect("Failed to set doctest wallet directory");
+		// Opening a wallet requires a seed file in the temporary directory.
+		drop(
+			lc.create_wallet(
+				None,
+				None,
+				32,
+				pw.clone(),
+				#[cfg(feature = "test-support")]
+				false,
+				None,
+				false,
+			)
+			.expect("Failed to create doctest wallet"),
+		);
+		let secp = mwc_wallet_util::mwc_crates::secp::Secp256k1::with_caps(
+			mwc_wallet_util::mwc_crates::secp::ContextFlag::Commit,
+		)
+		.unwrap();
+		lc.open_wallet(
+			&secp,
+			None,
+			pw,
+			false,
+			#[cfg(feature = "test-support")]
+			false,
+			None,
+		)
+		.expect("Failed to open doctest wallet");
 		let $wallet = Arc::new(Mutex::new(wallet));
 	};
 }

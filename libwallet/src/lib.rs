@@ -23,104 +23,76 @@
 #![deny(unused_mut)]
 #![warn(missing_docs)]
 
-use mwc_wallet_config as config;
-use mwc_wallet_util::mwc_api;
-use mwc_wallet_util::mwc_core;
-use mwc_wallet_util::mwc_keychain;
-use mwc_wallet_util::mwc_p2p;
-use mwc_wallet_util::mwc_util;
-
-use mwc_wallet_util as util;
-
-use blake2_rfc as blake2;
-
-#[macro_use]
-extern crate serde_derive;
-#[macro_use]
-extern crate log;
-#[macro_use]
-extern crate lazy_static;
-
-extern crate strum;
-#[macro_use]
-extern crate strum_macros;
-
-extern crate hex;
-extern crate signature;
-
-extern crate crc;
-
 pub mod address;
 pub mod api_impl;
 /// Ring prev version internals that are needed for our internal encription functionality
 mod error;
+mod error_serde;
 pub mod internal;
 pub mod proof;
+pub mod reply_cache;
 mod slate;
+pub mod slate_process;
 pub mod slate_versions;
 pub mod slatepack;
+pub mod status;
 /// Atomic Swap library
 #[cfg(feature = "swaps")]
 pub mod swap;
+pub mod transaction_preflight;
 pub mod types;
 
-#[cfg(feature = "swaps")]
-extern crate bitcoin as bitcoin_lib;
-#[cfg(feature = "swaps")]
-extern crate bitcoin_hashes;
-#[cfg(feature = "swaps")]
-extern crate mwc_zcash_primitives as zcash;
+#[cfg(test)]
+mod test_support_tests;
+
+/// Legacy deterministic RNG implementation used by wallet tests.
+#[cfg(feature = "test-support")]
+pub mod step_rng;
 
 pub use crate::slatepack::{SlatePurpose, Slatepack, SlatepackArmor, Slatepacker};
-
-#[cfg(feature = "swaps")]
-pub use bitcoin::Address as BitcoinAddress;
 
 pub use crate::error::Error;
 pub use crate::slate::{
 	ParticipantData, ParticipantMessageData, ParticipantMessages, Slate, SlateCtx,
+	MAX_PARTICIPANT_MESSAGE_LEN, MAX_SEND_PARTICIPANTS,
 };
 pub use crate::slate_versions::{
-	SlateVersion, VersionedCoinbase, VersionedSlate, CURRENT_SLATE_VERSION,
+	SlateVersion, VersionedSlate, CURRENT_SLATE_VERSION,
 	MWC_BLOCK_HEADER_VERSION,
 };
+pub use crate::status::{StatusCallback, StatusMessage};
 pub use api_impl::foreign;
 pub use api_impl::owner;
-#[cfg(feature = "libp2p")]
-pub use api_impl::owner_libp2p;
-pub use api_impl::owner_updater::StatusMessage;
 pub use api_impl::types::{
-	Amount, BlockFees, BuiltOutput, InitTxArgs, InitTxSendArgs, IssueInvoiceTxArgs,
+	Amount, BlockFees, BuiltOutput, InitTxArgs, InitTxSendArgs, IssueInvoiceTxArgs, LateLockArgs,
 	NodeHeightResult, OutputCommitMapping, OwnershipProof, OwnershipProofValidation,
 	PubKeySignature, ReplayMitigationConfig, RetrieveTxQueryArgs, RetrieveTxQuerySortField,
-	RetrieveTxQuerySortOrder, SendTXArgs, SwapStartArgs, VersionInfo,
+	RetrieveTxQuerySortOrder, SecondaryFeeUnits, SendTXArgs, SwapStartArgs,
+	VersionInfo,
 };
-pub use internal::scan::{scan, set_replay_config};
+#[cfg(feature = "swaps")]
+pub use api_impl::{owner_eth, owner_swap};
+#[cfg(feature = "test-support")]
+pub use internal::scan::set_replay_height_gap_for_tests;
+pub use internal::scan::set_replay_config;
 pub use proof::tx_proof::TxProof;
 pub use proof::tx_proof::{proof_ok, verify_tx_proof_wrapper};
-pub use slate_versions::ser as dalek_ser;
+pub use slate_versions::ser;
 pub use types::{
-	AcctPathMapping, BlockIdentifier, CbData, Context, HeaderInfo, NodeClient, NodeVersionInfo,
-	OutputData, OutputStatus, ScannedBlockInfo, TxLogEntry, TxLogEntryType, ViewWallet,
-	WalletBackend, WalletInfo, WalletInst, WalletLCProvider, WalletOutputBatch,
+	AcctPathMapping, BlockIdentifier, CbData, ChainTip, Context, HeaderInfo, NodeClient,
+	NodeConnectionId, NodeHeaderLink, NodeOutputDetails, NodeVersionInfo, OutputData, OutputStatus,
+	ScannedBlockInfo, StoredTxLocator, TxLogEntry, TxLogEntryType, ViewWallet, WalletBackend,
+	WalletInfo, WalletInst, WalletLCProvider, WalletOutputBatch,
 };
 
-#[cfg(feature = "grin_proof")]
-pub use api_impl::types::PaymentProof;
-#[cfg(feature = "grin_proof")]
-pub use types::StoredProofInfo;
-
 pub use api_impl::foreign::{get_receive_account, set_receive_account};
-
-#[cfg(feature = "libp2p")]
-pub use api_impl::owner_libp2p::IntegrityContext;
 
 /// Helper for taking a lock on the wallet instance
 #[macro_export]
 macro_rules! wallet_lock {
 	($wallet_inst: expr, $wallet: ident) => {
 		let inst = $wallet_inst.clone();
-		let mut w_lock = inst.lock().unwrap_or_else(|e| e.into_inner());
+		let mut w_lock = inst.lock();
 		let w_provider = w_lock.lc_provider()?;
 		let $wallet = w_provider.wallet_inst()?;
 	};
@@ -131,7 +103,7 @@ macro_rules! wallet_lock {
 macro_rules! wallet_lock_test {
 	($wallet_inst: expr, $wallet: ident) => {
 		let inst = $wallet_inst.clone();
-		let mut w_lock = inst.lock().unwrap_or_else(|e| e.into_inner());
+		let mut w_lock = inst.lock();
 		let w_provider = w_lock.lc_provider().unwrap();
 		let $wallet = w_provider.wallet_inst().unwrap();
 	};

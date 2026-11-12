@@ -15,20 +15,47 @@
 
 //! Foreign API External Definition
 
-use crate::keychain::Keychain;
-use crate::libwallet::api_impl::foreign;
-use crate::libwallet::{
+use mwc_wallet_libwallet::api_impl::foreign;
+use mwc_wallet_libwallet::reply_cache;
+use mwc_wallet_libwallet::slate_process::SlateProcessGuard;
+use mwc_wallet_libwallet::types::{ReceiveData, TxSession};
+use mwc_wallet_libwallet::wallet_lock;
+use mwc_wallet_libwallet::{
 	BlockFees, CbData, Error, NodeClient, NodeVersionInfo, Slate, SlatePurpose, SlateVersion,
-	VersionInfo, VersionedSlate, WalletInst, WalletLCProvider,
+	TxLogEntryType, VersionInfo, VersionedSlate, WalletBackend, WalletInst, WalletLCProvider,
 };
-use crate::util::secp::key::SecretKey;
-use ed25519_dalek::PublicKey as DalekPublicKey;
-use libwallet::types::TxSession;
-use libwallet::wallet_lock;
+use mwc_wallet_util::mwc_crates::ed25519_dalek;
+use mwc_wallet_util::mwc_crates::secp::key::{PublicKey, SecretKey};
+use mwc_wallet_util::mwc_crates::secp::{ContextFlag, Secp256k1};
+use mwc_wallet_util::mwc_keychain::Keychain;
+use mwc_wallet_util::Mutex;
 use std::sync::Arc;
-use std::sync::Mutex;
+
+/// Check wallet-wide durable receive state independently of the active account.
+fn durable_receive_exists<'a, T: ?Sized, C, K>(
+	wallet: &T,
+	slate_id: &mwc_wallet_util::mwc_crates::uuid::Uuid,
+	finalized_only: bool,
+) -> Result<bool, Error>
+where
+	T: WalletBackend<'a, C, K>,
+	C: NodeClient + 'a,
+	K: Keychain + 'a,
+{
+	let found = wallet
+		.tx_log_iter()?
+		.chain(wallet.tx_log_archive_iter()?)
+		.any(|tx| {
+			tx.tx_type == TxLogEntryType::TxReceived
+				&& tx.tx_slate_id == Some(*slate_id)
+				&& (!finalized_only || tx.stored_tx.is_some())
+		});
+	Ok(found)
+}
 
 /// ForeignAPI Middleware Check callback
+/// `BuildCoinbase` runs before wallet access and receives `None` for both the
+/// node version and slate; coinbase construction does not require a node lookup.
 pub type ForeignCheckMiddleware =
 	fn(ForeignCheckMiddlewareFn, Option<NodeVersionInfo>, Option<&Slate>) -> Result<(), Error>;
 
@@ -44,6 +71,36 @@ pub enum ForeignCheckMiddlewareFn {
 	ReceiveTx,
 	/// finalize_invoice_tx
 	FinalizeInvoiceTx,
+}
+
+/// Result of staging a received transaction.
+///
+/// The caller finishes the response exchange first, then saves the supplied
+/// `TxSession`, completes the reply reservation and dispatches the notification.
+pub struct ReceiveTxResult {
+	/// Slate containing the receiver's contribution.
+	pub slate: Slate,
+	/// Keeps this Slate UUID serialized across every supported concurrent entry
+	/// point until the caller finishes the exchange and persists or abandons the
+	/// transaction session. The wallet lifecycle permits only one backend for a
+	/// wallet data directory, so this backend-local guard is the intended
+	/// serialization boundary.
+	pub processing_guard: SlateProcessGuard,
+	/// In-flight reply slot to publish only after the wallet commit succeeds.
+	pub reply_reservation: Option<reply_cache::ReplyReservation>,
+	/// Notification to dispatch only after the wallet commit succeeds.
+	pub receive_data: Option<ReceiveData>,
+}
+
+/// Result of finalizing an invoice transaction.
+pub struct FinalizeInvoiceTxResult {
+	/// Finalized Slate.
+	pub slate: Slate,
+	/// Keeps this Slate UUID serialized until the caller finishes the exchange
+	/// and persists or abandons the transaction session.
+	pub processing_guard: SlateProcessGuard,
+	/// In-flight reply slot to publish only after a deferred wallet commit succeeds.
+	pub reply_reservation: Option<reply_cache::ReplyReservation>,
 }
 
 /// Main interface into all wallet API functions.
@@ -69,11 +126,12 @@ where
 	/// Wallet instance
 	pub wallet_inst: Arc<Mutex<Box<dyn WalletInst<'a, L, C, K>>>>,
 	/// Flag to normalize some output during testing. Can mostly be ignored.
+	#[cfg(feature = "test-support")]
 	pub doctest_mode: bool,
 	/// foreign check middleware
 	middleware: Option<ForeignCheckMiddleware>,
 	/// Stored keychain mask (in case the stored wallet seed is tokenized)
-	keychain_mask: Option<SecretKey>,
+	pub(crate) keychain_mask: Option<SecretKey>,
 }
 
 impl<'a, L, C, K> Foreign<'a, L, C, K>
@@ -105,26 +163,23 @@ where
 	/// # Example
 	/// ```
 	/// use mwc_wallet_util::mwc_keychain as keychain;
-	/// use mwc_wallet_util::mwc_util as util;
-	/// use mwc_wallet_util::mwc_core;
 	/// use mwc_wallet_api as api;
 	/// use mwc_wallet_config as config;
 	/// use mwc_wallet_impls as impls;
-	/// use mwc_wallet_libwallet as libwallet;
 	///
 	/// use keychain::ExtKeychain;
-	/// use tempfile::tempdir;
+	/// use mwc_wallet_util::mwc_crates::tempfile::tempdir;
 	///
 	/// use std::sync::Arc;
-	/// use util::ZeroingString;
-	/// use std::sync::Mutex;
+	/// use mwc_wallet_util::mwc_util::ZeroingString;
+	/// use mwc_wallet_util::Mutex;
 	///
-	/// use mwc_core::global;
+	/// use mwc_wallet_util::mwc_core::global;
 	///
 	/// use api::Foreign;
 	/// use config::WalletConfig;
 	/// use impls::{DefaultWalletImpl, DefaultLCProvider, HTTPNodeClient};
-	/// use libwallet::WalletInst;
+	/// use mwc_wallet_libwallet::WalletInst;
 	/// use mwc_wallet_config::parse_node_address_string;
 	///
 	/// global::set_local_chain_type(global::ChainTypes::AutomatedTesting);
@@ -160,7 +215,18 @@ where
 	///
 	/// // Wallet must be opened with the password (TBD)
 	/// let pw = ZeroingString::from("wallet_password");
-	/// lc.open_wallet(None, pw, false, false, None);
+	/// let secp = mwc_wallet_util::mwc_crates::secp::Secp256k1::with_caps(
+	///     mwc_wallet_util::mwc_crates::secp::ContextFlag::Commit,
+	/// ).unwrap();
+	/// lc.open_wallet(
+	///     &secp,
+	///     None,
+	///     pw,
+	///     false,
+	///     # #[cfg(feature = "test-support")]
+	///     false,
+	///     None,
+	/// );
 	///
 	/// // All wallet functions operate on an Arc::Mutex to allow multithreading where needed
 	/// let wallet = Arc::new(Mutex::new(wallet));
@@ -177,6 +243,7 @@ where
 	) -> Self {
 		Foreign {
 			wallet_inst,
+			#[cfg(feature = "test-support")]
 			doctest_mode: false,
 			middleware,
 			keychain_mask,
@@ -200,8 +267,16 @@ where
 	/// ```
 
 	pub fn check_version(&self) -> Result<VersionInfo, Error> {
-		let version = foreign::check_version()?;
-		Ok(version)
+		if let Some(m) = self.middleware.as_ref() {
+			// Keep request cache and failover updates without holding the wallet lock.
+			let mut node_client = {
+				wallet_lock!(self.wallet_inst, w);
+				w.w2n_client().clone_for_request()
+			};
+			let version_info = node_client.get_version_info();
+			m(ForeignCheckMiddlewareFn::CheckVersion, version_info, None)?;
+		}
+		foreign::check_version()
 	}
 
 	/// Return the tor proof address
@@ -217,79 +292,57 @@ where
 	/// let mut api_foreign = Foreign::new(wallet.clone(), None, None);
 	///
 	/// let tor_proof_address = api_foreign.get_proof_address();
+	/// # assert!(tor_proof_address.is_ok());
 	/// // check and proceed accordingly
 	/// ```
 
 	pub fn get_proof_address(&self) -> Result<String, Error> {
 		wallet_lock!(self.wallet_inst, w);
-		foreign::get_proof_address(&mut **w, (&self.keychain_mask).as_ref())
+		let secp = Secp256k1::with_caps(ContextFlag::Commit)?;
+		foreign::get_proof_address(&mut **w, &secp, (&self.keychain_mask).as_ref())
 	}
 
-	/// Builds a new unconfirmed coinbase output in the wallet, generally for inclusion in a
-	/// potential new block's coinbase output during mining.
+	/// Build an unconfirmed Coinbase output and S2C kernel at any height.
+	/// Rewards use the active wallet account and ordinary recovery metadata.
+	/// Access is restricted to authorized mining callers.
 	///
-	/// All potential coinbase outputs are created as 'Unconfirmed' with the coinbase flag set.
-	/// If a potential coinbase output is found on the chain after a wallet update, it status
-	/// is set to `Unsent` and a [Transaction Log Entry](../mwc_wallet_libwallet/types/struct.TxLogEntry.html)
-	/// will be created. Note the output will be unspendable until the coinbase maturity period
-	/// has expired.
+	/// The mining node supplies the exact template's binding digest and verifies
+	/// the returned opening. It includes that opening in the block only after
+	/// consensus activation. No legacy mining fallback is supported.
 	///
-	/// # Arguments
+	/// `fees` is the sum of transaction fees, `height` is the candidate block
+	/// height, and `binding_digest` is a 32-byte hash
+	/// encoded as hexadecimal. An optional `key_id` requests reuse of an existing
+	/// unconfirmed Coinbase candidate. Ineligible keys are left untouched and
+	/// replaced with a newly allocated key.
 	///
-	/// * `block_fees` - A [`BlockFees`](../mwc_wallet_libwallet/api_impl/types/struct.BlockFees.html)
-	/// struct, set up as follows:
+	/// The output remains unconfirmed until found on chain during a wallet update,
+	/// and remains unspendable until Coinbase maturity.
 	///
-	/// `fees` - should contain the sum of all transaction fees included in the potential
-	/// block
-	///
-	/// `height` - should contain the block height being mined
-	///
-	/// `key_id` - can optionally contain the corresponding keychain ID in the wallet to use
-	/// to create the output's blinding factor. If this is not provided, the next available key
-	/// id will be assigned
-	///
-	/// # Returns
-	/// * `Ok`([`cb_data`](../mwc_wallet_libwallet/api_impl/types/struct.CbData.html)`)` if successful. This
-	/// will contain the corresponding output, kernel and keyID used to create the coinbase output.
-	/// * or [`libwallet::Error`](../mwc_wallet_libwallet/struct.Error.html) if an error is encountered.
-	///
-	/// # Example
-	/// Set up as in [`new`](struct.Foreign.html#method.new) method above.
 	/// ```
 	/// # mwc_wallet_api::doctest_helper_setup_doc_env_foreign!(wallet, wallet_config);
-	///
-	/// let mut api_foreign = Foreign::new(wallet.clone(), None, None);
-	///
+	/// let api_foreign = Foreign::new(wallet.clone(), None, None);
 	/// let block_fees = BlockFees {
-	///     fees: 800000,
-	///     height: 234323,
+	///     fees: 0,
+	///     height: 3,
 	///     key_id: None,
+	///     // Example only: the mining node calculates this from its actual template.
+	///     binding_digest: "01".repeat(32),
 	/// };
-	/// // Build a new coinbase output
-	///
-	/// let res = api_foreign.build_coinbase(&block_fees);
-	///
-	/// if let Ok(cb_data) = res {
-	///     // cb_data is populated with coinbase output info
-	///     // ...
-	/// }
+	/// let coinbase = api_foreign.build_coinbase(&block_fees).unwrap();
+	/// assert!(coinbase.key_id.is_some());
 	/// ```
 
 	pub fn build_coinbase(&self, block_fees: &BlockFees) -> Result<CbData, Error> {
-		wallet_lock!(self.wallet_inst, w);
+		// The mining caller may be a different node from the wallet's configured
+		// node, so that node's version does not describe the caller. Check mining
+		// access without querying the configured node.
 		if let Some(m) = self.middleware.as_ref() {
-			m(
-				ForeignCheckMiddlewareFn::BuildCoinbase,
-				w.w2n_client().get_version_info(),
-				None,
-			)?;
+			m(ForeignCheckMiddlewareFn::BuildCoinbase, None, None)?;
 		}
-		foreign::build_coinbase(
-			&mut **w,
-			(&self.keychain_mask).as_ref(),
-			block_fees,
-			self.doctest_mode,
-		)
+		let mut secp = Secp256k1::with_caps(ContextFlag::Commit)?;
+		wallet_lock!(self.wallet_inst, w);
+		foreign::build_coinbase(&mut **w, &mut secp, self.keychain_mask.as_ref(), block_fees)
 	}
 
 	/// Verifies all messages in the slate match their public keys.
@@ -306,7 +359,7 @@ where
 	///
 	/// # Returns
 	/// * `Ok(())` if successful and the signatures validate
-	/// * or [`libwallet::Error`](../mwc_wallet_libwallet/struct.Error.html) if an error is encountered.
+	/// * or [`mwc_wallet_libwallet::Error`](../mwc_wallet_libwallet/struct.Error.html) if an error is encountered.
 	///
 	/// # Example
 	/// Set up as in [`new`](struct.Foreign.html#method.new) method above.
@@ -315,7 +368,7 @@ where
 	///
 	/// let mut api_foreign = Foreign::new(wallet.clone(), None, None);
 	///
-	/// # let slate = Slate::blank(2, false);
+	/// # let Ok(slate) = Slate::blank(2, false) else { return; };
 	/// // Receive a slate via some means
 	///
 	/// let res = api_foreign.verify_slate_messages(&slate);
@@ -342,7 +395,8 @@ where
 				Some(slate),
 			)?;
 		}
-		foreign::verify_slate_messages(slate)
+		let secp = Secp256k1::with_caps(ContextFlag::VerifyOnly)?;
+		foreign::verify_slate_messages(slate, &secp)
 	}
 
 	/// Recieve a tranaction created by another party, returning the modified
@@ -361,9 +415,19 @@ where
 	/// in the wallet's transaction log.
 	///
 	/// # Arguments
+	/// * `tx_session` - Stages every wallet mutation until the caller commits with
+	/// [`TxSession::save_tx_data`]. Making the session mandatory prevents an accidental
+	/// lower-level commit while the reply is still being constructed. Only after that
+	/// commit succeeds may the caller complete the returned reply reservation.
 	/// * `slate` - The transaction [`Slate`](../mwc_wallet_libwallet/slate/struct.Slate.html).
 	/// The slate should contain the results of the sender's round 1 (e.g, public nonce and public
 	/// excess value).
+	/// * `reply_binding` - The authenticated sender and transport allowed to retry this request.
+	/// Supply this only for MQS or an encrypted Slatepack; plain requests must use `None`.
+	/// * `authenticated_sender` - The secp256k1 public key independently authenticated by the
+	/// sender transport. A slate requesting a payment proof is rejected when this is `None` or
+	/// does not match its claimed MQS sender. An encrypted Slatepack sender is Ed25519 and cannot
+	/// populate this argument without a verified cross-key attestation.
 	/// * `dest_acct_name` - The name of the account into which the slate should be received. If
 	/// `None`, the default account is used.
 	/// * `message` - An optional participant message to include alongside the recipient's public
@@ -372,16 +436,20 @@ where
 	/// the convenience of the participants during the exchange; it is not included in the final
 	/// transaction sent to the chain. The message will be truncated to 256 characters.
 	/// Validation of this message is optional.
+	/// * `validate_with_node` - Whether to preflight a newly created response with the node
+	/// before returning it. Set to `false` for offline exchanges. Local validation always
+	/// runs, and the completed transaction still requires node preflight before publication.
 	///
 	/// # Returns
-	/// * a result containing:
-	/// * `Ok`([`slate`](../mwc_wallet_libwallet/slate/struct.Slate.html)`)` if successful,
-	/// containing the new slate updated with the recipient's output and public signing information.
-	/// * or [`libwallet::Error`](../mwc_wallet_libwallet/struct.Error.html) if an error is encountered.
+	/// * `Ok(ReceiveTxResult)` if successful, containing the updated Slate, its
+	/// process-local UUID guard, and the post-commit reply/callback data.
+	/// * or [`mwc_wallet_libwallet::Error`](../mwc_wallet_libwallet/struct.Error.html) if an error is encountered.
 	///
 	/// # Remarks
 	///
-	/// * This method will store a partially completed transaction in the wallet's transaction log.
+	/// * This method only stages a partially completed transaction. After the
+	/// response exchange succeeds, the caller saves `tx_session`, then completes
+	/// `reply_reservation`.
 	///
 	/// # Example
 	/// Set up as in [new](struct.Foreign.html#method.new) method above.
@@ -389,13 +457,18 @@ where
 	/// # mwc_wallet_api::doctest_helper_setup_doc_env_foreign!(wallet, wallet_config);
 	///
 	/// let mut api_foreign = Foreign::new(wallet.clone(), None, None);
-	/// # let slate = Slate::blank(2, false);
+	/// # let Ok(slate) = Slate::blank(2, false) else { return; };
+	/// let mut tx_session = TxSession::new();
 	///
 	/// // . . .
 	/// // Obtain a sent slate somehow
-	/// let result = api_foreign.receive_tx(None, &slate, None, &None, None);
+	/// let result = api_foreign.receive_tx(
+	///     &mut tx_session, &slate, None, None, None, &None, None, true,
+	/// );
 	///
-	/// if let Ok(slate) = result {
+	/// if let Ok(result) = result {
+	///     // Publish the response, then commit tx_session.
+	///     let slate = result.slate;
 	///     // Send back to recipient somehow
 	///     // ...
 	/// }
@@ -403,35 +476,111 @@ where
 
 	pub fn receive_tx(
 		&self,
-		tx_session: Option<&mut TxSession>,
+		tx_session: &mut TxSession,
 		slate: &Slate,
+		reply_binding: Option<reply_cache::ReplyBinding>,
 		address: Option<String>,
+		authenticated_sender: Option<PublicKey>,
 		dest_acct_name: &Option<String>,
 		message: Option<String>,
-	) -> Result<Slate, Error> {
-		wallet_lock!(self.wallet_inst, w);
-		if let Some(m) = self.middleware.as_ref() {
-			m(
-				ForeignCheckMiddlewareFn::ReceiveTx,
-				w.w2n_client().get_version_info(),
-				Some(slate),
+		validate_with_node: bool,
+	) -> Result<ReceiveTxResult, Error> {
+		let mut secp = Secp256k1::with_caps(ContextFlag::Commit)?;
+		let (slate, receive_data, reply_reservation, processing_guard, context_id, node_client) = {
+			wallet_lock!(self.wallet_inst, w);
+			// Reject an oversized or structurally invalid peer transaction before
+			// reserving process state or serializing the full slate for reply-cache
+			// fingerprinting.
+			slate.validate_transaction_read(w.get_context_id())?;
+			// The wallet lifecycle guarantees one backend per wallet data
+			// directory. Holding this returned guard through exchange and commit
+			// therefore excludes every supported concurrent receive of this UUID;
+			// no cross-process protocol is required for unsupported duplicate
+			// backend instances.
+			let processing_guard = w.slate_process_tracker().acquire(slate.id)?;
+			if let Some(m) = self.middleware.as_ref() {
+				m(
+					ForeignCheckMiddlewareFn::ReceiveTx,
+					w.w2n_client().get_version_info(),
+					Some(slate),
+				)?;
+			}
+
+			let reply_request = reply_binding
+				.map(|binding| {
+					reply_cache::ReplyRequest::receive(
+						w.get_context_id(),
+						slate,
+						binding,
+						dest_acct_name.as_deref(),
+						message.as_deref(),
+					)
+				})
+				.transpose()?;
+			let reply_reservation = if let Some(request) = reply_request {
+				let cache = w.reply_cache();
+				let reservation =
+					match cache.reserve(slate.id, SlatePurpose::SendResponse, request)? {
+						reply_cache::ReserveResult::Cached(reply) => {
+							return Ok(ReceiveTxResult {
+								slate: reply,
+								processing_guard,
+								reply_reservation: None,
+								receive_data: None,
+							});
+						}
+						reply_cache::ReserveResult::Reserved(reservation) => Some(reservation),
+						reply_cache::ReserveResult::Uncached => None,
+					};
+				if durable_receive_exists(&**w, &slate.id, false)? {
+					return Err(Error::ReceiveResponseUnavailable(slate.id.to_string()));
+				}
+				reservation
+			} else {
+				None
+			};
+
+			let (slate, _context, receive_data) = foreign::receive_tx(
+				&mut **w,
+				&mut secp,
+				(&self.keychain_mask).as_ref(),
+				tx_session,
+				slate,
+				address,
+				authenticated_sender,
+				None,
+				dest_acct_name,
+				message,
+				#[cfg(feature = "test-support")]
+				self.doctest_mode,
+				true,
+			)?;
+			(
+				slate,
+				receive_data,
+				reply_reservation,
+				processing_guard,
+				w.get_context_id(),
+				w.w2n_client().clone_for_request(),
+			)
+		};
+
+		if validate_with_node {
+			mwc_wallet_libwallet::transaction_preflight::check_slate(
+				context_id,
+				&node_client,
+				&slate,
+				&secp,
+				!slate.compact_slate,
 			)?;
 		}
 
-		let (slate, _context) = foreign::receive_tx(
-			&mut **w,
-			(&self.keychain_mask).as_ref(),
-			tx_session,
+		Ok(ReceiveTxResult {
 			slate,
-			address,
-			None,
-			None,
-			dest_acct_name,
-			message,
-			self.doctest_mode,
-			true,
-		)?;
-		Ok(slate)
+			processing_guard,
+			reply_reservation,
+			receive_data: Some(receive_data),
+		})
 	}
 
 	/// Finalizes an invoice transaction initiated by this wallet's Owner api.
@@ -448,20 +597,24 @@ where
 	/// via the [`get_stored_tx`](struct.Owner.html#method.get_stored_tx) function.
 	///
 	/// # Arguments
+	/// * `tx_session` - When supplied, stages finalization and leaves the wallet commit to the
+	/// caller via [`TxSession::save_tx_data`]. This is used by the faucet workflow, whose
+	/// invoice state is not yet durable. With `None`, this method uses the normal persisted
+	/// invoice path and commits finalization directly.
 	/// * `slate` - The transaction [`Slate`](../mwc_wallet_libwallet/slate/struct.Slate.html). The
 	/// payer should have filled in round 1 and 2.
 	///
 	/// # Returns
-	/// * Ok([`slate`](../mwc_wallet_libwallet/slate/struct.Slate.html)) if successful,
-	/// containing the new finalized slate.
-	/// * or [`libwallet::Error`](../mwc_wallet_libwallet/struct.Error.html) if an error is encountered.
+	/// * `Ok(FinalizeInvoiceTxResult)` if successful, containing the finalized Slate,
+	/// its process-local UUID guard, and any deferred reply reservation.
+	/// * or [`mwc_wallet_libwallet::Error`](../mwc_wallet_libwallet/struct.Error.html) if an error is encountered.
 	///
 	/// # Example
 	/// Set up as in [`new`](struct.Owner.html#method.new) method above.
 	/// ```
 	/// # mwc_wallet_api::doctest_helper_setup_doc_env_foreign!(wallet, wallet_config);
 	///
-	/// let api_owner = Owner::new(0, wallet.clone(), None, None);
+	/// let api_owner = Owner::new(0, wallet.clone(), None).unwrap();
 	/// let api_foreign = Foreign::new(wallet.clone(), None, None);
 	///
 	/// // . . .
@@ -475,18 +628,34 @@ where
 	/// // If result okay, send to payer, who will apply the transaction via their
 	/// // owner API, then send back the slate
 	/// // ...
-	/// # let slate = Slate::blank(2, false);
+	/// # let Ok(slate) = Slate::blank(2, false) else { return; };
 	///
-	/// let slate = api_foreign.finalize_invoice_tx(None, &slate);
+	/// let result = api_foreign.finalize_invoice_tx(None, &slate, None);
 	/// // if okay, then post via the owner API
 	/// ```
 
 	pub fn finalize_invoice_tx(
 		&self,
+		tx_session: Option<&mut TxSession>,
+		slate: &Slate,
+		reply_binding: Option<reply_cache::ReplyBinding>,
+	) -> Result<FinalizeInvoiceTxResult, Error> {
+		self.finalize_invoice_tx_with_output_version(tx_session, slate, reply_binding, None)
+	}
+
+	/// Finalize for the specified response format, checking the restored SP size
+	/// before binding the signing nonce or consuming the invoice context.
+	pub fn finalize_invoice_tx_with_output_version(
+		&self,
 		mut tx_session: Option<&mut TxSession>,
 		slate: &Slate,
-	) -> Result<Slate, Error> {
+		reply_binding: Option<reply_cache::ReplyBinding>,
+		output_version: Option<SlateVersion>,
+	) -> Result<FinalizeInvoiceTxResult, Error> {
+		let deferred_commit = tx_session.is_some();
+		let mut secp = Secp256k1::with_caps(ContextFlag::Commit)?;
 		wallet_lock!(self.wallet_inst, w);
+		let processing_guard = w.slate_process_tracker().acquire(slate.id)?;
 		if let Some(m) = self.middleware.as_ref() {
 			m(
 				ForeignCheckMiddlewareFn::FinalizeInvoiceTx,
@@ -494,20 +663,63 @@ where
 				Some(slate),
 			)?;
 		}
-		foreign::finalize_invoice_tx(
+		let reply_request = reply_binding
+			.map(|binding| {
+				reply_cache::ReplyRequest::finalize_invoice(w.get_context_id(), slate, binding)
+			})
+			.transpose()?;
+
+		let reply_reservation = if let Some(request) = reply_request {
+			let cache = w.reply_cache();
+			let reservation = match cache.reserve(slate.id, SlatePurpose::FullSlate, request)? {
+				reply_cache::ReserveResult::Cached(reply) => {
+					return Ok(FinalizeInvoiceTxResult {
+						slate: reply,
+						processing_guard,
+						reply_reservation: None,
+					});
+				}
+				reply_cache::ReserveResult::Reserved(reservation) => Some(reservation),
+				reply_cache::ReserveResult::Uncached => None,
+			};
+			if durable_receive_exists(&**w, &slate.id, true)? {
+				return Err(Error::ReceiveResponseUnavailable(slate.id.to_string()));
+			}
+			reservation
+		} else {
+			None
+		};
+
+		let out_slate = foreign::finalize_invoice_tx_with_output_version(
 			&mut **w,
+			&mut secp,
 			(&self.keychain_mask).as_ref(),
 			&mut tx_session,
 			slate,
 			true,
+			#[cfg(feature = "test-support")]
 			self.doctest_mode,
-		)
+			output_version,
+		)?;
+		let mut reply_reservation = reply_reservation;
+		if !deferred_commit {
+			if let Some(reservation) = reply_reservation.take() {
+				reservation.complete(&out_slate);
+			}
+		}
+		Ok(FinalizeInvoiceTxResult {
+			slate: out_slate,
+			processing_guard,
+			reply_reservation,
+		})
 	}
 
 	#[cfg(feature = "swaps")]
 	pub fn receive_swap_message(&self, swap_message: &String) -> Result<(), Error> {
+		let mut secp = Secp256k1::with_caps(ContextFlag::Commit)?;
 		foreign::receive_swap_message(
 			self.wallet_inst.clone(),
+			&mut secp,
 			(&self.keychain_mask).as_ref(),
 			swap_message,
 		)
@@ -517,25 +729,32 @@ where
 	// And we can notify that offers are dropped.
 	#[cfg(feature = "swaps")]
 	pub fn marketplace_message(&self, message: &String) -> Result<String, Error> {
+		let mut secp = Secp256k1::with_caps(ContextFlag::Commit)?;
 		foreign::marketplace_message(
 			self.wallet_inst.clone(),
+			&mut secp,
 			(&self.keychain_mask).as_ref(),
 			message,
 		)
 	}
 
 	// Utility method, not expected to be called from Foreign API.
+	// Used by inbound receive paths, so an encrypted slatepack must name this
+	// wallet as its recipient.
 	pub fn decrypt_slate(
 		&self,
 		encrypted_slate: VersionedSlate,
 		address_index: Option<u32>,
-	) -> Result<(Slate, SlatePurpose, Option<DalekPublicKey>), Error> {
+	) -> Result<(Slate, SlatePurpose, Option<ed25519_dalek::VerifyingKey>), Error> {
+		let secp = Secp256k1::with_caps(ContextFlag::Commit)?;
 		wallet_lock!(self.wallet_inst, w);
 		let (slate, content, sender, _receiver) = foreign::decrypt_slate(
 			&mut **w,
+			&secp,
 			(&self.keychain_mask).as_ref(),
 			encrypted_slate,
 			address_index,
+			true,
 		)?;
 		Ok((slate, content, sender))
 	}
@@ -546,22 +765,67 @@ where
 		slate: &Slate,
 		version: Option<SlateVersion>,
 		content: SlatePurpose,
-		slatepack_recipient: Option<DalekPublicKey>,
+		slatepack_recipient: Option<ed25519_dalek::VerifyingKey>,
 		address_index: Option<u32>,
-		use_test_rng: bool,
+		#[cfg(feature = "test-support")] use_test_rng: bool,
 	) -> Result<VersionedSlate, Error> {
+		let secp = Secp256k1::with_caps(ContextFlag::Commit)?;
 		wallet_lock!(self.wallet_inst, w);
 		let vslate = foreign::encrypt_slate(
 			&mut **w,
+			&secp,
 			(&self.keychain_mask).as_ref(),
 			slate,
 			version,
 			content,
 			slatepack_recipient,
 			address_index,
+			#[cfg(feature = "test-support")]
 			use_test_rng,
 		)?;
 		Ok(vslate)
+	}
+}
+
+#[cfg(test)]
+mod coinbase_tests {
+	use super::*;
+	use mwc_wallet_impls::{DefaultLCProvider, DefaultWalletImpl, HTTPNodeClient};
+	use mwc_wallet_util::mwc_keychain::ExtKeychain;
+
+	#[test]
+	fn build_coinbase_rejects_before_wallet_access() {
+		// No opened wallet or configured node is needed to reject mining access.
+		let node_client = HTTPNodeClient::new(0, Vec::new(), None).unwrap();
+		let wallet: Box<
+			dyn WalletInst<
+					'static,
+					DefaultLCProvider<'static, HTTPNodeClient, ExtKeychain>,
+					HTTPNodeClient,
+					ExtKeychain,
+				>,
+		> = Box::new(DefaultWalletImpl::new(0, node_client));
+		let api = Foreign::new(
+			Arc::new(Mutex::new(wallet)),
+			None,
+			Some(|name, node_version, slate| {
+				assert!(matches!(name, ForeignCheckMiddlewareFn::BuildCoinbase));
+				assert!(node_version.is_none());
+				assert!(slate.is_none());
+				Err(Error::GenericError("mining access denied".to_owned()))
+			}),
+		);
+		let request = BlockFees {
+			fees: 0,
+			height: 3,
+			key_id: None,
+			binding_digest: "01".repeat(32),
+		};
+
+		assert!(matches!(
+			api.build_coinbase(&request),
+			Err(Error::GenericError(message)) if message == "mining access denied"
+		));
 	}
 }
 
@@ -569,26 +833,21 @@ where
 #[macro_export]
 macro_rules! doctest_helper_setup_doc_env_foreign {
 	($wallet:ident, $wallet_config:ident) => {
-		use mwc_wallet_api as api;
-		use mwc_wallet_config as config;
-		use mwc_wallet_impls as impls;
-		use mwc_wallet_libwallet as libwallet;
 		use mwc_wallet_util::mwc_core;
-		use mwc_wallet_util::mwc_keychain as keychain;
-		use mwc_wallet_util::mwc_util as util;
 
-		use keychain::ExtKeychain;
-		use mwc_core::global;
-		use tempfile::tempdir;
+		use mwc_wallet_util::mwc_core::global;
+		use mwc_wallet_util::mwc_crates::tempfile::tempdir;
+		use mwc_wallet_util::mwc_keychain::ExtKeychain;
 
+		use mwc_wallet_util::mwc_util::ZeroingString;
+		use mwc_wallet_util::Mutex;
 		use std::sync::Arc;
-		use std::sync::Mutex;
-		use util::ZeroingString;
 
-		use api::{Foreign, Owner};
-		use config::{parse_node_address_string, WalletConfig};
-		use impls::{DefaultLCProvider, DefaultWalletImpl, HTTPNodeClient};
-		use libwallet::{BlockFees, IssueInvoiceTxArgs, Slate, WalletInst};
+		use mwc_wallet_api::{Foreign, Owner};
+		use mwc_wallet_config::{parse_node_address_string, WalletConfig};
+		use mwc_wallet_impls::{DefaultLCProvider, DefaultWalletImpl, HTTPNodeClient};
+		use mwc_wallet_libwallet::types::TxSession;
+		use mwc_wallet_libwallet::{BlockFees, IssueInvoiceTxArgs, Slate, WalletInst};
 
 		// don't run on windows CI, which gives very inconsistent results
 		if cfg!(windows) {
@@ -598,7 +857,8 @@ macro_rules! doctest_helper_setup_doc_env_foreign {
 		// Set our local chain_type for testing.
 		global::set_local_chain_type(global::ChainTypes::AutomatedTesting);
 		global::set_local_nrd_enabled(true);
-		global::set_local_accept_fee_base(global::DEFAULT_ACCEPT_FEE_BASE);
+		global::set_local_accept_fee_base(global::DEFAULT_ACCEPT_FEE_BASE)
+			.expect("Failed to set doctest fee base");
 
 		// don't run on windows CI, which gives very inconsistent results
 		if cfg!(windows) {
@@ -627,7 +887,7 @@ macro_rules! doctest_helper_setup_doc_env_foreign {
 			node_client.clone(),
 		))
 			as Box<
-				WalletInst<
+				dyn WalletInst<
 					'static,
 					DefaultLCProvider<HTTPNodeClient, ExtKeychain>,
 					HTTPNodeClient,
@@ -635,8 +895,36 @@ macro_rules! doctest_helper_setup_doc_env_foreign {
 				>,
 			>;
 		let lc = wallet.lc_provider().unwrap();
-		let _ = lc.set_top_level_directory(&wallet_config.data_file_dir);
-		lc.open_wallet(None, pw, false, false, None);
+		lc.set_top_level_directory(&wallet_config.data_file_dir)
+			.expect("Failed to set doctest wallet directory");
+		// Opening a wallet requires a seed file in the temporary directory.
+		drop(
+			lc.create_wallet(
+				None,
+				None,
+				32,
+				pw.clone(),
+				#[cfg(feature = "test-support")]
+				false,
+				None,
+				false,
+			)
+			.expect("Failed to create doctest wallet"),
+		);
+		let secp = mwc_wallet_util::mwc_crates::secp::Secp256k1::with_caps(
+			mwc_wallet_util::mwc_crates::secp::ContextFlag::Commit,
+		)
+		.unwrap();
+		lc.open_wallet(
+			&secp,
+			None,
+			pw,
+			false,
+			#[cfg(feature = "test-support")]
+			false,
+			None,
+		)
+		.expect("Failed to open doctest wallet");
 		let $wallet = Arc::new(Mutex::new(wallet));
 	};
 }

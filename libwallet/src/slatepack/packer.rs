@@ -13,12 +13,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use crate::slatepack::{Slatepack, SlatepackArmor};
 use crate::Error;
-use crate::{Slate, SlateVersion, Slatepack, SlatepackArmor};
+use crate::{Slate, SlateVersion};
+use mwc_wallet_util::mwc_crates::ed25519_dalek;
 
-use ed25519_dalek::PublicKey as DalekPublicKey;
-use ed25519_dalek::SecretKey as DalekSecretKey;
-use mwc_wallet_util::mwc_util::secp::Secp256k1;
+use mwc_wallet_util::mwc_crates::secp::Secp256k1;
 
 use crate::slatepack::slatepack::SlatePurpose;
 
@@ -26,13 +26,33 @@ use crate::slatepack::slatepack::SlatePurpose;
 /// Arguments, mostly for encrypting decrypting a slatepack
 pub struct Slatepacker {
 	/// Sender address, None for wrapped
-	pub sender: Option<DalekPublicKey>,
+	pub sender: Option<ed25519_dalek::VerifyingKey>,
 	/// Recipient addresses, None for wrapped
-	pub recipient: Option<DalekPublicKey>,
+	pub recipient: Option<ed25519_dalek::VerifyingKey>,
 	/// The content purpose. It customize serializer/deserializer for us.
 	pub content: SlatePurpose,
 	/// Slate data.
 	pub slate: Slate,
+}
+
+/// Validate decoded Slatepack header roles before processing the payload as an
+/// inbound wallet request. Plain slates have no header keys and remain valid;
+/// an encrypted request must name the local wallet as its recipient.
+pub fn validate_slatepack_receive_direction(
+	sender: Option<&ed25519_dalek::VerifyingKey>,
+	recipient: Option<&ed25519_dalek::VerifyingKey>,
+	local_recipient: &ed25519_dalek::VerifyingKey,
+) -> Result<(), Error> {
+	match (sender, recipient) {
+		(None, None) => Ok(()),
+		(Some(_), Some(recipient)) if recipient == local_recipient => Ok(()),
+		(Some(_), Some(_)) => Err(Error::SlatepackDecodeError(
+			"Encrypted Slatepack receive request is not addressed to this wallet".to_owned(),
+		)),
+		_ => Err(Error::SlatepackDecodeError(
+			"Slatepack has inconsistent sender and recipient metadata".to_owned(),
+		)),
+	}
 }
 
 impl Slatepacker {
@@ -52,12 +72,19 @@ impl Slatepacker {
 		slate: Slate,
 		slate_version: SlateVersion,
 		content: SlatePurpose,
-		sender: DalekPublicKey,
-		recipient: Option<DalekPublicKey>, // Encrypted only if recipient is some
-		secret: &DalekSecretKey,
-		use_test_rng: bool,
+		sender: ed25519_dalek::VerifyingKey,
+		recipient: Option<ed25519_dalek::VerifyingKey>, // Encrypted only if recipient is some
+		secret: &ed25519_dalek::SigningKey,
+		#[cfg(feature = "test-support")] use_test_rng: bool,
 		secp: &Secp256k1,
 	) -> Result<String, Error> {
+		// This boundary knows the actual wire format, including callers that
+		// built a compact V3 slate before deciding to send it as SP.
+		if content == SlatePurpose::SendInitial {
+			crate::slatepack::validate_slatepack_size(&slate, Some(&slate_version), 0, 1)?;
+		} else if content == SlatePurpose::InvoiceInitial {
+			crate::slatepack::validate_slatepack_size(&slate, Some(&slate_version), 0, 0)?;
+		}
 		let pack = Slatepack {
 			sender: Some(sender),
 			recipient: recipient,
@@ -65,8 +92,14 @@ impl Slatepacker {
 			slate: slate,
 		};
 
-		let (slate_bin, encrypted) =
-			pack.to_binary(context_id, slate_version, secret, use_test_rng, secp)?;
+		let (slate_bin, encrypted) = pack.to_binary(
+			context_id,
+			slate_version,
+			secret,
+			#[cfg(feature = "test-support")]
+			use_test_rng,
+			secp,
+		)?;
 
 		SlatepackArmor::encode(&slate_bin, encrypted)
 	}
@@ -75,7 +108,7 @@ impl Slatepacker {
 	pub fn decrypt_slatepack(
 		context_id: u32,
 		data: &[u8],
-		dec_key: &DalekSecretKey,
+		dec_key: &ed25519_dalek::SigningKey,
 		secp: &Secp256k1,
 	) -> Result<Self, Error> {
 		let (slate_bytes, encrypted) = SlatepackArmor::decode(data)?;
@@ -103,12 +136,12 @@ impl Slatepacker {
 	}
 
 	/// Get Sender info. It is needed to send the response back
-	pub fn get_sender(&self) -> Option<DalekPublicKey> {
+	pub fn get_sender(&self) -> Option<ed25519_dalek::VerifyingKey> {
 		self.sender.clone()
 	}
 
 	/// Get Sender info. It is needed to send the response back
-	pub fn get_recipient(&self) -> Option<DalekPublicKey> {
+	pub fn get_recipient(&self) -> Option<ed25519_dalek::VerifyingKey> {
 		self.recipient.clone()
 	}
 
@@ -119,23 +152,61 @@ impl Slatepacker {
 	}
 }
 
+#[cfg(test)]
+mod receive_direction_tests {
+	use super::validate_slatepack_receive_direction;
+	use mwc_wallet_util::mwc_crates::ed25519_dalek;
+
+	#[test]
+	fn receive_direction_requires_the_local_recipient_for_encrypted_slatepacks() {
+		let local = ed25519_dalek::SigningKey::from_bytes(&[1_u8; 32]).verifying_key();
+		let remote = ed25519_dalek::SigningKey::from_bytes(&[2_u8; 32]).verifying_key();
+
+		assert!(validate_slatepack_receive_direction(Some(&remote), Some(&local), &local).is_ok());
+		assert!(validate_slatepack_receive_direction(Some(&local), Some(&remote), &local).is_err());
+	}
+
+	#[test]
+	fn receive_direction_preserves_plain_and_encrypted_self_send_flows() {
+		let local = ed25519_dalek::SigningKey::from_bytes(&[1_u8; 32]).verifying_key();
+
+		assert!(validate_slatepack_receive_direction(None, None, &local).is_ok());
+		assert!(validate_slatepack_receive_direction(Some(&local), Some(&local), &local).is_ok());
+		assert!(validate_slatepack_receive_direction(Some(&local), None, &local).is_err());
+	}
+}
+
+#[cfg(all(test, feature = "test-support"))]
 #[test]
 fn slatepack_io_test() {
-	use crate::mwc_core::core::KernelFeatures;
-	use crate::mwc_core::core::{Input, Output, OutputFeatures, Transaction, TxKernel};
-	use crate::mwc_core::global;
-	use crate::mwc_keychain::BlindingFactor;
-	use crate::mwc_util as util;
-	use crate::mwc_util::secp::pedersen::{Commitment, RangeProof};
-	use crate::mwc_util::secp::Signature;
-	use crate::mwc_util::secp::{PublicKey, SecretKey};
+	slatepack_io_test_impl();
+}
+
+#[cfg(all(test, not(feature = "test-support")))]
+#[test]
+fn slatepack_io_test() {
+	panic!("test-support feature is required to run the tests");
+}
+
+#[cfg(all(test, feature = "test-support"))]
+fn slatepack_io_test_impl() {
 	use crate::proof::proofaddress;
 	use crate::proof::proofaddress::ProvableAddress;
 	use crate::slate::{PaymentInfo, VersionCompatInfo};
 	use crate::ParticipantData;
-	use mwc_wallet_util::mwc_util::secp::Secp256k1;
-	use uuid::Uuid;
-	use x25519_dalek::PublicKey as xDalekPublicKey;
+	use mwc_wallet_util::mwc_core::core::{FeeFields, KernelFeatures};
+	use mwc_wallet_util::mwc_core::core::{Output, OutputFeatures, Transaction, TxKernel};
+	use mwc_wallet_util::mwc_core::global;
+	use mwc_wallet_util::mwc_core::libtx::{aggsig, proof};
+	use mwc_wallet_util::mwc_crates::secp::pedersen::Commitment;
+	use mwc_wallet_util::mwc_crates::secp::{ContextFlag, Secp256k1};
+	use mwc_wallet_util::mwc_crates::secp::{PublicKey, SecretKey};
+	use mwc_wallet_util::mwc_crates::uuid::Uuid;
+	use mwc_wallet_util::mwc_crates::x25519_dalek;
+	use mwc_wallet_util::mwc_keychain::{
+		BlindingFactor, ExtKeychain, Keychain, SwitchCommitmentType,
+	};
+	use mwc_wallet_util::mwc_util;
 
 	global::set_local_chain_type(global::ChainTypes::AutomatedTesting);
 
@@ -148,24 +219,20 @@ fn slatepack_io_test() {
 		2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26,
 		27, 28, 29, 30, 31, 32, 33,
 	];
-	let bytes_33: [u8; 33] = [
-		1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25,
-		26, 27, 28, 29, 30, 31, 32, 33,
-	];
 	let bytes_64: [u8; 64] = [
 		1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25,
 		26, 27, 28, 29, 30, 31, 32, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18,
 		19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32,
 	];
 
-	let secp = Secp256k1::new();
+	let secp = Secp256k1::new().unwrap();
 	let sk = SecretKey::from_slice(&secp, &bytes_32).unwrap();
 
-	let dalek_sk = DalekSecretKey::from_bytes(&bytes_32).unwrap();
-	let dalek_pk = DalekPublicKey::from(&dalek_sk);
+	let dalek_sk = ed25519_dalek::SigningKey::from_bytes(&bytes_32);
+	let dalek_pk = dalek_sk.verifying_key();
 
-	let dalek_sk2 = DalekSecretKey::from_bytes(&bytes_32_2).unwrap();
-	let dalek_pk2 = DalekPublicKey::from(&dalek_sk2);
+	let dalek_sk2 = ed25519_dalek::SigningKey::from_bytes(&bytes_32_2);
+	let dalek_pk2 = dalek_sk2.verifying_key();
 
 	// Let's test out Dalec 2 xDalec algebra.
 	let dalek_xpk = proofaddress::tor_pub_2_slatepack_pub(&dalek_pk).unwrap();
@@ -173,8 +240,8 @@ fn slatepack_io_test() {
 	let dalek_xsk = proofaddress::tor_secret_2_slatepack_secret(&dalek_sk);
 	let dalek_xsk2 = proofaddress::tor_secret_2_slatepack_secret(&dalek_sk2);
 
-	let builded_xpk = xDalekPublicKey::from(&dalek_xsk);
-	let builded_xpk2 = xDalekPublicKey::from(&dalek_xsk2);
+	let builded_xpk = x25519_dalek::PublicKey::from(&dalek_xsk);
+	let builded_xpk2 = x25519_dalek::PublicKey::from(&dalek_xsk2);
 
 	assert_eq!(dalek_xpk.as_bytes(), builded_xpk.as_bytes());
 	assert_eq!(dalek_xpk2.as_bytes(), builded_xpk2.as_bytes());
@@ -185,7 +252,40 @@ fn slatepack_io_test() {
 
 	assert_eq!(shared_secret1.as_bytes(), shared_secret2.as_bytes());
 
-	// Note, Slate Data is fake. Just some randome numbers, it will not pass validation of any type
+	let mut proof_secp = Secp256k1::with_caps(ContextFlag::Commit).unwrap();
+	let fixture_keychain = ExtKeychain::from_seed(&proof_secp, &[7u8; 32], true).unwrap();
+	let fixture_proof_builder = proof::ProofBuilder::new(&proof_secp, &fixture_keychain).unwrap();
+	let fixture_key_id = ExtKeychain::derive_key_id(1, 1, 0, 0, 0).unwrap();
+	let fixture_switch = SwitchCommitmentType::Regular;
+	let fixture_commit = fixture_keychain
+		.commit(&proof_secp, 1, &fixture_key_id, fixture_switch)
+		.unwrap();
+	let fixture_proof = proof::create(
+		&mut proof_secp,
+		&fixture_keychain,
+		&fixture_proof_builder,
+		1,
+		&fixture_key_id,
+		fixture_switch,
+		fixture_commit,
+	)
+	.unwrap();
+	let kernel_blind =
+		BlindingFactor::from_secret_key(SecretKey::from_slice(&proof_secp, &bytes_32_2).unwrap());
+	let kernel_secret = kernel_blind.secret_key(&proof_secp).unwrap();
+	let kernel_pubkey = PublicKey::from_secret_key(&proof_secp, &kernel_secret).unwrap();
+	let mut fixture_kernel = TxKernel::with_features(KernelFeatures::Plain {
+		fee: FeeFields::new(321).unwrap(),
+	})
+	.unwrap();
+	fixture_kernel.excess = Commitment::from_pubkey(&proof_secp, &kernel_pubkey).unwrap();
+	let kernel_msg = fixture_kernel.msg_to_sign(0).unwrap();
+	fixture_kernel.excess_sig =
+		aggsig::sign_with_blinding(&proof_secp, &kernel_msg, &kernel_blind, &kernel_pubkey)
+			.unwrap();
+	let fixture_sig = fixture_kernel.excess_sig.clone();
+
+	// Note, Slate Data is fake. It is only required to pass serialization.
 	let mut slate_enc = Slate::new(
 		true,
 		VersionCompatInfo {
@@ -194,11 +294,19 @@ fn slatepack_io_test() {
 		},
 		2,
 		Uuid::from_bytes(bytes_16),
-		Some(Transaction::empty()
-			.with_offset(BlindingFactor::from_slice(&bytes_32) )
-			.with_input( Input::new( OutputFeatures::Plain, Commitment(bytes_33)) )
-			.with_output( Output::new(OutputFeatures::Plain, Commitment(bytes_33), RangeProof::zero()))
-			.with_kernel( TxKernel::with_features(KernelFeatures::Plain { fee: 321.into() }) )),
+		Some(
+			Transaction::empty()
+				.with_offset(BlindingFactor::from_slice(&bytes_32).unwrap())
+				.with_commit_input(0, fixture_commit)
+				.unwrap()
+				.with_output(
+					0,
+					Output::new(OutputFeatures::Plain, fixture_commit, fixture_proof),
+				)
+				.unwrap()
+				.with_kernel(0, fixture_kernel)
+				.unwrap(),
+		),
 		30000000000000000,
 		321,
 		67,
@@ -208,33 +316,76 @@ fn slatepack_io_test() {
 		vec![
 			ParticipantData {
 				id: 0,
-				public_blind_excess: PublicKey::from_secret_key( &secp, &sk).unwrap(),
-				public_nonce:  PublicKey::from_secret_key( &secp, &sk).unwrap(),
+				public_blind_excess: PublicKey::from_secret_key(&secp, &sk).unwrap(),
+				public_nonce: PublicKey::from_secret_key(&secp, &sk).unwrap(),
 				part_sig: None,
 				message: Some("message 1 to send".to_string()),
-				message_sig: Some(Signature::from_compact(&secp, &util::from_hex("89cc3c1480fea655f29d300fcf68d0cfbf53f96a1d6b1219486b64385ed7ed89acf96f1532b31ac8309e611583b1ecf37090e79700fae3683cf682c0043b3029").unwrap()).unwrap()),
+				message_sig: Some(fixture_sig.clone()),
 			},
 			ParticipantData {
 				id: 1,
-				public_blind_excess: PublicKey::from_secret_key( &secp, &sk).unwrap(),
-				public_nonce:  PublicKey::from_secret_key( &secp, &sk).unwrap(),
-				part_sig: Some(Signature::from_compact(&secp, &util::from_hex("89cc3c1480fea655f29d300fcf68d0cfbf53f96a1d6b1219486b64385ed7ed89acf96f1532b31ac8309e611583b1ecf37090e79700fae3683cf682c0043b3029").unwrap()).unwrap()),
+				public_blind_excess: PublicKey::from_secret_key(&secp, &sk).unwrap(),
+				public_nonce: PublicKey::from_secret_key(&secp, &sk).unwrap(),
+				part_sig: Some(fixture_sig.clone()),
 				message: Some("message 2 to send".to_string()),
-				message_sig: Some(Signature::from_compact(&secp, &util::from_hex("89cc3c1480fea655f29d300fcf68d0cfbf53f96a1d6b1219486b64385ed7ed89acf96f1532b31ac8309e611583b1ecf37090e79700fae3683cf682c0043b3029").unwrap()).unwrap()),
-			}
+				message_sig: Some(fixture_sig.clone()),
+			},
 		],
 		Some(PaymentInfo {
-			sender_address: ProvableAddress::from_str(0, "a5ib4b2l5snzdgxzpdzouwxwvn4c3setpp5t5j2tr37n3uy3665qwnqd").unwrap(),
-			receiver_address: ProvableAddress::from_str(0, "a5ib4b2l5snzdgxzpdzouwxwvn4c3setpp5t5j2tr37n3uy3665qwnqd").unwrap(),
-			receiver_signature: Some( util::to_hex(&bytes_64) ),
+			sender_address: ProvableAddress::from_str(
+				&secp,
+				0,
+				"a5ib4b2l5snzdgxzpdzouwxwvn4c3setpp5t5j2tr37n3uy3665qwnqd",
+			)
+			.unwrap(),
+			receiver_address: ProvableAddress::from_str(
+				&secp,
+				0,
+				"a5ib4b2l5snzdgxzpdzouwxwvn4c3setpp5t5j2tr37n3uy3665qwnqd",
+			)
+			.unwrap(),
+			receiver_signature: Some(mwc_util::to_hex(&bytes_64)),
 		}),
-		BlindingFactor::from_slice(&bytes_32)).unwrap();
+		BlindingFactor::from_slice(&bytes_32).unwrap(),
+	)
+	.unwrap();
 
 	// updating kernel excess
 	slate_enc.tx_or_err_mut().unwrap().body.kernels[0].excess =
 		slate_enc.calc_excess(&secp).unwrap();
 
 	let slate_enc_str = format!("{:?}", slate_enc);
+	// Exercise the early size budget against the real encrypted serializer.
+	// Repeated elements are deliberate: this tests wire size, not tx validity.
+	for (inputs, outputs) in [(1, 79), (1_600, 4)] {
+		let mut large = slate_enc.clone();
+		large.amount = u64::MAX;
+		large.height = u64::MAX;
+		large.ttl_cutoff_height = Some(u64::MAX);
+		for participant in &mut large.participant_data {
+			participant.part_sig = Some(fixture_sig.clone());
+			participant.message = Some("Qe".repeat(crate::slate::MAX_PARTICIPANT_MESSAGE_LEN / 2));
+		}
+		let body = &mut large.tx_or_err_mut().unwrap().body;
+		body.inputs = mwc_wallet_util::mwc_core::core::Inputs::FeaturesAndCommit(vec![
+			mwc_wallet_util::mwc_core::core::Input::new(OutputFeatures::Coinbase, fixture_commit);
+			inputs
+		]);
+		body.outputs = vec![body.outputs[0].clone(); outputs];
+		crate::slatepack::validate_slatepack_size(&large, Some(&SlateVersion::SP), 0, 0).unwrap();
+		Slatepacker::encrypt_to_send(
+			0,
+			large,
+			SlateVersion::SP,
+			SlatePurpose::FullSlate,
+			dalek_pk,
+			Some(dalek_pk2),
+			&dalek_sk,
+			true,
+			&secp,
+		)
+		.unwrap();
+	}
 	println!("start encrypted slate = {}", slate_enc_str);
 
 	// Not encoded, just want to review the data...
@@ -293,7 +444,7 @@ fn slatepack_io_test() {
 	let slatepack = Slatepacker::decrypt_slatepack(
 		0,
 		slatepack_string_binary.as_bytes(),
-		&DalekSecretKey::from_bytes(&[1; 32]).unwrap(),
+		&ed25519_dalek::SigningKey::from_bytes(&[1; 32]),
 		&secp,
 	)
 	.unwrap();

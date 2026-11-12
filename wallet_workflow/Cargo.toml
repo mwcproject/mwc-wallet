@@ -1,6 +1,6 @@
 [package]
 name = "mwc_wallet_workflow"
-version = "6.0.1"
+version = "7.0.0"
 authors = ["Mwc Developers <info@mwc.mw>"]
 description = "Simple, private and scalable cryptocurrency implementation based on the MimbleWimble chain format."
 license = "Apache-2.0"
@@ -10,9 +10,14 @@ workspace = ".."
 edition = "2024"
 
 [dependencies]
-mwc_wallet_libwallet = { path = "../libwallet", version = "6.0.1" }
-mwc_wallet_impls = { path = "../impls", version = "6.0.1" }
-mwc_wallet_controller = { path = "../controller", version = "6.0.1" }
+mwc_wallet_libwallet = { path = "../libwallet", version = "7.0.0" }
+mwc_wallet_impls = { path = "../impls", version = "7.0.0" }
+mwc_wallet_controller = { path = "../controller", version = "7.0.0" }
 
 [features]
 swaps = ["mwc_wallet_libwallet/swaps", "mwc_wallet_controller/swaps", "mwc_wallet_impls/swaps"]
+test-support = [
+	"mwc_wallet_controller/test-support",
+	"mwc_wallet_impls/test-support",
+	"mwc_wallet_libwallet/test-support",
+]

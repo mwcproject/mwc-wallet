@@ -12,40 +12,53 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::http_parser::parse_utils;
 use crate::Error;
-use hyper::body::to_bytes;
-use hyper::http;
+use crate::http_parser::parse_utils;
+use mwc_wallet_util::mwc_crates::bytes::Bytes;
+use mwc_wallet_util::mwc_crates::futures;
+use mwc_wallet_util::mwc_crates::http;
+use mwc_wallet_util::mwc_crates::http_body_util::{BodyExt, Full};
 use mwc_wallet_util::mwc_p2p::tor::tcp_data_stream::TcpDataStream;
 use std::io::Write;
 use std::time::Duration;
 
-/// Read response from the stream. Response with the body and closed connection flag.
+/// Read one HTTP request while allowing server shutdown to interrupt the
+/// absolute header/body deadlines at the normal poll interval.
 pub fn read_http_request(
 	buf: &mut Vec<u8>,
 	stream: &mut TcpDataStream,
 	try_read_timeout: &Duration,
 	data_wait_timeout: &Duration,
-) -> Result<(http::Request<hyper::Body>, bool), Error> {
+	cancelled: &dyn Fn() -> bool,
+) -> Result<(http::Request<Bytes>, bool), Error> {
 	// Reading the response:
-	stream.set_read_timeout(try_read_timeout.clone());
+	stream.set_read_timeout(*try_read_timeout);
 
-	let header_text = parse_utils::read_headers(stream, buf)?;
+	let header_text = parse_utils::read_headers_with_limits(
+		stream,
+		buf,
+		parse_utils::MAX_HTTP_HEADER_BYTES,
+		*try_read_timeout,
+		parse_utils::HTTP_HEADER_READ_DEADLINE,
+		cancelled,
+	)?;
 	let (method, path, version, headers) = parse_utils::parse_method_and_headers(&header_text)?;
 
 	// 3. ---------- read exact body ----------
-	let body_len = headers
-		.iter()
-		.find(|(k, _)| k.eq_ignore_ascii_case("content-length"))
-		.and_then(|(_, v)| v.parse::<usize>().ok())
-		.unwrap_or(0);
+	let body_len = parse_utils::content_length(&headers)?;
 
-	stream.set_read_timeout(data_wait_timeout.clone());
+	stream.set_read_timeout(*data_wait_timeout);
 
 	// Not printing timeout into the error
-	let body = parse_utils::read_exact_bytes(stream, buf, body_len)
-		.map_err(|_e| Error::ConnectionError(format!("Unable to read the request")))?;
-	let body = hyper::Body::from(body);
+	let body = parse_utils::read_exact_bytes_with_deadline(
+		stream,
+		buf,
+		body_len,
+		*try_read_timeout,
+		*data_wait_timeout,
+		cancelled,
+	)?;
+	let body = Bytes::from(body);
 
 	let mut builder = http::Request::builder()
 		.method(method)
@@ -68,7 +81,7 @@ pub fn read_http_request(
 
 pub fn send_http_response(
 	stream: &mut TcpDataStream,
-	response: http::Response<hyper::Body>,
+	response: http::Response<Full<Bytes>>,
 	close_connection: bool,
 ) -> Result<(), Error> {
 	// 1. status line
@@ -88,16 +101,7 @@ pub fn send_http_response(
 	header.push_str("\r\n");
 
 	// 2. headers
-	for (k, v) in response.headers() {
-		header.push_str(k.as_str());
-		header.push_str(": ");
-		header.push_str(
-			v.to_str().map_err(|e| {
-				Error::ConnectionError(format!("Invalid response header data, {}", e))
-			})?,
-		);
-		header.push_str("\r\n");
-	}
+	append_response_headers(&mut header, response.headers())?;
 
 	// 3. content-length + keep-alive
 	let body_bytes = body_to_bytes(response.into_body())?;
@@ -124,8 +128,56 @@ pub fn send_http_response(
 	Ok(())
 }
 
-fn body_to_bytes(body: hyper::body::Body) -> Result<Vec<u8>, Error> {
-	futures::executor::block_on(to_bytes(body))
-		.map(|b| b.to_vec())
-		.map_err(|e| Error::ConnectionError(format!("Broken body data, {}", e)))
+fn append_response_headers(
+	header: &mut String,
+	headers: &http::HeaderMap<http::HeaderValue>,
+) -> Result<(), Error> {
+	for (k, v) in headers {
+		// Framing is owned by send_http_response. Forwarding these values before
+		// adding the computed fields below could create duplicate Content-Length
+		// headers or an ambiguous Transfer-Encoding/Content-Length response.
+		if k == http::header::CONTENT_LENGTH
+			|| k == http::header::TRANSFER_ENCODING
+			|| k == http::header::CONNECTION
+		{
+			continue;
+		}
+
+		header.push_str(k.as_str());
+		header.push_str(": ");
+		header.push_str(
+			v.to_str().map_err(|e| {
+				Error::ConnectionError(format!("Invalid response header data, {}", e))
+			})?,
+		);
+		header.push_str("\r\n");
+	}
+	Ok(())
+}
+
+fn body_to_bytes(body: Full<Bytes>) -> Result<Vec<u8>, Error> {
+	let collected = futures::executor::block_on(body.collect())
+		.map_err(|e| Error::ConnectionError(format!("Broken body data, {}", e)))?;
+	Ok(collected.to_bytes().to_vec())
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn managed_response_headers_are_not_forwarded() {
+		let response = http::Response::builder()
+			.header(http::header::CONTENT_LENGTH, "999")
+			.header(http::header::TRANSFER_ENCODING, "chunked")
+			.header(http::header::CONNECTION, "close")
+			.header("x-test-header", "preserved")
+			.body(Full::new(Bytes::from_static(b"body")))
+			.unwrap();
+		let mut header = String::new();
+
+		append_response_headers(&mut header, response.headers()).unwrap();
+
+		assert_eq!(header, "x-test-header: preserved\r\n");
+	}
 }
