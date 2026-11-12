@@ -27,30 +27,30 @@ mwc-wagyu-model = { git = "https://github.com/mwcproject/wagyu-model",version = 
 bitcoin_hashes = { version = " 1.0", features = ["serde"] }
 
 # For Release
-#mwc_crates = { git = "https://github.com/mwcproject/mwc-node", version="7.2.0", tag = "7.2.0" }
-#mwc_config = { git = "https://github.com/mwcproject/mwc-node", version="7.2.0", tag = "7.2.0" }
-#mwc_core = { git = "https://github.com/mwcproject/mwc-node", version="7.2.0", tag = "7.2.0" }
-#mwc_keychain = { git = "https://github.com/mwcproject/mwc-node", version="7.2.0", tag = "7.2.0" }
-#mwc_chain = { git = "https://github.com/mwcproject/mwc-node", version="7.2.0", tag = "7.2.0" }
-#mwc_util = { git = "https://github.com/mwcproject/mwc-node", version="7.2.0", tag = "7.2.0" }
-#mwc_api = { git = "https://github.com/mwcproject/mwc-node", version="7.2.0", tag = "7.2.0" }
-#mwc_store = { git = "https://github.com/mwcproject/mwc-node", version="7.2.0", tag = "7.2.0" }
-#mwc_p2p = { git = "https://github.com/mwcproject/mwc-node", version="7.2.0", tag = "7.2.0" }
-#mwc_node_workflow = { git = "https://github.com/mwcproject/mwc-node", version="7.2.0", tag = "7.2.0" }
-#mwc_node_lib = { git = "https://github.com/mwcproject/mwc-node", version="7.2.0", tag = "7.2.0" }
+mwc_crates = { git = "https://github.com/mwcproject/mwc-node", version="7.2.0", tag = "7.2.0" }
+mwc_config = { git = "https://github.com/mwcproject/mwc-node", version="7.2.0", tag = "7.2.0" }
+mwc_core = { git = "https://github.com/mwcproject/mwc-node", version="7.2.0", tag = "7.2.0" }
+mwc_keychain = { git = "https://github.com/mwcproject/mwc-node", version="7.2.0", tag = "7.2.0" }
+mwc_chain = { git = "https://github.com/mwcproject/mwc-node", version="7.2.0", tag = "7.2.0" }
+mwc_util = { git = "https://github.com/mwcproject/mwc-node", version="7.2.0", tag = "7.2.0" }
+mwc_api = { git = "https://github.com/mwcproject/mwc-node", version="7.2.0", tag = "7.2.0" }
+mwc_store = { git = "https://github.com/mwcproject/mwc-node", version="7.2.0", tag = "7.2.0" }
+mwc_p2p = { git = "https://github.com/mwcproject/mwc-node", version="7.2.0", tag = "7.2.0" }
+mwc_node_workflow = { git = "https://github.com/mwcproject/mwc-node", version="7.2.0", tag = "7.2.0" }
+mwc_node_lib = { git = "https://github.com/mwcproject/mwc-node", version="7.2.0", tag = "7.2.0" }
 
 # For bleeding edge
-mwc_crates = { git = "https://github.com/mwcproject/mwc-node", branch = "audit" }
-mwc_config = { git = "https://github.com/mwcproject/mwc-node", branch = "audit" }
-mwc_core = { git = "https://github.com/mwcproject/mwc-node", branch = "audit" }
-mwc_keychain = { git = "https://github.com/mwcproject/mwc-node", branch = "audit" }
-mwc_chain = { git = "https://github.com/mwcproject/mwc-node", branch = "audit" }
-mwc_util = { git = "https://github.com/mwcproject/mwc-node", branch = "audit" }
-mwc_api = { git = "https://github.com/mwcproject/mwc-node", branch = "audit" }
-mwc_store = { git = "https://github.com/mwcproject/mwc-node", branch = "audit" }
-mwc_p2p = { git = "https://github.com/mwcproject/mwc-node", branch = "audit" }
-mwc_node_workflow = { git = "https://github.com/mwcproject/mwc-node", branch = "audit" }
-mwc_node_lib = { git = "https://github.com/mwcproject/mwc-node", branch = "audit" }
+#mwc_crates = { git = "https://github.com/mwcproject/mwc-node", branch = "audit" }
+#mwc_config = { git = "https://github.com/mwcproject/mwc-node", branch = "audit" }
+#mwc_core = { git = "https://github.com/mwcproject/mwc-node", branch = "audit" }
+#mwc_keychain = { git = "https://github.com/mwcproject/mwc-node", branch = "audit" }
+#mwc_chain = { git = "https://github.com/mwcproject/mwc-node", branch = "audit" }
+#mwc_util = { git = "https://github.com/mwcproject/mwc-node", branch = "audit" }
+#mwc_api = { git = "https://github.com/mwcproject/mwc-node", branch = "audit" }
+#mwc_store = { git = "https://github.com/mwcproject/mwc-node", branch = "audit" }
+#mwc_p2p = { git = "https://github.com/mwcproject/mwc-node", branch = "audit" }
+#mwc_node_workflow = { git = "https://github.com/mwcproject/mwc-node", branch = "audit" }
+#mwc_node_lib = { git = "https://github.com/mwcproject/mwc-node", branch = "audit" }
 
 # For local testing
 #mwc_crates = { path = "../../mwc-node/mwc_crates" }

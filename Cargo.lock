@@ -3518,9 +3518,9 @@ checksum = "3bd1574e617a9a6c1f8f8181bd7e841e1f20e4277607ef28945765188d6284d4"
 
 [[package]]
 name = "jiff"
-version = "0.2.42"
+version = "0.2.43"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fefca06093eeaed707a905795e68206da0edca4edef23d2a3997a3ddbee462aa"
+checksum = "26699905cc795a23e3949585cc7ba3ee8ade090872a27e4316304a777297894a"
 dependencies = [
  "jiff-core",
  "jiff-static",
@@ -3534,18 +3534,18 @@ dependencies = [
 
 [[package]]
 name = "jiff-core"
-version = "0.1.4"
+version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "77a24020db0ee88d1c681d677681bd31f9f4ea189a455425223d52ce4f1508aa"
+checksum = "ffe6854081f5ac0a3046a9b223729ccd7a20b1e0e8277e44dc0660eedf67dfe2"
 dependencies = [
  "log",
 ]
 
 [[package]]
 name = "jiff-static"
-version = "0.2.42"
+version = "0.2.43"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "41d3213549742662eea1a18e6c5af9be5dfbabeb7611ab71356a54928ec398f0"
+checksum = "4b4ff49b2887190c760b86207b55cdcaabbdecaf7a0660d68aa2ed6f652abf0a"
 dependencies = [
  "jiff-core",
  "proc-macro2",
@@ -4202,7 +4202,7 @@ dependencies = [
 [[package]]
 name = "mwc_api"
 version = "7.2.0"
-source = "git+https://github.com/mwcproject/mwc-node.git?branch=audit#70bc1613af48bd9f64e1431067de1a921c82f53e"
+source = "git+https://github.com/mwcproject/mwc-node.git?tag=7.2.0#97504865b0bc5303d911b8c927ac0c1efcd4f6e0"
 dependencies = [
  "mwc_chain",
  "mwc_core",
@@ -4216,7 +4216,7 @@ dependencies = [
 [[package]]
 name = "mwc_chain"
 version = "7.2.0"
-source = "git+https://github.com/mwcproject/mwc-node.git?branch=audit#70bc1613af48bd9f64e1431067de1a921c82f53e"
+source = "git+https://github.com/mwcproject/mwc-node.git?tag=7.2.0#97504865b0bc5303d911b8c927ac0c1efcd4f6e0"
 dependencies = [
  "mwc_core",
  "mwc_crates",
@@ -4229,7 +4229,7 @@ dependencies = [
 [[package]]
 name = "mwc_config"
 version = "7.2.0"
-source = "git+https://github.com/mwcproject/mwc-node.git?branch=audit#70bc1613af48bd9f64e1431067de1a921c82f53e"
+source = "git+https://github.com/mwcproject/mwc-node.git?tag=7.2.0#97504865b0bc5303d911b8c927ac0c1efcd4f6e0"
 dependencies = [
  "mwc_core",
  "mwc_crates",
@@ -4242,7 +4242,7 @@ dependencies = [
 [[package]]
 name = "mwc_core"
 version = "7.2.0"
-source = "git+https://github.com/mwcproject/mwc-node.git?branch=audit#70bc1613af48bd9f64e1431067de1a921c82f53e"
+source = "git+https://github.com/mwcproject/mwc-node.git?tag=7.2.0#97504865b0bc5303d911b8c927ac0c1efcd4f6e0"
 dependencies = [
  "mwc_crates",
  "mwc_keychain",
@@ -4253,7 +4253,7 @@ dependencies = [
 [[package]]
 name = "mwc_crates"
 version = "7.2.0"
-source = "git+https://github.com/mwcproject/mwc-node.git?branch=audit#70bc1613af48bd9f64e1431067de1a921c82f53e"
+source = "git+https://github.com/mwcproject/mwc-node.git?tag=7.2.0#97504865b0bc5303d911b8c927ac0c1efcd4f6e0"
 dependencies = [
  "anyhow",
  "argon2",
@@ -4336,7 +4336,7 @@ dependencies = [
  "signature 3.0.0",
  "siphasher",
  "subtle",
- "sysinfo 0.40.1",
+ "sysinfo 0.40.3",
  "tempfile",
  "term 1.2.1",
  "tokio",
@@ -4367,7 +4367,7 @@ dependencies = [
 [[package]]
 name = "mwc_keychain"
 version = "7.2.0"
-source = "git+https://github.com/mwcproject/mwc-node.git?branch=audit#70bc1613af48bd9f64e1431067de1a921c82f53e"
+source = "git+https://github.com/mwcproject/mwc-node.git?tag=7.2.0#97504865b0bc5303d911b8c927ac0c1efcd4f6e0"
 dependencies = [
  "mwc_crates",
  "mwc_util",
@@ -4377,7 +4377,7 @@ dependencies = [
 [[package]]
 name = "mwc_node_lib"
 version = "7.2.0"
-source = "git+https://github.com/mwcproject/mwc-node.git?branch=audit#70bc1613af48bd9f64e1431067de1a921c82f53e"
+source = "git+https://github.com/mwcproject/mwc-node.git?tag=7.2.0#97504865b0bc5303d911b8c927ac0c1efcd4f6e0"
 dependencies = [
  "mwc_core",
  "mwc_crates",
@@ -4392,7 +4392,7 @@ dependencies = [
 [[package]]
 name = "mwc_node_workflow"
 version = "7.2.0"
-source = "git+https://github.com/mwcproject/mwc-node.git?branch=audit#70bc1613af48bd9f64e1431067de1a921c82f53e"
+source = "git+https://github.com/mwcproject/mwc-node.git?tag=7.2.0#97504865b0bc5303d911b8c927ac0c1efcd4f6e0"
 dependencies = [
  "mwc_api",
  "mwc_chain",
@@ -4407,7 +4407,7 @@ dependencies = [
 [[package]]
 name = "mwc_p2p"
 version = "7.2.0"
-source = "git+https://github.com/mwcproject/mwc-node.git?branch=audit#70bc1613af48bd9f64e1431067de1a921c82f53e"
+source = "git+https://github.com/mwcproject/mwc-node.git?tag=7.2.0#97504865b0bc5303d911b8c927ac0c1efcd4f6e0"
 dependencies = [
  "mwc_chain",
  "mwc_core",
@@ -4420,7 +4420,7 @@ dependencies = [
 [[package]]
 name = "mwc_pool"
 version = "7.2.0"
-source = "git+https://github.com/mwcproject/mwc-node.git?branch=audit#70bc1613af48bd9f64e1431067de1a921c82f53e"
+source = "git+https://github.com/mwcproject/mwc-node.git?tag=7.2.0#97504865b0bc5303d911b8c927ac0c1efcd4f6e0"
 dependencies = [
  "mwc_core",
  "mwc_crates",
@@ -4447,7 +4447,7 @@ dependencies = [
 [[package]]
 name = "mwc_servers"
 version = "7.2.0"
-source = "git+https://github.com/mwcproject/mwc-node.git?branch=audit#70bc1613af48bd9f64e1431067de1a921c82f53e"
+source = "git+https://github.com/mwcproject/mwc-node.git?tag=7.2.0#97504865b0bc5303d911b8c927ac0c1efcd4f6e0"
 dependencies = [
  "mwc_api",
  "mwc_chain",
@@ -4464,7 +4464,7 @@ dependencies = [
 [[package]]
 name = "mwc_store"
 version = "7.2.0"
-source = "git+https://github.com/mwcproject/mwc-node.git?branch=audit#70bc1613af48bd9f64e1431067de1a921c82f53e"
+source = "git+https://github.com/mwcproject/mwc-node.git?tag=7.2.0#97504865b0bc5303d911b8c927ac0c1efcd4f6e0"
 dependencies = [
  "mwc_core",
  "mwc_crates",
@@ -4475,7 +4475,7 @@ dependencies = [
 [[package]]
 name = "mwc_util"
 version = "7.2.0"
-source = "git+https://github.com/mwcproject/mwc-node.git?branch=audit#70bc1613af48bd9f64e1431067de1a921c82f53e"
+source = "git+https://github.com/mwcproject/mwc-node.git?tag=7.2.0#97504865b0bc5303d911b8c927ac0c1efcd4f6e0"
 dependencies = [
  "mwc_crates",
  "thiserror 2.0.21",
@@ -5988,9 +5988,9 @@ dependencies = [
 
 [[package]]
 name = "rpassword"
-version = "7.5.4"
+version = "7.5.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2da316a15f47e3d053de9cb2c439650bd8fa4aaeb9365f2e5f27f492ff73c196"
+checksum = "1fa2c5d9304b618df61ff17f3d3485c6e1854a3d94902a49abbb8d43dfbe0464"
 dependencies = [
  "libc",
  "rtoolbox",
@@ -7123,9 +7123,9 @@ dependencies = [
 
 [[package]]
 name = "sysinfo"
-version = "0.40.1"
+version = "0.40.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0e8a3edbe0394ce115f3917a00349dd242be09eb5a091ed509eaf67b55cfb8a8"
+checksum = "a86bac2f7d06e6384984118ad727f5694110f0ec44d924d05c8fdec3d030bee6"
 dependencies = [
  "libc",
  "memchr",
@@ -8490,7 +8490,7 @@ dependencies = [
 [[package]]
 name = "tor-ptmgr"
 version = "0.48.0"
-source = "git+https://github.com/mwcproject/mwc-node.git?branch=audit#70bc1613af48bd9f64e1431067de1a921c82f53e"
+source = "git+https://github.com/mwcproject/mwc-node.git?tag=7.2.0#97504865b0bc5303d911b8c927ac0c1efcd4f6e0"
 dependencies = [
  "async-trait",
  "cfg-if",
@@ -9659,9 +9659,9 @@ dependencies = [
 
 [[package]]
 name = "zip"
-version = "9.5.0"
+version = "9.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0700e6c427aff64acdbf02e85fbfd946c2ee12319d1af013092f3a2178914ff8"
+checksum = "e3476fd497ac8af5b1ec7b51acab7bef380f7e8dd8e0487595bafd839417a302"
 dependencies = [
  "constant_time_eq 0.6.1",
  "crc32fast",

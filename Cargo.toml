@@ -23,7 +23,7 @@ exclude = ["integration"]
 # Match the local node dependencies in util/Cargo.toml.
 #tor-ptmgr = { path = "../mwc-node/vendor/tor-ptmgr", version = "0.48.0" }
 # For Git node dependencies, after the 0.46 patch is published in mwc-node:
-tor-ptmgr = { git = "https://github.com/mwcproject/mwc-node.git", branch = "audit", version = "0.48.0" }
+tor-ptmgr = { git = "https://github.com/mwcproject/mwc-node.git", tag = "7.2.0", version = "0.48.0" }
 
 [workspace.dependencies]
 thiserror = "2"
