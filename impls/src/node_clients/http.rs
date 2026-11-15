@@ -464,49 +464,6 @@ impl HTTPNodeClient {
 		}
 	}
 
-	/// Return Connected peers
-	fn get_connected_peer_info_impls(
-		&self,
-		counter: i32,
-	) -> Result<Vec<PeerInfoDisplayLegacy>, mwc_wallet_libwallet::Error> {
-		// There is no v2 API with connected peers. Keep using v1 for that
-		let (addr, connection_id) = self.node_url_with_connection()?;
-		let url = node_api_url(&addr, &["v1", "peers", "connected"])?;
-
-		let res = self
-			.state
-			.client
-			.get::<Vec<PeerInfoDisplayLegacy>>(url.as_str(), self.node_api_secret());
-		match res {
-			Err(e) => {
-				let safe_error = safe_node_error(&e);
-				// Do retry
-				if counter > 0 {
-					debug!(
-						"Retry to call connected peers API {}, {}",
-						safe_node_text(&url),
-						safe_error
-					);
-					self.increase_index_if_current(connection_id);
-					// The retry branch requires a positive counter.
-					#[allow(
-						clippy::arithmetic_side_effects,
-						reason = "the retry counter is checked greater than zero"
-					)]
-					return self.get_connected_peer_info_impls(counter - 1);
-				}
-				let report = format!(
-					"Get connected peers error {}, {}",
-					safe_node_text(&url),
-					safe_error
-				);
-				error!("{}", report);
-				Err(mwc_wallet_libwallet::Error::ClientCallback(report))
-			}
-			Ok(peer) => Ok(peer),
-		}
-	}
-
 	/// Get kernel implementation
 	fn get_kernel_impl(
 		&self,
@@ -930,7 +887,9 @@ impl NodeClient for HTTPNodeClient {
 	fn get_connected_peer_info(
 		&self,
 	) -> Result<Vec<PeerInfoDisplayLegacy>, mwc_wallet_libwallet::Error> {
-		self.get_connected_peer_info_impls(1)
+		let (peers, _) =
+			self.send_json_request("get_connected_peers", &serde_json::Value::Null, 1)?;
+		Ok(peers)
 	}
 
 	/// Get kernel implementation
@@ -1547,6 +1506,7 @@ mod tests {
 						let mut request = [0u8; 4096];
 						let bytes_read = stream.read(&mut request).unwrap();
 						let request = String::from_utf8_lossy(&request[..bytes_read]);
+						assert!(request.starts_with("POST /v2/foreign HTTP/1.1\r\n"));
 						assert!(request.contains(expected_method));
 						stream.write_all(response.as_bytes()).unwrap();
 						break;
@@ -1744,6 +1704,49 @@ mod tests {
 		assert_eq!(outputs[0].3, 42);
 		assert_eq!(outputs[0].4, 9);
 		assert_eq!(outputs[0].1.len().unwrap(), 1);
+	}
+
+	#[test]
+	fn connected_peers_use_v2_foreign_and_preserve_fields() {
+		mwc_util::init_global_runtime().unwrap();
+		global::set_local_chain_type(global::ChainTypes::AutomatedTesting);
+		let peer = serde_json::json!({
+			"capabilities": "HEADER_HIST | PEER_LIST", "user_agent": "MW/MWC 7.2.0",
+			"version": 5, "addr": "zwecav6dgftsoscybpzufbo77d452mk3mox2fqzjqocu7265bxgq6oad.onion",
+			"direction": "Outbound", "total_difficulty": 90934832500_u64,
+			"height": 1757062, "last_seen": 3
+		});
+		let (url, server) = serve_single_rpc_response(
+			"get_connected_peers",
+			serde_json::json!({"jsonrpc": "2.0", "id": 1, "result": {"Ok": [peer.clone()]}}),
+		);
+		let client = HTTPNodeClient::new(0, vec![url], None).unwrap();
+		let peers = client.get_connected_peer_info().unwrap();
+		server.join().unwrap();
+		assert_eq!(
+			serde_json::to_value(peers).unwrap(),
+			serde_json::json!([peer])
+		);
+	}
+
+	#[test]
+	fn connected_peers_retry_v2_and_accept_an_empty_list() {
+		mwc_util::init_global_runtime().unwrap();
+		global::set_local_chain_type(global::ChainTypes::AutomatedTesting);
+		let (failed_url, failed_server) = serve_single_rpc_response(
+			"get_connected_peers",
+			serde_json::json!({"jsonrpc": "2.0", "id": 1,
+				"error": {"code": -32000, "message": "node unavailable"}}),
+		);
+		let (working_url, working_server) = serve_single_rpc_response(
+			"get_connected_peers",
+			serde_json::json!({"jsonrpc": "2.0", "id": 1, "result": {"Ok": []}}),
+		);
+		let client = HTTPNodeClient::new(0, vec![failed_url, working_url], None).unwrap();
+		assert!(client.get_connected_peer_info().unwrap().is_empty());
+		failed_server.join().unwrap();
+		working_server.join().unwrap();
+		assert_eq!(client.get_node_connection_id().node_index, 1);
 	}
 
 	#[test]

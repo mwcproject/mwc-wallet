@@ -7,7 +7,7 @@ This document specifies how to build and use `mwc_wallet_lib`, including its C i
 Run from repository root:
 
 ```bash
-cargo build --package mwc_wallet_lib --lib
+cargo build --release --locked --package mwc_wallet_lib --lib
 ```
 
 `mwc_wallet_lib` is built as `rlib`, `cdylib`, and `staticlib` (see `crate-type` in [mwc_wallet_lib/Cargo.toml](https://github.com/mwcproject/mwc-wallet/blob/master/mwc_wallet_lib/Cargo.toml)).
@@ -34,17 +34,36 @@ all those methods are supported and will be used for the wallet calls as well.
 - `char *process_mwc_wallet_request(char const *input);`
   - Main wallet API entry point.
   - `input` is a JSON string with `{ "method": "...", "params": {...} }`.
-  - Return value is a C string containing JSON response. Note, that string is managed in library side.
-    Use this string as a read only, don't store it in you code. When you copy, release it by calling 'free_node_lib_string'
+  - Returns a separately allocated UTF-8 JSON C string. Treat it as read-only; it remains valid until you call `free_lib_string` 
+  exactly once. Copy/parse it before freeing it; do not use `free` or `delete`.
 
 
-Important callback lifetime rule:
+Important callback lifetime rules:
+
+- Caller-owned callback context must be safe for the threads that invoke it and remain alive until `unregister_lib_callback` returns for that exact name. Unregister waits for in-flight callbacks; free the context afterward.
+- Callbacks must not synchronously register or unregister callbacks: dispatch holds the registry read lock. Use unique names; registering a duplicate does not replace the existing callback.
+- A response callback must not return a pointer to a destroyed local string. Keep its response storage valid until Rust copies it, including under concurrent callbacks.
 
 - Callback message pointers are temporary and must not be stored on the C side. Copy data during callback execution.
 - Notification callbacks may return null. A `node_client_callback` must synchronously return a valid JSON-RPC response
   C string; the wallet copies it before returning from the callback call.
 - Scan and wallet-update progress callbacks run inline before the request returns. They must return promptly and must not
   synchronously re-enter wallet APIs or register/unregister library callbacks.
+
+Before `release_wallet`, stop submitting work and wait for outstanding direct requests using that context. `stop_running_scan` requests interruption; it is not a join barrier. Release listeners/wallet resources before unregistering their callbacks.
+
+## Wallet session sequence
+
+`create_new_wallet`, `restore_new_wallet` and `open_wallet` each register a
+wallet instance for the context. Only one such instance may be created per
+context: another call returns `Wallet already created for context ...`.
+After creation/restoration, release that context, call `init_wallet` with the
+same data path, then open the saved wallet. Likewise, after a failed open or
+`close_wallet`, release/reinitialize before another `open_wallet` attempt.
+`close_wallet` closes the seed provider but does not remove the registered
+instance or free the context. Qt follows this sequence when provisioning and
+retrying login. Use `validate_password` for a UI unlock on an already open
+wallet instead of calling `open_wallet` again.
 
 ## JSON Request/Response Contract
 
@@ -53,11 +72,15 @@ Important callback lifetime rule:
 ```json
 {
   "method": "init_wallet",
-  "params": {}
+  "params": {
+    "config": {
+      "wallet": { "chain_type": "Floonet", "data_file_dir": "/absolute/path/test-wallet" }
+    }
+  }
 }
 ```
 
-Success response:
+Success response (the result depends on the method; `init_wallet` returns `context_id`):
 
 ```json
 {
@@ -109,7 +132,147 @@ All methods below are dispatched in:
   - `{ "context_id": <u32> }`
 - Notes:
   - Allocates wallet context and stores wallet config.
+  - `config.wallet.data_file_dir` and `config.wallet.wallet_data_dir` together select the wallet's storage location, as explained below.
   - This `context_id` identify wallet instance, it will be required for all wallet related operations.
+
+#### Configuration settings used by the embedded API
+
+The shared configuration type also contains standalone CLI settings. Accepting
+a field in JSON does not mean the embedded API uses it. The following settings
+affect `init_wallet` or subsequent operations on its context:
+
+| JSON path | Purpose                                                                                                               | Behavior when omitted or `null` |
+| --- |-----------------------------------------------------------------------------------------------------------------------| --- |
+| `config.wallet.chain_type` | Selects chain parameters: `Mainnet` or `Floonet`. | `Mainnet` |
+| `config.wallet.data_file_dir` | Base directory for seed/database storage.                                                                             | Required when the `wallet` object is supplied; `null` is invalid. See the default-object distinction below. |
+| `config.wallet.wallet_data_dir` | Relative storage subdirectory under the base. Qt uses `"."`.                                                          | `"wallet_data"` |
+| `config.wallet.tx_fee_base` | Sets the context's fee base in nanomwc per transaction weight unit.                                                   | `1000` |
+| `config.tor.tor_enabled` | Allows Tor use by the embedded listener and outgoing Tor operations. Initialization itself does not start Tor.        | `true` |
+| `config.tor.tor_bridge` | Optional explicit Tor bridge/transport/upstream-proxy configuration.                                                  | Direct connection to the Tor network |
+
+When the entire `config.wallet` object is omitted, Serde constructs
+`WalletConfig::default()`, whose `data_file_dir` is `"."`. When a `wallet`
+object is supplied, its fields are deserialized individually: `data_file_dir`
+is required, and omitted optional fields become `None`. The Rust `Default`
+implementation is not a set of per-field JSON defaults.
+
+The optional `config.tor.tor_bridge` object supports all of these fields:
+
+| Field within `tor_bridge` | Purpose and default |
+| --- | --- |
+| `bridges` | Array of Tor bridge-line strings; defaults to `[]`. |
+| `proxy` | Upstream proxy URI, such as `socks4://127.0.0.1:1080`, `socks5://127.0.0.1:1080`, or `http://127.0.0.1:8080`. Requires an IP address and explicit port; omitted/`null` means no upstream proxy. |
+| `transports` | Array of pluggable-transport configurations; defaults to `[]`. Requires at least one bridge. |
+| `transports[].protocols` | Required, non-empty array of protocol names, such as `["obfs4"]`. Each protocol may be assigned only once. |
+| `transports[].path` | Absolute executable path of a managed transport helper. Specify exactly one of `path` or `proxy_addr`. |
+| `transports[].arguments` | Array of helper arguments, passed without a shell; defaults to `[]`. Applies to managed helpers. |
+| `transports[].run_on_startup` | Whether to launch a managed helper immediately; defaults to Arti's `false` (launch on demand). |
+| `transports[].proxy_addr` | IP:port of an already-running SOCKS5 transport. Cannot be combined with `path`, non-empty `arguments`, `run_on_startup`, or the upstream `proxy` setting. |
+
+Omit `tor_bridge` for direct Tor. An explicit empty object is invalid when Tor
+starts: provide at least one bridge or a proxy. A bridge using a pluggable
+transport needs a matching entry in `transports`. Invalid explicit routes do
+not fall back to direct Tor. Tor objects reject unknown fields.
+
+Setting `tor_enabled` to `false` does not configure an HTTP listener as a
+replacement. The C ABI's `start_tor_listener` supplies no TCP listen address,
+so that call fails when Tor is disabled.
+
+The following shared settings are accepted but do not configure the current
+embedded wallet operations:
+
+| Settings | Embedded API behavior |
+| --- | --- |
+| `config.wallet.api_listen_interface`, `api_listen_port`, `mining_node_ip` | `start_tor_listener` supplies its own listener arguments and does not read these fields. |
+| `config.wallet.owner_api_listen_port`, `api_secret_path`, `owner_api_include_foreign`, `owner_api_include_mqs_listener` | No owner HTTP server is started by `init_wallet`. |
+| `config.wallet.check_node_api_http_addr`, `node_api_secret_path` | Node access uses the registered `node_client_callback` supplied to create/restore/open calls. |
+| `config.wallet.tls_certificate_file`, `tls_certificate_key`, `dark_background_color_scheme` | These CLI/server presentation settings are not read by the embedded dispatcher. |
+| `config.mqs.mwcmqs_domain`, `mwcmqs_port` | Stored, but the embedded MQS listener and send calls use `MQSConfig::default()` (`mqs.mwc.mw:443`) instead. Custom values currently have no effect. |
+| `config.logging` | Stored; `init_wallet` does not initialize logging from it. |
+| `config.config_file_version` | Stored; the C ABI does not perform the standalone config-file migration/version checks. |
+
+The optional swap fields (`eth_swap_contract_address`,
+`erc20_swap_contract_address`, `eth_infura_project_id`, and
+`swap_electrumx_addr`) belong to the `swaps` feature. The normal
+`mwc_wallet_lib` build does not enable it, and this dispatcher does not use
+these fields. Unknown wallet fields are accepted, so a successful
+`init_wallet` response alone does not demonstrate that a setting is supported.
+
+Qt currently supplies only `chain_type`, `data_file_dir`, and
+`wallet_data_dir`; fee and Tor behavior use the defaults described above.
+
+#### Wallet storage paths
+
+For the **`init_wallet` C ABI**, the fields have these roles:
+
+| Field | Purpose | Default |
+| --- | --- | --- |
+| `config.wallet.data_file_dir` | Base directory supplied by the embedding application. Later create/open calls pass it to the lifecycle provider as its top-level directory. Use an absolute path to make the location independent of the process's working directory. | Required inside a supplied `wallet` object. If the whole object is omitted, its default uses `"."` (the process's working directory). |
+| `config.wallet.wallet_data_dir` | Relative subdirectory within that base where the seed and wallet backend are stored. This selects the directory layout under the base. | Omitted or `null` means `"wallet_data"` |
+
+The effective wallet storage directory is:
+
+```text
+data_file_dir / (wallet_data_dir, or "wallet_data" when omitted/null)
+```
+
+The encrypted `wallet.seed`, the `db` directory and `saved_txs` directory all
+belong under this effective location. The two settings do not split the seed
+and database into separate locations.
+
+For example, with `data_file_dir = "/wallets/alice"`:
+
+| `wallet_data_dir` | Effective storage directory | Seed file |
+| --- | --- | --- |
+| Omitted, `null`, or `"wallet_data"` | `/wallets/alice/wallet_data` | `/wallets/alice/wallet_data/wallet.seed` |
+| `"."` | `/wallets/alice` | `/wallets/alice/wallet.seed` |
+| `"accounts/savings"` | `/wallets/alice/accounts/savings` | `/wallets/alice/accounts/savings/wallet.seed` |
+
+Qt uses the selected instance directory as `data_file_dir` and sets
+`wallet_data_dir` to `"."`. This preserves Qt's existing layout, with the seed,
+database and saved transactions directly in that instance directory. Omitting
+`wallet_data_dir` would add a `wallet_data` level and look for a different seed.
+
+Example using the Qt layout:
+
+```json
+{
+  "method": "init_wallet",
+  "params": {
+    "config": {
+      "wallet": {
+        "chain_type": "Floonet",
+        "data_file_dir": "/wallets/alice",
+        "wallet_data_dir": "."
+      }
+    }
+  }
+}
+```
+
+`wallet_data_dir` must be non-empty and relative. `"."` and nested relative
+paths are allowed. Lifecycle validation uses the host platform's path rules
+and rejects root components, drive prefixes and any `..` component. Use an absolute path in
+`data_file_dir`, not in `wallet_data_dir`. An empty string is not equivalent
+to omitting the field.
+
+`init_wallet` only allocates a context and stores this configuration; it does
+not create a seed, open the database, generate a CLI configuration file or
+validate the storage path. Directory validation and storage access occur in
+the subsequent lifecycle operations. Creation, restoration, opening, mnemonic
+reads and password changes must use the same effective directory. When
+reinitializing a context for an existing wallet, preserve both field values;
+changing them selects another location and does not move existing data.
+
+This path composition describes the C ABI request. A configuration generated
+for the standalone CLI can already contain a resolved data path in
+`data_file_dir`; check its layout before reusing it as an `init_wallet` base,
+or the default subdirectory could be appended twice.
+
+Implementation: [request dispatcher](../mwc_wallet_lib/src/mwc_wallet_calls.rs),
+[lifecycle path composition](../impls/src/lifecycle/default.rs),
+[path validation](../config/src/config.rs), and
+[backend directories](../impls/src/backends/lmdb.rs).
 
 ### 4) `stop_running_scan`
 

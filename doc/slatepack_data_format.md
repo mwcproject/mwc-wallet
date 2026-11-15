@@ -1,40 +1,34 @@
 # MWC Slatepacks
 
 ## Contents : #
-  * [About](./slatepack_data_format.md/#About)
-  * [Community-level explanation](./slatepack_data_format.md/#Community-level-explanation)
-  * [Reference-level explanation](./slatepack_data_format.md/#Reference-level-explanation)
-    * [Slatepack Address](./slatepack_data_format.md/#Slatepack-Address )
-    * [Message Armor](./slatepack_data_format.md/#Message-Armor)
-    * [Encryption/Decryption](./slatepack_data_format.md/#EncryptionDecryption)
-    * [Binary Data Format](./slatepack_data_format.md/#Binary-Data-Format)
+  * [About](#about)
+  * [Community-level explanation](#community-level-explanation)
+  * [Reference-level explanation](#reference-level-explanation)
+    * [Slatepack Address](#slatepack-address)
+    * [Message Armor](#message-armor)
+    * [Encryption/Decryption](#encryptiondecryption)
+    * [Binary Data Format](#slatepack-binary-data-format)
 
 # About
 
-Slatepacks are intented to simplify the exchange process for Slates in a secure and userfriendly way. Current file based methods have the following cons:
-* Files content is well readable, because of that it is not secure.
-* Files are susceptible to man in the middle attack because files are not addressed to specific wallet.
-* Users don't like files for exchanges. Sting with content is more friendly.
-
-To address those issues MWC adopts mwc's Slatepacks:  https://docs.mwc.mw/wiki/transactions/slatepack/ <br>
-Altho MWC slatepacks look very similar, the implementation is very different.
-This document desribes the Slatepack format and our deviation from mwcs Implementation.
+Slatepacks carry compact transaction data as copyable text, allowing sender and
+recipient to exchange messages asynchronously. Encryption is optional: an
+unencrypted Slatepack is readable by anyone who has the message. File transport
+is not itself insecure; confidentiality depends on message encryption and the
+channel used to exchange it.
 
 # Community-level explanation
-Slatepacks Simplify the existing transaction process so that a transaction can be built using a copy and pastable SlatepackMessage string asynchronously.
-So in easier words this simplyfies transactions alot as it's usable by a simple copy paste without the requirement to be online or to exchange files.
 
-An Example to elaborate;
+The sender creates an initial message, the recipient receives it and returns a
+response, then the sender finalizes. The CLI supports a `slatepack` send method;
+use `mwc-wallet send --help` for destination and file options. A Tor/Ed25519
+recipient address permits encryption. An MQS address is not an encryption key
+for this format. Do not assume `send -d ADDRESS` alone selects a manual exchange
+rather than an online transport.
 
-```mwc-wallet send -d SlatepackAddress 1.337``` will generate an armored encrypted SlatepackMessage string that only you and the recipient can decipher if a TOR address was used as SlatepackAddress. In the case of MQS it will generate a non encrypted SlatepackMessage. <br>
-If a counterparty is unwilling or unable to provide a SlatepackAddress, an unencrypted plain text SlatepackMessage can still be exchanged
-This SlatepackMessage can then be exchanged manually by copy and paste.
-Example SlatepackAddress: f4ujdq2hzidsrwljst4mfxoaogolqzhwzbu4uxjke6w4ibclqgxaowid
-
-Sending a mobile MWC transaction should be as easy as scanning a simple QR code encoded from a bech32 SlatepackAddress
-Or as easy as pasting the SlatepackAddress of your counterparty into your wallet for any other device.
-Then the SlatepackMessage can be exchanged easily via copy and paste with a counterparty in an alternative communication channel (email, forum, social media, instant messenger, generic web text box, carrier pigeon etc.)
-
+MWC uses its own compact binary serialization and armor. It does not use a
+bech32 Grin Slatepack address as its standard recipient representation. Current
+implementation and tests are in `libwallet/src/slatepack/`.
 
 # Reference-level explanation
 ## Slatepack Address
@@ -46,16 +40,16 @@ Please note, ProvableAddress is applicable to encrypted slatepack only.
 
 ## Message Armor
 
-Mwc Armor does binary to Base58 conversion and it works great for us. This part works as it is, the only change is the header and footer.
-https://docs.mwc.mw/wiki/transactions/slatepack/#armor
-
-For normal encrypted slatepacks the header/footer are: BEGINSLATEPACK / ENDSLATEPACK
-
-For non encrypted slatepacks in binary format the header/footer are: BEGINSLATE_BIN / ENDSLATE_BIN
+Armor Base58-encodes a four-byte checksum followed by the binary message. The
+checksum is the first four bytes of double SHA-256 of that binary message.
+Framing uses `BEGINSLATEPACK.` / `. ENDSLATEPACK.` for encrypted messages and
+`BEGINSLATE_BIN.` / `. ENDSLATE_BIN.` for unencrypted messages. The decoder
+checks matching framing, checksum and size limits. See `armor.rs` for whitespace
+handling and exact encoding; armor is not encryption.
 
 ## Encryption/Decryption
 
-Mwc's original design is using the 'age' rust library for encryption/decryption. The Age library had a huge data overhead on data size.
+The earlier Grin design used the 'age' rust library for encryption/decryption. The Age library had a huge data overhead on data size.
 The header is about 350 bytes. For example, initial send message size less then 150 bytes. Such overhead is not acceptable.
 Also it is not clear if age will allow to read the message that was archived. 
 
@@ -84,17 +78,21 @@ Users working with armored message, but underneath it is a pure binary format. H
 MWC slate data is using bit streaming as a format for data serialization. The serialization/deserialization functions are symmetrical and
 aren't using serde because we want full control to maintain compatibility. Backward compatibility will be maintained. The forward compatibility is nice to have, but it is not guaranteed.
 
-### Slate package binary (not encrypted) header
+### Plaintext header of an encrypted Slatepack
 
 Data | Size | Descryption 
 ---- | ---- | ----------- |
 Version             | 1 byte    | The slatepack binary format version. This version is global for all parts.
-Sender Public Key   | 30 bytes  | Sender public key. Needed to decode the encrypted data by receiver
-Receiver Public Key | 30 bytes  | Receiver Public key. Needed to decode encryptrd by sender (archived data)
+Sender Public Key   | 32 bytes  | Sender public key. Needed to decode the encrypted data by receiver
+Receiver Public Key | 32 bytes  | Receiver Public key. Needed to decode encryptrd by sender (archived data)
 Nonce               | 12 bytes  | AEAD message nonce 
 Encrypted Data Size | 2 bytes   | Length of the encrypted data in bytes
 
-### Slate package encrypted data.
+For an **unencrypted** Slatepack, the binary header is only the one-byte version
+and two-byte payload length, followed by the payload. It has no sender/recipient
+keys, nonce or inner CRC32. Both forms still have the outer armor checksum.
+
+### Slate payload
 
 In version 0, input, output, and kernel sections use a continuation bit after
 each element. If a section is included for the message's purpose, it must contain
@@ -140,10 +138,10 @@ Proof Sender Address    | variable | Optional, the sender address saved as binar
 Proof Receiver address  | variable | Optional, the receiver address saved as binary Dalek PK or secp256k1 PK
 Proof Signature flag    | 1 bit  | Optional, 1 if signature data present, 0 if not
 Proof Signature len delta | 4 bit   | Optional, length can be longet then 64 byte (can be 70). Len is 64 + this_value 
-Proof Signature         | 64 bytes | Optional, signature data
+Proof Signature         | 64 + length delta bytes | Optional, signature data
 Future usage        | any       | Here we can write encrypted frontward compatible data.
-CRC32               | last 4 bytes | The check sum for Unencrypoted and Encrypted data. It allow to verify is unencrypted or encrypted data was adjusted
+CRC32 | last 4 plaintext bytes, encrypted form only | Checksum over version + sender/recipient keys + aligned plaintext payload, appended before AEAD encryption
 
 ## Slate package binary (not encrypted) tail
 
-Currently nothing, can be used for frontward compatible data.
+No separate tail is currently written. Length/framing and bounded payload decoding are enforced; do not append arbitrary data and assume it will be accepted.

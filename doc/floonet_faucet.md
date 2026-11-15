@@ -1,3 +1,5 @@
+> The command is implemented for Floonet only. The service limits and logs below describe the faucet example; live availability and current service policy were not verified by this source review.
+
 
 # MWC Floonet Faucet / MWC Testnet Faucet
 
@@ -6,7 +8,7 @@ If you need some coins to test with the MWC Floonet network, feel free to use th
 Testnet coins can be requested using `mwc-wallet` with the command:
 
 ```shell
-> mwc-wallet faucet_request --amount <amount>
+> mwc-wallet --floonet faucet_request --amount <amount>
 ```
 
 You can download the `mwc-wallet` from the official releases page:  

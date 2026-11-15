@@ -1,3 +1,5 @@
+> Historical secondary-chain test setup. It depends on the optional wallet `swaps` feature. Old upstream versions, public services and example RPC credentials are not current deployment instructions; the broad RPC bind/allow settings below are unsuitable for an exposed host. Use a dedicated test environment and the selected node software’s current documentation.
+
 Instructions for setting up bitcoin node and electrumx server. This instruction can be extended to setting up nodes for other types of currencies.
 
 

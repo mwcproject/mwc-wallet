@@ -1,12 +1,14 @@
+> Build prerequisite: swaps are optional and disabled by the root default feature set. Build the CLI with `cargo build --release --locked --bin mwc-wallet --features swaps`. This guide describes the optional CLI/library implementation, not availability in the default Qt desktop UI.
+
 # Contents : #
-  * [Overview](./atomic_swaps.md/#Overview)
+  * [Overview](#overview)
   * [Marketplace winner selection](#marketplace-winner-selection)
-  * [Ethereum transaction safety assumptions](./atomic_swaps.md/#Ethereum-transaction-safety-assumptions)
-  * [Configuration](./atomic_swaps.md/#Configuration )
-  * [Workflow / Guide](./atomic_swaps.md/#Atomic-swap-workflow)
-  * [Cancellation](./atomic_swaps.md/#Cancellation)
-  * [Discontinuing Auto-Swap](./atomic_swaps.md/#Discontinuing-Auto-Swap)
-  * [Secondary Currency List](./atomic_swaps.md/#Secondary-Currency-List)
+  * [Ethereum transaction safety assumptions](#ethereum-transaction-safety-assumptions)
+  * [Configuration](#configuration)
+  * [Workflow / Guide](#atomic-swap-workflow)
+  * [Cancellation](#cancellation)
+  * [Discontinuing Auto-Swap](#discontinuing-auto-swap)
+  * [Secondary Currency List](#secondary-currency-list)
   
 # Overview #
 
