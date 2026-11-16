@@ -2,13 +2,14 @@
   "name": "node-sample",
   "version": "0.0.1",
   "description": "Sample of connecting to the secure OwnerAPI via node",
-  "main": "src/index.js",
+  "main": "src/client.js",
+  "private": true,
+  "engines": { "node": ">=22" },
   "scripts": {
-    "test": "npm test"
+    "start": "node src/index.js",
+    "cli": "node src/cli.js",
+    "test": "node --test test/*.test.js"
   },
   "author": "",
-  "license": "ISC",
-  "dependencies": {
-    "jayson": "^3.2.0"
-  }
+  "license": "ISC"
 }

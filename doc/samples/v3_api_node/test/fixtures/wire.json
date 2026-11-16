@@ -1,0 +1,43 @@
+{
+  "key_hex": "2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a",
+  "request": {
+    "id": "7",
+    "jsonrpc": "2.0",
+    "method": "encrypted_request_v3",
+    "params": {
+      "body_enc": "ITZBuS7T6n8Ob7KMBG3V1K9TtzIVHw8CZeuUF6NtYgZKE7ufy14zZGeEBZI1v6Cfu6b5cnvE9K9ZTPjgpsqk3fOwXss+DzAoqh58R6mC7CGbc/3EEpQ=",
+      "nonce": "aa6bd39368e8559e15dca716"
+    }
+  },
+  "request_value": {
+    "id": "7",
+    "jsonrpc": "2.0",
+    "method": "accounts",
+    "params": {
+      "token": null
+    }
+  },
+  "response": {
+    "id": "7",
+    "jsonrpc": "2.0",
+    "result": {
+      "Ok": {
+        "body_enc": "QclUqLxoInO+gNWLGco4l07nxqqE7Ty6NOpfYACgxnjhPM+oAfn7JOG6R20q/xHlmSstHhn1XZ6HTtmnEFbbFIxsrbzTQByziVwvkKDF5X4kV53rAssx+q6dcLJMccY=",
+        "nonce": "39f2d912b914e00138f65b90"
+      }
+    }
+  },
+  "response_value": {
+    "id": "7",
+    "jsonrpc": "2.0",
+    "result": {
+      "Ok": [
+        {
+          "label": "default",
+          "path": "m/0/0"
+        }
+      ]
+    }
+  },
+  "source": "mwc_wallet_api::EncryptedRequest and EncryptedResponse, api/src/types.rs"
+}
