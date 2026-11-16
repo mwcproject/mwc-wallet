@@ -1,3 +1,5 @@
+> Historical ElectrumX setup for optional swap testing. Version pins and service availability are not validated by a wallet source audit. See [wallet setup](../setup.md) for enabling the `swaps` feature.
+
 # Background #
 
 This document explaining how to install Electrum X server on Ubuntu 18.04.

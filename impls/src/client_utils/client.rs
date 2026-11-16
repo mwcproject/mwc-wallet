@@ -122,20 +122,6 @@ impl Client {
 		Ok(Client { context_id, client })
 	}
 
-	/// Helper function to easily issue a HTTP GET request against a given URL that
-	/// returns a JSON object. Handles request building, JSON deserialization and
-	/// response code checking.
-	pub fn get<'a, T>(
-		&self,
-		url: &'a str,
-		api_secret: &Option<Zeroizing<String>>,
-	) -> Result<T, Error>
-	where
-		for<'de> T: Deserialize<'de>,
-	{
-		self.handle_request(self.build_request(url, Method::GET, None, api_secret, None)?)
-	}
-
 	/// Helper function to easily issue an async HTTP GET request against a given
 	/// URL that returns a future. Handles request building, JSON deserialization
 	/// and response code checking.

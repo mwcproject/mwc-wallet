@@ -1,74 +1,108 @@
-# Wallet TLS setup
+# Wallet HTTP listener TLS
 
-## What you need
-* A server with a static IP address (eg `3.3.3.3`)
-* A domain name ownership (`example.com`)
-* DNS configuration for this IP (`mwc1.example.com` -> `3.3.3.3`)
+`mwc-wallet` supports HTTPS on its **owner API listener**, using Rustls. The
+`tls_certificate_file` and `tls_certificate_key` settings also cover the Foreign
+API when it is hosted on that same listener. Tor's onion transport and TLS used
+to contact a remote node are configured separately.
 
-If you don't have a static IP you may want to consider using services like DynDNS which support dynamic IP resolving, this case is not covered by this guide, but all the next steps are equally applicable.
+## Configure the owner listener
 
-If you don't have a domain name there is a possibility to get a TLS certificate for your IP, but you have to pay for that (so perhaps it's cheaper to buy a domain name) and it's rarely supported by certificate providers.
-
-## I have a TLS certificate already
-Uncomment and update the following lines in wallet config (by default `~/.mwc/mwc-wallet.toml`):
+In `[wallet]` of `mwc-wallet.toml` (normally under `~/.mwc/main` or `~/.mwc/floo`),
+set both PEM files:
 
 ```toml
-tls_certificate_file = "/path/to/my/cerificate/fullchain.pem"
-tls_certificate_key =  "/path/to/my/cerificate/privkey.pem"
+[wallet]
+owner_api_listen_port = 3420
+tls_certificate_file = "/absolute/path/fullchain.pem"
+tls_certificate_key = "/absolute/path/privkey.pem"
 ```
 
-If you have Stratum server enabled (you run a miner) make sure that wallet listener URL starts with `https` in node config (by default `~/.mwc/mwc-server.toml`):
+Use a certificate valid for the hostname clients connect to, with the leaf
+certificate followed by its intermediate certificates in `fullchain.pem`.
+Obtain and renew it using your certificate provider's instructions. The private
+key must be an unencrypted PEM key that Rustls can load. The wallet process must
+be able to read both files.
 
-```toml
-wallet_listener_url = "https://mwc1.example.com:13415"
-```
-
-Make sure your user has read access to the files (see below for how to do it). Restart wallet. If you changed your node configuration restart `mwc` too. When you (or someone else) send mwcs to this wallet the destination (`-d` option) must start with `https://`, not with `http://`.
-
-## I don't have a TLS certificate
-You can get it for free from [Let's Encrypt](https://letsencrypt.org/). To simplify the process we need `certbot`.
-
-### Install certbot
-Go to [Certbot home page](https://certbot.eff.org/), choose I'm using `None of the above` and your OS (eg `Ubuntu 18.04` which will be used as an example). You will be redirected to a page with instructions like [steps for Ubuntu](https://certbot.eff.org/lets-encrypt/ubuntubionic-other). Follow instructions from `Install` section. As result you should have `certbot` installed.
-
-### Obtain certificate
-If you have experince with `certboot` feel free to use any type of challenge. This guide covers the simplest case of HTTP challenge. For this you need to have a web server listening on port `80`, which requires running it as root in the simplest case. We will use the server provided by certbot. **Make sure you have port 80 open**
+On macOS and Linux, the server **rejects private keys with any group or other
+permission bits**. Restrict the individual key file to its owning service account:
 
 ```sh
-sudo certbot certonly --standalone -d mwc1.example.com
+chmod 600 /absolute/path/privkey.pem
 ```
 
-It will ask you some questions, as result you should see something like:
-
-```
-Congratulations! Your certificate and chain have been saved at:
-  /etc/letsencrypt/live/mwc1.example.com/fullchain.pem
- Your key file has been saved at:
-  /etc/letsencrypt/live/mwc1.example.com/privkey.pem
- Your cert will expire on 2019-01-16. To obtain a new or tweaked
- version of this certificate in the future, simply run certbot
- again. To non-interactively renew *all* of your certificates, run
-"certbot renew"
-```
-
-### Change permissions
-Now you have the certificate files but only root user can read it. We run mwc as `ubuntu` user. There are different scenarios how to fix it, the simplest one is to create a group which will have access to `/etc/letsencrypt` directory and add our user to this group.
+Start the listener using the wallet's configuration:
 
 ```sh
-sudo groupadd tls-cert
-sudo usermod -a -G tls-cert ubuntu
-chgrp -R tls-cert /etc/letsencrypt
-chmod -R g=rX /etc/letsencrypt
-sudo chmod 2755 /etc/letsencrypt
+mwc-wallet owner_api
+# For a Floonet wallet, use: mwc-wallet --floonet owner_api
 ```
 
-The last step is needed for renewal, it makes sure that all new files will have the same group ownership.
+The owner port defaults to 3420 on mainnet and 13420 on Floonet. An explicit
+`owner_api_listen_port` overrides that default. Restart the listener after
+replacing its certificate or key; certificates are loaded at startup.
 
-### Update wallet config
-Refer to `I have a TLS certificate already` because you have it now. Use the folowing values:
+The CLI owner listener binds to **127.0.0.1**. `--external` changes the standalone
+Foreign socket configuration, not this owner binding. For access from another
+machine, use a controlled tunnel or reverse proxy with access restricted to the
+intended clients. Preserve owner authentication: Basic username `mwc`, password
+from `api_secret_path` (normally `.owner_api_secret`).
+
+## Verify HTTPS
+
+For a certificate issued to `wallet.example.com`, this command connects locally
+while checking that hostname. Replace the CA file with the CA that issued your
+certificate; omit `--cacert` when it is already trusted by your system.
+
+```sh
+curl --include \
+  --resolve wallet.example.com:3420:127.0.0.1 \
+  --cacert /absolute/path/ca.pem \
+  https://wallet.example.com:3420/v3/owner
+```
+
+With owner authentication configured, expect `401 Unauthorized`: the TLS
+handshake succeeded and the listener requested credentials. A certificate error
+means the hostname, trust chain, validity dates, or configured certificate needs
+attention. This check does not open the wallet or start an encrypted API session.
+
+The [Node.js owner API sample](samples/v3_api_node/readme.md) performs authenticated
+v3 requests over HTTPS. For a private CA, set `NODE_EXTRA_CA_CERTS` to its PEM file
+before starting Node.js. Keep certificate and hostname verification enabled.
+
+## Foreign listener and mining connections
+
+`mwc-wallet listen -m http --no_tor` starts the standalone Foreign HTTP socket.
+That path does **not** use the certificate settings above: its socket remains
+plain HTTP. Configure both `api_listen_interface` and `api_listen_port` for it;
+they are unset by default. `--listen_on_socket_with_tor` enables this additional
+socket alongside Tor, and `--external` requests an external socket bind.
+
+To host the Foreign API on the TLS-enabled owner listener, set
+`owner_api_include_foreign = true` and use its `/v2/foreign` endpoint and owner
+port. The Foreign route is exempt from owner Basic authentication, so restrict
+access to that listener appropriately. The wallet must be open to serve wallet
+operations; this configuration prompts for its password at startup.
+
+Use the standalone Foreign socket for Stratum coinbase requests. The co-hosted
+Foreign route currently lacks the source-address access context and rejects
+`build_coinbase`, including local requests.
+
+For a node and standalone wallet listener on the same machine, configure the
+wallet socket as `api_listen_interface = "127.0.0.1"` and
+`api_listen_port = 3415`. Set the node's matching endpoint:
 
 ```toml
-tls_certificate_file = "/etc/letsencrypt/live/mwc1.example.com/fullchain.pem"
-tls_certificate_key =  "/etc/letsencrypt/live/mwc1.example.com/privkey.pem"
+[server.stratum_mining_config]
+wallet_listener_url = "http://127.0.0.1:3415"
 ```
 
+For a remote mining connection that requires HTTPS, terminate TLS at a controlled
+proxy in front of the standalone socket and point `wallet_listener_url` to that
+proxy's HTTPS URL. The node must trust its issuing CA. Restrict the proxy to the
+intended mining node: forwarded traffic can appear to originate from the proxy's
+local address and receive loopback coinbase access. The standalone wallet also
+supports `mining_node_ip` for direct connections from an authorized remote node.
+
+See [wallet configuration](../config/src/types.rs),
+[listener startup](../controller/src/command.rs), and
+[owner/Foreign routing](../controller/src/controller.rs) for the implementation.

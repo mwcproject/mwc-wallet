@@ -443,7 +443,7 @@ fn process_request(input: String) -> Result<Value, String> {
 				.get_mnemonic(
 					None,
 					password.into(),
-					Some(config.wallet.data_file_dir.as_str()),
+					config.wallet.wallet_data_dir.as_deref(),
 				)
 				.map_err(|e| format!("Unable to get mnemonic, {}", e))?;
 
@@ -478,7 +478,7 @@ fn process_request(input: String) -> Result<Value, String> {
 				None,
 				old_password.into(),
 				new_password.into(),
-				Some(config.wallet.data_file_dir.as_str()),
+				config.wallet.wallet_data_dir.as_deref(),
 			)
 			.map_err(|e| format!("Unable to change a password, {}", e))?;
 			json!({})
